@@ -11,11 +11,6 @@ const navigation = [
     icon: Home,
   },
   {
-    label: "Builds",
-    href: "/builds",
-    icon: BarChart,
-  },
-  {
     label: "Repo Sync",
     href: "/admin/repos",
     icon: BadgeCheck,

@@ -51,7 +51,7 @@ export type RepoSyncStatus = "healthy" | "error" | "disabled";
 
 export interface RepositoryRecord {
   id: string;
-  user_id: number;
+  user_id?: string;
   provider: string;
   full_name: string;
   default_branch?: string;
@@ -94,7 +94,7 @@ export interface RepoSuggestionResponse {
 export interface RepoImportPayload {
   full_name: string;
   provider?: string;
-  user_id?: number;
+  user_id?: string;
   installation_id?: string;
 }
 
@@ -166,7 +166,7 @@ export interface GithubImportJob {
   id: string;
   repository: string;
   branch: string;
-  user_id: number;
+  user_id?: string;
   status: "pending" | "running" | "completed" | "failed";
   progress: number;
   builds_imported: number;
@@ -244,7 +244,7 @@ export interface RoleListResponse {
 }
 
 export interface UserAccount {
-  id: number;
+  id: string;
   email: string;
   name?: string | null;
   role: "admin" | "user";

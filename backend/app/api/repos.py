@@ -6,8 +6,8 @@ from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pymongo.database import Database
+from bson import ObjectId
 
-from app.config import settings
 from app.database.mongo import get_db
 from app.models.schemas import (
     GithubImportJobResponse,
@@ -35,6 +35,16 @@ def _prepare_repo_payload(doc: dict, build_count: int | None = None) -> dict:
     repo_id = payload.pop("_id", None)
     if repo_id is not None:
         payload["id"] = str(repo_id)
+    # Normalize owner id to string for API response
+    user_id = payload.get("user_id")
+    if user_id is not None:
+        try:
+            if isinstance(user_id, ObjectId):
+                payload["user_id"] = str(user_id)
+            else:
+                payload["user_id"] = user_id
+        except Exception:
+            payload["user_id"] = user_id
     payload.setdefault("ci_provider", "github_actions")
     payload.setdefault("monitoring_enabled", True)
     payload.setdefault("sync_status", "healthy")
@@ -84,7 +94,7 @@ def _normalize_branches(branches: List[str]) -> List[str]:
 )
 def import_repository(payload: RepoImportRequest, db: Database = Depends(get_db)):
     """Register a repository for ingestion."""
-    owner_id = payload.user_id or settings.DEFAULT_REPO_OWNER_ID
+    user_id = payload.user_id
 
     with get_pipeline_github_client(db, payload.installation_id) as gh:
         repo_data = gh.get_repository(payload.full_name)
@@ -99,7 +109,7 @@ def import_repository(payload: RepoImportRequest, db: Database = Depends(get_db)
 
     store = PipelineStore(db)
     repo_doc = store.upsert_repository(
-        user_id=owner_id,
+        user_id=user_id,
         provider=payload.provider,
         full_name=payload.full_name,
         default_branch=repo_data.get("default_branch", "main"),
@@ -116,7 +126,7 @@ def import_repository(payload: RepoImportRequest, db: Database = Depends(get_db)
 @router.get("/", response_model=list[RepoResponse])
 def list_repositories(
     db: Database = Depends(get_db),
-    user_id: int | None = Query(default=None, description="Filter by owner id"),
+    user_id: str | None = Query(default=None, description="Filter by owner id"),
 ):
     """List tracked repositories."""
     store = PipelineStore(db)
@@ -143,16 +153,26 @@ def discover_repositories(
     try:
         with get_pipeline_github_client(db) as gh:
             if query:
-                repos = gh.search_repositories(query, per_page=limit)
+                if "/" in query:
+                    repos = [gh.get_repository(query)]
+                else:
+                    repos = gh.search_repositories(query, per_page=limit)
                 source = "search"
             else:
                 repos = gh.list_authenticated_repositories(per_page=limit)
                 source = "owned"
-    except PipelineConfigurationError as exc:  # pragma: no cover - runtime config errors
+    except (
+        PipelineConfigurationError
+    ) as exc:  # pragma: no cover - runtime config errors
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
     except PipelineRetryableError as exc:  # pragma: no cover - runtime API errors
+        if query and "/" in query:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Repository '{query}' not found or inaccessible.",
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
         ) from exc
@@ -275,7 +295,7 @@ def request_scan(
 
     repo_full_name = repo_doc["full_name"]
     branch = repo_doc.get("default_branch") or "main"
-    owner_id = repo_doc.get("user_id") or settings.DEFAULT_REPO_OWNER_ID
+    user_id = repo_doc.get("user_id")
     installation_id = repo_doc.get("installation_id")
     if not installation_id:
         raise HTTPException(
@@ -289,9 +309,9 @@ def request_scan(
         repository=repo_full_name,
         branch=branch,
         initiated_by=payload.initiated_by or "admin",
-        user_id=owner_id,
+        user_id=user_id,
         installation_id=installation_id,
     )
     job_id = import_job["id"]
-    enqueue_repo_import.delay(repo_full_name, branch, job_id, owner_id, installation_id)
+    enqueue_repo_import.delay(repo_full_name, branch, job_id, user_id, installation_id)
     return GithubImportJobResponse.model_validate(import_job)

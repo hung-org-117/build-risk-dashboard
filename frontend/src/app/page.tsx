@@ -35,7 +35,7 @@ export default function RootRedirect() {
       {checking ? (
         <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
-          <span>Đang chuyển hướng...</span>
+          <span>Redirecting...</span>
         </div>
       ) : null}
     </main>

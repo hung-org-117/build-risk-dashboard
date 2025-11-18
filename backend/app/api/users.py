@@ -1,18 +1,19 @@
 """User management helper endpoints (role definitions, login)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import List
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from app.services.auth import create_access_token
 from pymongo.database import Database
 
 from app.database.mongo import get_db
 from app.models.schemas import (
     GithubLoginRequest,
     OAuthIdentityResponse,
-    RoleListResponse,
     UserLoginResponse,
     UserResponse,
 )
@@ -21,43 +22,26 @@ from app.services.user_accounts import (
     list_users as list_users_service,
     upsert_github_identity,
 )
+from app.config import settings
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-ROLE_DEFINITIONS = [
-    {
-        "role": "admin",
-        "description": "Manage users and system configuration.",
-        "permissions": [
-            "manage_repositories",
-            "configure_settings",
-            "view_logs",
-        ],
-        "admin_only": True,
-    },
-    {
-        "role": "user",
-        "description": "Log in with GitHub to view the dashboard and receive alerts.",
-        "permissions": [
-            "view_dashboard",
-            "receive_alerts",
-        ],
-        "admin_only": False,
-    },
-]
-
 
 def _serialize_user(doc: dict) -> UserResponse:
-    return UserResponse.model_validate(doc)
+    # Ensure ObjectIds are converted to strings for Pydantic validation
+    payload = doc.copy()
+    if payload.get("_id") is not None:
+        payload["_id"] = str(payload["_id"])
+    return UserResponse.model_validate(payload)
 
 
 def _serialize_identity(doc: dict) -> OAuthIdentityResponse:
-    return OAuthIdentityResponse.model_validate(doc)
-
-
-@router.get("/roles", response_model=RoleListResponse)
-def list_roles():
-    return {"roles": ROLE_DEFINITIONS}
+    payload = doc.copy()
+    if payload.get("_id") is not None:
+        payload["_id"] = str(payload["_id"])
+    if payload.get("user_id") is not None:
+        payload["user_id"] = str(payload["user_id"])
+    return OAuthIdentityResponse.model_validate(payload)
 
 
 @router.get("/", response_model=List[UserResponse])
@@ -76,29 +60,41 @@ async def _fetch_github_profile(access_token: str) -> dict:
         try:
             user_response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid GitHub token") from exc
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid GitHub token"
+            ) from exc
 
         user_data = user_response.json()
         email = user_data.get("email")
         if not email:
-            emails_response = await client.get("https://api.github.com/user/emails", headers=headers)
+            emails_response = await client.get(
+                "https://api.github.com/user/emails", headers=headers
+            )
             emails_response.raise_for_status()
             emails = emails_response.json()
-            primary = next((item.get("email") for item in emails if item.get("primary")), None)
+            primary = next(
+                (item.get("email") for item in emails if item.get("primary")), None
+            )
             fallback = emails[0]["email"] if emails else None
             email = primary or fallback
         if not email:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to retrieve email from GitHub user")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to retrieve email from GitHub user",
+            )
         user_data["resolved_email"] = email
         return user_data
 
 
 @router.post("/github/login", response_model=UserLoginResponse)
-async def github_login(payload: GithubLoginRequest, db: Database = Depends(get_db)):
+async def github_login(payload: GithubLoginRequest, db: Database = Depends(get_db), response: Response = None):
     profile = await _fetch_github_profile(payload.access_token)
     external_id = profile.get("id")
     if not external_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Did not receive GitHub user id")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Did not receive GitHub user id",
+        )
     expires_at = None
     if payload.expires_in:
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=payload.expires_in)
@@ -112,6 +108,20 @@ async def github_login(payload: GithubLoginRequest, db: Database = Depends(get_d
         refresh_token=payload.refresh_token,
         token_expires_at=expires_at,
         scopes=payload.scope,
+        account_login=profile.get("login"),
+        account_name=profile.get("name"),
+        account_avatar_url=profile.get("avatar_url"),
+    )
+    token = create_access_token(subject=user_doc["_id"])
+    if response is not None:
+        response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
     )
 
     return {
@@ -122,26 +132,15 @@ async def github_login(payload: GithubLoginRequest, db: Database = Depends(get_d
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user(db: Database = Depends(get_db)):
-    connection = db.github_connection.find_one({})
-    if not connection:
+    # Find an OAuth identity for GitHub and use the linked user document.
+    identity = db.oauth_identities.find_one({"provider": PROVIDER_GITHUB})
+    if not identity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No user is currently logged in.",
         )
 
-    user_doc = None
-    user_id = connection.get("user_id")
-    if user_id is not None:
-        user_doc = db.users.find_one({"_id": user_id})
-
-    if user_doc is None:
-        github_user_id = connection.get("github_user_id")
-        if github_user_id:
-            identity = db.oauth_identities.find_one(
-                {"provider": PROVIDER_GITHUB, "external_user_id": str(github_user_id)}
-            )
-            if identity:
-                user_doc = db.users.find_one({"_id": identity["user_id"]})
+    user_doc = db.users.find_one({"_id": identity["user_id"]})
 
     if user_doc is None:
         raise HTTPException(

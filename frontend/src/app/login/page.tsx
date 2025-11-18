@@ -42,7 +42,6 @@ export default function LoginPage() {
     setActionLoading(true);
     try {
       const { authorize_url } = await integrationApi.startGithubOAuth("/");
-      // Redirect user to GitHub OAuth
       window.location.href = authorize_url;
     } catch (err) {
       console.error(err);
@@ -51,10 +50,6 @@ export default function LoginPage() {
       setActionLoading(false);
     }
   };
-
-  // NOTE: Do not early-return while `loading` is true; we show the login
-  // UI immediately and only indicate the loading state on the sign-in
-  // button (as requested).
 
   return (
     <main className="min-h-screen flex items-center justify-center">
@@ -74,8 +69,6 @@ export default function LoginPage() {
               <Button
                 onClick={handleLogin}
                 size="lg"
-                // disable while initial check is running or while the OAuth
-                // redirect is being prepared.
                 disabled={loading || actionLoading}
               >
                 {actionLoading || loading ? (

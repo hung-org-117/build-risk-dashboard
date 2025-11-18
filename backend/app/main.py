@@ -16,6 +16,7 @@ from app.api import (
     notifications,
     users,
 )
+from app.middleware.request_logging import RequestLoggingMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Trace middleware for request logging and correlation
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(builds.router, prefix="/api/builds", tags=["Builds"])

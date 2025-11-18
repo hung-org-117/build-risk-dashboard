@@ -115,9 +115,6 @@ class BuildListResponse(BaseModel):
     builds: List[BuildListItem]
 
 
-# Risk assessment schemas removed (model inference disabled)
-
-
 # Build detail with all related data
 class BuildDetailResponse(BuildListItem):
     """Schema for detailed build information including all assessments"""
@@ -226,7 +223,7 @@ class GithubImportRequest(BaseModel):
     initiated_by: Optional[str] = Field(
         default="admin", description="User requesting the import"
     )
-    user_id: Optional[int] = Field(
+    user_id: Optional[str] = Field(
         default=None, description="Owner user id (defaults to admin)"
     )
 
@@ -235,7 +232,7 @@ class GithubImportJobResponse(BaseModel):
     id: str
     repository: str
     branch: str
-    user_id: int
+    user_id: Optional[str] = None
     installation_id: Optional[str] = None
     status: Literal["pending", "running", "completed", "failed"]
     progress: int = Field(..., ge=0, le=100)
@@ -256,7 +253,7 @@ class GithubImportJobResponse(BaseModel):
 class RepoImportRequest(BaseModel):
     full_name: str = Field(..., description="Repository full name (e.g., owner/name)")
     provider: str = Field(default="github")
-    user_id: Optional[int] = Field(
+    user_id: Optional[str] = Field(
         default=None, description="Owner user id (defaults to admin)"
     )
     installation_id: Optional[str] = Field(
@@ -267,7 +264,7 @@ class RepoImportRequest(BaseModel):
 
 class RepoResponse(BaseModel):
     id: str
-    user_id: int
+    user_id: Optional[str] = None
     provider: str
     full_name: str
     default_branch: Optional[str] = None
@@ -408,10 +405,6 @@ class UserRoleDefinition(BaseModel):
     admin_only: bool = False
 
 
-class RoleListResponse(BaseModel):
-    roles: List[UserRoleDefinition]
-
-
 # GitHub App Installation schemas
 class GithubInstallationResponse(BaseModel):
     id: str = Field(..., alias="_id")
@@ -433,7 +426,7 @@ class GithubInstallationListResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int = Field(..., alias="_id")
+    id: str = Field(..., alias="_id")
     email: str
     name: Optional[str] = None
     role: Literal["admin", "user"] = "user"
@@ -444,8 +437,8 @@ class UserResponse(BaseModel):
 
 
 class OAuthIdentityResponse(BaseModel):
-    id: int = Field(..., alias="_id")
-    user_id: int
+    id: str = Field(..., alias="_id")
+    user_id: str
     provider: str
     external_user_id: str
     scopes: Optional[str] = None

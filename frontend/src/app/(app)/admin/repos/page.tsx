@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -54,6 +61,7 @@ export default function AdminReposPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStep, setModalStep] = useState<1 | 2>(1);
   const [suggestions, setSuggestions] = useState<RepoSuggestion[]>([]);
+  const [privateRepos, setPrivateRepos] = useState<RepoSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [selectedRepos, setSelectedRepos] = useState<
     Record<string, RepoSuggestion>
@@ -74,6 +82,7 @@ export default function AdminReposPage() {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [tableActionId, setTableActionId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   const loadRepositories = useCallback(async () => {
     setLoading(true);
@@ -93,16 +102,47 @@ export default function AdminReposPage() {
     loadRepositories();
   }, [loadRepositories]);
 
+  const loadSuggestions = useCallback(async (query?: string) => {
+    setSuggestionsLoading(true);
+    const normalized = query?.trim();
+    try {
+      const data: RepoSuggestionResponse = await reposApi.discover(
+        normalized && normalized.length > 0 ? normalized : undefined
+      );
+      setSuggestions(data.items);
+      // Save private repos when first loading
+      if (!normalized) {
+        setPrivateRepos(data.items);
+      }
+    } catch (err) {
+      console.error(err);
+      setFeedback("Unable to load repository choices from GitHub.");
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!modalOpen) {
       setModalStep(1);
       setSelectedRepos({});
       setBranchPreferences({});
       setSearchTerm("");
+      setIsSearching(false);
       return;
     }
-    void loadSuggestions();
-  }, [modalOpen]);
+    // Load private repos when modal opens
+    loadSuggestions();
+  }, [modalOpen, loadSuggestions]);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    // When search term is cleared and we were searching, restore private repos
+    if (searchTerm.trim().length === 0 && isSearching) {
+      setSuggestions(privateRepos);
+      setIsSearching(false);
+    }
+  }, [modalOpen, searchTerm, isSearching, privateRepos]);
 
   useEffect(() => {
     if (!panelRepo) return;
@@ -122,19 +162,6 @@ export default function AdminReposPage() {
     () => Object.values(selectedRepos),
     [selectedRepos]
   );
-
-  const loadSuggestions = async (query?: string) => {
-    setSuggestionsLoading(true);
-    try {
-      const data: RepoSuggestionResponse = await reposApi.discover(query);
-      setSuggestions(data.items);
-    } catch (err) {
-      console.error(err);
-      setFeedback("Unable to load repository choices from GitHub.");
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  };
 
   const toggleSelection = (item: RepoSuggestion) => {
     setSelectedRepos((prev) => {
@@ -158,7 +185,11 @@ export default function AdminReposPage() {
 
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void loadSuggestions(searchTerm.trim());
+    const query = searchTerm.trim();
+    if (query.length > 0) {
+      setIsSearching(true);
+      void loadSuggestions(query);
+    }
   };
 
   const toggleBranchPreference = (repoName: string, branch: string) => {
@@ -499,17 +530,22 @@ export default function AdminReposPage() {
                   <input
                     type="text"
                     className="flex-1 rounded-lg border px-3 py-2 text-sm"
-                    placeholder="Search public repositories"
+                    placeholder="Search all GitHub repositories (owner/repo or keyword)"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                   />
-                  <Button type="submit" variant="secondary">
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    disabled={!searchTerm.trim()}
+                  >
                     Search
                   </Button>
                 </form>
                 <p className="text-xs text-muted-foreground">
-                  Private repositories require installing the BuildGuard GitHub
-                  App in the target organization or user account.
+                  {isSearching
+                    ? "Searching all GitHub repositories..."
+                    : "Showing your accessible repositories. Enter a search term to find public repositories on GitHub."}
                 </p>
                 <div className="max-h-[320px] space-y-3 overflow-y-auto pr-2">
                   {suggestionsLoading ? (

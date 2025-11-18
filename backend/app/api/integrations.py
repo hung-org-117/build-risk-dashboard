@@ -29,6 +29,7 @@ from app.services.github_oauth import (
     create_oauth_state,
     exchange_code_for_token,
 )
+from app.services.auth import create_access_token
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
@@ -54,11 +55,21 @@ def initiate_github_login(
 @router.post("/github/revoke", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_github_token(db: Database = Depends(get_db)):
     """Remove stored GitHub access tokens."""
-    result = db.github_connection.delete_many({})
-    if result.deleted_count == 0:
+    result = db.oauth_identities.update_many(
+        {"provider": "github"},
+        {
+            "$unset": {
+                "access_token": "",
+                "refresh_token": "",
+                "token_expires_at": "",
+                "scopes": "",
+            }
+        },
+    )
+    if result.matched_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No token found to revoke.",
+            detail="No GitHub identities found to revoke.",
         )
 
 
@@ -69,13 +80,34 @@ async def github_oauth_callback(
     db: Database = Depends(get_db),
 ):
     """Handle GitHub OAuth callback, exchange code for token, and redirect to frontend."""
-    _, redirect_path = await exchange_code_for_token(db, code=code, state=state)
+    identity_doc, redirect_path = await exchange_code_for_token(
+        db, code=code, state=state
+    )
+    user_id = identity_doc.get("user_id")
+    jwt_token = create_access_token(subject=user_id)
     redirect_target = settings.FRONTEND_BASE_URL.rstrip("/")
     if redirect_path:
         redirect_target = f"{redirect_target}{redirect_path}"
     else:
         redirect_target = f"{redirect_target}/integrations/github?status=success"
-    return RedirectResponse(url=redirect_target)
+    response = RedirectResponse(url=redirect_target)
+    # Set cookie for frontend usage; allow credentials cross-site
+    response.set_cookie(
+        key="access_token",
+        value=jwt_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    # Also append the token to the query string for convenience while debugging
+    # (not recommended for production). If there's already a token or params,
+    # we skip this step.
+    if settings.DEBUG and "token=" not in redirect_target:
+        sep = "?" if "?" not in redirect_target else "&"
+        response.headers["location"] = f"{redirect_target}{sep}token={jwt_token}"
+    return response
 
 
 @router.get("/github/imports", response_model=List[GithubImportJobResponse])
@@ -92,7 +124,7 @@ def list_github_import_jobs(db: Database = Depends(get_db)):
 def start_github_import(payload: GithubImportRequest, db: Database = Depends(get_db)):
     """Create a mock import job for a repository."""
     initiated_by = payload.initiated_by or "admin"
-    owner_user_id = payload.user_id or settings.DEFAULT_REPO_OWNER_ID
+    owner_user_id = payload.user_id
     return create_import_job(
         db,
         repository=payload.repository,

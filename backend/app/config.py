@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_ID: Optional[str] = None
     GITHUB_CLIENT_SECRET: Optional[str] = None
     GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/integrations/github/callback"
-    GITHUB_SCOPES: List[str] = ["read:user", "repo", "read:org", "workflow"]
+    GITHUB_SCOPES: List[str] = ["read:user", "user:email", "repo", "read:org", "workflow"]
     PIPELINE_PRIMARY_LANGUAGES: List[str] = ["python", "ruby"]
     FRONTEND_BASE_URL: str = "http://localhost:3000"
 
@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     REPO_MIRROR_ROOT: str = "./repo-mirrors"
     ARTIFACTS_ROOT: str = "./artifacts"
     WORKFLOW_POLL_INTERVAL_MINUTES: int = 15
-    DEFAULT_REPO_OWNER_ID: int = 1
 
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"

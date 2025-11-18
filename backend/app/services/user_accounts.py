@@ -9,22 +9,37 @@ from pymongo.database import Database
 PROVIDER_GITHUB = "github"
 
 
-def _generate_numeric_id(collection) -> int:
-    latest = collection.find_one(sort=[("_id", -1)])
-    if latest:
-        return int(latest.get("_id", 0)) + 1
-    return 1
+def _stringify_object_id(document: Dict[str, object]) -> Dict[str, object]:
+    payload = document.copy()
+    identifier = payload.pop("_id", None)
+    if identifier is not None:
+        try:
+            from bson import ObjectId
+
+            if isinstance(identifier, ObjectId):
+                payload["_id"] = str(identifier)
+            else:
+                payload["_id"] = identifier
+        except Exception:
+            payload["_id"] = identifier
+    return payload
 
 
 def _serialize_user(document: Dict[str, object]) -> Dict[str, object]:
     payload = document.copy()
-    payload["id"] = payload.pop("_id")
+    identifier = payload.pop("_id", None)
+    payload["id"] = str(identifier) if identifier is not None else None
     return payload
 
 
 def _serialize_identity(document: Dict[str, object]) -> Dict[str, object]:
     payload = document.copy()
-    payload["id"] = payload.pop("_id")
+    identifier = payload.pop("_id", None)
+    payload["id"] = str(identifier) if identifier is not None else None
+    # Ensure user_id is string for client-facing schema
+    uid = payload.get("user_id")
+    if uid is not None:
+        payload["user_id"] = str(uid)
     return payload
 
 
@@ -38,6 +53,11 @@ def upsert_github_identity(
     refresh_token: Optional[str],
     token_expires_at: Optional[datetime],
     scopes: Optional[str],
+    # Additional metadata to store on the identity
+    account_login: Optional[str] = None,
+    account_name: Optional[str] = None,
+    account_avatar_url: Optional[str] = None,
+    connected_at: Optional[datetime] = None,
 ) -> Tuple[Dict[str, object], Dict[str, object]]:
     users = db.users
     identities = db.oauth_identities
@@ -58,6 +78,10 @@ def upsert_github_identity(
                     "token_expires_at": token_expires_at,
                     "scopes": scopes,
                     "updated_at": now,
+                    "account_login": account_login,
+                    "account_name": account_name,
+                    "account_avatar_url": account_avatar_url,
+                    "connected_at": connected_at,
                 }
             },
         )
@@ -73,29 +97,26 @@ def upsert_github_identity(
         identity_doc = identities.find_one({"_id": existing_identity["_id"]}) or existing_identity
         return user_doc, identity_doc
 
-    user_id = _generate_numeric_id(users)
-    user_doc = {
-        "_id": user_id,
-        "email": email,
-        "name": name,
-        "role": "user",
-        "created_at": now,
-    }
-    users.insert_one(user_doc)
+    result = users.insert_one({"email": email, "name": name, "role": "user", "created_at": now})
+    user_doc = users.find_one({"_id": result.inserted_id})
 
-    identity_id = _generate_numeric_id(identities)
     identity_doc = {
-        "_id": identity_id,
-        "user_id": user_id,
+        "user_id": user_doc["_id"],
         "provider": PROVIDER_GITHUB,
         "external_user_id": github_user_id,
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_expires_at": token_expires_at,
         "scopes": scopes,
+        "account_login": account_login,
+        "account_name": account_name,
+        "account_avatar_url": account_avatar_url,
+        "connected_at": connected_at,
         "created_at": now,
     }
-    identities.insert_one(identity_doc)
+    identity_result = identities.insert_one(identity_doc)
+    identity_doc = identities.find_one({"_id": identity_result.inserted_id})
+    # Return the user and freshly created identity documents.
 
     return user_doc, identity_doc
 

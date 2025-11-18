@@ -31,6 +31,7 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 })
 
 // Build API
@@ -114,7 +115,7 @@ export const integrationApi = {
     const response = await api.get<GithubImportJob[]>('/integrations/github/imports')
     return response.data
   },
-  startGithubImport: async (payload: { repository: string; branch: string; initiated_by?: string; user_id?: number }) => {
+  startGithubImport: async (payload: { repository: string; branch: string; initiated_by?: string; user_id?: string }) => {
     const response = await api.post<GithubImportJob>('/integrations/github/imports', payload)
     return response.data
   },

@@ -39,3 +39,13 @@ Start the backend then visit `http://localhost:3000/integrations/github` to trig
 - `GET /api/builds/` – Paginated builds including full telemetry (commits, workflows, features)
 - `GET /api/dashboard/summary` – Aggregated metrics for dashboard widgets
 - `GET /api/integrations/github` – GitHub OAuth status + repository summary
+
+### Request tracing middleware
+
+The backend uses a lightweight request logging middleware to make it easy to
+correlate logs for individual requests. It automatically adds an `X-Request-ID`
+header, logs HTTP method/path/status, client IP and request duration in ms.
+
+To configure logging level for development, set `LOGGING_LEVEL` environment
+variable or change the logging configuration in `app/main.py` prior to starting
+the app.

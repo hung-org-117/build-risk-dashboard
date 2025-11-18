@@ -335,9 +335,11 @@ class GitHubClient:
 _token_pool: GitHubTokenPool | None = None
 
 
-def _collect_tokens(connection: Optional[Dict[str, Any]]) -> List[str]:
+def _collect_tokens_from_db(db: Database) -> List[str]:
+    """Collect GitHub tokens from environment and stored OAuth identities."""
     tokens: List[str] = settings.GITHUB_TOKENS or []
-    oauth_token = (connection or {}).get("access_token")
+    identity = db.oauth_identities.find_one({"provider": "github"})
+    oauth_token = (identity or {}).get("access_token")
     if oauth_token:
         tokens.append(oauth_token)
     deduped: List[str] = []
@@ -355,8 +357,7 @@ def get_pipeline_github_client(
         token = get_installation_token(installation_id, db=db)
         return GitHubClient(token=token)
 
-    connection = db.github_connection.find_one({})
-    tokens = _collect_tokens(connection)
+    tokens = _collect_tokens_from_db(db)
     if not tokens:
         raise PipelineConfigurationError(
             "GitHub credentials are missing. Configure a GitHub App or set GITHUB_TOKENS before running collectors.",

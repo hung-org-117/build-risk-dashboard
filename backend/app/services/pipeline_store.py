@@ -10,8 +10,6 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.database import Database
 
-from app.config import settings
-
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -24,6 +22,16 @@ def _serialize(job: Dict[str, Any]) -> Dict[str, Any]:
     identifier = payload.pop("_id", None)
     if identifier is not None:
         payload["id"] = str(identifier)
+    # Convert any Mongo ObjectId fields (e.g., user_id) to strings for JSON
+    if payload.get("user_id") is not None:
+        try:
+            from bson import ObjectId
+
+            if isinstance(payload["user_id"], ObjectId):
+                payload["user_id"] = str(payload["user_id"])
+        except Exception:
+            # leave as-is if conversion is not applicable
+            pass
     for key, value in payload.items():
         if isinstance(value, datetime):
             payload[key] = value.isoformat()
@@ -39,7 +47,7 @@ class PipelineStore:
     def upsert_repository(
         self,
         *,
-        user_id: int,
+        user_id: Optional[str],
         provider: str,
         full_name: str,
         default_branch: str,
@@ -54,8 +62,17 @@ class PipelineStore:
         existing = self.db.repositories.find_one(
             {"provider": provider, "full_name": full_name}
         )
+        try:
+            if isinstance(user_id, str):
+                converted = ObjectId(user_id)
+                owner_id = converted
+            else:
+                owner_id = user_id
+        except Exception:
+            owner_id = user_id
+
         document = {
-            "user_id": user_id,
+            "user_id": owner_id,
             "provider": provider,
             "full_name": full_name,
             "default_branch": default_branch,
@@ -66,7 +83,9 @@ class PipelineStore:
             "updated_at": now,
         }
         document["ci_provider"] = (existing or {}).get("ci_provider", "github_actions")
-        document["monitoring_enabled"] = (existing or {}).get("monitoring_enabled", True)
+        document["monitoring_enabled"] = (existing or {}).get(
+            "monitoring_enabled", True
+        )
         document["sync_status"] = (existing or {}).get("sync_status", "healthy")
         document["webhook_status"] = (existing or {}).get("webhook_status", "inactive")
         document["ci_token_status"] = (existing or {}).get("ci_token_status", "valid")
@@ -99,7 +118,9 @@ class PipelineStore:
             document["_id"] = insert_result.inserted_id
             return document
 
-    def update_repository(self, repo_id: str | ObjectId, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update_repository(
+        self, repo_id: str | ObjectId, updates: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         identifier = repo_id
         if isinstance(repo_id, str):
             try:
@@ -113,10 +134,24 @@ class PipelineStore:
         self.db.repositories.update_one({"_id": identifier}, {"$set": payload})
         return self.db.repositories.find_one({"_id": identifier})
 
-    def list_repositories(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def list_repositories(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         query: Dict[str, Any] = {}
         if user_id is not None:
-            query["user_id"] = user_id
+            # Convert string looking like an ObjectId to the ObjectId type so it
+            # matches stored ObjectId references.
+            if isinstance(user_id, str):
+                try:
+                    from bson import ObjectId
+
+                    query["user_id"] = ObjectId(user_id)
+                except Exception:
+                    # not an ObjectId string — try to coerce to int if numeric
+                    if user_id.isdigit():
+                        query["user_id"] = int(user_id)
+                    else:
+                        query["user_id"] = user_id
+            else:
+                query["user_id"] = user_id
         cursor = self.db.repositories.find(query).sort("created_at", -1)
         return list(cursor)
 
@@ -245,11 +280,10 @@ class PipelineStore:
         repository: str,
         branch: str,
         initiated_by: str,
-        user_id: Optional[int] = None,
+        user_id: Optional[str] = None,
         installation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         now = _utcnow()
-        owner_id = user_id if user_id is not None else settings.DEFAULT_REPO_OWNER_ID
         doc = {
             "_id": uuid4().hex,
             "repository": repository,
@@ -260,7 +294,7 @@ class PipelineStore:
             "commits_analyzed": 0,
             "tests_collected": 0,
             "initiated_by": initiated_by,
-            "user_id": owner_id,
+            "user_id": user_id,
             "installation_id": installation_id,
             "created_at": now,
             "started_at": None,

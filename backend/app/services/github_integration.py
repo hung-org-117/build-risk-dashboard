@@ -47,10 +47,11 @@ def _aggregate_repo_stats(builds: List[dict]) -> List[dict]:
 
 
 def get_github_status(db: Database) -> Dict[str, object]:
-    connection = db.github_connection.find_one({})
-    scopes = settings.GITHUB_SCOPES or ["read:user", "repo", "read:org", "workflow"]
+    # Use oauth_identities to determine whether any GitHub identity exists.
+    connection = db.oauth_identities.find_one({"provider": "github"})
+    scopes = settings.GITHUB_SCOPES
 
-    if not connection:
+    if not connection or not connection.get("access_token"):
         return {
             "connected": False,
             "organization": None,
@@ -67,9 +68,15 @@ def get_github_status(db: Database) -> Dict[str, object]:
     builds = list(db.builds.find())
     repositories = _aggregate_repo_stats(builds)
 
-    status = connection.get("last_sync_status", "warning")
-    message = connection.get(
-        "last_sync_message", "Collector has not run since authorization."
+    # `last_sync_status` and `last_sync_message` were previously stored on a
+    # global github_connection document. Keep fallbacks when migrating away.
+    status = connection.get("last_sync_status", "warning") if connection else "warning"
+    message = (
+        connection.get(
+            "last_sync_message", "Collector has not run since authorization."
+        )
+        if connection
+        else "GitHub OAuth not authorized."
     )
 
     connected_at = connection.get("connected_at")
@@ -78,16 +85,21 @@ def get_github_status(db: Database) -> Dict[str, object]:
 
     return {
         "connected": True,
-        "organization": connection.get("organization")
-        or connection.get("account_login"),
+        "organization": (
+            (connection.get("organization") or connection.get("account_login"))
+            if connection
+            else None
+        ),
         "connectedAt": connected_at,
         "scopes": scopes,
         "repositories": repositories,
         "lastSyncStatus": status,
         "lastSyncMessage": message,
-        "accountLogin": connection.get("account_login"),
-        "accountName": connection.get("account_name"),
-        "accountAvatarUrl": connection.get("account_avatar_url"),
+        "accountLogin": connection.get("account_login") if connection else None,
+        "accountName": connection.get("account_name") if connection else None,
+        "accountAvatarUrl": (
+            connection.get("account_avatar_url") if connection else None
+        ),
     }
 
 
@@ -101,16 +113,15 @@ def create_import_job(
     repository: str,
     branch: str,
     initiated_by: str = "admin",
-    user_id: int | None = None,
+    user_id: str | None = None,
     installation_id: str | None = None,
 ) -> Dict[str, object]:
     store = PipelineStore(db)
-    owner_id = user_id or settings.DEFAULT_REPO_OWNER_ID
     job = store.create_import_job(
         repository,
         branch,
         initiated_by,
-        user_id=owner_id,
+        user_id=user_id,
         installation_id=installation_id,
     )
     job_id = job.get("id")
@@ -123,7 +134,7 @@ def create_import_job(
         started_at=start_time,
         notes="Collecting repository metadata",
     )
-    enqueue_repo_import.delay(repository, branch, job_id, owner_id, installation_id)
+    enqueue_repo_import.delay(repository, branch, job_id, user_id, installation_id)
     return store.update_import_job(
         job_id,
         status="waiting_webhook",
