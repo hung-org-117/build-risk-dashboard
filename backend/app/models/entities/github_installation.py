@@ -8,8 +8,6 @@ from pydantic import BaseModel, Field
 
 
 class GithubInstallation(BaseModel):
-    """GitHub App installation entity stored in MongoDB"""
-
     id: Optional[ObjectId] = Field(None, alias="_id")
     installation_id: str
     account_login: Optional[str] = None

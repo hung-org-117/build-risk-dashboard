@@ -1,7 +1,7 @@
 """Workflow entities - GitHub Actions workflow runs and jobs"""
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 

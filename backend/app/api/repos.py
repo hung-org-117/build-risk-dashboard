@@ -17,7 +17,7 @@ from app.dtos import (
     RepoSuggestionListResponse,
     RepoUpdateRequest,
 )
-from app.services.github_client import get_pipeline_github_client
+from app.services.github.github_client import get_pipeline_github_client
 from app.services.github_integration_service import create_import_job
 from app.services.pipeline_exceptions import (
     PipelineConfigurationError,

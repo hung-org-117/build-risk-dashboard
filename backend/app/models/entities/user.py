@@ -8,8 +8,6 @@ from pydantic import BaseModel, Field
 
 
 class User(BaseModel):
-    """User entity stored in MongoDB"""
-
     id: Optional[ObjectId] = Field(None, alias="_id")
     email: str
     name: Optional[str] = None

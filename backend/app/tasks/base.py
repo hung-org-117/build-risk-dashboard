@@ -10,7 +10,7 @@ from pymongo.database import Database
 
 from app.database.mongo import get_database
 
-from app.services.github_client import GitHubClient, get_pipeline_github_client
+from app.services.github.github_client import GitHubClient, get_pipeline_github_client
 from app.services.pipeline_exceptions import (
     PipelineRateLimitError,
     PipelineRetryableError,

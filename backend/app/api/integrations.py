@@ -17,7 +17,7 @@ from app.services.github_integration_service import (
     create_import_job,
     list_import_jobs,
 )
-from app.services.github_webhook import handle_github_event, verify_signature
+from app.services.github.github_webhook import handle_github_event, verify_signature
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 

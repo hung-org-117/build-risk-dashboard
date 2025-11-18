@@ -8,14 +8,14 @@ from pydantic import BaseModel, Field
 
 
 class ImportJob(BaseModel):
-    """Import job entity stored in MongoDB"""
-
-    id: Optional[str] = Field(None, alias="_id")
+    id: Optional[ObjectId] = Field(None, alias="_id")
     repository: str
     branch: str
     user_id: Optional[str] = None
     installation_id: Optional[str] = None
-    status: Literal["pending", "running", "completed", "failed", "waiting_webhook", "queued"]
+    status: Literal[
+        "pending", "running", "completed", "failed", "waiting_webhook", "queued"
+    ]
     progress: int = Field(0, ge=0, le=100)
     builds_imported: int = 0
     commits_analyzed: int = 0

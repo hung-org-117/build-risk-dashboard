@@ -60,7 +60,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         # Call the downstream handler
         try:
             response = await call_next(request)
-        except Exception as exc:  # pragma: no cover - we still want to log then reraise
+        except Exception:  # pragma: no cover - we still want to log then reraise
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.exception(
                 "Unhandled exception during request: method=%s path=%s client=%s req_id=%s duration_ms=%d user=%s",

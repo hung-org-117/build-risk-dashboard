@@ -11,7 +11,7 @@ from app.dtos import (
     GithubAuthorizeResponse,
     AuthVerifyResponse,
 )
-from app.services.github_oauth import (
+from app.services.github.github_oauth import (
     build_authorize_url,
     create_oauth_state,
     exchange_code_for_token,

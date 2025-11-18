@@ -1,4 +1,5 @@
 """Dashboard analytics endpoints."""
+
 from fastapi import APIRouter, Depends
 from pymongo.database import Database
 

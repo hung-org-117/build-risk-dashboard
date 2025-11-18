@@ -15,7 +15,7 @@ from app.services.pipeline_exceptions import (
     PipelineRateLimitError,
     PipelineRetryableError,
 )
-from app.services.github_app import (
+from app.services.github.github_app import (
     github_app_configured,
     get_installation_token,
 )
@@ -159,7 +159,9 @@ class GitHubClient:
     def get_repository(self, full_name: str) -> Dict[str, Any]:
         return self._rest_request("GET", f"/repos/{full_name}")
 
-    def list_authenticated_repositories(self, per_page: int = 10) -> List[Dict[str, Any]]:
+    def list_authenticated_repositories(
+        self, per_page: int = 10
+    ) -> List[Dict[str, Any]]:
         params = {
             "per_page": per_page,
             "sort": "updated",
@@ -168,7 +170,9 @@ class GitHubClient:
         repos = self._rest_request("GET", "/user/repos", params=params)
         return repos if isinstance(repos, list) else []
 
-    def search_repositories(self, query: str, per_page: int = 10) -> List[Dict[str, Any]]:
+    def search_repositories(
+        self, query: str, per_page: int = 10
+    ) -> List[Dict[str, Any]]:
         params = {"q": query, "per_page": per_page}
         response = self._rest_request("GET", "/search/repositories", params=params)
         items = response.get("items", []) if isinstance(response, dict) else []

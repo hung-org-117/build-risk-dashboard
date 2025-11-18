@@ -12,9 +12,6 @@ from app.api import (
     integrations,
     auth,
     repos,
-    pipeline,
-    settings,
-    logs,
     users,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -46,9 +43,6 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(integrations.router, prefix="/api", tags=["Integrations"])
 app.include_router(auth.router, prefix="/api", tags=["Auth"])
 app.include_router(repos.router, prefix="/api", tags=["Repositories"])
-app.include_router(pipeline.router, prefix="/api", tags=["Pipeline"])
-app.include_router(settings.router, prefix="/api", tags=["Settings"])
-app.include_router(logs.router, prefix="/api", tags=["Logging"])
 app.include_router(users.router, prefix="/api", tags=["Users"])
 
 

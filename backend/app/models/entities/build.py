@@ -8,8 +8,6 @@ from pydantic import BaseModel, Field
 
 
 class BuildFeatures(BaseModel):
-    """Feature snapshot for ML/analytics"""
-
     tr_build_id: Optional[int] = None
     gh_project_name: Optional[str] = None
     gh_is_pr: Optional[bool] = None
@@ -68,8 +66,6 @@ class BuildFeatures(BaseModel):
 
 
 class Build(BaseModel):
-    """Build entity stored in MongoDB"""
-
     id: Optional[ObjectId] = Field(None, alias="_id")
     repository: str
     branch: str
