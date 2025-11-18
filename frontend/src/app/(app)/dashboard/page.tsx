@@ -201,7 +201,9 @@ export default function DashboardPage() {
                         build.status
                       );
                       const finishedAt =
-                        build.completed_at ?? build.updated_at ?? build.created_at;
+                        build.completed_at ??
+                        build.updated_at ??
+                        build.created_at;
 
                       return (
                         <tr
@@ -281,8 +283,7 @@ function getBuildStatus(conclusion?: string | null, status?: string | null) {
   if (normalized === "failure" || normalized === "failed") {
     return {
       label: "Failed",
-      className:
-        "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300",
+      className: "bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300",
     };
   }
 

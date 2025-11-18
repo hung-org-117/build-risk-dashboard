@@ -1,21 +1,26 @@
 import axios from 'axios'
 import type {
+  ActivityLogListResponse,
   BuildDetail,
   BuildListResponse,
   DashboardSummaryResponse,
-  GithubIntegrationStatus,
   GithubAuthorizeResponse,
-  PipelineStatus,
   GithubImportJob,
   GithubInstallation,
   GithubInstallationListResponse,
-  SystemSettings,
-  SystemSettingsUpdateRequest,
-  ActivityLogListResponse,
+  GithubIntegrationStatus,
   NotificationListResponse,
   NotificationPolicy,
   NotificationPolicyUpdateRequest,
+  PipelineStatus,
+  RepoDetail,
+  RepoImportPayload,
+  RepoSuggestionResponse,
+  RepoUpdatePayload,
+  RepositoryRecord,
   RoleListResponse,
+  SystemSettings,
+  SystemSettingsUpdateRequest,
   UserAccount,
 } from '@/types'
 
@@ -47,6 +52,39 @@ export const buildApi = {
   
   delete: async (id: string) => {
     const response = await api.delete(`/builds/${id}`)
+    return response.data
+  },
+}
+
+export const reposApi = {
+  list: async () => {
+    const response = await api.get<RepositoryRecord[]>('/repos/')
+    return response.data
+  },
+  get: async (repoId: string) => {
+    const response = await api.get<RepoDetail>(`/repos/${repoId}`)
+    return response.data
+  },
+  update: async (repoId: string, payload: RepoUpdatePayload) => {
+    const response = await api.patch<RepoDetail>(`/repos/${repoId}`, payload)
+    return response.data
+  },
+  scan: async (repoId: string, payload?: { initiated_by?: string }) => {
+    const response = await api.post<GithubImportJob>(`/repos/${repoId}/scan`, payload ?? {})
+    return response.data
+  },
+  listJobs: async (repoId: string) => {
+    const response = await api.get<GithubImportJob[]>(`/repos/${repoId}/jobs`)
+    return response.data
+  },
+  import: async (payload: RepoImportPayload) => {
+    const response = await api.post<RepositoryRecord>('/repos/import', payload)
+    return response.data
+  },
+  discover: async (query?: string) => {
+    const response = await api.get<RepoSuggestionResponse>('/repos/available', {
+      params: query ? { q: query } : undefined,
+    })
     return response.data
   },
 }

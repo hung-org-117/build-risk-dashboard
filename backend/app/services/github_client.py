@@ -159,6 +159,21 @@ class GitHubClient:
     def get_repository(self, full_name: str) -> Dict[str, Any]:
         return self._rest_request("GET", f"/repos/{full_name}")
 
+    def list_authenticated_repositories(self, per_page: int = 10) -> List[Dict[str, Any]]:
+        params = {
+            "per_page": per_page,
+            "sort": "updated",
+            "affiliation": "owner,collaborator,organization_member",
+        }
+        repos = self._rest_request("GET", "/user/repos", params=params)
+        return repos if isinstance(repos, list) else []
+
+    def search_repositories(self, query: str, per_page: int = 10) -> List[Dict[str, Any]]:
+        params = {"q": query, "per_page": per_page}
+        response = self._rest_request("GET", "/search/repositories", params=params)
+        items = response.get("items", []) if isinstance(response, dict) else []
+        return items
+
     def list_workflow_runs(
         self, full_name: str, params: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:

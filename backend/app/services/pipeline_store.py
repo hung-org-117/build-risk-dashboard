@@ -65,6 +65,17 @@ class PipelineStore:
             "metadata": metadata,
             "updated_at": now,
         }
+        document["ci_provider"] = (existing or {}).get("ci_provider", "github_actions")
+        document["monitoring_enabled"] = (existing or {}).get("monitoring_enabled", True)
+        document["sync_status"] = (existing or {}).get("sync_status", "healthy")
+        document["webhook_status"] = (existing or {}).get("webhook_status", "inactive")
+        document["ci_token_status"] = (existing or {}).get("ci_token_status", "valid")
+        tracked = (existing or {}).get("tracked_branches")
+        if not tracked:
+            tracked = [default_branch] if default_branch else []
+        document["tracked_branches"] = tracked
+        document["last_sync_error"] = (existing or {}).get("last_sync_error")
+        document["notes"] = (existing or {}).get("notes")
         if installation_id is not None:
             document["installation_id"] = installation_id
         elif existing:
@@ -82,11 +93,25 @@ class PipelineStore:
                 {"$set": document},
             )
             return self.db.repositories.find_one({"_id": repo_id})
+        else:
+            document["created_at"] = now
+            insert_result = self.db.repositories.insert_one(document)
+            document["_id"] = insert_result.inserted_id
+            return document
 
-        document["created_at"] = now
-        insert_result = self.db.repositories.insert_one(document)
-        document["_id"] = insert_result.inserted_id
-        return document
+    def update_repository(self, repo_id: str | ObjectId, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        identifier = repo_id
+        if isinstance(repo_id, str):
+            try:
+                identifier = ObjectId(repo_id)
+            except (InvalidId, TypeError):
+                return None
+        payload = updates.copy()
+        if "tracked_branches" in payload and payload["tracked_branches"] is None:
+            payload["tracked_branches"] = []
+        payload["updated_at"] = _utcnow()
+        self.db.repositories.update_one({"_id": identifier}, {"$set": payload})
+        return self.db.repositories.find_one({"_id": identifier})
 
     def list_repositories(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         query: Dict[str, Any] = {}
@@ -94,6 +119,30 @@ class PipelineStore:
             query["user_id"] = user_id
         cursor = self.db.repositories.find(query).sort("created_at", -1)
         return list(cursor)
+
+    def count_builds_by_repository(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        pipeline = [
+            {"$group": {"_id": "$repository", "count": {"$sum": 1}}},
+        ]
+        for doc in self.db.builds.aggregate(pipeline):
+            repo_name = doc.get("_id")
+            if repo_name:
+                counts[repo_name] = doc.get("count", 0)
+        return counts
+
+    def count_builds_for_repo(self, repository: str) -> int:
+        if not repository:
+            return 0
+        return self.db.builds.count_documents({"repository": repository})
+
+    def list_repo_jobs(self, repository: str, limit: int = 20) -> List[Dict[str, Any]]:
+        cursor = (
+            self.db.github_import_jobs.find({"repository": repository})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        return [_serialize(job) for job in cursor]
 
     def get_repository(self, repo_id: str | ObjectId) -> Optional[Dict[str, Any]]:
         identifier = repo_id

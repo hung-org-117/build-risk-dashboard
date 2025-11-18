@@ -277,9 +277,48 @@ class RepoResponse(BaseModel):
     created_at: datetime
     last_scanned_at: Optional[datetime] = None
     installation_id: Optional[str] = None
+    ci_provider: Literal["github_actions", "travis_ci"] = "github_actions"
+    monitoring_enabled: bool = True
+    sync_status: Literal["healthy", "error", "disabled"] = "healthy"
+    webhook_status: Literal["active", "inactive"] = "inactive"
+    ci_token_status: Literal["valid", "missing"] = "valid"
+    tracked_branches: List[str] = Field(default_factory=list)
+    total_builds_imported: int = 0
+    last_sync_error: Optional[str] = None
+    notes: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class RepoDetailResponse(RepoResponse):
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class RepoUpdateRequest(BaseModel):
+    ci_provider: Optional[str] = None
+    monitoring_enabled: Optional[bool] = None
+    sync_status: Optional[Literal["healthy", "error", "disabled"]] = None
+    tracked_branches: Optional[List[str]] = None
+    webhook_status: Optional[Literal["active", "inactive"]] = None
+    ci_token_status: Optional[Literal["valid", "missing"]] = None
+    default_branch: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RepoSuggestion(BaseModel):
+    full_name: str
+    description: Optional[str] = None
+    default_branch: Optional[str] = None
+    private: bool = False
+    owner: Optional[str] = None
+    installed: bool = False
+    requires_installation: bool = False
+    source: Literal["owned", "search"] = "owned"
+
+
+class RepoSuggestionListResponse(BaseModel):
+    items: List[RepoSuggestion]
 
 
 class RepoScanRequest(BaseModel):

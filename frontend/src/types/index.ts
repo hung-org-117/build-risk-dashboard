@@ -47,6 +47,68 @@ export interface RepoDistributionEntry {
   builds: number;
 }
 
+export type RepoSyncStatus = "healthy" | "error" | "disabled";
+
+export interface RepositoryRecord {
+  id: string;
+  user_id: number;
+  provider: string;
+  full_name: string;
+  default_branch?: string;
+  is_private: boolean;
+  main_lang?: string;
+  github_repo_id?: number;
+  created_at: string;
+  last_scanned_at?: string;
+  installation_id?: string;
+  ci_provider: string;
+  monitoring_enabled: boolean;
+  sync_status: RepoSyncStatus;
+  webhook_status: "active" | "inactive";
+  ci_token_status: "valid" | "missing";
+  tracked_branches: string[];
+  total_builds_imported: number;
+  last_sync_error?: string;
+  notes?: string;
+}
+
+export interface RepoDetail extends RepositoryRecord {
+  metadata?: Record<string, any>;
+}
+
+export interface RepoSuggestion {
+  full_name: string;
+  description?: string;
+  default_branch?: string;
+  private: boolean;
+  owner?: string;
+  installed: boolean;
+  requires_installation: boolean;
+  source: "owned" | "search";
+}
+
+export interface RepoSuggestionResponse {
+  items: RepoSuggestion[];
+}
+
+export interface RepoImportPayload {
+  full_name: string;
+  provider?: string;
+  user_id?: number;
+  installation_id?: string;
+}
+
+export interface RepoUpdatePayload {
+  ci_provider?: string;
+  monitoring_enabled?: boolean;
+  sync_status?: RepoSyncStatus;
+  tracked_branches?: string[];
+  webhook_status?: "active" | "inactive";
+  ci_token_status?: "valid" | "missing";
+  default_branch?: string;
+  notes?: string;
+}
+
 export interface DashboardSummaryResponse {
   metrics: DashboardMetrics;
   trends: DashboardTrendPoint[];
