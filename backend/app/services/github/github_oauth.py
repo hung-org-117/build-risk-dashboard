@@ -22,7 +22,7 @@ async def verify_github_token(access_token: str) -> bool:
     """Verify if a GitHub access token is still valid."""
     if not access_token:
         return False
-    
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
@@ -99,9 +99,15 @@ async def exchange_code_for_token(
     token_data = token_response.json()
     access_token = token_data.get("access_token")
     if not access_token:
+        error_details = (
+            token_data.get("error_description")
+            or token_data.get("error")
+            or str(token_data)
+        )
+        print(f"GitHub OAuth Error: {error_details}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub did not return an access token",
+            detail=f"GitHub did not return an access token. Error: {error_details}",
         )
 
     scope = token_data.get("scope")

@@ -149,45 +149,45 @@ export default function AdminReposPage() {
     loadSuggestions();
   }, [modalOpen, loadSuggestions]);
 
-    
 
-  
 
-    useEffect(() => {
 
-      if (!panelRepo) return;
 
-      setPanelForm({
+  useEffect(() => {
 
-        monitoring_enabled: panelRepo.monitoring_enabled,
+    if (!panelRepo) return;
 
-        default_branch: panelRepo.default_branch,
+    setPanelForm({
 
-        sync_status: panelRepo.sync_status,
+      monitoring_enabled: panelRepo.monitoring_enabled,
 
-        webhook_status: panelRepo.webhook_status,
+      default_branch: panelRepo.default_branch,
 
-        ci_token_status: panelRepo.ci_token_status,
+      sync_status: panelRepo.sync_status,
 
-        notes: panelRepo.notes,
+      webhook_status: panelRepo.webhook_status,
 
-      });
+      ci_token_status: panelRepo.ci_token_status,
 
-      setPanelBranches(panelRepo.tracked_branches ?? []);
+      notes: panelRepo.notes,
 
-      setPanelNotes(panelRepo.notes ?? "");
+    });
 
-    }, [panelRepo]);
+    setPanelBranches(panelRepo.tracked_branches ?? []);
 
-  
+    setPanelNotes(panelRepo.notes ?? "");
 
-    const selectedList = useMemo(
+  }, [panelRepo]);
 
-      () => Object.values(selectedRepos),
 
-      [selectedRepos]
 
-    );
+  const selectedList = useMemo(
+
+    () => Object.values(selectedRepos),
+
+    [selectedRepos]
+
+  );
 
   const toggleSelection = (item: RepoSuggestion) => {
     setSelectedRepos((prev) => {
@@ -246,8 +246,8 @@ export default function AdminReposPage() {
         const branches = branchPreferences[repo.full_name]?.length
           ? branchPreferences[repo.full_name]
           : created.default_branch
-          ? [created.default_branch]
-          : [];
+            ? [created.default_branch]
+            : [];
         if (branches.length) {
           await reposApi.update(created.id, {
             tracked_branches: branches,
@@ -463,15 +463,14 @@ export default function AdminReposPage() {
                       </td>
                       <td className="px-6 py-4">
                         <span
-                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                            STATUS_COLORS[repo.sync_status]
-                          }`}
+                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${STATUS_COLORS[repo.sync_status]
+                            }`}
                         >
                           {repo.sync_status === "healthy"
                             ? "Healthy"
                             : repo.sync_status === "error"
-                            ? "Error"
-                            : "Disabled"}
+                              ? "Error"
+                              : "Disabled"}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-muted-foreground">
@@ -557,7 +556,7 @@ export default function AdminReposPage() {
                   <input
                     type="text"
                     className="flex-1 rounded-lg border px-3 py-2 text-sm"
-                    placeholder="Search all your private GitHub repositories (owner/repo or keyword)"
+                    placeholder="Search all your GitHub repositories (owner/repo or keyword)"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                   />
@@ -746,22 +745,20 @@ export default function AdminReposPage() {
                 <div className="flex gap-4 border-b px-6 py-3 text-sm">
                   <button
                     type="button"
-                    className={`pb-2 font-medium ${
-                      panelTab === "settings"
-                        ? "text-blue-600"
-                        : "text-muted-foreground"
-                    }`}
+                    className={`pb-2 font-medium ${panelTab === "settings"
+                      ? "text-blue-600"
+                      : "text-muted-foreground"
+                      }`}
                     onClick={() => setPanelTab("settings")}
                   >
                     Sync Settings
                   </button>
                   <button
                     type="button"
-                    className={`pb-2 font-medium ${
-                      panelTab === "history"
-                        ? "text-blue-600"
-                        : "text-muted-foreground"
-                    }`}
+                    className={`pb-2 font-medium ${panelTab === "history"
+                      ? "text-blue-600"
+                      : "text-muted-foreground"
+                      }`}
                     onClick={() => {
                       setPanelTab("history");
                       void loadJobs(panelRepo.id);

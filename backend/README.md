@@ -9,9 +9,6 @@ cd backend
 uv sync
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-The default configuration uses MongoDB (`mongodb://localhost:27017/buildguard`). Update `backend/.env` nếu bạn dùng connection khác. Mock data sẽ tự seed khi khởi động server.
-
 ### Useful commands
 
 ```bash
@@ -31,21 +28,3 @@ GITHUB_CLIENT_SECRET=<github-oauth-app-client-secret>
 GITHUB_REDIRECT_URI=http://localhost:8000/api/auth/github/callback
 FRONTEND_BASE_URL=http://localhost:3000
 ```
-
-Start the backend then visit `http://localhost:3000/integrations/github` to trigger the OAuth flow.
-
-### Key endpoints
-
-- `GET /api/builds/` – Paginated builds including full telemetry (commits, workflows, features)
-- `GET /api/dashboard/summary` – Aggregated metrics for dashboard widgets
-- `GET /api/integrations/github` – GitHub OAuth status + repository summary
-
-### Request tracing middleware
-
-The backend uses a lightweight request logging middleware to make it easy to
-correlate logs for individual requests. It automatically adds an `X-Request-ID`
-header, logs HTTP method/path/status, client IP and request duration in ms.
-
-To configure logging level for development, set `LOGGING_LEVEL` environment
-variable or change the logging configuration in `app/main.py` prior to starting
-the app.

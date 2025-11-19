@@ -91,13 +91,15 @@ def sync_repositories(
     """Sync available repositories from GitHub (User OAuth + App Installations)."""
     user_id = str(current_user["_id"])
     store = PipelineStore(db)
-    
+
     # Track seen repos to avoid duplicates
     seen_repos = set()
-    
+
     # Fetch user's GitHub login from OAuth identity
-    identity = db.oauth_identities.find_one({"user_id": ObjectId(user_id), "provider": "github"})
-    
+    identity = db.oauth_identities.find_one(
+        {"user_id": ObjectId(user_id), "provider": "github"}
+    )
+
     # 1. Fetch from User OAuth (if available)
     if identity:
         try:
@@ -107,32 +109,32 @@ def sync_repositories(
                     full_name = repo.get("full_name")
                     if not full_name:
                         continue
-                    
+
                     store.upsert_available_repository(
                         user_id=user_id,
                         repo_data=repo,
-                        installation_id=None # Will be updated if found in app
+                        installation_id=None,  # Will be updated if found in app
                     )
                     seen_repos.add(full_name)
         except Exception as e:
             # Check for expired token (401)
             # PipelineRetryableError wraps httpx.HTTPStatusError
             if isinstance(e, PipelineRetryableError) and "401" in str(e):
-                 raise HTTPException(
+                raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="GitHub token expired or revoked. Please reconnect.",
-                    headers={"x-auth-error": "github_token_expired"}
+                    headers={"x-auth-error": "github_token_expired"},
                 )
-            
+
             # Raise exception if user has connected but sync fails
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, 
-                detail=f"Failed to sync user repositories: {str(e)}"
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to sync user repositories: {str(e)}",
             )
 
     # 2. Fetch from GitHub App Installations (if available)
     github_login = (identity or {}).get("profile", {}).get("login")
-    
+
     if github_login:
         # Find installations for this user or their orgs
         installations = db.github_installations.find({"account_login": github_login})
@@ -141,32 +143,32 @@ def sync_repositories(
             try:
                 with get_app_github_client(db, inst_id) as gh:
                     # List repos for this installation
-                    resp = gh._rest_request("GET", "/installation/repositories", params={"per_page": 100})
+                    resp = gh._rest_request(
+                        "GET", "/installation/repositories", params={"per_page": 100}
+                    )
                     app_repos = resp.get("repositories", [])
-                    
+
                     for repo in app_repos:
                         full_name = repo.get("full_name")
                         if not full_name:
                             continue
-                        
+
                         store.upsert_available_repository(
-                            user_id=user_id,
-                            repo_data=repo,
-                            installation_id=inst_id
+                            user_id=user_id, repo_data=repo, installation_id=inst_id
                         )
                         seen_repos.add(full_name)
             except Exception as e:
                 # Raise exception if app sync fails
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Failed to sync app repositories for installation {inst_id}: {str(e)}"
+                    detail=f"Failed to sync app repositories for installation {inst_id}: {str(e)}",
                 )
 
     # Remove repositories that were not found in this sync
     store.delete_stale_available_repositories(user_id, list(seen_repos))
 
     # Return updated list
-    return discover_repositories(db=db, current_user=current_user)
+    return discover_repositories(db=db, current_user=current_user, q=None, limit=50)
 
 
 @router.post(
@@ -175,18 +177,17 @@ def sync_repositories(
 def import_repository(
     payload: RepoImportRequest,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     """Register a repository for ingestion."""
     user_id = payload.user_id or str(current_user["_id"])
     store = PipelineStore(db)
-    
+
     # Check if we have this repo in available_repositories to get installation_id
-    available_repo = db.available_repositories.find_one({
-        "user_id": ObjectId(user_id),
-        "full_name": payload.full_name
-    })
-    
+    available_repo = db.available_repositories.find_one(
+        {"user_id": ObjectId(user_id), "full_name": payload.full_name}
+    )
+
     installation_id = payload.installation_id
     if available_repo and available_repo.get("installation_id"):
         installation_id = available_repo.get("installation_id")
@@ -195,16 +196,16 @@ def import_repository(
     if not installation_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This repository must be installed via the GitHub App to be imported. Please install the App for this repository first."
+            detail="This repository must be installed via the GitHub App to be imported. Please install the App for this repository first.",
         )
 
     try:
         with get_app_github_client(db, installation_id) as gh:
             repo_data = gh.get_repository(payload.full_name)
     except PipelineConfigurationError as e:
-         raise HTTPException(
+        raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Authentication failed: {str(e)}. Please ensure you have connected GitHub or installed the App."
+            detail=f"Authentication failed: {str(e)}. Please ensure you have connected GitHub or installed the App.",
         )
 
     is_private = bool(repo_data.get("private"))
@@ -220,11 +221,12 @@ def import_repository(
         installation_id=installation_id,
         last_scanned_at=None,
     )
-    
+
     # Trigger Initial Scan Job (Celery)
     from app.tasks.ingestion import trigger_initial_scan
+
     trigger_initial_scan.delay(str(repo_doc["_id"]))
-    
+
     return _serialize_repo(repo_doc)
 
 
@@ -237,7 +239,7 @@ def list_repositories(
     """List tracked repositories."""
     # If user_id not specified, default to current user's repositories
     filter_user_id = user_id or str(current_user["_id"])
-    
+
     store = PipelineStore(db)
     repos = store.list_repositories(user_id=filter_user_id)
     return [_serialize_repo(repo) for repo in repos]
@@ -256,24 +258,28 @@ def discover_repositories(
     """List available repositories from cache (sync first to update)."""
     store = PipelineStore(db)
     user_id = str(current_user["_id"])
-    
+
     # Get already tracked repos to mark them
-    tracked = {repo.get("full_name") for repo in store.list_repositories(user_id=user_id)}
-    
+    tracked = {
+        repo.get("full_name") for repo in store.list_repositories(user_id=user_id)
+    }
+
     # Get available repos from DB
     available_repos = store.list_available_repositories(user_id=user_id)
-    
+
     # Filter by query
     if q:
         query = q.lower().strip()
-        available_repos = [r for r in available_repos if query in r.get("full_name", "").lower()]
-        
+        available_repos = [
+            r for r in available_repos if query in r.get("full_name", "").lower()
+        ]
+
     items = []
     for repo in available_repos[:limit]:
         full_name = repo.get("full_name")
         if not full_name:
             continue
-            
+
         items.append(
             {
                 "full_name": full_name,
@@ -282,10 +288,11 @@ def discover_repositories(
                 "private": bool(repo.get("private")),
                 "owner": full_name.split("/")[0],
                 "installed": full_name in tracked,
-                "requires_installation": bool(repo.get("private")) and not repo.get("installation_id"),
+                "requires_installation": bool(repo.get("private"))
+                and not repo.get("installation_id"),
                 "source": "app" if repo.get("installation_id") else "owned",
                 "installation_id": repo.get("installation_id"),
-                "html_url": repo.get("html_url")
+                "html_url": repo.get("html_url"),
             }
         )
 
@@ -304,16 +311,16 @@ def get_repository_detail(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
         )
-    
+
     # Verify user owns this repository
     repo_user_id = str(repo_doc.get("user_id", ""))
     current_user_id = str(current_user["_id"])
     if repo_user_id != current_user_id and current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to access this repository"
+            detail="You don't have permission to access this repository",
         )
-    
+
     return _serialize_repo_detail(repo_doc)
 
 
@@ -330,14 +337,14 @@ def update_repository_settings(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
         )
-    
+
     # Verify user owns this repository
     repo_user_id = str(repo_doc.get("user_id", ""))
     current_user_id = str(current_user["_id"])
     if repo_user_id != current_user_id and current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to update this repository"
+            detail="You don't have permission to update this repository",
         )
 
     updates = payload.model_dump(exclude_unset=True)
@@ -365,4 +372,3 @@ def update_repository_settings(
             )
 
     return _serialize_repo_detail(updated)
-

@@ -52,8 +52,11 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Check if error is 401 and we haven't already tried to refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.url?.includes("/auth/refresh")
+    ) {
       const authError = error.response?.headers?.["x-auth-error"];
 
       // Handle GitHub token errors - redirect to re-authenticate
@@ -93,7 +96,7 @@ api.interceptors.response.use(
         processQueue(refreshError, null);
         isRefreshing = false;
         // Redirect to login page
-        if (typeof window !== "undefined") {
+        if (typeof window !== "undefined" && window.location.pathname !== "/login") {
           window.location.href = "/login";
         }
         return Promise.reject(refreshError);

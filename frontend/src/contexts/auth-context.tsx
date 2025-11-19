@@ -52,8 +52,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           reason: authError,
         });
         setError(`GitHub authentication required: ${authError}`);
+      } else if (err.response?.status === 401) {
+        // Standard unauthenticated state - not an error
+        setStatus({ authenticated: false, github_connected: false });
+        setError(null);
       } else {
-        // Complete authentication failure
+        // Complete authentication failure (network error, 500, etc.)
         setStatus({ authenticated: false, github_connected: false });
         setError("Unable to verify authentication status.");
       }
@@ -63,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    refresh();
   }, [refresh]);
 
   // Determine if GitHub needs re-authentication
