@@ -10,7 +10,11 @@ from pymongo.database import Database
 
 from app.database.mongo import get_database
 
-from app.services.github.github_client import GitHubClient, get_pipeline_github_client
+from app.services.github.github_client import (
+    GitHubClient,
+    get_app_github_client,
+    get_public_github_client,
+)
 from app.services.pipeline_exceptions import (
     PipelineRateLimitError,
     PipelineRetryableError,
@@ -57,7 +61,9 @@ class PipelineTask(Task):
         return self._store
 
     def github_client(self, installation_id: Optional[str] = None) -> GitHubClient:
-        return get_pipeline_github_client(self.db, installation_id)
+        if installation_id:
+            return get_app_github_client(self.db, installation_id)
+        return get_public_github_client()
 
     def github_client_for_repository(self, repository: str) -> GitHubClient:
         repo_doc = self.db.repositories.find_one({"full_name": repository}) or {}

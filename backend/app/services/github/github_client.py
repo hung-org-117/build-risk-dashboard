@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any, Dict, Iterator, List, Optional
 
+from bson import ObjectId
 import httpx
 from pymongo.database import Database
 
@@ -111,9 +112,26 @@ class GitHubClient:
 
     def _handle_rate_limit(self, response: httpx.Response) -> None:
         reset_header = response.headers.get("X-RateLimit-Reset")
+        retry_after_header = response.headers.get("Retry-After")
+        wait_seconds = 60.0
+
+        if retry_after_header:
+             try:
+                 wait_seconds = float(retry_after_header)
+             except ValueError:
+                 pass
+        elif reset_header:
+             try:
+                 reset_epoch = float(reset_header)
+                 now_epoch = datetime.now(timezone.utc).timestamp()
+                 wait_seconds = max(reset_epoch - now_epoch, 1.0)
+             except ValueError:
+                 pass
+
         if self._token_pool and self._token:
             self._token_pool.mark_rate_limited(self._token, reset_epoch=reset_header)
-        raise PipelineRateLimitError("GitHub rate limit reached")
+            
+        raise PipelineRateLimitError("GitHub rate limit reached", retry_after=wait_seconds)
 
     def _rest_request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
         response = self._rest.request(method, path, headers=self._headers(), **kwargs)
@@ -339,32 +357,53 @@ class GitHubClient:
 _token_pool: GitHubTokenPool | None = None
 
 
-def _collect_tokens_from_db(db: Database) -> List[str]:
-    """Collect GitHub tokens from environment and stored OAuth identities."""
-    tokens: List[str] = settings.GITHUB_TOKENS or []
-    identity = db.oauth_identities.find_one({"provider": "github"})
-    oauth_token = (identity or {}).get("access_token")
-    if oauth_token:
-        tokens.append(oauth_token)
-    deduped: List[str] = []
-    for token in tokens:
-        if token and token not in deduped:
-            deduped.append(token)
-    return deduped
+def get_user_github_client(db: Database, user_id: str) -> GitHubClient:
+    """
+    Get a GitHub client using the user's OAuth token.
+    Used for querying repositories the user has access to.
+    """
+    if not user_id:
+        raise PipelineConfigurationError("user_id is required for user auth")
+    
+    identity = db.oauth_identities.find_one(
+        {"user_id": ObjectId(user_id), "provider": "github"}
+    )
+    if not identity or not identity.get("access_token"):
+        raise PipelineConfigurationError(
+            f"No GitHub OAuth token found for user {user_id}"
+        )
+    return GitHubClient(token=identity["access_token"])
 
 
-def get_pipeline_github_client(
-    db: Database, installation_id: Optional[str] = None
-) -> GitHubClient:
+def get_app_github_client(db: Database, installation_id: str) -> GitHubClient:
+    """
+    Get a GitHub client using the GitHub App installation token.
+    Used for backfilling past retained workflows and commits.
+    """
+    if not installation_id:
+        raise PipelineConfigurationError("installation_id is required for app auth")
+    
+    if not github_app_configured():
+        raise PipelineConfigurationError("GitHub App is not configured")
+        
+    token = get_installation_token(installation_id, db=db)
+    return GitHubClient(token=token)
+
+
+def get_public_github_client() -> GitHubClient:
+    """
+    Get a GitHub client using public tokens from config.
+    Used for public data or when no specific auth is needed.
+    """
     global _token_pool
-    if installation_id and github_app_configured():
-        token = get_installation_token(installation_id, db=db)
-        return GitHubClient(token=token)
-
-    tokens = _collect_tokens_from_db(db)
+    
+    tokens = settings.GITHUB_TOKENS or []
+    # Filter empty tokens
+    tokens = [t for t in tokens if t and t.strip()]
+    
     if not tokens:
         raise PipelineConfigurationError(
-            "GitHub credentials are missing. Configure a GitHub App or set GITHUB_TOKENS before running collectors.",
+            "No public GitHub tokens configured in settings"
         )
 
     if len(tokens) == 1:
@@ -375,3 +414,29 @@ def get_pipeline_github_client(
         _token_pool = GitHubTokenPool(tokens)
 
     return GitHubClient(token_pool=_token_pool)
+
+
+def get_pipeline_github_client(
+    db: Database,
+    auth_type: str = "public",  # "user", "app", "public"
+    user_id: Optional[str] = None,
+    installation_id: Optional[str] = None,
+) -> GitHubClient:
+    """
+    DEPRECATED: Use specific get_*_github_client functions instead.
+    Wrapper for backward compatibility.
+    """
+    if auth_type == "user":
+        if not user_id:
+            raise PipelineConfigurationError("user_id is required for 'user' auth type")
+        return get_user_github_client(db, user_id)
+    elif auth_type == "app":
+        if not installation_id:
+            raise PipelineConfigurationError("installation_id is required for 'app' auth type")
+        return get_app_github_client(db, installation_id)
+    elif auth_type == "public":
+        return get_public_github_client()
+    else:
+        raise PipelineConfigurationError(f"Invalid auth_type: {auth_type}")
+
+

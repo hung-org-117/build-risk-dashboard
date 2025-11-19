@@ -17,7 +17,12 @@ from app.dtos import (
     RepoUpdateRequest,
 )
 from app.middleware.auth import get_current_user
-from app.services.github.github_client import get_pipeline_github_client
+from app.services.github.github_client import (
+    get_pipeline_github_client,
+    get_user_github_client,
+    get_app_github_client,
+    get_public_github_client,
+)
 from app.services.pipeline_exceptions import (
     PipelineConfigurationError,
     PipelineRetryableError,
@@ -77,6 +82,94 @@ def _normalize_branches(branches: List[str]) -> List[str]:
 
 
 @router.post(
+    "/sync", response_model=RepoSuggestionListResponse, status_code=status.HTTP_200_OK
+)
+def sync_repositories(
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Sync available repositories from GitHub (User OAuth + App Installations)."""
+    user_id = str(current_user["_id"])
+    store = PipelineStore(db)
+    
+    # Track seen repos to avoid duplicates
+    seen_repos = set()
+    
+    # Fetch user's GitHub login from OAuth identity
+    identity = db.oauth_identities.find_one({"user_id": ObjectId(user_id), "provider": "github"})
+    
+    # 1. Fetch from User OAuth (if available)
+    if identity:
+        try:
+            with get_user_github_client(db, user_id) as gh:
+                user_repos = gh.list_authenticated_repositories(per_page=100)
+                for repo in user_repos:
+                    full_name = repo.get("full_name")
+                    if not full_name:
+                        continue
+                    
+                    store.upsert_available_repository(
+                        user_id=user_id,
+                        repo_data=repo,
+                        installation_id=None # Will be updated if found in app
+                    )
+                    seen_repos.add(full_name)
+        except Exception as e:
+            # Check for expired token (401)
+            # PipelineRetryableError wraps httpx.HTTPStatusError
+            if isinstance(e, PipelineRetryableError) and "401" in str(e):
+                 raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="GitHub token expired or revoked. Please reconnect.",
+                    headers={"x-auth-error": "github_token_expired"}
+                )
+            
+            # Raise exception if user has connected but sync fails
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, 
+                detail=f"Failed to sync user repositories: {str(e)}"
+            )
+
+    # 2. Fetch from GitHub App Installations (if available)
+    github_login = (identity or {}).get("profile", {}).get("login")
+    
+    if github_login:
+        # Find installations for this user or their orgs
+        installations = db.github_installations.find({"account_login": github_login})
+        for inst in installations:
+            inst_id = inst["installation_id"]
+            try:
+                with get_app_github_client(db, inst_id) as gh:
+                    # List repos for this installation
+                    resp = gh._rest_request("GET", "/installation/repositories", params={"per_page": 100})
+                    app_repos = resp.get("repositories", [])
+                    
+                    for repo in app_repos:
+                        full_name = repo.get("full_name")
+                        if not full_name:
+                            continue
+                        
+                        store.upsert_available_repository(
+                            user_id=user_id,
+                            repo_data=repo,
+                            installation_id=inst_id
+                        )
+                        seen_repos.add(full_name)
+            except Exception as e:
+                # Raise exception if app sync fails
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to sync app repositories for installation {inst_id}: {str(e)}"
+                )
+
+    # Remove repositories that were not found in this sync
+    store.delete_stale_available_repositories(user_id, list(seen_repos))
+
+    # Return updated list
+    return discover_repositories(db=db, current_user=current_user)
+
+
+@router.post(
     "/import", response_model=RepoResponse, status_code=status.HTTP_201_CREATED
 )
 def import_repository(
@@ -85,21 +178,36 @@ def import_repository(
     current_user: dict = Depends(get_current_user)
 ):
     """Register a repository for ingestion."""
-    # Use authenticated user's ID if not provided in payload
     user_id = payload.user_id or str(current_user["_id"])
-
-    with get_pipeline_github_client(db, payload.installation_id) as gh:
-        repo_data = gh.get_repository(payload.full_name)
-        is_private = bool(repo_data.get("private"))
-
-        # Validate that private repos have installation_id
-        if is_private and not payload.installation_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Private repositories require installation_id. Please install the GitHub App for this repository.",
-            )
-
     store = PipelineStore(db)
+    
+    # Check if we have this repo in available_repositories to get installation_id
+    available_repo = db.available_repositories.find_one({
+        "user_id": ObjectId(user_id),
+        "full_name": payload.full_name
+    })
+    
+    installation_id = payload.installation_id
+    if available_repo and available_repo.get("installation_id"):
+        installation_id = available_repo.get("installation_id")
+
+    # Enforce GitHub App Installation
+    if not installation_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This repository must be installed via the GitHub App to be imported. Please install the App for this repository first."
+        )
+
+    try:
+        with get_app_github_client(db, installation_id) as gh:
+            repo_data = gh.get_repository(payload.full_name)
+    except PipelineConfigurationError as e:
+         raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Authentication failed: {str(e)}. Please ensure you have connected GitHub or installed the App."
+        )
+
+    is_private = bool(repo_data.get("private"))
     repo_doc = store.upsert_repository(
         user_id=user_id,
         provider=payload.provider,
@@ -109,9 +217,14 @@ def import_repository(
         main_lang=repo_data.get("language"),
         github_repo_id=repo_data.get("id"),
         metadata=repo_data,
-        installation_id=payload.installation_id,
+        installation_id=installation_id,
         last_scanned_at=None,
     )
+    
+    # Trigger Initial Scan Job (Celery)
+    from app.tasks.ingestion import trigger_initial_scan
+    trigger_initial_scan.delay(str(repo_doc["_id"]))
+    
     return _serialize_repo(repo_doc)
 
 
@@ -134,60 +247,45 @@ def list_repositories(
 def discover_repositories(
     q: str | None = Query(
         default=None,
-        description="Optional search query for public repositories",
+        description="Optional filter by name",
     ),
-    limit: int = Query(default=10, ge=1, le=50),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """List GitHub repositories available to connect."""
+    """List available repositories from cache (sync first to update)."""
     store = PipelineStore(db)
-    tracked = {repo.get("full_name") for repo in store.list_repositories()}
-    query = (q or "").strip()
-    try:
-        with get_pipeline_github_client(db) as gh:
-            if query:
-                if "/" in query:
-                    repos = [gh.get_repository(query)]
-                else:
-                    # Add is:private to the query to search only for private repos
-                    repos = gh.search_repositories(f"{query} is:private", per_page=limit)
-                source = "search"
-            else:
-                repos = gh.list_authenticated_repositories(per_page=limit)
-                source = "owned"
-    except (
-        PipelineConfigurationError
-    ) as exc:  # pragma: no cover - runtime config errors
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-        ) from exc
-    except PipelineRetryableError as exc:  # pragma: no cover - runtime API errors
-        if query and "/" in query:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Repository '{query}' not found or inaccessible.",
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-        ) from exc
-
+    user_id = str(current_user["_id"])
+    
+    # Get already tracked repos to mark them
+    tracked = {repo.get("full_name") for repo in store.list_repositories(user_id=user_id)}
+    
+    # Get available repos from DB
+    available_repos = store.list_available_repositories(user_id=user_id)
+    
+    # Filter by query
+    if q:
+        query = q.lower().strip()
+        available_repos = [r for r in available_repos if query in r.get("full_name", "").lower()]
+        
     items = []
-    for repo in repos[:limit]:
+    for repo in available_repos[:limit]:
         full_name = repo.get("full_name")
         if not full_name:
             continue
-        owner = (repo.get("owner") or {}).get("login")
+            
         items.append(
             {
                 "full_name": full_name,
                 "description": repo.get("description"),
                 "default_branch": repo.get("default_branch"),
                 "private": bool(repo.get("private")),
-                "owner": owner,
+                "owner": full_name.split("/")[0],
                 "installed": full_name in tracked,
-                "requires_installation": bool(repo.get("private")),
-                "source": source,
+                "requires_installation": bool(repo.get("private")) and not repo.get("installation_id"),
+                "source": "app" if repo.get("installation_id") else "owned",
+                "installation_id": repo.get("installation_id"),
+                "html_url": repo.get("html_url")
             }
         )
 
@@ -267,3 +365,4 @@ def update_repository_settings(
             )
 
     return _serialize_repo_detail(updated)
+

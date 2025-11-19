@@ -84,7 +84,9 @@ export interface RepoSuggestion {
   owner?: string;
   installed: boolean;
   requires_installation: boolean;
-  source: "owned" | "search";
+  source: "owned" | "app";
+  installation_id?: string;
+  html_url?: string;
 }
 
 export interface RepoSuggestionResponse {

@@ -121,6 +121,21 @@ export default function AdminReposPage() {
     }
   }, []);
 
+  const handleSync = async () => {
+    setSuggestionsLoading(true);
+    try {
+      const data = await reposApi.sync();
+      setSuggestions(data.items);
+      setInitialSuggestions(data.items);
+      setFeedback("Repository list updated from GitHub.");
+    } catch (err) {
+      console.error(err);
+      setFeedback("Unable to sync repositories from GitHub.");
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!modalOpen) {
       setModalStep(1);
@@ -226,6 +241,7 @@ export default function AdminReposPage() {
         const created = await reposApi.import({
           full_name: repo.full_name,
           provider: "github",
+          installation_id: repo.installation_id,
         });
         const branches = branchPreferences[repo.full_name]?.length
           ? branchPreferences[repo.full_name]
@@ -552,6 +568,14 @@ export default function AdminReposPage() {
                   >
                     Search
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleSync}
+                    title="Sync available repositories from GitHub"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${suggestionsLoading ? "animate-spin" : ""}`} />
+                  </Button>
                 </form>
                 <p className="text-xs text-muted-foreground">
                   {isSearching
@@ -599,6 +623,11 @@ export default function AdminReposPage() {
                             </p>
                             <p className="text-sm text-muted-foreground">
                               {repo.description || "No description provided."}
+                              {repo.source === "app" && (
+                                <span className="ml-2 text-xs text-blue-600">
+                                  (via App)
+                                </span>
+                              )}
                             </p>
                           </div>
                         </label>

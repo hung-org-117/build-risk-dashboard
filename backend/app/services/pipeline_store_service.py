@@ -7,6 +7,7 @@ from bson import ObjectId
 from pymongo.database import Database
 
 from app.repositories.repository import RepositoryRepository
+from app.repositories.available_repository import AvailableRepositoryRepository
 
 
 class PipelineStore:
@@ -18,6 +19,7 @@ class PipelineStore:
     def __init__(self, db: Database) -> None:
         self.db = db
         self.repo_repo = RepositoryRepository(db)
+        self.available_repo_repo = AvailableRepositoryRepository(db)
 
     def upsert_repository(
         self,
@@ -60,3 +62,28 @@ class PipelineStore:
     def get_repository(self, repo_id: str | ObjectId) -> Optional[Dict[str, Any]]:
         """Get a repository by ID"""
         return self.repo_repo.find_by_id(str(repo_id))
+
+    def upsert_available_repository(
+        self,
+        user_id: str | ObjectId,
+        repo_data: Dict[str, Any],
+        installation_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Upsert an available repository"""
+        return self.available_repo_repo.upsert_available_repo(
+            user_id=user_id,
+            repo_data=repo_data,
+            installation_id=installation_id
+        )
+
+    def list_available_repositories(self, user_id: str | ObjectId) -> List[Dict[str, Any]]:
+        """List available repositories for a user"""
+        return self.available_repo_repo.list_by_user(user_id)
+    
+    def clear_available_repositories(self, user_id: str):
+        """Clear cached available repositories for a user"""
+        self.available_repo_repo.delete_by_user(user_id)
+
+    def delete_stale_available_repositories(self, user_id: str, active_full_names: List[str]):
+        """Remove available repositories that are no longer active"""
+        self.available_repo_repo.delete_stale_repos(user_id, active_full_names)

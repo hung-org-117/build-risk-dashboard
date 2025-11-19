@@ -166,6 +166,10 @@ export const reposApi = {
     });
     return response.data;
   },
+  sync: async () => {
+    const response = await api.post<RepoSuggestionResponse>("/repos/sync");
+    return response.data;
+  },
 };
 
 export const dashboardApi = {
