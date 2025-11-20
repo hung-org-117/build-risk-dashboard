@@ -5,26 +5,30 @@ from typing import Dict, Optional, Tuple
 
 from pymongo.database import Database
 
+from app.models.entities.oauth_identity import OAuthIdentity
+from app.models.entities.user import User
 from .base import BaseRepository
 from .user import UserRepository
 
 
-class OAuthIdentityRepository(BaseRepository):
+class OAuthIdentityRepository(BaseRepository[OAuthIdentity]):
     """Repository for OAuth identity entities"""
 
     def __init__(self, db: Database):
-        super().__init__(db, "oauth_identities")
+        super().__init__(db, "oauth_identities", OAuthIdentity)
         self.user_repo = UserRepository(db)
 
     def find_by_provider_and_external_id(
         self, provider: str, external_user_id: str
-    ) -> Optional[Dict]:
+    ) -> Optional[OAuthIdentity]:
         """Find an identity by provider and external user ID"""
         return self.find_one(
             {"provider": provider, "external_user_id": external_user_id}
         )
 
-    def find_by_user_id_and_provider(self, user_id, provider: str) -> Optional[Dict]:
+    def find_by_user_id_and_provider(
+        self, user_id, provider: str
+    ) -> Optional[OAuthIdentity]:
         """Find an identity by user ID and provider"""
         return self.find_one({"user_id": user_id, "provider": provider})
 
@@ -74,7 +78,7 @@ class OAuthIdentityRepository(BaseRepository):
         account_name: Optional[str] = None,
         account_avatar_url: Optional[str] = None,
         connected_at: Optional[datetime] = None,
-    ) -> Tuple[Dict, Dict]:
+    ) -> Tuple[User, OAuthIdentity]:
         """Upsert a GitHub identity and associated user"""
         provider = "github"
         existing_identity = self.find_by_provider_and_external_id(
@@ -96,31 +100,33 @@ class OAuthIdentityRepository(BaseRepository):
                 "account_avatar_url": account_avatar_url,
                 "connected_at": connected_at,
             }
-            self.update_one(existing_identity["_id"], identity_updates)
+            self.update_one(existing_identity.id, identity_updates)
 
             # Update user if needed
-            user_doc = self.user_repo.find_by_id(existing_identity["user_id"])
+            user_doc = self.user_repo.find_by_id(existing_identity.user_id)
             if not user_doc:
                 raise ValueError("User referenced by identity not found")
 
             user_updates = {}
-            if email and user_doc.get("email") != email:
+            if email and user_doc.email != email:
                 user_updates["email"] = email
-            if name and user_doc.get("name") != name:
+            if name and user_doc.name != name:
                 user_updates["name"] = name
 
             if user_updates:
-                self.user_repo.update_one(user_doc["_id"], user_updates)
-                user_doc.update(user_updates)
+                self.user_repo.update_one(user_doc.id, user_updates)
+                # We need to refresh user_doc after update or manually update it
+                # Since update_one returns the updated doc, let's use that
+                user_doc = self.user_repo.find_by_id(user_doc.id)
 
-            identity_doc = self.find_by_id(existing_identity["_id"])
+            identity_doc = self.find_by_id(existing_identity.id)
             return user_doc, identity_doc
 
         # Create new user and identity
         user_doc = self.user_repo.create_user(email, name, role="user")
 
         identity_doc = {
-            "user_id": user_doc["_id"],
+            "user_id": user_doc.id,
             "provider": provider,
             "external_user_id": github_user_id,
             "access_token": access_token,

@@ -1,7 +1,3 @@
-from app.repositories.available_repository import AvailableRepositoryRepository
-from app.repositories.imported_repository import ImportedRepositoryRepository
-from __future__ import annotations
-
 from typing import List, Optional
 
 from bson import ObjectId
@@ -15,6 +11,8 @@ from app.dtos import (
     RepoSuggestionListResponse,
     RepoUpdateRequest,
 )
+from app.repositories.available_repository import AvailableRepositoryRepository
+from app.repositories.imported_repository import ImportedRepositoryRepository
 from app.services.github.github_client import get_app_github_client
 from app.services.github.github_sync import sync_user_available_repos
 from app.services.github.exceptions import GithubConfigurationError
@@ -203,7 +201,7 @@ class RepositoryService:
         # Verify user owns this repository
         repo_user_id = str(repo_doc.get("user_id", ""))
         current_user_id = str(current_user["_id"])
-        if repo_user_id != current_user_id and current_user.get("role") != "admin":
+        if repo_user_id != current_user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this repository",
@@ -223,7 +221,7 @@ class RepositoryService:
         # Verify user owns this repository
         repo_user_id = str(repo_doc.get("user_id", ""))
         current_user_id = str(current_user["_id"])
-        if repo_user_id != current_user_id and current_user.get("role") != "admin":
+        if repo_user_id != current_user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to update this repository",

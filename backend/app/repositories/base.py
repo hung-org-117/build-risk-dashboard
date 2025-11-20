@@ -1,33 +1,37 @@
 """Base repository pattern for MongoDB operations"""
 
 from abc import ABC
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
 
 from bson import ObjectId
 from bson.errors import InvalidId
+from pydantic import BaseModel
 from pymongo.collection import Collection
 from pymongo.database import Database
 
-T = TypeVar("T")
+T = TypeVar("T", bound=BaseModel)
 
 
 class BaseRepository(ABC, Generic[T]):
     """Base repository providing common CRUD operations for MongoDB collections"""
 
-    def __init__(self, db: Database, collection_name: str):
+    def __init__(self, db: Database, collection_name: str, model_class: Type[T]):
         self.db = db
         self.collection: Collection = db[collection_name]
+        self.model_class = model_class
 
-    def find_by_id(self, entity_id: str | ObjectId) -> Optional[Dict[str, Any]]:
+    def find_by_id(self, entity_id: str | ObjectId) -> Optional[T]:
         """Find a document by its ID"""
         identifier = self._to_object_id(entity_id)
         if identifier is None:
             return None
-        return self.collection.find_one({"_id": identifier})
+        doc = self.collection.find_one({"_id": identifier})
+        return self._to_model(doc)
 
-    def find_one(self, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def find_one(self, query: Dict[str, Any]) -> Optional[T]:
         """Find a single document matching the query"""
-        return self.collection.find_one(query)
+        doc = self.collection.find_one(query)
+        return self._to_model(doc)
 
     def find_many(
         self,
@@ -35,7 +39,7 @@ class BaseRepository(ABC, Generic[T]):
         sort: Optional[List[tuple]] = None,
         skip: int = 0,
         limit: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[T]:
         """Find multiple documents matching the query"""
         cursor = self.collection.find(query)
         if sort:
@@ -44,24 +48,43 @@ class BaseRepository(ABC, Generic[T]):
             cursor = cursor.skip(skip)
         if limit:
             cursor = cursor.limit(limit)
-        return list(cursor)
+        return [self._to_model(doc) for doc in cursor if doc]
 
-    def insert_one(self, document: Dict[str, Any]) -> Dict[str, Any]:
+    def insert_one(self, document: Union[T, Dict[str, Any]]) -> T:
         """Insert a single document"""
-        result = self.collection.insert_one(document)
-        document["_id"] = result.inserted_id
-        return document
+        if isinstance(document, BaseModel):
+            doc_dict = document.model_dump(by_alias=True, exclude_none=True)
+        else:
+            doc_dict = document
 
-    def insert_many(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        result = self.collection.insert_one(doc_dict)
+        doc_dict["_id"] = result.inserted_id
+        return self._to_model(doc_dict)
+
+    def insert_many(self, documents: List[Union[T, Dict[str, Any]]]) -> List[T]:
         """Insert multiple documents"""
-        result = self.collection.insert_many(documents)
-        for i, doc in enumerate(documents):
-            doc["_id"] = result.inserted_ids[i]
-        return documents
+        if not documents:
+            return []
+
+        doc_dicts = []
+        for doc in documents:
+            if isinstance(doc, BaseModel):
+                doc_dicts.append(doc.model_dump(by_alias=True, exclude_none=True))
+            else:
+                doc_dicts.append(doc)
+
+        result = self.collection.insert_many(doc_dicts)
+
+        models = []
+        for i, doc_dict in enumerate(doc_dicts):
+            doc_dict["_id"] = result.inserted_ids[i]
+            models.append(self._to_model(doc_dict))
+
+        return models
 
     def update_one(
         self, entity_id: str | ObjectId, updates: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[T]:
         """Update a document by ID"""
         identifier = self._to_object_id(entity_id)
         if identifier is None:
@@ -96,6 +119,12 @@ class BaseRepository(ABC, Generic[T]):
     def aggregate(self, pipeline: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Execute an aggregation pipeline"""
         return list(self.collection.aggregate(pipeline))
+
+    def _to_model(self, doc: Optional[Dict[str, Any]]) -> Optional[T]:
+        """Convert a dictionary to a model instance"""
+        if not doc:
+            return None
+        return self.model_class.model_validate(doc)
 
     @staticmethod
     def _to_object_id(value: str | ObjectId | None) -> ObjectId | None:

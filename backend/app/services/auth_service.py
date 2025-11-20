@@ -14,7 +14,6 @@ from app.dtos.auth import (
     UserDetailResponse,
 )
 from app.dtos.github import GithubAuthorizeResponse, GithubOAuthInitRequest
-from app.services.auth import create_access_token
 from app.services.github.github_oauth import (
     build_authorize_url,
     create_oauth_state,
@@ -48,7 +47,7 @@ class AuthService:
         identity_doc, redirect_path = await exchange_code_for_token(
             self.db, code=code, state=state
         )
-        user_id = identity_doc.get("user_id")
+        user_id = identity_doc.user_id
 
         # Create JWT access token with expiration matching configuration
         jwt_token = create_access_token(subject=user_id)

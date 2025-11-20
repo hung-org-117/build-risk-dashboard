@@ -9,6 +9,8 @@ from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.dtos import UserResponse
+from app.models.entities.oauth_identity import OAuthIdentity
+from app.models.entities.user import User
 from app.repositories.oauth_identity import OAuthIdentityRepository
 from app.repositories.user import UserRepository
 
@@ -29,7 +31,7 @@ def upsert_github_identity(
     account_name: Optional[str] = None,
     account_avatar_url: Optional[str] = None,
     connected_at: Optional[datetime] = None,
-) -> Tuple[Dict[str, object], Dict[str, object]]:
+) -> Tuple[User, OAuthIdentity]:
     """Upsert a GitHub identity and associated user"""
     oauth_repo = OAuthIdentityRepository(db)
     return oauth_repo.upsert_github_identity(

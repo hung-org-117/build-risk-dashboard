@@ -6,20 +6,21 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from pymongo.database import Database
 
+from app.models.entities.available_repository import AvailableRepository
 from .base import BaseRepository
 
 
-class AvailableRepositoryRepository(BaseRepository):
+class AvailableRepositoryRepository(BaseRepository[AvailableRepository]):
     """Repository for available repository entities"""
 
     def __init__(self, db: Database):
-        super().__init__(db, "available_repositories")
+        super().__init__(db, "available_repositories", AvailableRepository)
         # Create index on user_id and full_name for fast lookups
         self.collection.create_index([("user_id", 1), ("full_name", 1)], unique=True)
 
     def list_by_user(
         self, user_id: str | ObjectId, filters: Optional[Dict[str, Any]] = None
-    ) -> List[Dict]:
+    ) -> List[AvailableRepository]:
         """List available repositories for a user with optional filters"""
         query = {"user_id": self._to_object_id(user_id)}
         if filters:
@@ -32,7 +33,7 @@ class AvailableRepositoryRepository(BaseRepository):
         user_id: str | ObjectId,
         repo_data: Dict[str, Any],
         installation_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> AvailableRepository:
         """Upsert an available repository"""
         now = datetime.now(timezone.utc)
         user_oid = self._to_object_id(user_id)
@@ -69,8 +70,8 @@ class AvailableRepositoryRepository(BaseRepository):
         if q:
             filters["full_name"] = {"$regex": q, "$options": "i"}
 
-        repos = self.collection.find_many(
-            filters=filters, sort=[("full_name", 1)], limit=limit
+        repos = self.collection.find(
+            filter=filters, sort=[("full_name", 1)], limit=limit
         )
         items = []
         for repo in repos:

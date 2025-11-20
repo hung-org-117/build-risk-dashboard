@@ -1,25 +1,23 @@
-"""GitHub installation repository for database operations"""
-
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pymongo.database import Database
 
+from app.models.entities.github_installation import GithubInstallation
 from .base import BaseRepository
 
 
-class GithubInstallationRepository(BaseRepository):
-    """Repository for GitHub installation entities"""
+class GithubInstallationRepository(BaseRepository[GithubInstallation]):
 
     def __init__(self, db: Database):
-        super().__init__(db, "github_installations")
+        super().__init__(db, "github_installations", GithubInstallation)
 
-    def list_all(self) -> List[Dict]:
-        """List all GitHub installations"""
+    def list_all(self) -> List[GithubInstallation]:
         return self.find_many({}, sort=[("installed_at", -1)])
 
-    def find_by_installation_id(self, installation_id: str) -> Dict | None:
-        """Find an installation by its installation ID"""
+    def find_by_installation_id(
+        self, installation_id: str
+    ) -> Optional[GithubInstallation]:
         return self.find_one({"installation_id": installation_id})
 
     def create_installation(
@@ -28,8 +26,7 @@ class GithubInstallationRepository(BaseRepository):
         account_login: str | None,
         account_type: str | None,
         installed_at: datetime,
-    ) -> Dict:
-        """Create a new installation record"""
+    ) -> GithubInstallation:
         now = datetime.now(timezone.utc)
         doc = {
             "installation_id": installation_id,

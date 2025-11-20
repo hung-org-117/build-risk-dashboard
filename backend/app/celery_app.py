@@ -26,7 +26,6 @@ celery_app.conf.update(
     task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT,
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
     broker_heartbeat=settings.CELERY_BROKER_HEARTBEAT,
-    task_routes={"app.tasks.scheduler.*": {"queue": "default"}},
     task_queues=[
         Queue(
             settings.CELERY_DEFAULT_QUEUE,

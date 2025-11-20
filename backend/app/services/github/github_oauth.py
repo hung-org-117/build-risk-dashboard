@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.config import settings
+from app.models.entities.oauth_identity import OAuthIdentity
 from app.services.user_service import upsert_github_identity
 
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
@@ -73,7 +74,7 @@ def create_oauth_state(db: Database, redirect_url: Optional[str] = None) -> dict
 
 async def exchange_code_for_token(
     db: Database, code: str, state: str
-) -> Tuple[dict, Optional[str]]:
+) -> Tuple[OAuthIdentity, Optional[str]]:
     _require_github_credentials()
 
     oauth_state = db.github_states.find_one({"_id": state, "used": False})
