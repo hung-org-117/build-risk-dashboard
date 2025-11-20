@@ -1,6 +1,4 @@
-# Build Risk Assessment System
-
-This project is a comprehensive system for assessing build risks in CI/CD pipelines. It consists of a FastAPI backend with Celery for asynchronous processing and a Next.js frontend.
+# Build Dashboard
 
 ## Prerequisites
 
