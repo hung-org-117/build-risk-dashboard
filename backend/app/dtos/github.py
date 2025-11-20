@@ -1,23 +1,12 @@
 """GitHub integration DTOs"""
 
+from app.models.entities.base import PyObjectIdStr
+from app.models.entities.base import PyObjectId
 from datetime import datetime
 from typing import Annotated, Any, List, Optional
 
 from bson import ObjectId
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-
-
-# Custom validator for MongoDB ObjectId
-def validate_object_id(v: Any) -> str:
-    """Validate and convert ObjectId to string."""
-    if isinstance(v, ObjectId):
-        return str(v)
-    if isinstance(v, str) and ObjectId.is_valid(v):
-        return v
-    raise ValueError("Invalid ObjectId")
-
-
-PyObjectId = Annotated[str, BeforeValidator(validate_object_id)]
 
 
 class GithubRepositoryStatus(BaseModel):
@@ -37,7 +26,7 @@ class GithubOAuthInitRequest(BaseModel):
 
 
 class GithubInstallationResponse(BaseModel):
-    id: PyObjectId = Field(..., alias="_id")
+    id: PyObjectIdStr = Field(..., alias="_id")
     installation_id: str
     account_login: Optional[str] = None
     account_type: Optional[str] = None  # "User" or "Organization"

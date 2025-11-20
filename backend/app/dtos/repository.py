@@ -1,23 +1,14 @@
 """Repository DTOs"""
 
+from app.models.entities.imported_repository import SourceLanguage
+from app.models.entities.imported_repository import TestFramework
+from app.models.entities.imported_repository import CIProvider
+from app.models.entities.base import PyObjectId
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from bson import ObjectId
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-
-
-# Custom validator for MongoDB ObjectId
-def validate_object_id(v: Any) -> str:
-    """Validate and convert ObjectId to string."""
-    if isinstance(v, ObjectId):
-        return str(v)
-    if isinstance(v, str) and ObjectId.is_valid(v):
-        return v
-    raise ValueError("Invalid ObjectId")
-
-
-PyObjectId = Annotated[str, BeforeValidator(validate_object_id)]
 
 
 class RepoImportRequest(BaseModel):
@@ -32,9 +23,12 @@ class RepoImportRequest(BaseModel):
     ci_provider: Optional[str] = Field(default=None)
 
 
+from app.models.entities.base import PyObjectIdStr
+
+
 class RepoResponse(BaseModel):
-    id: PyObjectId = Field(..., alias="_id")
-    user_id: Optional[PyObjectId] = None
+    id: PyObjectIdStr = Field(..., alias="_id")
+    user_id: Optional[PyObjectIdStr] = None
     provider: str
     full_name: str
     default_branch: Optional[str] = None
@@ -44,14 +38,18 @@ class RepoResponse(BaseModel):
     created_at: datetime
     last_scanned_at: Optional[datetime] = None
     installation_id: Optional[str] = None
-    ci_provider: Literal["github_actions", "travis_ci"] = "github_actions"
-    test_frameworks: List[str] = Field(default_factory=list)
-    source_languages: List[str] = Field(default_factory=list)
+    ci_provider: CIProvider = CIProvider.GITHUB_ACTIONS
+    test_frameworks: List[TestFramework] = Field(default_factory=list)
+    source_languages: List[SourceLanguage] = Field(default_factory=list)
     total_builds_imported: int = 0
     last_sync_error: Optional[str] = None
     notes: Optional[str] = None
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        from_attributes=True,
+        use_enum_values=True,
+    )
 
 
 class RepoDetailResponse(RepoResponse):

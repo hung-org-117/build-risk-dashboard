@@ -1,5 +1,6 @@
 """User and authentication DTOs"""
 
+from app.models.entities.base import PyObjectId
 from datetime import datetime
 from typing import Annotated, Any, List, Literal, Optional
 
@@ -7,21 +8,11 @@ from bson import ObjectId
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
-# Custom validator for MongoDB ObjectId
-def validate_object_id(v: Any) -> str:
-    """Validate and convert ObjectId to string."""
-    if isinstance(v, ObjectId):
-        return str(v)
-    if isinstance(v, str) and ObjectId.is_valid(v):
-        return v
-    raise ValueError("Invalid ObjectId")
-
-
-PyObjectId = Annotated[str, BeforeValidator(validate_object_id)]
+from app.models.entities.base import PyObjectIdStr
 
 
 class UserResponse(BaseModel):
-    id: PyObjectId = Field(..., alias="_id")
+    id: PyObjectIdStr = Field(..., alias="_id")
     email: str
     name: Optional[str] = None
     role: Literal["admin", "user"] = "user"
@@ -31,8 +22,8 @@ class UserResponse(BaseModel):
 
 
 class OAuthIdentityResponse(BaseModel):
-    id: PyObjectId = Field(..., alias="_id")
-    user_id: PyObjectId
+    id: PyObjectIdStr = Field(..., alias="_id")
+    user_id: PyObjectIdStr
     provider: str
     external_user_id: str
     scopes: Optional[str] = None

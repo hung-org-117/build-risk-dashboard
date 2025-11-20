@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from bson import ObjectId
 from fastapi import HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from pymongo.database import Database
 
 from app.dtos import (
@@ -21,19 +22,11 @@ from app.tasks.ingestion import import_repo
 
 
 def _serialize_repo(repo_doc) -> RepoResponse:
-    if hasattr(repo_doc, "model_dump"):
-        repo_dict = repo_doc.model_dump(by_alias=True, exclude_none=False, mode="json")
-    else:
-        repo_dict = repo_doc
-    return RepoResponse.model_validate(repo_dict)
+    return RepoResponse.model_validate(repo_doc)
 
 
 def _serialize_repo_detail(repo_doc) -> RepoDetailResponse:
-    if hasattr(repo_doc, "model_dump"):
-        repo_dict = repo_doc.model_dump(by_alias=True, exclude_none=False, mode="json")
-    else:
-        repo_dict = repo_doc
-    return RepoDetailResponse.model_validate(repo_dict)
+    return RepoDetailResponse.model_validate(repo_doc)
 
 
 class RepositoryService:
@@ -47,7 +40,6 @@ class RepositoryService:
     ) -> List[RepoResponse]:
         results = []
 
-        # Pre-fetch available repos to check installation_ids
         full_names = [p.full_name for p in payloads]
         available_repos = list(
             self.db.available_repositories.find(
@@ -133,6 +125,7 @@ class RepositoryService:
     def list_repositories(self, user_id: str) -> List[RepoResponse]:
         """List tracked repositories."""
         repos = self.repo_repo.list_by_user(user_id)
+        print("repos: {}", repos)
         return [_serialize_repo(repo) for repo in repos]
 
     def discover_repositories(

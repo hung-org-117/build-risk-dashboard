@@ -265,7 +265,9 @@ class GitHubClient:
 
     def download_job_logs(self, full_name: str, job_id: int) -> bytes:
         response = self._rest.get(
-            f"/repos/{full_name}/actions/jobs/{job_id}/logs", headers=self._headers()
+            f"/repos/{full_name}/actions/jobs/{job_id}/logs",
+            headers=self._headers(),
+            follow_redirects=True,
         )
         self._handle_response(response)
         return response.content

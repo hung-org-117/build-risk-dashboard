@@ -7,6 +7,7 @@ from typing import Dict, Any
 from bson import ObjectId
 import os
 from pathlib import Path
+import time
 
 from app.celery_app import celery_app
 from app.services.github.github_client import get_app_github_client
@@ -67,17 +68,20 @@ def import_repo(
         # Find existing repo to get ID (it should exist now)
         repo = imported_repo_repo.find_one(
             {
+                "user_id": ObjectId(user_id),
                 "provider": provider,
                 "full_name": full_name,
                 "import_status": ImportStatus.QUEUED.value,
             }
         )
         if not repo:
-            # Fallback if not found (shouldn't happen with new flow)
             repo_doc = imported_repo_repo.upsert_repository(
-                query={"provider": provider, "full_name": full_name},
+                query={
+                    "user_id": ObjectId(user_id),
+                    "provider": provider,
+                    "full_name": full_name,
+                },
                 data={
-                    "user_id": user_id,
                     "default_branch": "main",
                     "is_private": False,
                     "main_lang": None,
@@ -104,9 +108,12 @@ def import_repo(
             repo_data = gh.get_repository(full_name)
 
             imported_repo_repo.upsert_repository(
-                query={"provider": provider, "full_name": full_name},
+                query={
+                    "user_id": ObjectId(user_id),
+                    "provider": provider,
+                    "full_name": full_name,
+                },
                 data={
-                    "user_id": user_id,
                     "default_branch": repo_data.get("default_branch", "main"),
                     "is_private": bool(repo_data.get("private")),
                     "main_lang": repo_data.get("language"),
@@ -210,6 +217,9 @@ def process_workflow_run(
                         file_path = log_path / f"{job_id}.log"
                         with open(file_path, "wb") as f:
                             f.write(log_content)
+
+                        time.sleep(0.1)
+
                 except Exception as e:
                     logger.error(
                         "Failed to download logs for job %s in run %s (repo: %s): %s",

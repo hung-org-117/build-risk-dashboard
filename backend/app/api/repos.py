@@ -58,6 +58,7 @@ def list_repositories(
 ):
     """List tracked repositories."""
     service = RepositoryService(db)
+    print("test: {}", current_user["_id"])
     return service.list_repositories(current_user["_id"])
 
 
