@@ -23,13 +23,13 @@ PyObjectId = Annotated[str, BeforeValidator(validate_object_id)]
 class RepoImportRequest(BaseModel):
     full_name: str = Field(..., description="Repository full name (e.g., owner/name)")
     provider: str = Field(default="github")
-    user_id: Optional[str] = Field(
-        default=None, description="Owner user id (defaults to admin)"
-    )
     installation_id: Optional[str] = Field(
         default=None,
         description="GitHub App installation id (required for private repos, optional for public repos)",
     )
+    test_frameworks: Optional[List[str]] = Field(default=None)
+    source_languages: Optional[List[str]] = Field(default=None)
+    ci_provider: Optional[str] = Field(default=None)
 
 
 class RepoResponse(BaseModel):
@@ -45,11 +45,10 @@ class RepoResponse(BaseModel):
     last_scanned_at: Optional[datetime] = None
     installation_id: Optional[str] = None
     ci_provider: Literal["github_actions", "travis_ci"] = "github_actions"
-    monitoring_enabled: bool = True
     sync_status: Literal["healthy", "error", "disabled"] = "healthy"
-    webhook_status: Literal["active", "inactive"] = "inactive"
     ci_token_status: Literal["valid", "missing"] = "valid"
-    tracked_branches: List[str] = Field(default_factory=list)
+    test_frameworks: List[str] = Field(default_factory=list)
+    source_languages: List[str] = Field(default_factory=list)
     total_builds_imported: int = 0
     last_sync_error: Optional[str] = None
     notes: Optional[str] = None
@@ -63,10 +62,9 @@ class RepoDetailResponse(RepoResponse):
 
 class RepoUpdateRequest(BaseModel):
     ci_provider: Optional[str] = None
-    monitoring_enabled: Optional[bool] = None
     sync_status: Optional[Literal["healthy", "error", "disabled"]] = None
-    tracked_branches: Optional[List[str]] = None
-    webhook_status: Optional[Literal["active", "inactive"]] = None
+    test_frameworks: Optional[List[str]] = None
+    source_languages: Optional[List[str]] = None
     ci_token_status: Optional[Literal["valid", "missing"]] = None
     default_branch: Optional[str] = None
     notes: Optional[str] = None
@@ -78,8 +76,6 @@ class RepoSuggestion(BaseModel):
     default_branch: Optional[str] = None
     private: bool = False
     owner: Optional[str] = None
-    installed: bool = False
-    requires_installation: bool = False
     installation_id: Optional[str] = None
     html_url: Optional[str] = None
 

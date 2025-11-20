@@ -62,11 +62,10 @@ export interface RepositoryRecord {
   last_scanned_at?: string;
   installation_id?: string;
   ci_provider: string;
-  monitoring_enabled: boolean;
   sync_status: RepoSyncStatus;
-  webhook_status: "active" | "inactive";
   ci_token_status: "valid" | "missing";
-  tracked_branches: string[];
+  test_frameworks: string[];
+  source_languages: string[];
   total_builds_imported: number;
   last_sync_error?: string;
   notes?: string;
@@ -82,8 +81,6 @@ export interface RepoSuggestion {
   default_branch?: string;
   private: boolean;
   owner?: string;
-  installed: boolean;
-  requires_installation: boolean;
   installation_id?: string;
   html_url?: string;
 }
@@ -97,14 +94,16 @@ export interface RepoImportPayload {
   provider?: string;
   user_id?: string;
   installation_id?: string;
+  test_frameworks?: string[];
+  source_languages?: string[];
+  ci_provider?: string;
 }
 
 export interface RepoUpdatePayload {
   ci_provider?: string;
-  monitoring_enabled?: boolean;
   sync_status?: RepoSyncStatus;
-  tracked_branches?: string[];
-  webhook_status?: "active" | "inactive";
+  test_frameworks?: string[];
+  source_languages?: string[];
   ci_token_status?: "valid" | "missing";
   default_branch?: string;
   notes?: string;

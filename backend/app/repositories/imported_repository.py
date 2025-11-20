@@ -38,6 +38,9 @@ class ImportedRepositoryRepository(BaseRepository):
         metadata: Dict[str, Any],
         last_scanned_at: Optional[datetime] = None,
         installation_id: Optional[str] = None,
+        test_frameworks: Optional[List[str]] = None,
+        source_languages: Optional[List[str]] = None,
+        ci_provider: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Insert or update a repository"""
         now = datetime.now(timezone.utc)
@@ -59,25 +62,32 @@ class ImportedRepositoryRepository(BaseRepository):
 
         # Preserve existing settings
         if existing:
-            document["ci_provider"] = existing.get("ci_provider", "github_actions")
-            document["monitoring_enabled"] = existing.get("monitoring_enabled", True)
             document["sync_status"] = existing.get("sync_status", "healthy")
-            document["webhook_status"] = existing.get("webhook_status", "inactive")
             document["ci_token_status"] = existing.get("ci_token_status", "valid")
-            document["tracked_branches"] = existing.get("tracked_branches") or [
-                default_branch
-            ]
+            document["test_frameworks"] = existing.get("test_frameworks", [])
+            document["source_languages"] = existing.get("source_languages", [])
             document["last_sync_error"] = existing.get("last_sync_error")
             document["notes"] = existing.get("notes")
+            # Only update ci_provider if explicitly provided
+            if ci_provider is not None:
+                document["ci_provider"] = ci_provider
+            else:
+                document["ci_provider"] = existing.get("ci_provider", "github_actions")
         else:
-            document["ci_provider"] = "github_actions"
-            document["monitoring_enabled"] = True
             document["sync_status"] = "healthy"
-            document["webhook_status"] = "inactive"
             document["ci_token_status"] = "valid"
-            document["tracked_branches"] = [default_branch] if default_branch else []
+            document["test_frameworks"] = test_frameworks or []
+            document["source_languages"] = source_languages or []
+            document["ci_provider"] = ci_provider or "github_actions"
             document["last_sync_error"] = None
             document["notes"] = None
+
+        # Update config fields if explicitly provided for existing repos
+        if existing:
+            if test_frameworks is not None:
+                document["test_frameworks"] = test_frameworks
+            if source_languages is not None:
+                document["source_languages"] = source_languages
 
         # Handle installation_id
         if installation_id is not None:
@@ -105,7 +115,5 @@ class ImportedRepositoryRepository(BaseRepository):
     ) -> Optional[Dict[str, Any]]:
         """Update repository fields"""
         payload = updates.copy()
-        if "tracked_branches" in payload and payload["tracked_branches"] is None:
-            payload["tracked_branches"] = []
         payload["updated_at"] = datetime.now(timezone.utc)
         return self.update_one(repo_id, payload)

@@ -66,8 +66,12 @@ export default function AdminReposPage() {
   const [selectedRepos, setSelectedRepos] = useState<
     Record<string, RepoSuggestion>
   >({});
-  const [branchPreferences, setBranchPreferences] = useState<
-    Record<string, string[]>
+  const [repoConfigs, setRepoConfigs] = useState<
+    Record<string, {
+      test_frameworks: string[];
+      source_languages: string[];
+      ci_provider: string;
+    }>
   >({});
   const [searchTerm, setSearchTerm] = useState("");
   const [addingRepos, setAddingRepos] = useState(false);
@@ -75,7 +79,6 @@ export default function AdminReposPage() {
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelTab, setPanelTab] = useState<"settings" | "history">("settings");
   const [panelForm, setPanelForm] = useState<RepoUpdatePayload>({});
-  const [panelBranches, setPanelBranches] = useState<string[]>([]);
   const [panelNotes, setPanelNotes] = useState("");
   const [panelSaving, setPanelSaving] = useState(false);
   const [jobs, setJobs] = useState<GithubImportJob[]>([]);
@@ -141,7 +144,7 @@ export default function AdminReposPage() {
     if (!modalOpen) {
       setModalStep(1);
       setSelectedRepos({});
-      setBranchPreferences({});
+      setRepoConfigs({});
       setSearchTerm("");
       setIsSearching(false);
       return;
@@ -160,21 +163,19 @@ export default function AdminReposPage() {
 
     setPanelForm({
 
-      monitoring_enabled: panelRepo.monitoring_enabled,
-
       default_branch: panelRepo.default_branch,
 
       sync_status: panelRepo.sync_status,
-
-      webhook_status: panelRepo.webhook_status,
 
       ci_token_status: panelRepo.ci_token_status,
 
       notes: panelRepo.notes,
 
-    });
+      test_frameworks: panelRepo.test_frameworks,
 
-    setPanelBranches(panelRepo.tracked_branches ?? []);
+      source_languages: panelRepo.source_languages,
+
+    });
 
     setPanelNotes(panelRepo.notes ?? "");
 
@@ -195,16 +196,23 @@ export default function AdminReposPage() {
       const next = { ...prev };
       if (next[item.full_name]) {
         delete next[item.full_name];
+        // Also remove config when deselecting
+        setRepoConfigs((current) => {
+          const updated = { ...current };
+          delete updated[item.full_name];
+          return updated;
+        });
       } else {
         next[item.full_name] = item;
-        setBranchPreferences((current) => {
-          if (current[item.full_name]) return current;
-          const defaultBranch = item.default_branch || "main";
-          return {
-            ...current,
-            [item.full_name]: [defaultBranch],
-          };
-        });
+        // Initialize default config
+        setRepoConfigs((current) => ({
+          ...current,
+          [item.full_name]: {
+            test_frameworks: [],
+            source_languages: [],
+            ci_provider: "github_actions",
+          },
+        }));
       }
       return next;
     });
@@ -219,41 +227,25 @@ export default function AdminReposPage() {
     }
   };
 
-  const toggleBranchPreference = (repoName: string, branch: string) => {
-    setBranchPreferences((prev) => {
-      const current = prev[repoName] || [];
-      const exists = current.includes(branch);
-      const updated = exists
-        ? current.filter((item) => item !== branch)
-        : [...current, branch];
-      return {
-        ...prev,
-        [repoName]: updated.length ? updated : current,
-      };
-    });
-  };
-
   const handleAddRepos = async () => {
     if (!selectedList.length) return;
     setAddingRepos(true);
     setFeedback(null);
     try {
       for (const repo of selectedList) {
-        const created = await reposApi.import({
+        const config = repoConfigs[repo.full_name] || {
+          test_frameworks: [],
+          source_languages: [],
+          ci_provider: "github_actions",
+        };
+        await reposApi.import({
           full_name: repo.full_name,
           provider: "github",
           installation_id: repo.installation_id,
+          test_frameworks: config.test_frameworks,
+          source_languages: config.source_languages,
+          ci_provider: config.ci_provider,
         });
-        const branches = branchPreferences[repo.full_name]?.length
-          ? branchPreferences[repo.full_name]
-          : created.default_branch
-            ? [created.default_branch]
-            : [];
-        if (branches.length) {
-          await reposApi.update(created.id, {
-            tracked_branches: branches,
-          });
-        }
       }
       await loadRepositories();
       setModalOpen(false);
@@ -310,7 +302,6 @@ export default function AdminReposPage() {
     try {
       const payload: RepoUpdatePayload = {
         ...panelForm,
-        tracked_branches: panelBranches,
         notes: panelNotes || undefined,
       };
       const updated = await reposApi.update(panelRepo.id, payload);
@@ -342,7 +333,6 @@ export default function AdminReposPage() {
     try {
       setTableActionId(repo.id);
       await reposApi.update(repo.id, {
-        monitoring_enabled: false,
         sync_status: "disabled",
       });
       await loadRepositories();
@@ -633,11 +623,6 @@ export default function AdminReposPage() {
                                   Private
                                 </span>
                               ) : null}
-                              {repo.installed ? (
-                                <span className="ml-2 rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                                  Connected
-                                </span>
-                              ) : null}
                             </p>
                             <p className="text-sm text-muted-foreground">
                               {repo.description || "No description provided."}
@@ -652,50 +637,104 @@ export default function AdminReposPage() {
             ) : (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Configure monitoring scope for each repository. BuildGuard
-                  currently supports GitHub Actions collectors.
+                  Configure test frameworks, source languages, and CI provider for each repository.
                 </p>
-                {selectedList.map((repo) => {
-                  const branchOptions = Array.from(
-                    new Set(
-                      [repo.default_branch, "main", "master"].filter(
-                        Boolean
-                      ) as string[]
-                    )
-                  );
-                  const selectedBranches =
-                    branchPreferences[repo.full_name] ||
-                    (repo.default_branch ? [repo.default_branch] : ["main"]);
-                  return (
-                    <div key={repo.full_name} className="rounded-xl border p-4">
-                      <p className="font-semibold">{repo.full_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Default branch: {repo.default_branch || "main"}
-                      </p>
-                      <div className="mt-3 space-y-2">
-                        {branchOptions.map((branch) => (
-                          <label
-                            key={`${repo.full_name}-${branch}`}
-                            className="flex items-center gap-2 text-sm"
+                <div className="max-h-[400px] space-y-4 overflow-y-auto pr-2">
+                  {selectedList.map((repo) => {
+                    const config = repoConfigs[repo.full_name] || {
+                      test_frameworks: [],
+                      source_languages: [],
+                      ci_provider: "github_actions",
+                    };
+
+                    const toggleFramework = (framework: string) => {
+                      setRepoConfigs((prev) => ({
+                        ...prev,
+                        [repo.full_name]: {
+                          ...config,
+                          test_frameworks: config.test_frameworks.includes(framework)
+                            ? config.test_frameworks.filter((f) => f !== framework)
+                            : [...config.test_frameworks, framework],
+                        },
+                      }));
+                    };
+
+                    const toggleLanguage = (language: string) => {
+                      setRepoConfigs((prev) => ({
+                        ...prev,
+                        [repo.full_name]: {
+                          ...config,
+                          source_languages: config.source_languages.includes(language)
+                            ? config.source_languages.filter((l) => l !== language)
+                            : [...config.source_languages, language],
+                        },
+                      }));
+                    };
+
+                    return (
+                      <div key={repo.full_name} className="rounded-xl border p-4 space-y-3">
+                        <p className="font-semibold">{repo.full_name}</p>
+
+                        <div>
+                          <p className="text-sm font-medium mb-2">Test Frameworks</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {["PYTEST", "UNITTEST", "RSPEC", "MINITEST"].map((framework) => (
+                              <label
+                                key={framework}
+                                className="flex items-center gap-2 text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={config.test_frameworks.includes(framework)}
+                                  onChange={() => toggleFramework(framework)}
+                                />
+                                {framework}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-medium mb-2">Source Languages</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {["PYTHON", "RUBY"].map((language) => (
+                              <label
+                                key={language}
+                                className="flex items-center gap-2 text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={config.source_languages.includes(language)}
+                                  onChange={() => toggleLanguage(language)}
+                                />
+                                {language}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-medium mb-2">CI Provider</p>
+                          <select
+                            className="w-full rounded-lg border px-3 py-2 text-sm"
+                            value={config.ci_provider}
+                            onChange={(e) =>
+                              setRepoConfigs((prev) => ({
+                                ...prev,
+                                [repo.full_name]: {
+                                  ...config,
+                                  ci_provider: e.target.value,
+                                },
+                              }))
+                            }
                           >
-                            <input
-                              type="checkbox"
-                              checked={selectedBranches.includes(branch)}
-                              onChange={() =>
-                                toggleBranchPreference(repo.full_name, branch)
-                              }
-                            />
-                            Monitor {branch}
-                          </label>
-                        ))}
+                            <option value="github_actions">GitHub Actions</option>
+                          </select>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-                <p className="text-xs text-muted-foreground">
-                  Need additional branches? You can configure them after the
-                  repository is connected.
-                </p>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -738,7 +777,7 @@ export default function AdminReposPage() {
               <div>
                 <p className="text-lg font-semibold">{panelRepo.full_name}</p>
                 <p className="text-xs text-muted-foreground">
-                  Monitoring {panelRepo.tracked_branches.join(", ") || "main"}
+                  {panelRepo.ci_provider.replace("_", " ")}
                 </p>
               </div>
               <button
@@ -796,90 +835,81 @@ export default function AdminReposPage() {
                           }
                           healthy={panelRepo.ci_token_status === "valid"}
                         />
-                        <StatusItem
-                          label="Webhook"
-                          value={
-                            panelRepo.webhook_status === "active"
-                              ? "Active"
-                              : "Inactive"
-                          }
-                          healthy={panelRepo.webhook_status === "active"}
-                        />
-                        <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                          <div>
-                            <p className="text-sm font-semibold">Monitoring</p>
-                            <p className="text-xs text-muted-foreground">
-                              {panelForm.monitoring_enabled
-                                ? "Enabled"
-                                : "Disabled"}
-                            </p>
-                          </div>
-                          <label className="flex items-center gap-2 text-xs font-medium">
-                            <input
-                              type="checkbox"
-                              checked={panelForm.monitoring_enabled ?? true}
-                              onChange={(event) =>
-                                setPanelForm((prev) => ({
-                                  ...prev,
-                                  monitoring_enabled: event.target.checked,
-                                  sync_status: event.target.checked
-                                    ? "healthy"
-                                    : "disabled",
-                                }))
-                              }
-                            />
-                            Enable
-                          </label>
-                        </div>
                       </div>
                     </div>
 
                     <div className="rounded-xl border p-4">
-                      <p className="text-sm font-semibold">Branches</p>
-                      <div className="mt-3 space-y-2 text-sm">
-                        {panelBranches.map((branch) => (
-                          <div
-                            key={branch}
-                            className="flex items-center justify-between rounded-lg border px-3 py-2"
-                          >
-                            <span>{branch}</span>
-                            <button
-                              type="button"
-                              className="text-xs text-red-500"
-                              onClick={() =>
-                                setPanelBranches((prev) =>
-                                  prev.filter((item) => item !== branch)
-                                )
-                              }
-                            >
-                              Remove
-                            </button>
+                      <p className="text-sm font-semibold">Repository Configuration</p>
+                      <div className="mt-3 space-y-3 text-sm">
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Test Frameworks</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {["PYTEST", "UNITTEST", "RSPEC", "MINITEST"].map((framework) => (
+                              <label
+                                key={framework}
+                                className="flex items-center gap-2 text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={panelForm.test_frameworks?.includes(framework) ?? false}
+                                  onChange={(e) => {
+                                    const current = panelForm.test_frameworks || [];
+                                    setPanelForm((prev) => ({
+                                      ...prev,
+                                      test_frameworks: e.target.checked
+                                        ? [...current, framework]
+                                        : current.filter((f) => f !== framework),
+                                    }));
+                                  }}
+                                />
+                                {framework}
+                              </label>
+                            ))}
                           </div>
-                        ))}
-                        <form
-                          className="flex gap-2"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            const formData = new FormData(event.currentTarget);
-                            const branch = (
-                              formData.get("branch") as string
-                            )?.trim();
-                            if (!branch) return;
-                            setPanelBranches((prev) =>
-                              prev.includes(branch) ? prev : [...prev, branch]
-                            );
-                            event.currentTarget.reset();
-                          }}
-                        >
-                          <input
-                            name="branch"
-                            placeholder="Add branch"
-                            className="flex-1 rounded-lg border px-3 py-2 text-sm"
-                          />
-                          <Button type="submit" variant="secondary">
-                            Add
-                          </Button>
-                        </form>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Source Languages</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {["PYTHON", "RUBY"].map((language) => (
+                              <label
+                                key={language}
+                                className="flex items-center gap-2 text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={panelForm.source_languages?.includes(language) ?? false}
+                                  onChange={(e) => {
+                                    const current = panelForm.source_languages || [];
+                                    setPanelForm((prev) => ({
+                                      ...prev,
+                                      source_languages: e.target.checked
+                                        ? [...current, language]
+                                        : current.filter((l) => l !== language),
+                                    }));
+                                  }}
+                                />
+                                {language}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1">CI Provider</p>
+                          <select
+                            className="w-full rounded-lg border px-3 py-2 text-sm"
+                            value={panelForm.ci_provider || "github_actions"}
+                            onChange={(e) =>
+                              setPanelForm((prev) => ({
+                                ...prev,
+                                ci_provider: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="github_actions">GitHub Actions</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
 

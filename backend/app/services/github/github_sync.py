@@ -1,3 +1,4 @@
+from app.repositories.available_repository import AvailableRepositoryRepository
 from typing import List, Set
 
 from bson import ObjectId
@@ -5,7 +6,6 @@ from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.services.github.github_client import get_app_github_client
-from app.services.pipeline_store_service import PipelineStore
 
 
 def sync_user_available_repos(db: Database, user_id: str) -> List[str]:
@@ -13,7 +13,7 @@ def sync_user_available_repos(db: Database, user_id: str) -> List[str]:
     Sync available repositories for a user from their GitHub App installations.
     Returns a list of full_names of repositories found.
     """
-    store = PipelineStore(db)
+    available_repo_repo = AvailableRepositoryRepository(db)
     seen_repos: Set[str] = set()
 
     identity = db.oauth_identities.find_one(
@@ -59,7 +59,7 @@ def sync_user_available_repos(db: Database, user_id: str) -> List[str]:
                         repo_data = repo.copy()
                         repo_data["imported"] = is_imported
 
-                        store.upsert_available_repository(
+                        available_repo_repo.upsert_available_repo(
                             user_id=user_id,
                             repo_data=repo_data,
                             installation_id=inst_id,
@@ -71,6 +71,6 @@ def sync_user_available_repos(db: Database, user_id: str) -> List[str]:
                     detail=f"Failed to sync app repositories for installation {inst_id}: {str(e)}",
                 )
 
-    store.delete_stale_available_repositories(user_id, list(seen_repos))
+    available_repo_repo.delete_stale_available_repositories(user_id, list(seen_repos))
 
     return list(seen_repos)

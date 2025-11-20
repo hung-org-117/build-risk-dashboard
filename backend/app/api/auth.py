@@ -1,27 +1,20 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 from fastapi.responses import RedirectResponse
 from pymongo.database import Database
 
 from app.config import settings
 from app.database.mongo import get_db
-from app.dtos import (
-    GithubOAuthInitRequest,
-    GithubAuthorizeResponse,
+from app.dtos.auth import (
     AuthVerifyResponse,
+    TokenResponse,
+    UserDetailResponse,
 )
-from app.services.github.github_oauth import (
-    build_authorize_url,
-    create_oauth_state,
-    exchange_code_for_token,
+from app.dtos.github import (
+    GithubAuthorizeResponse,
+    GithubOAuthInitRequest,
 )
-from app.services.auth import create_access_token
 from app.middleware.auth import get_current_user
-from app.services.github.github_token_manager import (
-    check_github_token_status,
-    GitHubTokenStatus,
-)
+from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -32,10 +25,9 @@ def initiate_github_login(
     db: Database = Depends(get_db),
 ):
     """Initiate GitHub OAuth flow by creating a state token."""
+    service = AuthService(db)
     payload = payload or GithubOAuthInitRequest()
-    oauth_state = create_oauth_state(db, redirect_url=payload.redirect_path)
-    authorize_url = build_authorize_url(oauth_state["_id"])
-    return {"authorize_url": authorize_url, "state": oauth_state["_id"]}
+    return service.initiate_github_login(payload)
 
 
 @router.get("/github/callback")
@@ -45,13 +37,8 @@ async def github_oauth_callback(
     db: Database = Depends(get_db),
 ):
     """Handle GitHub OAuth callback, exchange code for token, and redirect to frontend."""
-    identity_doc, redirect_path = await exchange_code_for_token(
-        db, code=code, state=state
-    )
-    user_id = identity_doc.get("user_id")
-
-    # Create JWT access token with expiration matching configuration
-    jwt_token = create_access_token(subject=user_id)
+    service = AuthService(db)
+    jwt_token, redirect_path = await service.handle_github_callback(code, state)
 
     redirect_target = settings.FRONTEND_BASE_URL.rstrip("/")
     if redirect_path:
@@ -86,170 +73,29 @@ def revoke_github_token(
     user: dict = Depends(get_current_user), db: Database = Depends(get_db)
 ):
     """Remove stored GitHub access tokens for the current user."""
-    user_id = user["_id"]
-
-    result = db.oauth_identities.update_many(
-        {"user_id": user_id, "provider": "github"},
-        {
-            "$set": {
-                "token_status": "revoked",
-                "token_invalid_reason": "user_revoked",
-                "token_invalidated_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            },
-            "$unset": {
-                "access_token": "",
-                "refresh_token": "",
-            },
-        },
-    )
-    if result.matched_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No GitHub identities found to revoke.",
-        )
+    service = AuthService(db)
+    service.revoke_github_token(user["_id"])
 
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=TokenResponse)
 async def refresh_access_token(
     user: dict = Depends(get_current_user), db: Database = Depends(get_db)
 ):
-    """Refresh the JWT access token for the current user.
-
-    This generates a new JWT token for the application (not GitHub token).
-    The new token will have a fresh expiration time.
-    """
-    user_id = user["_id"]
-    new_token = create_access_token(subject=user_id)
-
-    return {
-        "access_token": new_token,
-        "token_type": "bearer",
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    }
+    service = AuthService(db)
+    return service.refresh_access_token(user["_id"])
 
 
-@router.get("/me")
+@router.get("/me", response_model=UserDetailResponse)
 async def get_current_user_info(
     user: dict = Depends(get_current_user), db: Database = Depends(get_db)
 ):
-    """Get current authenticated user information."""
-    user_id = user["_id"]
-
-    # Get GitHub identity if exists
-    identity = db.oauth_identities.find_one({"user_id": user_id, "provider": "github"})
-
-    response = {
-        "id": str(user["_id"]),
-        "email": user.get("email"),
-        "name": user.get("name"),
-        "role": user.get("role", "user"),
-        "created_at": (
-            user.get("created_at").isoformat() if user.get("created_at") else None
-        ),
-    }
-
-    if identity:
-        token_status, _ = await check_github_token_status(
-            db, user_id, verify_with_api=False
-        )
-        response["github"] = {
-            "connected": token_status == GitHubTokenStatus.VALID,
-            "login": identity.get("account_login"),
-            "name": identity.get("account_name"),
-            "avatar_url": identity.get("account_avatar_url"),
-            "token_status": token_status,
-        }
-    else:
-        response["github"] = {"connected": False}
-
-    return response
+    service = AuthService(db)
+    return await service.get_current_user_info(user)
 
 
 @router.get("/verify", response_model=AuthVerifyResponse)
 async def verify_auth_status(
     user: dict = Depends(get_current_user), db: Database = Depends(get_db)
 ):
-    """Verify if the current user has a valid GitHub access token."""
-    user_id = user["_id"]
-
-    # Check GitHub token status
-    token_status, identity = await check_github_token_status(
-        db, user_id, verify_with_api=True
-    )
-
-    app_installed = False
-    if identity:
-        github_login = identity.get("account_login")
-        if github_login:
-            install_count = db.github_installations.count_documents(
-                {"account_login": github_login}
-            )
-            app_installed = install_count > 0
-
-    if token_status == GitHubTokenStatus.MISSING:
-        return {
-            "authenticated": True,
-            "github_connected": False,
-            "app_installed": False,
-            "reason": "no_github_identity",
-            "user": {
-                "id": str(user["_id"]),
-                "email": user.get("email"),
-                "name": user.get("name"),
-            },
-        }
-
-    if token_status == GitHubTokenStatus.EXPIRED:
-        return {
-            "authenticated": True,
-            "github_connected": False,
-            "app_installed": app_installed,
-            "reason": "github_token_expired",
-            "user": {
-                "id": str(user["_id"]),
-                "email": user.get("email"),
-                "name": user.get("name"),
-            },
-            "github": {
-                "login": identity.get("account_login"),
-                "name": identity.get("account_name"),
-                "avatar_url": identity.get("account_avatar_url"),
-            },
-        }
-
-    if token_status == GitHubTokenStatus.REVOKED:
-        return {
-            "authenticated": True,
-            "github_connected": False,
-            "app_installed": app_installed,
-            "reason": "github_token_revoked",
-            "user": {
-                "id": str(user["_id"]),
-                "email": user.get("email"),
-                "name": user.get("name"),
-            },
-            "github": {
-                "login": identity.get("account_login"),
-                "name": identity.get("account_name"),
-                "avatar_url": identity.get("account_avatar_url"),
-            },
-        }
-
-    # Token is valid
-    return {
-        "authenticated": True,
-        "github_connected": True,
-        "app_installed": app_installed,
-        "user": {
-            "id": str(user["_id"]),
-            "email": user.get("email"),
-            "name": user.get("name"),
-        },
-        "github": {
-            "login": identity.get("account_login"),
-            "name": identity.get("account_name"),
-            "avatar_url": identity.get("account_avatar_url"),
-            "scopes": identity.get("scopes"),
-        },
-    }
+    service = AuthService(db)
+    return await service.verify_auth_status(user)

@@ -18,12 +18,6 @@ async def github_webhook(
 ):
     """Handle GitHub webhook events."""
     payload_bytes = await request.body()
-
-    # Verify signature
     verify_signature(x_hub_signature_256, payload_bytes)
-
-    # Parse payload
     payload: Dict[str, object] = await request.json()
-
-    # Handle event
     return handle_github_event(db, x_github_event, payload)

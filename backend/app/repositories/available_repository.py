@@ -61,7 +61,40 @@ class AvailableRepositoryRepository(BaseRepository):
         """Delete all available repos for a user (e.g. before full sync)"""
         self.collection.delete_many({"user_id": self._to_object_id(user_id)})
 
-    def delete_stale_repos(self, user_id: str | ObjectId, active_full_names: List[str]):
+    def discover_available_repositories(
+        self, user_id: str | ObjectId, q: Optional[str] = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Discover available repositories that are not yet imported."""
+        filters = {"user_id": self._to_object_id(user_id), "imported": False}
+        if q:
+            filters["full_name"] = {"$regex": q, "$options": "i"}
+
+        repos = self.collection.find_many(
+            filters=filters, sort=[("full_name", 1)], limit=limit
+        )
+        items = []
+        for repo in repos:
+            full_name = repo.get("full_name")
+            if not full_name:
+                continue
+
+            items.append(
+                {
+                    "full_name": full_name,
+                    "description": repo.get("description"),
+                    "default_branch": repo.get("default_branch"),
+                    "private": bool(repo.get("private")),
+                    "owner": full_name.split("/")[0],
+                    "installation_id": repo.get("installation_id"),
+                    "html_url": repo.get("html_url"),
+                }
+            )
+
+        return items
+
+    def delete_stale_available_repositories(
+        self, user_id: str, active_full_names: List[str]
+    ):
         """Delete repos that are not in the active list"""
         self.collection.delete_many(
             {

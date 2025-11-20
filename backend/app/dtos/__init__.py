@@ -18,11 +18,6 @@ from .github import (
     GithubOAuthInitRequest,
     GithubRepositoryStatus,
 )
-from .pipeline import (
-    PipelineStage,
-    PipelineStatusResponse,
-    QueueHealthResponse,
-)
 from .repository import (
     RepoDetailResponse,
     RepoImportRequest,
@@ -53,10 +48,6 @@ __all__ = [
     "GithubInstallationResponse",
     "GithubOAuthInitRequest",
     "GithubRepositoryStatus",
-    # Pipeline
-    "PipelineStage",
-    "PipelineStatusResponse",
-    "QueueHealthResponse",
     # Repository
     "RepoDetailResponse",
     "RepoImportRequest",

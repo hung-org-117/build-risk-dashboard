@@ -26,3 +26,27 @@ class AuthVerifyResponse(BaseModel):
     reason: Optional[str] = None
     user: Optional[Dict[str, Optional[str]]] = None
     github: Optional[Dict[str, Optional[str]]] = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+
+
+class GitHubInfo(BaseModel):
+    connected: bool
+    login: Optional[str] = None
+    name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    token_status: Optional[str] = None
+    scopes: Optional[list[str]] = None
+
+
+class UserDetailResponse(BaseModel):
+    id: str
+    email: Optional[str] = None
+    name: Optional[str] = None
+    role: str = "user"
+    created_at: Optional[str] = None
+    github: GitHubInfo

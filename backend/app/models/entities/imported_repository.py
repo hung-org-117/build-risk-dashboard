@@ -21,11 +21,12 @@ class ImportedRepository(BaseModel):
     last_scanned_at: Optional[datetime] = None
     installation_id: Optional[str] = None
     ci_provider: Literal["github_actions", "travis_ci"] = "github_actions"
-    monitoring_enabled: bool = True
     sync_status: Literal["healthy", "error", "disabled"] = "healthy"
-    webhook_status: Literal["active", "inactive"] = "inactive"
     ci_token_status: Literal["valid", "missing"] = "valid"
-    tracked_branches: List[str] = Field(default_factory=list)
+    test_frameworks: List[Literal["PYTEST", "UNITTEST", "RSPEC", "MINITEST"]] = Field(
+        default_factory=list
+    )
+    source_languages: List[Literal["PYTHON", "RUBY"]] = Field(default_factory=list)
     total_builds_imported: int = 0
     last_sync_error: Optional[str] = None
     notes: Optional[str] = None

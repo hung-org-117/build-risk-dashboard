@@ -1,16 +1,15 @@
 """Ingestion tasks for repository backfill"""
 
+from app.repositories.imported_repository import ImportedRepositoryRepository
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
 
 from app.celery_app import celery_app
-from app.celery_app import celery_app
-from app.services.pipeline_store_service import PipelineStore
 from app.services.github.github_client import get_app_github_client
 from app.repositories.scan_job import ScanJobRepository
 from app.tasks.base import PipelineTask
-from app.services.pipeline_exceptions import PipelineRateLimitError
+from app.services.github.exceptions import GithubRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -22,75 +21,102 @@ LOG_DIR.mkdir(exist_ok=True)
 
 
 @celery_app.task(
-    bind=True, base=PipelineTask, name="app.tasks.ingestion.trigger_initial_scan"
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.ingestion.import_repo",
+    queue="import_repo",
 )
-def trigger_initial_scan(self: PipelineTask, repo_id: str) -> Dict[str, Any]:
+def import_repo(
+    self: PipelineTask,
+    user_id: str,
+    full_name: str,
+    installation_id: str,
+    provider: str = "github",
+    test_frameworks: list[str] | None = None,
+    source_languages: list[str] | None = None,
+    ci_provider: str = "github_actions",
+) -> Dict[str, Any]:
     """
-    Start the initial scan (backfill) for a repository.
-    1. Create/Update InitialScanJob
-    2. List past workflow runs via GitHub API
-    3. Enqueue processing for each run
+    Import and scan a repository.
+    1. Fetch metadata from GitHub
+    2. Upsert repository record
+    3. Mark as imported in available_repos
+    4. Trigger initial scan (list workflows)
     """
-    store = PipelineStore(self.db)
-    repo = store.get_repository(repo_id)
-    if not repo:
-        return {"status": "error", "message": "Repository not found"}
-
-    scan_repo = ScanJobRepository(self.db)
-
-    # Check for existing active job
-    job = scan_repo.get_active_job(repo_id)
-    if not job:
-        job = scan_repo.create_job(repo_id)
-
-    job_id = str(job["_id"])
-    scan_repo.update_progress(job_id, status="running", phase="discovering_builds")
-
+    imported_repo_repo = ImportedRepositoryRepository(self.db)
+    # 1. Fetch metadata
     try:
-        installation_id = repo.get("installation_id")
-        full_name = repo.get("full_name")
+        with get_app_github_client(self.db, installation_id) as gh:
+            repo_data = gh.get_repository(full_name)
 
-        # Enforce App auth for backfill
-        if not installation_id:
-            raise ValueError(
-                "Repository missing installation_id. Cannot perform backfill without App installation."
+            # 2. Upsert repository
+            repo_doc = imported_repo_repo.upsert_repository(
+                user_id=user_id,
+                provider=provider,
+                full_name=full_name,
+                default_branch=repo_data.get("default_branch", "main"),
+                is_private=bool(repo_data.get("private")),
+                main_lang=repo_data.get("language"),
+                github_repo_id=repo_data.get("id"),
+                metadata=repo_data,
+                installation_id=installation_id,
+                last_scanned_at=None,
+                test_frameworks=test_frameworks or [],
+                source_languages=source_languages or [],
+                ci_provider=ci_provider or "github_actions",
+            )
+            repo_id = str(repo_doc["_id"])
+
+            # 3. Mark as imported
+            from bson import ObjectId
+
+            self.db.available_repositories.update_one(
+                {"user_id": ObjectId(user_id), "full_name": full_name},
+                {"$set": {"imported": True}},
             )
 
-        gh_cm = get_app_github_client(self.db, installation_id)
+            # 4. Initial Scan Logic
+            scan_repo = ScanJobRepository(self.db)
+            job = scan_repo.get_active_job(repo_id)
+            if not job:
+                job = scan_repo.create_job(repo_id)
 
-        with gh_cm as gh:
-            # List workflow runs
-            # We might want to filter by branch or event if needed, but for backfill we usually want everything or last N months.
-            # Let's fetch last 100 runs for now to start.
+            job_id = str(job["_id"])
+            scan_repo.update_progress(
+                job_id, status="running", phase="discovering_builds"
+            )
+
             runs = gh.list_workflow_runs(full_name, params={"per_page": 100})
-
             scan_repo.update_progress(job_id, total_runs=len(runs))
 
             for run in runs:
-                # Enqueue processing for each run
                 process_workflow_run.delay(repo_id, run)
 
             scan_repo.update_progress(job_id, status="completed", phase="finalizing")
-    except PipelineRateLimitError as e:
-        # Retry after the specified wait time
+
+    except GithubRateLimitError as e:
         wait = e.retry_after if e.retry_after else 60
-        logger.warning(
-            "Rate limit hit in trigger_initial_scan. Retrying in %s seconds.", wait
-        )
+        logger.warning("Rate limit hit in import_repo. Retrying in %s seconds.", wait)
         raise self.retry(exc=e, countdown=wait)
     except Exception as e:
-        scan_repo.update_progress(job_id, status="failed", error=str(e))
+        logger.error(f"Failed to import repo {full_name}: {e}")
+        # If we have a job_id, mark it failed
+        if "job_id" in locals():
+            scan_repo.update_progress(job_id, status="failed", error=str(e))
         raise e
 
     return {
         "status": "completed",
-        "job_id": job_id,
+        "repo_id": repo_id,
         "runs_found": len(runs) if "runs" in locals() else 0,
     }
 
 
 @celery_app.task(
-    bind=True, base=PipelineTask, name="app.tasks.ingestion.process_workflow_run"
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.ingestion.process_workflow_run",
+    queue="collect_workflow_logs",
 )
 def process_workflow_run(
     self: PipelineTask, repo_id: str, run: Dict[str, Any]
@@ -101,8 +127,8 @@ def process_workflow_run(
     2. Download logs for each job
     3. (Future) Parse logs and create BuildSnapshot
     """
-    store = PipelineStore(self.db)
-    repo = store.get_repository(repo_id)
+    repo_repo = ImportedRepositoryRepository(self.db)
+    repo = repo_repo.find_by_id(repo_id)
     if not repo:
         return {"status": "error", "message": "Repository not found"}
 
@@ -143,7 +169,7 @@ def process_workflow_run(
                         str(e),
                         exc_info=True,
                     )
-    except PipelineRateLimitError as e:
+    except GithubRateLimitError as e:
         wait = e.retry_after if e.retry_after else 60
         logger.warning(
             "Rate limit hit in process_workflow_run. Retrying in %s seconds.", wait

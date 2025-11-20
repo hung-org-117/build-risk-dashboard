@@ -51,7 +51,7 @@ services:
   #       condition: service_healthy
   #     rabbitmq:
   #       condition: service_healthy
-  #   command: uv run celery -A app.celery_app.celery_app worker -Q high,medium,low --loglevel=info
+  #   command: uv run celery -A app.celery_app.celery_app worker -Q import_repo,collect_workflow_logs,high,low --loglevel=info
 
   # Celery beat / scheduler (optional)
   # celery-beat:

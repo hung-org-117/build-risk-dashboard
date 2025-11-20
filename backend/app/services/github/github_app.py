@@ -9,7 +9,7 @@ import httpx
 from jose import jwt
 
 from app.config import settings
-from app.services.pipeline_exceptions import PipelineConfigurationError
+from app.services.github.exceptions import GithubConfigurationError
 from app.core.redis import get_redis
 
 
@@ -19,7 +19,7 @@ def _load_private_key(raw: str) -> str:
     path = Path(raw.strip().strip('"'))
     if path.exists():
         return path.read_text()
-    raise PipelineConfigurationError(
+    raise GithubConfigurationError(
         "GITHUB_APP_PRIVATE_KEY must be a PEM string or path to a private key file",
     )
 
@@ -28,7 +28,7 @@ def _require_app_config() -> tuple[str, str]:
     app_id = settings.GITHUB_APP_ID
     private_key = settings.GITHUB_APP_PRIVATE_KEY
     if not app_id or not private_key:
-        raise PipelineConfigurationError(
+        raise GithubConfigurationError(
             "GitHub App credentials are not configured. "
             "Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY."
         )
@@ -65,7 +65,7 @@ def _request_installation_token(
         else None
     )
     if not token or not expires_at:
-        raise PipelineConfigurationError(
+        raise GithubConfigurationError(
             "GitHub installation token response missing token or expires_at"
         )
     return token, expires_at
@@ -73,7 +73,7 @@ def _request_installation_token(
 
 def get_installation_token(installation_id: str | None = None, db=None) -> str:
     if installation_id is None:
-        raise PipelineConfigurationError(
+        raise GithubConfigurationError(
             "Installation id is required to generate a GitHub App token"
         )
 
@@ -83,12 +83,12 @@ def get_installation_token(installation_id: str | None = None, db=None) -> str:
             if installation_doc.get("revoked_at") or installation_doc.get(
                 "uninstalled_at"
             ):
-                raise PipelineConfigurationError(
+                raise GithubConfigurationError(
                     f"GitHub App installation {installation_id} has been uninstalled. "
                     "User needs to reinstall the app."
                 )
             if installation_doc.get("suspended_at"):
-                raise PipelineConfigurationError(
+                raise GithubConfigurationError(
                     f"GitHub App installation {installation_id} is suspended."
                 )
 

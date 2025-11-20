@@ -15,11 +15,10 @@ from app.services.github.github_client import (
     get_app_github_client,
     get_public_github_client,
 )
-from app.services.pipeline_exceptions import (
-    PipelineRateLimitError,
-    PipelineRetryableError,
+from app.services.github.exceptions import (
+    GithubRateLimitError,
+    GithubRetryableError,
 )
-from app.services.pipeline_store_service import PipelineStore
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ class PipelineTask(Task):
     """Base Celery task with Mongo + GitHub helpers."""
 
     abstract = True
-    autoretry_for = (PipelineRateLimitError, PipelineRetryableError)
+    autoretry_for = (GithubRateLimitError, GithubRetryableError)
     retry_backoff = True
     retry_backoff_max = 100
     retry_kwargs = {"max_retries": 5}
@@ -37,7 +36,6 @@ class PipelineTask(Task):
 
     def __init__(self) -> None:
         self._db: Database | None = None
-        self._store: PipelineStore | None = None
 
     # Celery wires the Task via class attributes; __call__ not invoked.
     def after_return(
@@ -46,19 +44,12 @@ class PipelineTask(Task):
         if self._db is not None:
             # PyMongo handles pooling; no need to close. Clear cache to avoid holding references.
             self._db = None
-            self._store = None
 
     @property
     def db(self) -> Database:
         if self._db is None:
             self._db = get_database()
         return self._db
-
-    @property
-    def store(self) -> PipelineStore:
-        if self._store is None:
-            self._store = PipelineStore(self.db)
-        return self._store
 
     def on_failure(
         self, exc: Exception, task_id: str, args: tuple, kwargs: dict, einfo

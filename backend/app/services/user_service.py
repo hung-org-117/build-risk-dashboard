@@ -5,6 +5,10 @@ from typing import Dict, List, Optional, Tuple
 
 from pymongo.database import Database
 
+from fastapi import HTTPException, status
+from pymongo.database import Database
+
+from app.dtos import UserResponse
 from app.repositories.oauth_identity import OAuthIdentityRepository
 from app.repositories.user import UserRepository
 
@@ -43,7 +47,31 @@ def upsert_github_identity(
     )
 
 
-def list_users(db: Database) -> List[Dict[str, object]]:
-    """List all users"""
-    user_repo = UserRepository(db)
-    return user_repo.list_all()
+class UserService:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def list_users(self) -> List[UserResponse]:
+        """List all users"""
+        user_repo = UserRepository(self.db)
+        documents = user_repo.list_all()
+        return [UserResponse.model_validate(doc) for doc in documents]
+
+    def get_current_user(self) -> UserResponse:
+        # Find an OAuth identity for GitHub and use the linked user document.
+        identity = self.db.oauth_identities.find_one({"provider": PROVIDER_GITHUB})
+        if not identity:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No user is currently logged in.",
+            )
+
+        user_doc = self.db.users.find_one({"_id": identity["user_id"]})
+
+        if user_doc is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No user found for the current GitHub connection.",
+            )
+
+        return UserResponse.model_validate(user_doc)

@@ -11,10 +11,10 @@ import httpx
 from pymongo.database import Database
 
 from app.config import settings
-from app.services.pipeline_exceptions import (
-    PipelineConfigurationError,
-    PipelineRateLimitError,
-    PipelineRetryableError,
+from app.services.github.exceptions import (
+    GithubConfigurationError,
+    GithubRateLimitError,
+    GithubRetryableError,
 )
 from app.services.github.github_app import (
     github_app_configured,
@@ -37,7 +37,7 @@ class GitHubTokenPool:
     def __init__(self, tokens: List[str]):
         normalized = [token.strip() for token in tokens if token and token.strip()]
         if not normalized:
-            raise PipelineConfigurationError("No GitHub tokens configured for pool")
+            raise GithubConfigurationError("No GitHub tokens configured for pool")
         self._tokens = normalized
         self._index = 0
         self._lock = Lock()
@@ -58,7 +58,7 @@ class GitHubTokenPool:
                 if cooldown_until and cooldown_until > now:
                     continue
                 return token
-        raise PipelineRateLimitError(
+        raise GithubRateLimitError(
             "All GitHub tokens hit rate limits. Please wait before retrying."
         )
 
@@ -86,7 +86,7 @@ class GitHubClient:
         self._token_pool = token_pool
         self._token = token or (token_pool.acquire_token() if token_pool else None)
         if not self._token:
-            raise PipelineConfigurationError("GitHub token is required to call the API")
+            raise GithubConfigurationError("GitHub token is required to call the API")
         self._api_url = (api_url or settings.GITHUB_API_URL).rstrip("/")
         self._graphql_url = (graphql_url or settings.GITHUB_GRAPHQL_URL).rstrip("/")
         self._rest = httpx.Client(base_url=self._api_url, timeout=20)
@@ -107,7 +107,7 @@ class GitHubClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:  # pragma: no cover - passthrough for now
-            raise PipelineRetryableError(str(exc)) from exc
+            raise GithubRetryableError(str(exc)) from exc
         return response
 
     def _handle_rate_limit(self, response: httpx.Response) -> None:
@@ -131,7 +131,7 @@ class GitHubClient:
         if self._token_pool and self._token:
             self._token_pool.mark_rate_limited(self._token, reset_epoch=reset_header)
 
-        raise PipelineRateLimitError(
+        raise GithubRateLimitError(
             "GitHub rate limit reached", retry_after=wait_seconds
         )
 
@@ -172,7 +172,7 @@ class GitHubClient:
         self._handle_response(response)
         payload = response.json()
         if payload.get("errors"):
-            raise PipelineRetryableError(str(payload["errors"]))
+            raise GithubRetryableError(str(payload["errors"]))
         return payload.get("data", {})
 
     # --- Public REST helpers ----------------------------------------------
@@ -365,13 +365,13 @@ def get_user_github_client(db: Database, user_id: str) -> GitHubClient:
     Used for querying repositories the user has access to.
     """
     if not user_id:
-        raise PipelineConfigurationError("user_id is required for user auth")
+        raise GithubConfigurationError("user_id is required for user auth")
 
     identity = db.oauth_identities.find_one(
         {"user_id": ObjectId(user_id), "provider": "github"}
     )
     if not identity or not identity.get("access_token"):
-        raise PipelineConfigurationError(
+        raise GithubConfigurationError(
             f"No GitHub OAuth token found for user {user_id}"
         )
     return GitHubClient(token=identity["access_token"])
@@ -383,10 +383,10 @@ def get_app_github_client(db: Database, installation_id: str) -> GitHubClient:
     Used for backfilling past retained workflows and commits.
     """
     if not installation_id:
-        raise PipelineConfigurationError("installation_id is required for app auth")
+        raise GithubConfigurationError("installation_id is required for app auth")
 
     if not github_app_configured():
-        raise PipelineConfigurationError("GitHub App is not configured")
+        raise GithubConfigurationError("GitHub App is not configured")
 
     token = get_installation_token(installation_id, db=db)
     return GitHubClient(token=token)
@@ -404,9 +404,7 @@ def get_public_github_client() -> GitHubClient:
     tokens = [t for t in tokens if t and t.strip()]
 
     if not tokens:
-        raise PipelineConfigurationError(
-            "No public GitHub tokens configured in settings"
-        )
+        raise GithubConfigurationError("No public GitHub tokens configured in settings")
 
     if len(tokens) == 1:
         return GitHubClient(token=tokens[0])
@@ -430,15 +428,15 @@ def get_pipeline_github_client(
     """
     if auth_type == "user":
         if not user_id:
-            raise PipelineConfigurationError("user_id is required for 'user' auth type")
+            raise GithubConfigurationError("user_id is required for 'user' auth type")
         return get_user_github_client(db, user_id)
     elif auth_type == "app":
         if not installation_id:
-            raise PipelineConfigurationError(
+            raise GithubConfigurationError(
                 "installation_id is required for 'app' auth type"
             )
         return get_app_github_client(db, installation_id)
     elif auth_type == "public":
         return get_public_github_client()
     else:
-        raise PipelineConfigurationError(f"Invalid auth_type: {auth_type}")
+        raise GithubConfigurationError(f"Invalid auth_type: {auth_type}")
