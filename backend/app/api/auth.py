@@ -28,7 +28,11 @@ from app.services.auth_service import AuthService
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-@router.post("/github/login", response_model=GithubAuthorizeResponse)
+@router.post(
+    "/github/login",
+    response_model=GithubAuthorizeResponse,
+    response_model_by_alias=False,
+)
 def initiate_github_login(
     payload: GithubOAuthInitRequest | None = Body(default=None),
     db: Database = Depends(get_db),
@@ -99,7 +103,11 @@ def revoke_github_token(
     service.revoke_github_token(user["_id"])
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    response_model_by_alias=False,
+)
 async def refresh_access_token(
     response: Response,
     refresh_token: str | None = Cookie(default=None),
@@ -126,7 +134,11 @@ async def refresh_access_token(
     return token_data
 
 
-@router.get("/me", response_model=UserDetailResponse)
+@router.get(
+    "/me",
+    response_model=UserDetailResponse,
+    response_model_by_alias=False,
+)
 async def get_current_user_info(
     user: dict = Depends(get_current_user), db: Database = Depends(get_db)
 ):

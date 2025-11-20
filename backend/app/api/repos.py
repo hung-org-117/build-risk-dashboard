@@ -38,6 +38,7 @@ def sync_repositories(
 @router.post(
     "/import/bulk",
     response_model=List[RepoResponse],
+    response_model_by_alias=False,
     status_code=status.HTTP_201_CREATED,
 )
 def bulk_import_repositories(
@@ -51,14 +52,13 @@ def bulk_import_repositories(
     return service.bulk_import_repositories(user_id, payloads)
 
 
-@router.get("/", response_model=List[RepoResponse])
+@router.get("/", response_model=List[RepoResponse], response_model_by_alias=False)
 def list_repositories(
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """List tracked repositories."""
     service = RepositoryService(db)
-    print("test: {}", current_user["_id"])
     return service.list_repositories(current_user["_id"])
 
 
@@ -78,7 +78,9 @@ def discover_repositories(
     return service.discover_repositories(user_id, q, limit)
 
 
-@router.get("/{repo_id}", response_model=RepoDetailResponse)
+@router.get(
+    "/{repo_id}", response_model=RepoDetailResponse, response_model_by_alias=False
+)
 def get_repository_detail(
     repo_id: str = Path(..., description="Repository id (Mongo ObjectId)"),
     db: Database = Depends(get_db),
@@ -88,7 +90,9 @@ def get_repository_detail(
     return service.get_repository_detail(repo_id, current_user)
 
 
-@router.patch("/{repo_id}", response_model=RepoDetailResponse)
+@router.patch(
+    "/{repo_id}", response_model=RepoDetailResponse, response_model_by_alias=False
+)
 def update_repository_settings(
     repo_id: str,
     payload: RepoUpdateRequest,

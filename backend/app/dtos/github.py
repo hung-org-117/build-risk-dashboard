@@ -1,12 +1,10 @@
 """GitHub integration DTOs"""
 
 from app.models.entities.base import PyObjectIdStr
-from app.models.entities.base import PyObjectId
 from datetime import datetime
-from typing import Annotated, Any, List, Optional
+from typing import List, Optional
 
-from bson import ObjectId
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GithubRepositoryStatus(BaseModel):

@@ -1,11 +1,9 @@
 """User and authentication DTOs"""
 
-from app.models.entities.base import PyObjectId
 from datetime import datetime
-from typing import Annotated, Any, List, Literal, Optional
+from typing import Literal, Optional
 
-from bson import ObjectId
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 from app.models.entities.base import PyObjectIdStr
@@ -31,10 +29,3 @@ class OAuthIdentityResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(populate_by_name=True)
-
-
-class UserRoleDefinition(BaseModel):
-    role: str
-    description: str
-    permissions: List[str]
-    admin_only: bool = False

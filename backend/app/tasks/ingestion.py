@@ -107,13 +107,9 @@ def import_repo(
         with get_app_github_client(self.db, installation_id) as gh:
             repo_data = gh.get_repository(full_name)
 
-            imported_repo_repo.upsert_repository(
-                query={
-                    "user_id": ObjectId(user_id),
-                    "provider": provider,
-                    "full_name": full_name,
-                },
-                data={
+            imported_repo_repo.update_repository(
+                repo_id=repo_id,
+                updates={
                     "default_branch": repo_data.get("default_branch", "main"),
                     "is_private": bool(repo_data.get("private")),
                     "main_lang": repo_data.get("language"),

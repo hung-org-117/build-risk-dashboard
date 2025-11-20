@@ -1,3 +1,4 @@
+import logging
 from app.models.entities.imported_repository import ImportStatus
 from typing import List, Optional
 
@@ -19,6 +20,9 @@ from app.services.github.github_client import get_app_github_client
 from app.services.github.github_sync import sync_user_available_repos
 from app.services.github.exceptions import GithubConfigurationError
 from app.tasks.ingestion import import_repo
+
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_repo(repo_doc) -> RepoResponse:
@@ -102,7 +106,7 @@ class RepositoryService:
 
             except Exception as e:
                 # Log error and continue
-                print(f"Failed to import {payload.full_name}: {e}")
+                logger.error(f"Failed to import {payload.full_name}: {e}")
                 continue
 
         return [_serialize_repo(doc) for doc in results]
@@ -125,7 +129,6 @@ class RepositoryService:
     def list_repositories(self, user_id: str) -> List[RepoResponse]:
         """List tracked repositories."""
         repos = self.repo_repo.list_by_user(user_id)
-        print("repos: {}", repos)
         return [_serialize_repo(repo) for repo in repos]
 
     def discover_repositories(
@@ -140,7 +143,7 @@ class RepositoryService:
     def get_repository_detail(
         self, repo_id: str, current_user: dict
     ) -> RepoDetailResponse:
-        repo_doc = self.repo_repo.get_repository(repo_id)
+        repo_doc = self.repo_repo.find_by_id(ObjectId(repo_id))
         if not repo_doc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"

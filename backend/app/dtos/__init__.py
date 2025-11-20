@@ -29,7 +29,6 @@ from .repository import (
 from .user import (
     OAuthIdentityResponse,
     UserResponse,
-    UserRoleDefinition,
 )
 
 __all__ = [
@@ -58,5 +57,4 @@ __all__ = [
     # User
     "OAuthIdentityResponse",
     "UserResponse",
-    "UserRoleDefinition",
 ]

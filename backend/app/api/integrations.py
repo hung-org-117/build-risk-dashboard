@@ -12,7 +12,11 @@ from app.services.integration_service import IntegrationService
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
 
-@router.get("/github/installations", response_model=GithubInstallationListResponse)
+@router.get(
+    "/github/installations",
+    response_model=GithubInstallationListResponse,
+    response_model_by_alias=False,
+)
 def list_github_installations(
     db: Database = Depends(get_db), current_user: dict = Depends(get_current_user)
 ):
@@ -21,7 +25,9 @@ def list_github_installations(
 
 
 @router.get(
-    "/github/installations/{installation_id}", response_model=GithubInstallationResponse
+    "/github/installations/{installation_id}",
+    response_model=GithubInstallationResponse,
+    response_model_by_alias=False,
 )
 def get_github_installation(
     installation_id: str,

@@ -132,7 +132,7 @@ export interface UserAccount {
 }
 
 export interface GithubInstallation {
-  _id: string;
+  id: string;
   installation_id: string;
   account_login?: string;
   account_type?: string; // "User" or "Organization"

@@ -1,14 +1,13 @@
 """Repository DTOs"""
 
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, Field
+
 from app.models.entities.imported_repository import SourceLanguage
 from app.models.entities.imported_repository import TestFramework
 from app.models.entities.imported_repository import CIProvider
-from app.models.entities.base import PyObjectId
-from datetime import datetime
-from typing import Annotated, Any, Dict, List, Literal, Optional
-
-from bson import ObjectId
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from app.models.entities.base import PyObjectIdStr
 
 
 class RepoImportRequest(BaseModel):
@@ -21,9 +20,6 @@ class RepoImportRequest(BaseModel):
     test_frameworks: Optional[List[str]] = Field(default=None)
     source_languages: Optional[List[str]] = Field(default=None)
     ci_provider: Optional[str] = Field(default=None)
-
-
-from app.models.entities.base import PyObjectIdStr
 
 
 class RepoResponse(BaseModel):

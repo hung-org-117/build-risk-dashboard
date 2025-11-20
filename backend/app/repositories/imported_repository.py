@@ -27,7 +27,6 @@ class ImportedRepositoryRepository(BaseRepository[ImportedRepository]):
         query: Dict[str, Any] = {}
         if user_id is not None:
             query["user_id"] = self._to_object_id(user_id)
-        print("query: {}", query)
         return self.find_many(query, sort=[("created_at", -1)])
 
     def update_repository(
