@@ -34,6 +34,7 @@ function StatusBadge({ status }: { status: string }) {
     switch (status.toLowerCase()) {
         case "completed":
         case "success":
+        case "passed":
             return (
                 <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
                     <CheckCircle2 className="h-3 w-3" /> Passed

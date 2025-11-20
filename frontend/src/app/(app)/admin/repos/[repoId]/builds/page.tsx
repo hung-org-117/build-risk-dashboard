@@ -1,13 +1,14 @@
 "use client";
 
 import {
+    ArrowLeft,
     CheckCircle2,
     Clock,
     GitCommit,
     Loader2,
     XCircle
 } from "lucide-react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { BuildDrawer } from "@/components/build-drawer";
@@ -33,6 +34,7 @@ function StatusBadge({ status }: { status: string }) {
     switch (status.toLowerCase()) {
         case "completed":
         case "success":
+        case "passed":
             return (
                 <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
                     <CheckCircle2 className="h-3 w-3" /> Passed
@@ -64,8 +66,34 @@ function StatusBadge({ status }: { status: string }) {
     }
 }
 
+function ExtractionStatusBadge({ status }: { status: string }) {
+    switch (status.toLowerCase()) {
+        case "completed":
+            return (
+                <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                    <CheckCircle2 className="h-3 w-3" /> Done
+                </Badge>
+            );
+        case "failed":
+            return (
+                <Badge variant="destructive" className="gap-1">
+                    <XCircle className="h-3 w-3" /> Failed
+                </Badge>
+            );
+        case "pending":
+            return (
+                <Badge variant="secondary" className="gap-1">
+                    <Clock className="h-3 w-3" /> Pending
+                </Badge>
+            );
+        default:
+            return <Badge variant="secondary" className="text-xs">{status}</Badge>;
+    }
+}
+
 export default function RepoBuildsPage() {
     const params = useParams();
+    const router = useRouter();
     const repoId = params.repoId as string;
 
     const [repo, setRepo] = useState<RepoDetail | null>(null);
@@ -158,13 +186,24 @@ export default function RepoBuildsPage() {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold tracking-tight">
-                        {repo?.full_name || "Repository Builds"}
-                    </h1>
-                    <p className="text-muted-foreground">
-                        View and analyze build history.
-                    </p>
+                <div className="flex items-center gap-4">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => router.push("/admin/repos")}
+                        className="gap-2"
+                    >
+                        <ArrowLeft className="h-4 w-4" />
+                        Back to Repos
+                    </Button>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">
+                            {repo?.full_name || "Repository Builds"}
+                        </h1>
+                        <p className="text-muted-foreground">
+                            View and analyze build history.
+                        </p>
+                    </div>
                 </div>
             </div>
 
@@ -201,13 +240,16 @@ export default function RepoBuildsPage() {
                                         Commit
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Date
-                                    </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Duration
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Tests
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
+                                        Date
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
+                                        Extraction
                                     </th>
                                     <th className="px-6 py-3" />
                                 </tr>
@@ -216,7 +258,7 @@ export default function RepoBuildsPage() {
                                 {builds.length === 0 ? (
                                     <tr>
                                         <td
-                                            colSpan={7}
+                                            colSpan={8}
                                             className="px-6 py-6 text-center text-sm text-muted-foreground"
                                         >
                                             No builds recorded yet.
@@ -242,13 +284,16 @@ export default function RepoBuildsPage() {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
-                                                {formatTimestamp(build.created_at)}
-                                            </td>
-                                            <td className="px-6 py-4 text-muted-foreground">
                                                 {formatDurationFromSeconds(build.duration)}
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
                                                 {build.num_tests !== null ? build.num_tests : "—"}
+                                            </td>
+                                            <td className="px-6 py-4 text-muted-foreground">
+                                                {formatTimestamp(build.created_at)}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <ExtractionStatusBadge status={build.extraction_status} />
                                             </td>
                                             <td className="px-6 py-4">
                                                 <Button
