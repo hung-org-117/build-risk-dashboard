@@ -22,6 +22,8 @@ class TestFramework(str, Enum):
     UNITTEST = "UNITTEST"
     RSPEC = "RSPEC"
     MINITEST = "MINITEST"
+    TESTUNIT = "TESTUNIT"
+    CUCUMBER = "CUCUMBER"
 
 
 class SourceLanguage(str, Enum):

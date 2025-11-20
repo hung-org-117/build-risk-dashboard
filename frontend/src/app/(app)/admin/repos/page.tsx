@@ -660,7 +660,7 @@ export default function AdminReposPage() {
                           <div>
                             <p className="text-sm font-medium mb-2">Test Frameworks</p>
                             <div className="grid grid-cols-2 gap-2">
-                              {["PYTEST", "UNITTEST", "RSPEC", "MINITEST"].map((framework) => (
+                              {["PYTEST", "UNITTEST", "RSPEC", "MINITEST", "TESTUNIT", "CUCUMBER"].map((framework) => (
                                 <label
                                   key={framework}
                                   className="flex items-center gap-2 text-sm"

@@ -14,6 +14,8 @@ from app.services.github.github_client import get_app_github_client
 from app.tasks.base import PipelineTask
 from app.services.github.exceptions import GithubRateLimitError
 from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.repositories.workflow_run import WorkflowRunRepository
+from app.models.entities.workflow_run import WorkflowRunRaw
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ def import_repo(
     import redis
 
     imported_repo_repo = ImportedRepositoryRepository(self.db)
+    workflow_run_repo = WorkflowRunRepository(self.db)
     redis_client = redis.from_url(settings.REDIS_URL)
 
     def publish_status(repo_id: str, status: str, message: str = ""):
@@ -142,7 +145,25 @@ def import_repo(
                     )
                     break
 
-                process_workflow_run.delay(repo_id, run)
+                workflow_run = WorkflowRunRaw(
+                    repo_id=ObjectId(repo_id),
+                    workflow_run_id=run_id,
+                    head_sha=run.get("head_sha"),
+                    run_number=run.get("run_number"),
+                    status=run.get("status"),
+                    conclusion=run.get("conclusion"),
+                    created_at=datetime.fromisoformat(
+                        run.get("created_at").replace("Z", "+00:00")
+                    ),
+                    updated_at=datetime.fromisoformat(
+                        run.get("updated_at").replace("Z", "+00:00")
+                    ),
+                    raw_payload=run,
+                    log_fetched=False,
+                )
+                workflow_run_repo.insert_one(workflow_run)
+
+                download_job_logs.delay(repo_id, run_id)
                 total_runs += 1
 
             imported_repo_repo.update_repository(
@@ -178,12 +199,10 @@ def import_repo(
 @celery_app.task(
     bind=True,
     base=PipelineTask,
-    name="app.tasks.ingestion.process_workflow_run",
+    name="app.tasks.ingestion.download_job_logs",
     queue="collect_workflow_logs",
 )
-def process_workflow_run(
-    self: PipelineTask, repo_id: str, run: Dict[str, Any]
-) -> Dict[str, Any]:
+def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str, Any]:
     repo_repo = ImportedRepositoryRepository(self.db)
     repo = repo_repo.find_by_id(repo_id)
     if not repo:
@@ -191,7 +210,6 @@ def process_workflow_run(
 
     full_name = repo.full_name
     installation_id = repo.installation_id
-    run_id = run.get("id")
 
     if not installation_id:
         raise ValueError(f"Repository {full_name} missing installation_id")
@@ -228,9 +246,20 @@ def process_workflow_run(
     except GithubRateLimitError as e:
         wait = e.retry_after if e.retry_after else 60
         logger.warning(
-            "Rate limit hit in process_workflow_run. Retrying in %s seconds.", wait
+            "Rate limit hit in download_job_logs. Retrying in %s seconds.", wait
         )
         raise self.retry(exc=e, countdown=wait)
+
+    # Update WorkflowRunRaw.log_fetched = true
+    workflow_run_repo = WorkflowRunRepository(self.db)
+    workflow_run = workflow_run_repo.find_by_repo_and_run_id(repo_id, run_id)
+    if workflow_run:
+        workflow_run_repo.update_one(str(workflow_run.id), {"log_fetched": True})
+
+    # Trigger orchestrator
+    celery_app.send_task(
+        "app.tasks.processing.process_workflow_run", args=[repo_id, run_id]
+    )
 
     return {
         "repo_id": repo_id,

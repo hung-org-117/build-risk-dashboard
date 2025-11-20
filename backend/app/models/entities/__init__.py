@@ -1,6 +1,7 @@
 """Database entity models - represents the actual structure stored in MongoDB"""
 
 from .base import BaseEntity, PyObjectId
+from .build_sample import BuildSample
 from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
 from .imported_repository import (

@@ -10,6 +10,10 @@ from pymongo.database import Database
 
 from app.config import settings
 from app.services.github.github_sync import sync_user_available_repos
+from app.repositories.workflow_run import WorkflowRunRepository
+from app.models.entities.workflow_run import WorkflowRunRaw
+from app.celery_app import celery_app
+from bson import ObjectId
 
 
 def verify_signature(signature: str | None, body: bytes) -> None:
@@ -150,17 +154,62 @@ def _handle_workflow_run_event(
         return {"status": "ignored", "reason": "repo_not_imported"}
 
     repo_id = str(repo["_id"])
+    run_id = workflow_run.get("id")
 
-    # Trigger processing
-    from app.tasks.ingestion import process_workflow_run
+    # Save/Update WorkflowRunRaw
+    workflow_run_repo = WorkflowRunRepository(db)
 
-    process_workflow_run.delay(repo_id, workflow_run)
+    existing_run = workflow_run_repo.find_by_repo_and_run_id(repo_id, run_id)
+
+    if existing_run:
+        workflow_run_repo.update_one(
+            str(existing_run.id),
+            {
+                "status": workflow_run.get("status"),
+                "conclusion": workflow_run.get("conclusion"),
+                "updated_at": datetime.fromisoformat(
+                    workflow_run.get("updated_at").replace("Z", "+00:00")
+                ),
+                "raw_payload": workflow_run,
+            },
+        )
+        log_fetched = existing_run.log_fetched
+    else:
+        new_run = WorkflowRunRaw(
+            repo_id=ObjectId(repo_id),
+            workflow_run_id=run_id,
+            head_sha=workflow_run.get("head_sha"),
+            run_number=workflow_run.get("run_number"),
+            status=workflow_run.get("status"),
+            conclusion=workflow_run.get("conclusion"),
+            created_at=datetime.fromisoformat(
+                workflow_run.get("created_at").replace("Z", "+00:00")
+            ),
+            updated_at=datetime.fromisoformat(
+                workflow_run.get("updated_at").replace("Z", "+00:00")
+            ),
+            raw_payload=workflow_run,
+            log_fetched=False,
+        )
+        workflow_run_repo.insert_one(new_run)
+        log_fetched = False
+
+    if not log_fetched:
+        # Trigger download logs
+        celery_app.send_task(
+            "app.tasks.ingestion.download_job_logs", args=[repo_id, run_id]
+        )
+    else:
+        # Trigger processing directly
+        celery_app.send_task(
+            "app.tasks.processing.process_workflow_run", args=[repo_id, run_id]
+        )
 
     return {
         "status": "processed",
         "action": "workflow_run_queued",
         "repo_id": repo_id,
-        "run_id": workflow_run.get("id"),
+        "run_id": run_id,
     }
 
 
