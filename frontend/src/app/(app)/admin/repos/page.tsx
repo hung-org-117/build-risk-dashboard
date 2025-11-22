@@ -36,6 +36,7 @@ import type {
 } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { useWebSocket } from "@/contexts/websocket-context";
+import { ImportRepoModal } from "./_components/ImportRepoModal";
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
   const [mounted, setMounted] = useState(false);
@@ -70,21 +71,8 @@ export default function AdminReposPage() {
   const [tableLoading, setTableLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalStep, setModalStep] = useState<1 | 2>(1);
-  const [suggestions, setSuggestions] = useState<RepoSuggestion[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [selectedRepos, setSelectedRepos] = useState<
-    Record<string, RepoSuggestion>
-  >({});
-  const [repoConfigs, setRepoConfigs] = useState<
-    Record<string, {
-      test_frameworks: string[];
-      source_languages: string[];
-      ci_provider: string;
-    }>
-  >({});
-  const [searchTerm, setSearchTerm] = useState("");
-  const [addingRepos, setAddingRepos] = useState(false);
+
+  // Panel state
   const [panelRepo, setPanelRepo] = useState<RepoDetail | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelForm, setPanelForm] = useState<RepoUpdatePayload>({});
@@ -93,7 +81,6 @@ export default function AdminReposPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
 
   const { subscribe } = useWebSocket();
 
@@ -151,142 +138,7 @@ export default function AdminReposPage() {
     loadRepositories(1, true);
   }, [loadRepositories]);
 
-  const loadSuggestions = useCallback(async (query?: string) => {
-    setSuggestionsLoading(true);
-    const normalized = query?.trim();
-    try {
-      const data: RepoSuggestionResponse = await reposApi.discover(
-        normalized && normalized.length > 0 ? normalized : undefined,
-        20
-      );
-      setSuggestions(data.items);
-    } catch (err) {
-      console.error(err);
-      setFeedback("Unable to load repository choices from GitHub.");
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  }, []);
 
-  const handleSync = async () => {
-    setSuggestionsLoading(true);
-    try {
-      const data = await reposApi.sync();
-      setSuggestions(data.items);
-      setFeedback("Repository list updated from GitHub.");
-    } catch (err) {
-      console.error(err);
-      setFeedback("Unable to sync repositories from GitHub.");
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!modalOpen) {
-      setModalStep(1);
-      setSelectedRepos({});
-      setRepoConfigs({});
-      setSearchTerm("");
-      setIsSearching(false);
-      return;
-    }
-    // Load private repos when modal opens
-    loadSuggestions();
-  }, [modalOpen, loadSuggestions]);
-
-  useEffect(() => {
-    if (!panelRepo) return;
-    setPanelForm({
-      default_branch: panelRepo.default_branch,
-      notes: panelRepo.notes,
-      test_frameworks: panelRepo.test_frameworks,
-      source_languages: panelRepo.source_languages,
-    });
-    setPanelNotes(panelRepo.notes ?? "");
-  }, [panelRepo]);
-
-  const selectedList = useMemo(
-    () => Object.values(selectedRepos),
-    [selectedRepos]
-  );
-
-  const toggleSelection = (item: RepoSuggestion) => {
-    setSelectedRepos((prev) => {
-      const next = { ...prev };
-      if (next[item.full_name]) {
-        delete next[item.full_name];
-        // Also remove config when deselecting
-        setRepoConfigs((current) => {
-          const updated = { ...current };
-          delete updated[item.full_name];
-          return updated;
-        });
-      } else {
-        next[item.full_name] = item;
-        // Initialize default config
-        setRepoConfigs((current) => ({
-          ...current,
-          [item.full_name]: {
-            test_frameworks: [],
-            source_languages: [],
-            ci_provider: "github_actions",
-          },
-        }));
-      }
-      return next;
-    });
-  };
-
-  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const query = searchTerm.trim();
-    if (query.length > 0) {
-      setIsSearching(true);
-      void loadSuggestions(query);
-    }
-  };
-
-  const handleAddRepos = async () => {
-    if (!selectedList.length) return;
-    setAddingRepos(true);
-    setFeedback(null);
-    try {
-      const payloads = selectedList.map(repo => {
-        const config = repoConfigs[repo.full_name] || {
-          test_frameworks: [],
-          source_languages: [],
-          ci_provider: "github_actions",
-        };
-        return {
-          full_name: repo.full_name,
-          provider: "github",
-          installation_id: repo.installation_id,
-          test_frameworks: config.test_frameworks,
-          source_languages: config.source_languages,
-          ci_provider: config.ci_provider,
-        }
-      });
-
-      // Use bulk import
-      await reposApi.importBulk(payloads);
-
-      // Refresh list immediately to show queued repos
-      await loadRepositories(page, true);
-
-      setModalOpen(false);
-      setFeedback(
-        "Repositories queued for import. You can track progress in the list."
-      );
-    } catch (err) {
-      console.error(err);
-      setFeedback(
-        "Unable to connect selected repositories. Ensure the GitHub App is installed."
-      );
-    } finally {
-      setAddingRepos(false);
-    }
-  };
 
   const openPanel = async (repoId: string) => {
     setPanelLoading(true);
@@ -519,241 +371,14 @@ export default function AdminReposPage() {
         </div>
       </Card>
 
-      {modalOpen ? (
-        <Portal>
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">Connect repositories</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Step {modalStep} of 2
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-full p-2 text-muted-foreground hover:bg-slate-100"
-                  onClick={() => setModalOpen(false)}
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {modalStep === 1 ? (
-                <div className="space-y-4">
-                  <form className="flex gap-2" onSubmit={handleSearch}>
-                    <input
-                      type="text"
-                      className="flex-1 rounded-lg border px-3 py-2 text-sm"
-                      placeholder="Search all your GitHub repositories (owner/repo or keyword)"
-                      value={searchTerm}
-                      onChange={(event) => setSearchTerm(event.target.value)}
-                    />
-                    <Button
-                      type="submit"
-                      variant="secondary"
-                      disabled={!searchTerm.trim()}
-                    >
-                      Search
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleSync}
-                      title="Sync available repositories from GitHub"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${suggestionsLoading ? "animate-spin" : ""}`} />
-                    </Button>
-                  </form>
-                  <p className="text-xs text-muted-foreground">
-                    {isSearching
-                      ? "Searching your private GitHub repositories..."
-                      : "Showing your accessible repositories. Enter a search term to find your private repositories on GitHub."}
-                  </p>
-                  <div className="max-h-[320px] space-y-3 overflow-y-auto pr-2">
-                    {suggestionsLoading ? (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Fetching
-                        repos...
-                      </div>
-                    ) : suggestions.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center gap-4 py-8 text-center">
-                        <div className="rounded-full bg-slate-100 p-3 dark:bg-slate-800">
-                          <AlertCircle className="h-6 w-6 text-slate-500" />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="font-medium">No repositories found</p>
-                        </div>
-                      </div>
-                    ) : (
-                      suggestions.map((repo) => {
-                        const checked = Boolean(selectedRepos[repo.full_name]);
-                        return (
-                          <label
-                            key={repo.full_name}
-                            className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 hover:bg-slate-50"
-                          >
-                            <input
-                              type="checkbox"
-                              className="mt-1"
-                              checked={checked}
-                              onChange={() => toggleSelection(repo)}
-                            />
-                            <div>
-                              <p className="font-medium">
-                                {repo.full_name}{" "}
-                                {repo.private ? (
-                                  <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                                    Private
-                                  </span>
-                                ) : null}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {repo.description || "No description provided."}
-                              </p>
-                            </div>
-                          </label>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Configure test frameworks, source languages, and CI provider for each repository.
-                  </p>
-                  <div className="max-h-[400px] space-y-4 overflow-y-auto pr-2">
-                    {selectedList.map((repo) => {
-                      const config = repoConfigs[repo.full_name] || {
-                        test_frameworks: [],
-                        source_languages: [],
-                        ci_provider: "github_actions",
-                      };
-
-                      const toggleFramework = (framework: string) => {
-                        setRepoConfigs((prev) => ({
-                          ...prev,
-                          [repo.full_name]: {
-                            ...config,
-                            test_frameworks: config.test_frameworks.includes(framework)
-                              ? config.test_frameworks.filter((f) => f !== framework)
-                              : [...config.test_frameworks, framework],
-                          },
-                        }));
-                      };
-
-                      const toggleLanguage = (language: string) => {
-                        setRepoConfigs((prev) => ({
-                          ...prev,
-                          [repo.full_name]: {
-                            ...config,
-                            source_languages: config.source_languages.includes(language)
-                              ? config.source_languages.filter((l) => l !== language)
-                              : [...config.source_languages, language],
-                          },
-                        }));
-                      };
-
-                      return (
-                        <div key={repo.full_name} className="rounded-xl border p-4 space-y-3">
-                          <p className="font-semibold">{repo.full_name}</p>
-
-                          <div>
-                            <p className="text-sm font-medium mb-2">Test Frameworks</p>
-                            <div className="grid grid-cols-2 gap-2">
-                              {["PYTEST", "UNITTEST", "RSPEC", "MINITEST", "TESTUNIT", "CUCUMBER"].map((framework) => (
-                                <label
-                                  key={framework}
-                                  className="flex items-center gap-2 text-sm"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={config.test_frameworks.includes(framework)}
-                                    onChange={() => toggleFramework(framework)}
-                                  />
-                                  {framework}
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="text-sm font-medium mb-2">Source Languages</p>
-                            <div className="grid grid-cols-2 gap-2">
-                              {["PYTHON", "RUBY"].map((language) => (
-                                <label
-                                  key={language}
-                                  className="flex items-center gap-2 text-sm"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={config.source_languages.includes(language)}
-                                    onChange={() => toggleLanguage(language)}
-                                  />
-                                  {language}
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div>
-                            <p className="text-sm font-medium mb-2">CI Provider</p>
-                            <select
-                              className="w-full rounded-lg border px-3 py-2 text-sm"
-                              value={config.ci_provider}
-                              onChange={(e) =>
-                                setRepoConfigs((prev) => ({
-                                  ...prev,
-                                  [repo.full_name]: {
-                                    ...config,
-                                    ci_provider: e.target.value,
-                                  },
-                                }))
-                              }
-                            >
-                              <option value="github_actions">GitHub Actions</option>
-                            </select>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-6 flex items-center justify-between">
-                <Button variant="ghost" onClick={() => setModalOpen(false)}>
-                  Cancel
-                </Button>
-                <div className="flex gap-2">
-                  {modalStep === 2 ? (
-                    <Button variant="outline" onClick={() => setModalStep(1)}>
-                      Back
-                    </Button>
-                  ) : null}
-                  {modalStep === 1 ? (
-                    <Button
-                      onClick={() => setModalStep(2)}
-                      disabled={!selectedList.length}
-                    >
-                      Next
-                    </Button>
-                  ) : (
-                    <Button onClick={handleAddRepos} disabled={addingRepos}>
-                      {addingRepos ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Connect"
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </Portal>
-      ) : null}
+      <ImportRepoModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onImport={() => {
+          loadRepositories(page, true);
+          setFeedback("Repositories queued for import.");
+        }}
+      />
 
       {panelRepo ? (
         <Portal>

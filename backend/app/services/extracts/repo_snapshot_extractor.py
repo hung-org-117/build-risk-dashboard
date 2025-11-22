@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Tuple
 
 from app.models.entities.build_sample import BuildSample
 from app.models.entities.imported_repository import ImportedRepository
+from app.models.entities.workflow_run import WorkflowRunRaw
 from app.services.extracts.diff_analyzer import (
     _is_source_file,
     _is_test_file,
@@ -27,11 +28,28 @@ class RepoSnapshotExtractor:
         self.db = db
 
     def extract(
-        self, build_sample: BuildSample, repo: ImportedRepository
+        self,
+        build_sample: BuildSample,
+        workflow_run: WorkflowRunRaw,
+        repo: ImportedRepository,
     ) -> Dict[str, Any]:
         commit_sha = build_sample.tr_original_commit
         if not commit_sha:
             return self._empty_result()
+
+        # Extract metadata fields
+        payload = workflow_run.raw_payload
+        head_branch = payload.get("head_branch")
+        pull_requests = payload.get("pull_requests", [])
+        is_pr = len(pull_requests) > 0 or payload.get("event") == "pull_request"
+
+        pr_number = None
+        pr_created_at = None
+
+        if pull_requests:
+            pr_data = pull_requests[0]
+            pr_number = pr_data.get("number")
+            pr_created_at = pr_data.get("created_at")
 
         repo_path = REPOS_DIR / str(repo.id)
         if not repo_path.exists():
@@ -54,6 +72,20 @@ class RepoSnapshotExtractor:
                 "gh_repo_age": age,
                 "gh_repo_num_commits": num_commits,
                 **snapshot_metrics,
+                # Metadata fields
+                "gh_project_name": repo.full_name,
+                "gh_is_pr": is_pr,
+                "gh_pr_created_at": pr_created_at,
+                "gh_pull_req_num": pr_number,
+                "gh_lang": repo.main_lang,
+                "git_branch": head_branch,
+                "git_trigger_commit": workflow_run.head_sha,
+                "ci_provider": (
+                    repo.ci_provider.value
+                    if hasattr(repo.ci_provider, "value")
+                    else repo.ci_provider
+                ),
+                "gh_build_started_at": workflow_run.created_at,
             }
 
         except Exception as e:
@@ -130,10 +162,16 @@ class RepoSnapshotExtractor:
     ) -> Dict[str, int]:
         stats = {
             "gh_sloc": 0,
-            "gh_test_lines": 0,
-            "gh_test_cases": 0,
-            "gh_asserts": 0,
+            "gh_test_lines_per_kloc": 0.0,
+            "gh_test_cases_per_kloc": 0.0,
+            "gh_asserts_case_per_kloc": 0.0,
         }
+
+        # Counters for absolute values
+        total_sloc = 0
+        total_test_lines = 0
+        total_test_cases = 0
+        total_asserts = 0
 
         # Create temporary worktree
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -168,15 +206,11 @@ class RepoSnapshotExtractor:
                             content = "".join(lines)
 
                         if _is_test_file(rel_path):
-                            stats["gh_test_lines"] += line_count
-                            stats["gh_test_cases"] += self._count_tests(
-                                content, language
-                            )
-                            stats["gh_asserts"] += self._count_asserts(
-                                content, language
-                            )
+                            total_test_lines += line_count
+                            total_test_cases += self._count_tests(content, language)
+                            total_asserts += self._count_asserts(content, language)
                         elif _is_source_file(rel_path):
-                            stats["gh_sloc"] += line_count
+                            total_sloc += line_count
 
                     except Exception:
                         pass
@@ -199,6 +233,19 @@ class RepoSnapshotExtractor:
                     )
                 except Exception:
                     pass
+
+        # Calculate per-KLOC metrics
+        stats["gh_sloc"] = total_sloc
+
+        if total_sloc > 0:
+            kloc = total_sloc / 1000.0
+            stats["gh_test_lines_per_kloc"] = total_test_lines / kloc
+            stats["gh_test_cases_per_kloc"] = total_test_cases / kloc
+            stats["gh_asserts_case_per_kloc"] = total_asserts / kloc
+        else:
+            stats["gh_test_lines_per_kloc"] = 0.0
+            stats["gh_test_cases_per_kloc"] = 0.0
+            stats["gh_asserts_case_per_kloc"] = 0.0
 
         return stats
 
@@ -224,7 +271,16 @@ class RepoSnapshotExtractor:
             "gh_repo_age": 0.0,
             "gh_repo_num_commits": 0,
             "gh_sloc": 0,
-            "gh_test_lines": 0,
-            "gh_test_cases": 0,
-            "gh_asserts": 0,
+            "gh_test_lines_per_kloc": 0.0,
+            "gh_test_cases_per_kloc": 0.0,
+            "gh_asserts_case_per_kloc": 0.0,
+            "gh_project_name": None,
+            "gh_is_pr": None,
+            "gh_pr_created_at": None,
+            "gh_pull_req_num": None,
+            "gh_lang": None,
+            "git_branch": None,
+            "git_trigger_commit": None,
+            "ci_provider": None,
+            "gh_build_started_at": None,
         }

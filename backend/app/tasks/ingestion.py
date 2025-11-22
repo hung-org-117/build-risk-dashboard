@@ -107,7 +107,16 @@ def import_repo(
 
         publish_status(repo_id, "importing", "Fetching repository metadata...")
 
-        with get_app_github_client(self.db, installation_id) as gh:
+        # Determine which client to use
+        if installation_id:
+            client_context = get_app_github_client(self.db, installation_id)
+        else:
+            # Public repo import using system tokens
+            from app.services.github.github_client import get_public_github_client
+
+            client_context = get_public_github_client()
+
+        with client_context as gh:
             repo_data = gh.get_repository(full_name)
 
             imported_repo_repo.update_repository(
@@ -135,6 +144,8 @@ def import_repo(
             publish_status(repo_id, "importing", "Fetching workflow runs...")
 
             total_runs = 0
+            latest_run_created_at = None
+
             for run in gh.paginate_workflow_runs(
                 full_name, params={"per_page": 100, "status": "completed"}
             ):
@@ -173,6 +184,14 @@ def import_repo(
                 )
                 workflow_run_repo.insert_one(workflow_run)
 
+                # Track latest run timestamp
+                run_created_at = workflow_run.created_at
+                if (
+                    latest_run_created_at is None
+                    or run_created_at > latest_run_created_at
+                ):
+                    latest_run_created_at = run_created_at
+
                 download_job_logs.delay(repo_id, run_id)
                 total_runs += 1
 
@@ -182,6 +201,9 @@ def import_repo(
                     "import_status": "imported",
                     "total_builds_imported": total_runs,
                     "last_scanned_at": datetime.now(timezone.utc),
+                    "last_synced_at": datetime.now(timezone.utc),
+                    "last_sync_status": "success",
+                    "latest_synced_run_created_at": latest_run_created_at,
                 },
             )
             publish_status(repo_id, "imported", f"Imported {total_runs} workflow runs.")
@@ -194,7 +216,13 @@ def import_repo(
         logger.error(f"Failed to import repo {full_name}: {e}")
         if "repo_id" in locals():
             imported_repo_repo.update_repository(
-                repo_id, {"import_status": "failed", "last_sync_error": str(e)}
+                repo_id,
+                {
+                    "import_status": "failed",
+                    "last_sync_error": str(e),
+                    "last_sync_status": "failed",
+                    "last_synced_at": datetime.now(timezone.utc),
+                },
             )
             publish_status(repo_id, "failed", str(e))
         raise e
@@ -221,11 +249,20 @@ def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str
     full_name = repo.full_name
     installation_id = repo.installation_id
 
-    if not installation_id:
-        raise ValueError(f"Repository {full_name} missing installation_id")
+    full_name = repo.full_name
+    installation_id = repo.installation_id
+
+    # Determine which client to use
+    if installation_id:
+        client_context = get_app_github_client(self.db, installation_id)
+    else:
+        # Public repo import using system tokens
+        from app.services.github.github_client import get_public_github_client
+
+        client_context = get_public_github_client()
 
     try:
-        with get_app_github_client(self.db, installation_id) as gh:
+        with client_context as gh:
             jobs = gh.list_workflow_jobs(full_name, run_id)
 
             logs_collected = 0

@@ -62,6 +62,12 @@ def process_workflow_run(
         logger.error(f"WorkflowRunRaw not found for {repo_id} / {workflow_run_id}")
         return {"status": "error", "message": "WorkflowRunRaw not found"}
 
+    repo_repo = ImportedRepositoryRepository(self.db)
+    repo = repo_repo.find_by_id(repo_id)
+    if not repo:
+        logger.error(f"Repository {repo_id} not found")
+        return {"status": "error", "message": "Repository not found"}
+
     build_sample = build_sample_repo.find_by_repo_and_run_id(repo_id, workflow_run_id)
     if not build_sample:
         build_sample = BuildSample(
@@ -77,8 +83,6 @@ def process_workflow_run(
     publish_build_update(repo_id, build_id, "in_progress")
 
     # Fan-out tasks
-    # Fan-out to feature extraction tasks
-    # Use chord to ensure finalize is called with results
     header = [
         extract_build_log_features.s(build_id),
         extract_commit_diff_features.s(build_id),
@@ -117,8 +121,14 @@ def extract_build_log_features(self: PipelineTask, build_id: str) -> Dict[str, A
         )
         return {}
 
+    repo_repo = ImportedRepositoryRepository(self.db)
+    repo = repo_repo.find_by_id(str(build_sample.repo_id))
+    if not repo:
+        logger.error(f"Repository {build_sample.repo_id} not found")
+        return {}
+
     extractor = BuildLogExtractor()
-    return extractor.extract(build_sample, workflow_run)
+    return extractor.extract(build_sample, workflow_run, repo)
 
 
 @celery_app.task(
@@ -153,11 +163,21 @@ def extract_commit_diff_features(self: PipelineTask, build_id: str) -> Dict[str,
 )
 def extract_repo_snapshot_features(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     build_sample_repo = BuildSampleRepository(self.db)
+    workflow_run_repo = WorkflowRunRepository(self.db)
     repo_repo = ImportedRepositoryRepository(self.db)
 
     build_sample = build_sample_repo.find_by_id(ObjectId(build_id))
     if not build_sample:
         logger.error(f"BuildSample {build_id} not found")
+        return {}
+
+    workflow_run = workflow_run_repo.find_by_repo_and_run_id(
+        str(build_sample.repo_id), build_sample.workflow_run_id
+    )
+    if not workflow_run:
+        logger.error(
+            f"WorkflowRunRaw not found for {build_sample.repo_id} / {build_sample.workflow_run_id}"
+        )
         return {}
 
     repo = repo_repo.find_by_id(str(build_sample.repo_id))
@@ -166,7 +186,7 @@ def extract_repo_snapshot_features(self: PipelineTask, build_id: str) -> Dict[st
         return {}
 
     extractor = RepoSnapshotExtractor(self.db)
-    return extractor.extract(build_sample, repo)
+    return extractor.extract(build_sample, workflow_run, repo)
 
 
 @celery_app.task(
@@ -179,11 +199,21 @@ def extract_github_discussion_features(
     self: PipelineTask, build_id: str
 ) -> Dict[str, Any]:
     build_sample_repo = BuildSampleRepository(self.db)
+    workflow_run_repo = WorkflowRunRepository(self.db)
     repo_repo = ImportedRepositoryRepository(self.db)
 
     build_sample = build_sample_repo.find_by_id(ObjectId(build_id))
     if not build_sample:
         logger.error(f"BuildSample {build_id} not found")
+        return {}
+
+    workflow_run = workflow_run_repo.find_by_repo_and_run_id(
+        str(build_sample.repo_id), build_sample.workflow_run_id
+    )
+    if not workflow_run:
+        logger.error(
+            f"WorkflowRunRaw not found for {build_sample.repo_id} / {build_sample.workflow_run_id}"
+        )
         return {}
 
     repo = repo_repo.find_by_id(str(build_sample.repo_id))
@@ -192,7 +222,7 @@ def extract_github_discussion_features(
         return {}
 
     extractor = GitHubDiscussionExtractor(self.db)
-    return extractor.extract(build_sample, repo)
+    return extractor.extract(build_sample, workflow_run, repo)
 
 
 @celery_app.task(
@@ -227,7 +257,6 @@ def finalize_build_sample(
 
     build_sample_repo.update_one(build_id, merged_updates)
 
-    # Fetch repo_id for notification
     build = build_sample_repo.find_by_id(ObjectId(build_id))
     if build:
         publish_build_update(str(build.repo_id), build_id, merged_updates["status"])

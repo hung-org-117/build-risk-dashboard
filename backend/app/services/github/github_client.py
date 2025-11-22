@@ -89,10 +89,16 @@ class GitHubClient:
             raise GithubConfigurationError("GitHub token is required to call the API")
         self._api_url = (api_url or settings.GITHUB_API_URL).rstrip("/")
         self._graphql_url = (graphql_url or settings.GITHUB_GRAPHQL_URL).rstrip("/")
-        self._rest = httpx.Client(base_url=self._api_url, timeout=20)
-        self._graphql = httpx.Client(base_url=self._graphql_url, timeout=20)
 
-    # --- Internal helpers -------------------------------------------------
+        transport = httpx.HTTPTransport(retries=3)
+
+        self._rest = httpx.Client(
+            base_url=self._api_url, timeout=120, transport=transport
+        )
+        self._graphql = httpx.Client(
+            base_url=self._graphql_url, timeout=120, transport=transport
+        )
+
     def _headers(self) -> Dict[str, str]:
         headers = {
             "Authorization": f"Bearer {self._token}",

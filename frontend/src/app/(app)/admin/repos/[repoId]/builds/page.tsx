@@ -6,7 +6,9 @@ import {
     Clock,
     GitCommit,
     Loader2,
-    XCircle
+    XCircle,
+    RefreshCw,
+    AlertCircle,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -14,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BuildDrawer } from "@/components/build-drawer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
     Card,
     CardContent,
@@ -24,7 +27,7 @@ import {
 import { useWebSocket } from "@/contexts/websocket-context";
 import { buildApi, reposApi } from "@/lib/api";
 import { formatDurationFromSeconds, formatTimestamp } from "@/lib/utils";
-import type { Build, RepoDetail } from "@/types";
+import type { Build, RepoDetail, LazySyncPreviewResponse } from "@/types";
 
 const PAGE_SIZE = 20;
 
@@ -105,6 +108,10 @@ export default function RepoBuildsPage() {
     const [total, setTotal] = useState(0);
     const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
 
+    // Lazy Sync State
+    const [syncPreview, setSyncPreview] = useState<LazySyncPreviewResponse | null>(null);
+    const [syncing, setSyncing] = useState(false);
+
     const { subscribe } = useWebSocket();
 
     const loadRepo = useCallback(async () => {
@@ -116,6 +123,31 @@ export default function RepoBuildsPage() {
             setError("Unable to load repository details.");
         }
     }, [repoId]);
+
+    const loadSyncPreview = useCallback(async () => {
+        try {
+            const preview = await reposApi.getLazySyncPreview(repoId);
+            setSyncPreview(preview);
+        } catch (err) {
+            console.error("Failed to load sync preview", err);
+        }
+    }, [repoId]);
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            await reposApi.triggerLazySync(repoId);
+            // Optimistically update UI or show a toast
+            // For now, we rely on WebSocket or polling to update the list eventually
+            // But we can update the preview state to hide the banner temporarily
+            setSyncPreview(prev => prev ? { ...prev, has_updates: false } : null);
+        } catch (err) {
+            console.error("Failed to trigger sync", err);
+            setError("Failed to trigger sync.");
+        } finally {
+            setSyncing(false);
+        }
+    };
 
     const loadBuilds = useCallback(
         async (pageNumber = 1, withSpinner = false) => {
@@ -145,6 +177,12 @@ export default function RepoBuildsPage() {
         loadRepo();
         loadBuilds(1, true);
     }, [loadRepo, loadBuilds]);
+
+    useEffect(() => {
+        if (repo && !repo.installation_id) {
+            loadSyncPreview();
+        }
+    }, [repo, loadSyncPreview]);
 
     // WebSocket connection
     useEffect(() => {
@@ -217,6 +255,28 @@ export default function RepoBuildsPage() {
                     </CardHeader>
                 </Card>
             ) : null}
+
+            {syncPreview?.has_updates && (
+                <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
+                    <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <AlertTitle className="text-blue-800 dark:text-blue-300">Updates Available</AlertTitle>
+                    <AlertDescription className="flex items-center justify-between text-blue-700 dark:text-blue-400">
+                        <span>
+                            There are {syncPreview.new_runs_count ? `~${syncPreview.new_runs_count}` : "new"} workflow runs on GitHub that haven't been imported yet.
+                        </span>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="ml-4 border-blue-300 hover:bg-blue-100 dark:border-blue-700 dark:hover:bg-blue-900"
+                            onClick={handleSync}
+                            disabled={syncing}
+                        >
+                            {syncing ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-2 h-3 w-3" />}
+                            Sync Now
+                        </Button>
+                    </AlertDescription>
+                </Alert>
+            )}
 
             <Card>
                 <CardHeader>

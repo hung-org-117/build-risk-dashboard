@@ -14,10 +14,16 @@ from app.dtos import (
     RepoResponse,
     RepoSuggestionListResponse,
     RepoUpdateRequest,
+    RepoSearchResponse,
+    LazySyncPreviewResponse,
 )
+from datetime import datetime, timedelta, timezone
 from app.repositories.available_repository import AvailableRepositoryRepository
 from app.repositories.imported_repository import ImportedRepositoryRepository
-from app.services.github.github_client import get_app_github_client
+from app.services.github.github_client import (
+    get_app_github_client,
+    get_public_github_client,
+)
 from app.services.github.github_sync import sync_user_available_repos
 from app.services.github.exceptions import GithubConfigurationError
 from app.tasks.ingestion import import_repo
@@ -148,6 +154,43 @@ class RepositoryService:
         )
         return RepoSuggestionListResponse(items=items)
 
+    def search_repositories(self, user_id: str, q: str | None) -> RepoSearchResponse:
+        """Search for repositories (both private installed and public GitHub)."""
+        # 1. Search private installed repos (DB)
+        private_matches = self.available_repo_repo.discover_available_repositories(
+            user_id=user_id, q=q, limit=50
+        )
+
+        public_matches = []
+        # 2. Search public repos (GitHub API) - only if query is long enough
+        if q and len(q) >= 3:
+            try:
+                with get_public_github_client() as gh:
+                    # Search for public repos matching the query
+                    # We use 'in:name,description' and 'is:public' to narrow down
+                    query = f"{q} in:name,description is:public"
+                    results = gh.search_repositories(query, per_page=10)
+
+                    for repo in results:
+                        public_matches.append(
+                            {
+                                "full_name": repo["full_name"],
+                                "description": repo.get("description"),
+                                "default_branch": repo.get("default_branch"),
+                                "private": False,
+                                "owner": repo["owner"]["login"],
+                                "html_url": repo["html_url"],
+                                "installation_id": None,  # Public repos don't need installation_id
+                            }
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to search public repos: {e}")
+                # Don't fail the whole request, just return empty public matches
+
+        return RepoSearchResponse(
+            private_matches=private_matches, public_matches=public_matches
+        )
+
     def get_repository_detail(
         self, repo_id: str, current_user: dict
     ) -> RepoDetailResponse:
@@ -198,3 +241,134 @@ class RepositoryService:
                 )
 
         return _serialize_repo_detail(updated)
+
+    def get_lazy_sync_preview(self, repo_id: str) -> LazySyncPreviewResponse:
+        """
+        Check if a repository has updates on GitHub without performing a full sync.
+        Uses caching to avoid hitting GitHub API too frequently.
+        """
+        repo_doc = self.repo_repo.find_by_id(ObjectId(repo_id))
+        if not repo_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
+            )
+
+        # 0. If repo is installed via GitHub App, we rely on webhooks, so no lazy sync needed.
+        if repo_doc.installation_id:
+            return LazySyncPreviewResponse(
+                has_updates=False,
+                last_synced_at=repo_doc.last_synced_at,
+                last_remote_check_at=repo_doc.last_remote_check_at,
+                last_sync_status=repo_doc.last_sync_status,
+            )
+
+        # 1. Check cache (last_remote_check_at)
+        now = datetime.now(timezone.utc)
+        last_check = repo_doc.last_remote_check_at
+
+        # If checked recently (e.g., < 5 minutes), return cached status
+        # For now, we don't have a separate "has_updates" field in DB,
+        # so we infer it or just return "no updates" if cached.
+        # A better approach: if cached, we assume no *new* updates since last check
+        # unless we store "updates_available" flag.
+        # For simplicity in this MVP: if cached, we just return what we know.
+        if last_check and (now - last_check) < timedelta(minutes=5):
+            return LazySyncPreviewResponse(
+                has_updates=False,  # We assume user would have synced if they cared
+                last_synced_at=repo_doc.last_synced_at,
+                last_remote_check_at=repo_doc.last_remote_check_at,
+                last_sync_status=repo_doc.last_sync_status,
+            )
+
+        # 2. Call GitHub API to check for new runs
+        has_updates = False
+        new_runs_count = 0
+
+        try:
+            # Determine client (App or Public)
+            if repo_doc.installation_id:
+                client_context = get_app_github_client(
+                    self.db, repo_doc.installation_id
+                )
+            else:
+                client_context = get_public_github_client()
+
+            with client_context as gh:
+                # Fetch latest workflow runs (limit 5)
+                runs = gh.list_workflow_runs(repo_doc.full_name, limit=5)
+
+                if runs:
+                    latest_remote_run = runs[0]
+                    latest_remote_created_at = datetime.fromisoformat(
+                        latest_remote_run["created_at"].replace("Z", "+00:00")
+                    )
+
+                    latest_synced = repo_doc.latest_synced_run_created_at
+                    if latest_synced:
+                        # Ensure timezone awareness for comparison
+                        if latest_synced.tzinfo is None:
+                            latest_synced = latest_synced.replace(tzinfo=timezone.utc)
+
+                        if latest_remote_created_at > latest_synced:
+                            has_updates = True
+                            # Estimate count
+                            new_runs_count = sum(
+                                1
+                                for r in runs
+                                if datetime.fromisoformat(
+                                    r["created_at"].replace("Z", "+00:00")
+                                )
+                                > latest_synced
+                            )
+                    else:
+                        # If never synced runs, but runs exist
+                        has_updates = True
+                        new_runs_count = len(runs)
+
+            # 3. Update last_remote_check_at
+            self.repo_repo.update_repository(repo_id, {"last_remote_check_at": now})
+
+        except Exception as e:
+            logger.error(f"Failed to preview updates for {repo_id}: {e}")
+            # Return last known state with error indication if needed
+            pass
+
+        return LazySyncPreviewResponse(
+            has_updates=has_updates,
+            new_runs_count=new_runs_count if has_updates else 0,
+            last_synced_at=repo_doc.last_synced_at,
+            last_remote_check_at=now,
+            last_sync_status=repo_doc.last_sync_status,
+        )
+
+    def trigger_lazy_sync(self, repo_id: str, user_id: str):
+        """Trigger a full sync for a specific repository."""
+        repo_doc = self.repo_repo.find_by_id(ObjectId(repo_id))
+        if not repo_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
+            )
+
+        if repo_doc.installation_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lazy sync is not available for App-installed repositories.",
+            )
+
+        # Update status to queued/importing
+        self.repo_repo.update_repository(
+            repo_id, {"import_status": ImportStatus.QUEUED.value}
+        )
+
+        # Trigger import task
+        import_repo.delay(
+            user_id=user_id,
+            full_name=repo_doc.full_name,
+            installation_id=repo_doc.installation_id,
+            provider=repo_doc.provider,
+            test_frameworks=repo_doc.test_frameworks,
+            source_languages=repo_doc.source_languages,
+            ci_provider=repo_doc.ci_provider,
+        )
+
+        return {"status": "queued"}

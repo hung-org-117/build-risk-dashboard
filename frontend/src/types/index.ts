@@ -68,7 +68,11 @@ export interface RepositoryRecord {
   total_builds_imported: number;
   last_sync_error?: string;
   notes?: string;
-  import_status?: "queued" | "importing" | "imported" | "failed";
+  import_status: "queued" | "importing" | "imported" | "failed";
+  // Lazy Sync
+  last_synced_at?: string;
+  last_sync_status?: string;
+  last_remote_check_at?: string;
 }
 
 export interface RepoDetail extends RepositoryRecord {
@@ -94,6 +98,19 @@ export interface RepoSuggestion {
 
 export interface RepoSuggestionResponse {
   items: RepoSuggestion[];
+}
+
+export interface RepoSearchResponse {
+  private_matches: RepoSuggestion[];
+  public_matches: RepoSuggestion[];
+}
+
+export interface LazySyncPreviewResponse {
+  has_updates: boolean;
+  new_runs_count?: number;
+  last_synced_at?: string;
+  last_remote_check_at?: string;
+  last_sync_status?: string;
 }
 
 export interface RepoImportPayload {

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from app.models.entities.build_sample import BuildSample
+from app.models.entities.imported_repository import ImportedRepository
 from app.models.entities.workflow_run import WorkflowRunRaw
 from app.services.extracts.log_parser import TestLogParser
 
@@ -15,7 +16,10 @@ class BuildLogExtractor:
         self.parser = TestLogParser()
 
     def extract(
-        self, build_sample: BuildSample, workflow_run: WorkflowRunRaw
+        self,
+        build_sample: BuildSample,
+        workflow_run: WorkflowRunRaw,
+        repo: ImportedRepository,
     ) -> Dict[str, Any]:
         repo_id = str(build_sample.repo_id)
         run_id = str(build_sample.workflow_run_id)
@@ -32,7 +36,7 @@ class BuildLogExtractor:
             return self._empty_result()
 
         # Initialize aggregators
-        tr_job_ids = []
+        tr_jobs = []
         frameworks = set()
         total_jobs = 0
         tests_run_sum = 0
@@ -44,7 +48,7 @@ class BuildLogExtractor:
         for log_file in log_files:
             try:
                 job_id = int(log_file.stem)
-                tr_job_ids.append(job_id)
+                tr_jobs.append(job_id)
                 total_jobs += 1
 
                 content = log_file.read_text(errors="replace")
@@ -87,9 +91,11 @@ class BuildLogExtractor:
             tr_duration = delta.total_seconds()
 
         return {
-            "tr_job_ids": tr_job_ids,
+            "tr_jobs": tr_jobs,
+            "tr_build_id": workflow_run.workflow_run_id,
             "tr_build_number": workflow_run.run_number,
             "tr_original_commit": workflow_run.head_sha,
+            "tr_log_lan_all": repo.source_languages,
             "tr_log_frameworks_all": list(frameworks),
             "tr_log_num_jobs": total_jobs,
             "tr_log_tests_run_sum": tests_run_sum,
@@ -104,7 +110,11 @@ class BuildLogExtractor:
 
     def _empty_result(self) -> Dict[str, Any]:
         return {
-            "tr_job_ids": [],
+            "tr_jobs": [],
+            "tr_build_id": None,
+            "tr_build_number": None,
+            "tr_original_commit": None,
+            "tr_log_lan_all": [],
             "tr_log_frameworks_all": [],
             "tr_log_num_jobs": 0,
             "tr_log_tests_run_sum": 0,

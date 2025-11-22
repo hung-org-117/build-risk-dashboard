@@ -68,5 +68,11 @@ class ImportedRepository(BaseEntity):
     last_sync_error: str | None = None
     notes: str | None = None
 
+    # Lazy Sync Fields
+    last_synced_at: datetime | None = None
+    last_sync_status: str | None = None  # "success", "failed"
+    last_remote_check_at: datetime | None = None
+    latest_synced_run_created_at: datetime | None = None
+
     # Metadata
     metadata: Dict[str, Any] = {}

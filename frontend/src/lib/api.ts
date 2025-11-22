@@ -10,6 +10,8 @@ import type {
   RepoImportPayload,
   RepoListResponse,
   RepoSuggestionResponse,
+  RepoSearchResponse,
+  LazySyncPreviewResponse,
   RepoUpdatePayload,
   RepositoryRecord,
   UserAccount,
@@ -153,6 +155,24 @@ export const reposApi = {
         limit,
       },
     });
+    return response.data;
+  },
+  search: async (query?: string) => {
+    const response = await api.get<RepoSearchResponse>("/repos/search", {
+      params: { q: query },
+    });
+    return response.data;
+  },
+  getLazySyncPreview: async (repoId: string) => {
+    const response = await api.get<LazySyncPreviewResponse>(
+      `/repos/${repoId}/lazy-sync-preview`
+    );
+    return response.data;
+  },
+  triggerLazySync: async (repoId: string) => {
+    const response = await api.post<{ status: string }>(
+      `/repos/${repoId}/lazy-sync-run`
+    );
     return response.data;
   },
   sync: async () => {
