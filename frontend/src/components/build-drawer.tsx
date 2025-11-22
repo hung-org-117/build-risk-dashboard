@@ -229,6 +229,71 @@ export function BuildDrawer({ repoId, buildId, onClose }: BuildDrawerProps) {
                                         </div>
                                     </section>
 
+                                    {/* Git & Team Metrics */}
+                                    <section>
+                                        <h4 className="mb-3 flex items-center gap-2 font-semibold">
+                                            <GitCommit className="h-4 w-4" /> Git & Team Metrics
+                                        </h4>
+                                        <div className="grid gap-4 sm:grid-cols-2">
+                                            <div className="rounded-lg border p-4">
+                                                <p className="text-sm font-medium text-muted-foreground">
+                                                    Team Context
+                                                </p>
+                                                <div className="mt-2 space-y-2 text-sm">
+                                                    <div className="flex justify-between">
+                                                        <span>Team Size (3m)</span>
+                                                        <span className="font-medium">{build.gh_team_size ?? "—"}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>Core Member</span>
+                                                        <span className="font-medium">
+                                                            {build.gh_by_core_team_member === true
+                                                                ? "Yes"
+                                                                : build.gh_by_core_team_member === false
+                                                                    ? "No"
+                                                                    : "—"}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="rounded-lg border p-4">
+                                                <p className="text-sm font-medium text-muted-foreground">
+                                                    Commit History
+                                                </p>
+                                                <div className="mt-2 space-y-2 text-sm">
+                                                    <div className="flex justify-between">
+                                                        <span>Commits in Build</span>
+                                                        <span className="font-medium">
+                                                            {build.git_num_all_built_commits ?? "—"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>Prev Build ID</span>
+                                                        <span className="font-medium">
+                                                            {build.tr_prev_build ? `#${build.tr_prev_build}` : "—"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>Prev Resolution</span>
+                                                        <span className="font-medium text-xs">
+                                                            {build.git_prev_commit_resolution_status ?? "—"}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="col-span-2 rounded-lg border p-4">
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-muted-foreground">Commits on touched files (3m)</span>
+                                                    <span className="font-medium">
+                                                        {build.gh_num_commits_on_files_touched ?? "—"}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </section>
+
                                     {/* Churn Metrics */}
                                     <section>
                                         <h4 className="mb-3 flex items-center gap-2 font-semibold">

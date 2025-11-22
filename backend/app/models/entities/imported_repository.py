@@ -4,8 +4,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List
 
-from bson import ObjectId
-
 from .base import BaseEntity, PyObjectId
 
 

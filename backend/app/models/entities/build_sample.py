@@ -62,3 +62,13 @@ class BuildSample(BaseEntity):
     gh_num_issue_comments: int | None = None
     gh_num_commit_comments: int | None = None
     gh_num_pr_comments: int | None = None
+
+    # Git Features
+    git_prev_commit_resolution_status: str | None = None
+    git_prev_built_commit: str | None = None
+    tr_prev_build: int | None = None
+    gh_team_size: int | None = None
+    git_all_built_commits: List[str] = []
+    git_num_all_built_commits: int | None = None
+    gh_by_core_team_member: bool | None = None
+    gh_num_commits_on_files_touched: int | None = None

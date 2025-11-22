@@ -23,6 +23,14 @@ export interface BuildDetail extends Build {
   gh_repo_num_commits?: number;
   gh_sloc?: number;
   error_message?: string;
+  // New Git Features
+  git_prev_commit_resolution_status?: string;
+  git_prev_built_commit?: string;
+  tr_prev_build?: number;
+  gh_team_size?: number;
+  git_num_all_built_commits?: number;
+  gh_by_core_team_member?: boolean;
+  gh_num_commits_on_files_touched?: number;
 }
 
 export interface BuildListResponse {

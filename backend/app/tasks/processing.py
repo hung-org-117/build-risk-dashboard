@@ -10,10 +10,10 @@ from app.repositories.build_sample import BuildSampleRepository
 from app.repositories.imported_repository import ImportedRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.services.extracts.build_log_extractor import BuildLogExtractor
-from app.services.extracts.commit_diff_extractor import CommitDiffExtractor
+
 from app.services.extracts.github_discussion_extractor import GitHubDiscussionExtractor
 from app.services.extracts.build_log_extractor import BuildLogExtractor
-from app.services.extracts.commit_diff_extractor import CommitDiffExtractor
+
 from app.services.extracts.github_discussion_extractor import GitHubDiscussionExtractor
 from app.services.extracts.repo_snapshot_extractor import RepoSnapshotExtractor
 from app.tasks.base import PipelineTask
@@ -85,7 +85,7 @@ def process_workflow_run(
     # Fan-out tasks
     header = [
         extract_build_log_features.s(build_id),
-        extract_commit_diff_features.s(build_id),
+        extract_git_features.s(build_id),
         extract_repo_snapshot_features.s(build_id),
         extract_github_discussion_features.s(build_id),
     ]
@@ -134,10 +134,10 @@ def extract_build_log_features(self: PipelineTask, build_id: str) -> Dict[str, A
 @celery_app.task(
     bind=True,
     base=PipelineTask,
-    name="app.tasks.processing.extract_commit_diff_features",
+    name="app.tasks.processing.extract_git_features",
     queue="data_processing",
 )
-def extract_commit_diff_features(self: PipelineTask, build_id: str) -> Dict[str, Any]:
+def extract_git_features(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     build_sample_repo = BuildSampleRepository(self.db)
     repo_repo = ImportedRepositoryRepository(self.db)
 
@@ -151,7 +151,9 @@ def extract_commit_diff_features(self: PipelineTask, build_id: str) -> Dict[str,
         logger.error(f"Repository {build_sample.repo_id} not found")
         return {}
 
-    extractor = CommitDiffExtractor(self.db)
+    from app.services.extracts.git_feature_extractor import GitFeatureExtractor
+
+    extractor = GitFeatureExtractor(self.db)
     return extractor.extract(build_sample, repo)
 
 

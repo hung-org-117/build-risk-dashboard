@@ -145,7 +145,9 @@ def import_repo(
 
             total_runs = 0
             latest_run_created_at = None
+            runs_to_process = []
 
+            # PASS 1: Metadata Collection (Newest -> Oldest)
             for run in gh.paginate_workflow_runs(
                 full_name, params={"per_page": 100, "status": "completed"}
             ):
@@ -182,7 +184,14 @@ def import_repo(
                     raw_payload=run,
                     log_fetched=False,
                 )
-                workflow_run_repo.insert_one(workflow_run)
+
+                # Upsert to avoid duplicates if re-running
+                existing = workflow_run_repo.find_by_repo_and_run_id(repo_id, run_id)
+                if not existing:
+                    workflow_run_repo.insert_one(workflow_run)
+                else:
+                    # Update if needed, though raw payload usually static for completed runs
+                    pass
 
                 # Track latest run timestamp
                 run_created_at = workflow_run.created_at
@@ -192,13 +201,26 @@ def import_repo(
                 ):
                     latest_run_created_at = run_created_at
 
-                download_job_logs.delay(repo_id, run_id)
+                runs_to_process.append((run_created_at, run_id))
                 total_runs += 1
+
+            # PASS 2: Processing (Oldest -> Newest)
+            # Sort by created_at ascending
+            runs_to_process.sort(key=lambda x: x[0])
+
+            publish_status(
+                repo_id,
+                "importing",
+                f"Scheduling {len(runs_to_process)} runs for processing...",
+            )
+
+            for _, run_id in runs_to_process:
+                download_job_logs.delay(repo_id, run_id)
 
             imported_repo_repo.update_repository(
                 repo_id,
                 {
-                    "import_status": "imported",
+                    "import_status": ImportStatus.IMPORTED.value,
                     "total_builds_imported": total_runs,
                     "last_scanned_at": datetime.now(timezone.utc),
                     "last_synced_at": datetime.now(timezone.utc),
@@ -218,7 +240,7 @@ def import_repo(
             imported_repo_repo.update_repository(
                 repo_id,
                 {
-                    "import_status": "failed",
+                    "import_status": ImportStatus.FAILED.value,
                     "last_sync_error": str(e),
                     "last_sync_status": "failed",
                     "last_synced_at": datetime.now(timezone.utc),
