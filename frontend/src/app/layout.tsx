@@ -4,6 +4,8 @@ import './globals.css'
 import { AuthProvider } from '@/contexts/auth-context'
 import { WebSocketProvider } from '@/contexts/websocket-context'
 
+import { Toaster } from "@/components/ui/toaster"
+
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
@@ -21,6 +23,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <AuthProvider>
           <WebSocketProvider>{children}</WebSocketProvider>
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

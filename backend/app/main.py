@@ -14,6 +14,7 @@ from app.api import (
     users,
     webhook,
     websockets,
+    logs,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
 
@@ -46,6 +47,7 @@ app.include_router(repos.router, prefix="/api", tags=["Repositories"])
 app.include_router(users.router, prefix="/api", tags=["Users"])
 app.include_router(webhook.router, prefix="/api", tags=["Webhooks"])
 app.include_router(websockets.router, prefix="/api", tags=["WebSockets"])
+app.include_router(logs.router, prefix="/api", tags=["Logs"])
 
 
 @app.get("/")
