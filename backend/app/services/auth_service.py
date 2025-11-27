@@ -35,9 +35,9 @@ class AuthService:
     ) -> GithubAuthorizeResponse:
         """Initiate GitHub OAuth flow by creating a state token."""
         oauth_state = create_oauth_state(self.db, redirect_url=payload.redirect_path)
-        authorize_url = build_authorize_url(oauth_state["_id"])
+        authorize_url = build_authorize_url(oauth_state["state"])
         return GithubAuthorizeResponse(
-            authorize_url=authorize_url, state=oauth_state["_id"]
+            authorize_url=authorize_url, state=oauth_state["state"]
         )
 
     async def handle_github_callback(

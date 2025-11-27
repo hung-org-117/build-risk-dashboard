@@ -68,12 +68,7 @@ def _is_test_file(path: str, language: str | None = None) -> bool:
         # Python: ends with .py AND (starts with test_ OR ends with _test.py OR is test.py OR contains test/ or tests/)
         if not path.endswith(".py"):
             return False
-        # Note: TravisTorrent Ruby regex for Python test files:
-        # path.match(/test_.+/i) or path.match(/.+_test/i) or path.match(/test.py/i) or path.match(/tests?\//i)
-        # This implies checking the full path for "test_" or "_test" which is broad, but we stick to it.
-        # However, usually these apply to filenames. The Ruby code `path.match` applies to the full path string.
 
-        # Check for test directories first
         if any(x in lowered for x in ["test/", "tests/"]):
             return True
 

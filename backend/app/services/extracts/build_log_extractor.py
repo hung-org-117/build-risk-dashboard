@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class BuildLogExtractor:
-    def __init__(self, log_dir: Path = Path("job_logs")):
+    def __init__(self, log_dir: Path = Path("../repo-data/job_logs")):
         self.log_dir = log_dir
         self.parser = TestLogParser()
 
@@ -80,7 +80,7 @@ class BuildLogExtractor:
         if workflow_run.conclusion == "failure":
             tr_status = "failed"
         elif workflow_run.conclusion == "cancelled":
-            tr_status = "errored"
+            tr_status = "cancelled"
         elif tests_failed_sum > 0:
             tr_status = "failed"
 

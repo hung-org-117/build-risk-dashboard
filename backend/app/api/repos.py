@@ -1,10 +1,6 @@
-"""Repository management endpoints."""
-
-from __future__ import annotations
-
 from typing import List
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status, Body
 from pymongo.database import Database
 
 from app.database.mongo import get_db
@@ -16,7 +12,6 @@ from app.dtos import (
     RepoSuggestionListResponse,
     RepoSearchResponse,
     RepoUpdateRequest,
-    LazySyncPreviewResponse,
 )
 from app.dtos.build import BuildListResponse, BuildDetail
 from app.middleware.auth import get_current_user
@@ -126,38 +121,8 @@ def update_repository_settings(
     return service.update_repository_settings(repo_id, payload, current_user)
 
 
-@router.get("/{repo_id}/lazy-sync-preview", response_model=LazySyncPreviewResponse)
-def get_lazy_sync_preview(
-    repo_id: str,
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Check for updates on GitHub without full sync."""
-    service = RepositoryService(db)
-    # Verify access implicitly via service or explicit check if needed
-    # Service methods usually handle their own checks or we do it here.
-    # For now, we rely on service to fetch repo and we might want to check ownership.
-    # But get_lazy_sync_preview in service does fetch repo.
-    # Let's add ownership check in service or here.
-    # Service's get_lazy_sync_preview currently doesn't check user_id, let's check here.
-
-    # Actually, service.get_lazy_sync_preview just reads.
-    # Ideally we should check if user has access.
-    # Let's trust the service to find the repo, but we should verify ownership.
-    # Since I didn't add user_id check in service for this method, I'll do it here or update service.
-    # For consistency, let's just call service.
-    # Wait, I should probably verify ownership.
-    # Let's assume for now public repos might be viewable by anyone?
-    # No, this is "ImportedRepository", so it belongs to a user.
-
-    # Let's quick fix: I'll just call the service.
-    # If I need to enforce ownership, I should have done it in service.
-    # I'll proceed with calling service.
-    return service.get_lazy_sync_preview(repo_id)
-
-
-@router.post("/{repo_id}/lazy-sync-run")
-def trigger_lazy_sync(
+@router.post("/{repo_id}/sync-run")
+def trigger_sync(
     repo_id: str,
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
@@ -165,7 +130,7 @@ def trigger_lazy_sync(
     """Trigger a manual sync for the repository."""
     user_id = str(current_user["_id"])
     service = RepositoryService(db)
-    return service.trigger_lazy_sync(repo_id, user_id)
+    return service.trigger_sync(repo_id, user_id)
 
 
 @router.get(
@@ -204,3 +169,170 @@ def get_build_detail(
 
         raise HTTPException(status_code=404, detail="Build not found")
     return build
+
+
+# --- SonarQube Integration Endpoints ---
+
+
+@router.post("/{repo_id}/sonar/config")
+async def update_sonar_config(
+    repo_id: str,
+    payload: dict = Body(..., embed=True),  # Expect {"content": "..."}
+    db: Database = Depends(get_db),
+):
+    """Update sonar-project.properties content for the repository."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    content = payload.get("content")
+    if content is None:
+        raise HTTPException(status_code=400, detail="Content is required")
+
+    success = service.update_config(repo_id, content)
+    if not success:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return {"status": "success"}
+
+
+@router.get("/{repo_id}/sonar/config")
+async def get_sonar_config(
+    repo_id: str,
+    db: Database = Depends(get_db),
+):
+    """Get sonar-project.properties content."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    content = service.get_config(repo_id)
+    return {"content": content or ""}
+
+
+@router.get("/{repo_id}/sonar/jobs")
+async def list_scan_jobs(
+    repo_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Database = Depends(get_db),
+):
+    """List scan jobs for the repository."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    return service.list_jobs(repo_id, skip, limit)
+
+
+@router.post("/{repo_id}/builds/{build_id}/scan")
+async def trigger_build_scan(
+    repo_id: str,
+    build_id: str,
+    db: Database = Depends(get_db),
+):
+    """Trigger a SonarQube scan for a specific build."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    try:
+        job = service.trigger_scan(build_id)
+        return {"status": "queued", "job_id": str(job.id)}
+    except ValueError as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=500, detail=str(e))
+
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    try:
+        job = service.retry_job(job_id)
+        return {"status": "queued", "job_id": str(job.id)}
+    except ValueError as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/sonar/jobs/{job_id}/retry")
+async def retry_scan_job(
+    job_id: str,
+    payload: dict = Body(default={"config_override": None}),
+    db: Database = Depends(get_db),
+):
+    """Retry a failed scan job."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    try:
+        config_override = payload.get("config_override")
+        job = service.retry_job(job_id, config_override=config_override)
+        return {"status": "queued", "job_id": str(job.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{repo_id}/sonar/results")
+async def list_scan_results(
+    repo_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Database = Depends(get_db),
+):
+    """List scan results (metrics) for the repository."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    return service.list_results(repo_id, skip, limit)
+
+
+@router.get("/{repo_id}/sonar/failed")
+async def list_failed_scans(
+    repo_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Database = Depends(get_db),
+):
+    """List failed scans that need attention."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    return service.list_failed_scans(repo_id, skip, limit)
+
+
+@router.put("/sonar/failed/{failed_scan_id}/config")
+async def update_failed_scan_config(
+    failed_scan_id: str,
+    payload: dict = Body(..., embed=True),  # {"content": "..."}
+    db: Database = Depends(get_db),
+):
+    """Update configuration override for a failed scan."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    content = payload.get("content")
+    if content is None:
+        raise HTTPException(status_code=400, detail="Content is required")
+
+    try:
+        failed_scan = service.update_failed_scan_config(failed_scan_id, content)
+        return {"status": "success", "failed_scan_id": str(failed_scan.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/sonar/failed/{failed_scan_id}/retry")
+async def retry_failed_scan(
+    failed_scan_id: str,
+    db: Database = Depends(get_db),
+):
+    """Retry a failed scan with its configuration override."""
+    from app.services.sonar_service import SonarService
+
+    service = SonarService(db)
+    try:
+        result = service.retry_failed_scan(failed_scan_id)
+        return {"status": "queued", "job_id": str(result.id)}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

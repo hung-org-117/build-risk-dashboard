@@ -43,6 +43,15 @@ class BuildDetail(BuildSummary):
     # Logs
     error_message: Optional[str] = None
 
+    # New Git Features
+    git_prev_commit_resolution_status: Optional[str] = None
+    git_prev_built_commit: Optional[str] = None
+    tr_prev_build: Optional[int] = None
+    gh_team_size: Optional[int] = None
+    git_num_all_built_commits: Optional[int] = None
+    gh_by_core_team_member: Optional[bool] = None
+    gh_num_commits_on_files_touched: Optional[int] = None
+
 
 class BuildListResponse(BaseModel):
     items: List[BuildSummary]

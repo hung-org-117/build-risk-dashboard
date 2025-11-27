@@ -1,13 +1,8 @@
-"""
-Application configuration
-"""
-
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 
 
 class Settings(BaseSettings):
-    """Application settings"""
 
     # Application
     APP_NAME: str = "Build Risk Assessment"
@@ -60,6 +55,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
+    # SonarQube
+    SONAR_HOST_URL: str = "http://localhost:9000"
+    SONAR_TOKEN: str = ""
+    SONAR_DEFAULT_PROJECT_KEY: str = "build-risk-ui"
+    SONAR_WEBHOOK_SECRET: str = "change-me-change-me"
+    SONAR_WEBHOOK_PUBLIC_URL: str = "http://localhost:8000/api/sonar/webhook"
 
     class Config:
         env_file = ".env"

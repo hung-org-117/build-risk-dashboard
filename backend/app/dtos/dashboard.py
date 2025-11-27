@@ -18,6 +18,7 @@ class DashboardTrendPoint(BaseModel):
 
 
 class RepoDistributionEntry(BaseModel):
+    id: str
     repository: str
     builds: int
 

@@ -67,5 +67,4 @@ logs/
 # OS
 Thumbs.db
 
-backend/job_logs
-backend/repos
+repo-data/

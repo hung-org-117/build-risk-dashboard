@@ -78,7 +78,9 @@ def get_installation_token(installation_id: str | None = None, db=None) -> str:
         )
 
     if db is not None:
-        installation_doc = db.github_installations.find_one({"_id": installation_id})
+        installation_doc = db.github_installations.find_one(
+            {"installation_id": installation_id}
+        )
         if installation_doc:
             if installation_doc.get("revoked_at") or installation_doc.get(
                 "uninstalled_at"

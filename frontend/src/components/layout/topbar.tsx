@@ -51,9 +51,9 @@ export function Topbar() {
     if (signingOut) return
     setSigningOut(true)
     try {
-      await integrationApi.revokeGithubToken()
+      await integrationApi.logout()
     } catch (err) {
-      console.error('Failed to revoke GitHub token during logout', err)
+      console.error('Failed to logout', err)
     } finally {
       await refresh()
       router.replace('/login')

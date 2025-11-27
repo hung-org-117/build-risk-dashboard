@@ -109,7 +109,6 @@ export default function RepoBuildsPage() {
     const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
 
     // Lazy Sync State
-    const [syncPreview, setSyncPreview] = useState<LazySyncPreviewResponse | null>(null);
     const [syncing, setSyncing] = useState(false);
 
     const { subscribe } = useWebSocket();
@@ -124,14 +123,7 @@ export default function RepoBuildsPage() {
         }
     }, [repoId]);
 
-    const loadSyncPreview = useCallback(async () => {
-        try {
-            const preview = await reposApi.getLazySyncPreview(repoId);
-            setSyncPreview(preview);
-        } catch (err) {
-            console.error("Failed to load sync preview", err);
-        }
-    }, [repoId]);
+
 
     const handleSync = async () => {
         setSyncing(true);
@@ -139,13 +131,20 @@ export default function RepoBuildsPage() {
             await reposApi.triggerLazySync(repoId);
             // Optimistically update UI or show a toast
             // For now, we rely on WebSocket or polling to update the list eventually
-            // But we can update the preview state to hide the banner temporarily
-            setSyncPreview(prev => prev ? { ...prev, has_updates: false } : null);
         } catch (err) {
             console.error("Failed to trigger sync", err);
             setError("Failed to trigger sync.");
         } finally {
             setSyncing(false);
+        }
+    };
+
+    const handleScan = async (buildId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        try {
+            await reposApi.triggerScan(repoId, buildId);
+        } catch (err) {
+            console.error("Failed to trigger scan", err);
         }
     };
 
@@ -178,11 +177,7 @@ export default function RepoBuildsPage() {
         loadBuilds(1, true);
     }, [loadRepo, loadBuilds]);
 
-    useEffect(() => {
-        if (repo && !repo.installation_id) {
-            loadSyncPreview();
-        }
-    }, [repo, loadSyncPreview]);
+
 
     // WebSocket connection
     useEffect(() => {
@@ -243,40 +238,34 @@ export default function RepoBuildsPage() {
                         </p>
                     </div>
                 </div>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSync}
+                        disabled={syncing || (repo?.installation_id ? true : false)}
+                        title={repo?.installation_id ? "Sync is managed by GitHub App" : "Sync builds from GitHub"}
+                    >
+                        {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                        Sync Builds
+                    </Button>
+                </div>
             </div>
 
-            {error ? (
-                <Card className="border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
-                    <CardHeader>
-                        <CardTitle className="text-red-700 dark:text-red-300">
-                            Error
-                        </CardTitle>
-                        <CardDescription>{error}</CardDescription>
-                    </CardHeader>
-                </Card>
-            ) : null}
+            {
+                error ? (
+                    <Card className="border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
+                        <CardHeader>
+                            <CardTitle className="text-red-700 dark:text-red-300">
+                                Error
+                            </CardTitle>
+                            <CardDescription>{error}</CardDescription>
+                        </CardHeader>
+                    </Card>
+                ) : null
+            }
 
-            {syncPreview?.has_updates && (
-                <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
-                    <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                    <AlertTitle className="text-blue-800 dark:text-blue-300">Updates Available</AlertTitle>
-                    <AlertDescription className="flex items-center justify-between text-blue-700 dark:text-blue-400">
-                        <span>
-                            There are {syncPreview.new_runs_count ? `~${syncPreview.new_runs_count}` : "new"} workflow runs on GitHub that haven't been imported yet.
-                        </span>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="ml-4 border-blue-300 hover:bg-blue-100 dark:border-blue-700 dark:hover:bg-blue-900"
-                            onClick={handleSync}
-                            disabled={syncing}
-                        >
-                            {syncing ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-2 h-3 w-3" />}
-                            Sync Now
-                        </Button>
-                    </AlertDescription>
-                </Alert>
-            )}
+
 
             <Card>
                 <CardHeader>
@@ -292,6 +281,9 @@ export default function RepoBuildsPage() {
                                 <tr>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Build #
+                                    </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
+                                        Workflow ID
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Status
@@ -334,6 +326,9 @@ export default function RepoBuildsPage() {
                                             <td className="px-6 py-4 font-medium">
                                                 #{build.build_number}
                                             </td>
+                                            <td className="px-6 py-4 font-mono text-xs text-muted-foreground">
+                                                {build.workflow_run_id}
+                                            </td>
                                             <td className="px-6 py-4">
                                                 <StatusBadge status={build.status} />
                                             </td>
@@ -365,6 +360,14 @@ export default function RepoBuildsPage() {
                                                     }}
                                                 >
                                                     View
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="ml-2"
+                                                    onClick={(e) => handleScan(build.id, e)}
+                                                >
+                                                    Scan
                                                 </Button>
                                             </td>
                                         </tr>
@@ -417,6 +420,6 @@ export default function RepoBuildsPage() {
                 buildId={selectedBuildId}
                 onClose={() => setSelectedBuildId(null)}
             />
-        </div>
+        </div >
     );
 }

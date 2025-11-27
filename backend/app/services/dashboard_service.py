@@ -44,7 +44,9 @@ class DashboardService:
             repo_id = repo["_id"]
             build_count = self.build_collection.count_documents({"repo_id": repo_id})
             repo_distribution.append(
-                RepoDistributionEntry(repository=repo["full_name"], builds=build_count)
+                RepoDistributionEntry(
+                    id=str(repo_id), repository=repo["full_name"], builds=build_count
+                )
             )
 
         # Sort by builds desc

@@ -32,7 +32,6 @@ from .repository import (
     RepoSuggestion,
     RepoSuggestionListResponse,
     RepoUpdateRequest,
-    LazySyncPreviewResponse,
 )
 from .user import (
     OAuthIdentityResponse,
@@ -64,7 +63,6 @@ __all__ = [
     "RepoSuggestion",
     "RepoSuggestionListResponse",
     "RepoUpdateRequest",
-    "LazySyncPreviewResponse",
     # User
     "OAuthIdentityResponse",
     "UserResponse",

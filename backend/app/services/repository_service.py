@@ -1,10 +1,9 @@
 import logging
 from app.models.entities.imported_repository import ImportStatus
-from typing import List, Optional
+from typing import List
 
 from bson import ObjectId
 from fastapi import HTTPException, status
-from fastapi.encoders import jsonable_encoder
 from pymongo.database import Database
 
 from app.dtos import (
@@ -15,17 +14,15 @@ from app.dtos import (
     RepoSuggestionListResponse,
     RepoUpdateRequest,
     RepoSearchResponse,
-    LazySyncPreviewResponse,
 )
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from app.repositories.available_repository import AvailableRepositoryRepository
 from app.repositories.imported_repository import ImportedRepositoryRepository
 from app.services.github.github_client import (
-    get_app_github_client,
     get_public_github_client,
+    get_user_github_client,
 )
 from app.services.github.github_sync import sync_user_available_repos
-from app.services.github.exceptions import GithubConfigurationError
 from app.tasks.ingestion import import_repo
 
 
@@ -71,16 +68,44 @@ class RepositoryService:
 
             if available_repo and available_repo.get("installation_id"):
                 installation_id = available_repo.get("installation_id")
+            # Note: For public repositories found via search, available_repo might be None.
+            # This is expected, and we will create the AvailableRepository record during ingestion.
 
-            if not installation_id and self.repo_repo.find_one(
-                {
-                    "user_id": ObjectId(target_user_id),
-                    "provider": payload.provider,
-                    "full_name": payload.full_name,
-                }
-            ):
-                # Skip or log
-                continue
+            # Note: For public repositories found via search, available_repo might be None.
+            # If so, we need to fetch it and create the AvailableRepository record.
+            if not available_repo:
+                try:
+                    with get_public_github_client() as gh:
+                        repo_data = gh.get_repository(payload.full_name)
+
+                        # Create AvailableRepository record
+                        new_available_repo = {
+                            "user_id": ObjectId(user_id),
+                            "full_name": payload.full_name,
+                            "github_id": repo_data.get("id"),
+                            "private": bool(repo_data.get("private")),
+                            "html_url": repo_data.get("html_url"),
+                            "description": repo_data.get("description"),
+                            "default_branch": repo_data.get("default_branch", "main"),
+                            "language": repo_data.get("language"),
+                            "metadata": repo_data,
+                            "installation_id": None,
+                            "imported": False,
+                            "created_at": datetime.now(timezone.utc),
+                            "updated_at": datetime.now(timezone.utc),
+                        }
+                        self.db.available_repositories.insert_one(new_available_repo)
+                        available_repo = new_available_repo
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to fetch public repo details for {payload.full_name}: {e}"
+                    )
+                    # If we can't fetch it, we can't import it properly.
+                    continue
+
+            # We allow re-importing to retry failed imports or update settings.
+            # The upsert_repository below will handle updates.
 
             try:
                 repo_doc = self.repo_repo.upsert_repository(
@@ -123,10 +148,7 @@ class RepositoryService:
         try:
             sync_user_available_repos(self.db, user_id)
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to sync repositories: {str(e)}",
-            )
+            logger.error(f"Failed to sync repositories: {e}")
 
         items = self.available_repo_repo.discover_available_repositories(
             user_id=user_id, q=None, limit=limit
@@ -165,7 +187,7 @@ class RepositoryService:
         # 2. Search public repos (GitHub API) - only if query is long enough
         if q and len(q) >= 3:
             try:
-                with get_public_github_client() as gh:
+                with get_user_github_client(self.db, user_id) as gh:
                     # Search for public repos matching the query
                     # We use 'in:name,description' and 'is:public' to narrow down
                     query = f"{q} in:name,description is:public"
@@ -180,12 +202,11 @@ class RepositoryService:
                                 "private": False,
                                 "owner": repo["owner"]["login"],
                                 "html_url": repo["html_url"],
-                                "installation_id": None,  # Public repos don't need installation_id
+                                "installation_id": None,
                             }
                         )
             except Exception as e:
-                logger.warning(f"Failed to search public repos: {e}")
-                # Don't fail the whole request, just return empty public matches
+                logger.error(f"Failed to search public repos: {e}")
 
         return RepoSearchResponse(
             private_matches=private_matches, public_matches=public_matches
@@ -242,106 +263,7 @@ class RepositoryService:
 
         return _serialize_repo_detail(updated)
 
-    def get_lazy_sync_preview(self, repo_id: str) -> LazySyncPreviewResponse:
-        """
-        Check if a repository has updates on GitHub without performing a full sync.
-        Uses caching to avoid hitting GitHub API too frequently.
-        """
-        repo_doc = self.repo_repo.find_by_id(ObjectId(repo_id))
-        if not repo_doc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
-            )
-
-        # 0. If repo is installed via GitHub App, we rely on webhooks, so no lazy sync needed.
-        if repo_doc.installation_id:
-            return LazySyncPreviewResponse(
-                has_updates=False,
-                last_synced_at=repo_doc.last_synced_at,
-                last_remote_check_at=repo_doc.last_remote_check_at,
-                last_sync_status=repo_doc.last_sync_status,
-            )
-
-        # 1. Check cache (last_remote_check_at)
-        now = datetime.now(timezone.utc)
-        last_check = repo_doc.last_remote_check_at
-
-        # If checked recently (e.g., < 5 minutes), return cached status
-        # For now, we don't have a separate "has_updates" field in DB,
-        # so we infer it or just return "no updates" if cached.
-        # A better approach: if cached, we assume no *new* updates since last check
-        # unless we store "updates_available" flag.
-        # For simplicity in this MVP: if cached, we just return what we know.
-        if last_check and (now - last_check) < timedelta(minutes=5):
-            return LazySyncPreviewResponse(
-                has_updates=False,  # We assume user would have synced if they cared
-                last_synced_at=repo_doc.last_synced_at,
-                last_remote_check_at=repo_doc.last_remote_check_at,
-                last_sync_status=repo_doc.last_sync_status,
-            )
-
-        # 2. Call GitHub API to check for new runs
-        has_updates = False
-        new_runs_count = 0
-
-        try:
-            # Determine client (App or Public)
-            if repo_doc.installation_id:
-                client_context = get_app_github_client(
-                    self.db, repo_doc.installation_id
-                )
-            else:
-                client_context = get_public_github_client()
-
-            with client_context as gh:
-                # Fetch latest workflow runs (limit 5)
-                runs = gh.list_workflow_runs(repo_doc.full_name, limit=5)
-
-                if runs:
-                    latest_remote_run = runs[0]
-                    latest_remote_created_at = datetime.fromisoformat(
-                        latest_remote_run["created_at"].replace("Z", "+00:00")
-                    )
-
-                    latest_synced = repo_doc.latest_synced_run_created_at
-                    if latest_synced:
-                        # Ensure timezone awareness for comparison
-                        if latest_synced.tzinfo is None:
-                            latest_synced = latest_synced.replace(tzinfo=timezone.utc)
-
-                        if latest_remote_created_at > latest_synced:
-                            has_updates = True
-                            # Estimate count
-                            new_runs_count = sum(
-                                1
-                                for r in runs
-                                if datetime.fromisoformat(
-                                    r["created_at"].replace("Z", "+00:00")
-                                )
-                                > latest_synced
-                            )
-                    else:
-                        # If never synced runs, but runs exist
-                        has_updates = True
-                        new_runs_count = len(runs)
-
-            # 3. Update last_remote_check_at
-            self.repo_repo.update_repository(repo_id, {"last_remote_check_at": now})
-
-        except Exception as e:
-            logger.error(f"Failed to preview updates for {repo_id}: {e}")
-            # Return last known state with error indication if needed
-            pass
-
-        return LazySyncPreviewResponse(
-            has_updates=has_updates,
-            new_runs_count=new_runs_count if has_updates else 0,
-            last_synced_at=repo_doc.last_synced_at,
-            last_remote_check_at=now,
-            last_sync_status=repo_doc.last_sync_status,
-        )
-
-    def trigger_lazy_sync(self, repo_id: str, user_id: str):
+    def trigger_sync(self, repo_id: str, user_id: str):
         """Trigger a full sync for a specific repository."""
         repo_doc = self.repo_repo.find_by_id(ObjectId(repo_id))
         if not repo_doc:

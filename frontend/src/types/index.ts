@@ -1,3 +1,34 @@
+export interface SonarConfig {
+  content: string;
+}
+
+export interface ScanResult {
+  id: string;
+  repo_id: string;
+  job_id: string;
+  sonar_project_key: string;
+  metrics: Record<string, string | number>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FailedScan {
+  id: string;
+  repo_id: string;
+  build_id: string;
+  job_id: string;
+  commit_sha: string;
+  reason: string;
+  error_type: string;
+  status: string;
+  config_override?: string;
+  config_source?: string;
+  retry_count: number;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Build {
   id: string;
   build_number: number;
@@ -53,6 +84,7 @@ export interface DashboardTrendPoint {
 }
 
 export interface RepoDistributionEntry {
+  id: string;
   repository: string;
   builds: number;
 }
@@ -84,7 +116,55 @@ export interface RepositoryRecord {
 }
 
 export interface RepoDetail extends RepositoryRecord {
+  description?: string;
+  html_url?: string;
+  sonar_config?: string;
   metadata?: Record<string, any>;
+}
+
+export enum ScanJobStatus {
+  PENDING = "pending",
+  RUNNING = "running",
+  SUCCESS = "success",
+  FAILED = "failed",
+}
+
+export enum TestFramework {
+  PYTEST = "pytest",
+  UNITTEST = "unittest",
+  RSPEC = "rspec",
+  MINITEST = "minitest",
+  TESTUNIT = "testunit",
+  CUCUMBER = "cucumber",
+  JUNIT = "junit",
+  TESTNG = "testng",
+}
+
+export enum SourceLanguage {
+  PYTHON = "python",
+  RUBY = "ruby",
+  JAVA = "java",
+}
+
+export enum CIProvider {
+  GITHUB_ACTIONS = "github_actions",
+  TRAVIS_CI = "travis_ci",
+}
+
+export interface ScanJob {
+  id: string;
+  repo_id: string;
+  build_id: string;
+  commit_sha: string;
+  status: ScanJobStatus;
+  worker_id?: string;
+  started_at?: string;
+  finished_at?: string;
+  sonar_component_key?: string;
+  error_message?: string;
+  logs?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface RepoListResponse {

@@ -84,11 +84,3 @@ class RepoSuggestionListResponse(BaseModel):
 class RepoSearchResponse(BaseModel):
     private_matches: List[RepoSuggestion]
     public_matches: List[RepoSuggestion]
-
-
-class LazySyncPreviewResponse(BaseModel):
-    has_updates: bool
-    new_runs_count: int | None = None
-    last_synced_at: datetime | None = None
-    last_remote_check_at: datetime | None = None
-    last_sync_status: str | None = None

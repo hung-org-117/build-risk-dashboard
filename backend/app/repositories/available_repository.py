@@ -48,6 +48,8 @@ class AvailableRepositoryRepository(BaseRepository[AvailableRepository]):
             "html_url": repo_data["html_url"],
             "description": repo_data.get("description"),
             "default_branch": repo_data.get("default_branch", "main"),
+            "language": repo_data.get("language"),
+            "metadata": repo_data,
             "updated_at": now,
         }
 

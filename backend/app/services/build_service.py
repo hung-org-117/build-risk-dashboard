@@ -105,6 +105,14 @@ class BuildService:
             gh_repo_num_commits=sample.gh_repo_num_commits,
             gh_sloc=sample.gh_sloc,
             error_message=sample.error_message,
+            # New Git Features
+            git_prev_commit_resolution_status=sample.git_prev_commit_resolution_status,
+            git_prev_built_commit=sample.git_prev_built_commit,
+            tr_prev_build=sample.tr_prev_build,
+            gh_team_size=sample.gh_team_size,
+            git_num_all_built_commits=sample.git_num_all_built_commits,
+            gh_by_core_team_member=sample.gh_by_core_team_member,
+            gh_num_commits_on_files_touched=sample.gh_num_commits_on_files_touched,
         )
 
     def get_recent_builds(self, limit: int = 10) -> List[BuildSummary]:
@@ -143,3 +151,19 @@ class BuildService:
                 )
             )
         return items
+
+    def trigger_sonar_scan_direct(self, build_id: str):
+        from app.tasks.sonar import run_sonar_scan
+
+        # Verify build exists
+        if not self.build_collection.find_one({"_id": ObjectId(build_id)}):
+            raise ValueError("Build not found")
+
+        # Trigger Celery task
+        run_sonar_scan.delay(build_id)
+
+        # Update status
+        self.build_collection.update_one(
+            {"_id": ObjectId(build_id)}, {"$set": {"sonar_scan_status": "queued"}}
+        )
+        return True

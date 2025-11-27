@@ -1,5 +1,6 @@
 """Repository entity - represents a tracked repository"""
 
+from typing import Optional
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List
@@ -16,21 +17,21 @@ class Provider(str, Enum):
 
 class TestFramework(str, Enum):
 
-    PYTEST = "PYTEST"
-    UNITTEST = "UNITTEST"
-    RSPEC = "RSPEC"
-    MINITEST = "MINITEST"
-    TESTUNIT = "TESTUNIT"
-    CUCUMBER = "CUCUMBER"
-    JUNIT = "JUNIT"
-    TESTNG = "TESTNG"
+    PYTEST = "pytest"
+    UNITTEST = "unittest"
+    RSPEC = "rspec"
+    MINITEST = "minitest"
+    TESTUNIT = "testunit"
+    CUCUMBER = "cucumber"
+    JUNIT = "junit"
+    TESTNG = "testng"
 
 
 class SourceLanguage(str, Enum):
 
-    PYTHON = "PYTHON"
-    RUBY = "RUBY"
-    JAVA = "JAVA"
+    PYTHON = "python"
+    RUBY = "ruby"
+    JAVA = "java"
 
 
 class CIProvider(str, Enum):
@@ -70,7 +71,10 @@ class ImportedRepository(BaseEntity):
     notes: str | None = None
 
     # Lazy Sync Fields
-    last_synced_at: datetime | None = None
+    last_synced_at: Optional[datetime] = None
+
+    # SonarQube Configuration
+    sonar_config: Optional[str] = None  # Content of sonar-project.properties
     last_sync_status: str | None = None  # "success", "failed"
     last_remote_check_at: datetime | None = None
     latest_synced_run_created_at: datetime | None = None

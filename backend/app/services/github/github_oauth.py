@@ -62,7 +62,7 @@ def create_oauth_state(db: Database, redirect_url: Optional[str] = None) -> dict
     _require_github_credentials()
     state = uuid.uuid4().hex
     document = {
-        "_id": state,
+        "state": state,
         "redirect_url": redirect_url,
         "created_at": datetime.now(timezone.utc),
         "used": False,
@@ -77,7 +77,7 @@ async def exchange_code_for_token(
 ) -> Tuple[OAuthIdentity, Optional[str]]:
     _require_github_credentials()
 
-    oauth_state = db.github_states.find_one({"_id": state, "used": False})
+    oauth_state = db.github_states.find_one({"state": state, "used": False})
     if not oauth_state:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -178,7 +178,7 @@ async def exchange_code_for_token(
         connected_at=datetime.now(timezone.utc),
     )
     db.github_states.update_one(
-        {"_id": state},
+        {"state": state},
         {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}},
     )
 

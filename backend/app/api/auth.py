@@ -86,11 +86,6 @@ async def github_oauth_callback(
         path="/",
     )
 
-    # Append token to query string in debug mode for convenience
-    if settings.DEBUG and "token=" not in redirect_target:
-        sep = "?" if "?" not in redirect_target else "&"
-        response.headers["location"] = f"{redirect_target}{sep}token={jwt_token}"
-
     return response
 
 
@@ -152,3 +147,22 @@ async def verify_auth_status(
 ):
     service = AuthService(db)
     return await service.verify_auth_status(user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response):
+    """Logout user by clearing authentication cookies."""
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+    )

@@ -1,10 +1,5 @@
-import sys
 import unittest
-from unittest.mock import MagicMock, patch
-
-# Mock jellyfish before importing GitFeatureExtractor
-sys.modules["jellyfish"] = MagicMock()
-
+from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 from app.services.extracts.git_feature_extractor import GitFeatureExtractor
 from app.models.entities.imported_repository import ImportedRepository

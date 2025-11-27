@@ -194,6 +194,14 @@ class GitHubClient:
         repos = self._rest_request("GET", "/user/repos", params=params)
         return repos if isinstance(repos, list) else []
 
+    def list_user_installations(self) -> List[Dict[str, Any]]:
+        """List installations accessible to the user access token."""
+        response = self._rest_request("GET", "/user/installations")
+        installations = (
+            response.get("installations", []) if isinstance(response, dict) else []
+        )
+        return installations
+
     def search_repositories(
         self, query: str, per_page: int = 10
     ) -> List[Dict[str, Any]]:

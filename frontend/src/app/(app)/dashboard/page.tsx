@@ -174,9 +174,9 @@ export default function DashboardPage() {
                 ) : (
                   summary.repo_distribution.map((repo) => (
                     <tr
-                      key={repo.repository}
+                      key={repo.id}
                       className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/50"
-                      onClick={() => router.push(`/admin/repos`)}
+                      onClick={() => router.push(`/admin/repos/${repo.id}/builds`)}
                     >
                       <td className="px-6 py-4 text-sm font-medium text-foreground">
                         {repo.repository}

@@ -1,11 +1,8 @@
-"""Ingestion tasks for repository backfill"""
-
 from app.models.entities.imported_repository import ImportStatus
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
 from bson import ObjectId
-import os
 from pathlib import Path
 import time
 
@@ -21,8 +18,8 @@ from app.models.entities.workflow_run import WorkflowRunRaw
 
 logger = logging.getLogger(__name__)
 
-LOG_DIR = Path("job_logs")
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR = Path("../repo-data/job_logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @celery_app.task(
@@ -45,7 +42,6 @@ def import_repo(
     from app.config import settings
     import redis
 
-    imported_repo_repo = ImportedRepositoryRepository(self.db)
     imported_repo_repo = ImportedRepositoryRepository(self.db)
     workflow_run_repo = WorkflowRunRepository(self.db)
     redis_client = redis.from_url(settings.REDIS_URL)
@@ -119,7 +115,17 @@ def import_repo(
             client_context = get_public_github_client()
 
         with client_context as gh:
-            repo_data = gh.get_repository(full_name)
+            # Try to get data from available_repo first to avoid re-fetching
+            available_repo = self.db.available_repositories.find_one(
+                {"user_id": ObjectId(user_id), "full_name": full_name}
+            )
+
+            repo_data = None
+            if available_repo and available_repo.get("metadata"):
+                repo_data = available_repo.get("metadata")
+
+            if not repo_data:
+                repo_data = gh.get_repository(full_name)
 
             imported_repo_repo.update_repository(
                 repo_id=repo_id,
@@ -148,6 +154,15 @@ def import_repo(
             total_runs = 0
             latest_run_created_at = None
             runs_to_process = []
+
+            # Get the latest synced run timestamp from the DB to avoid re-processing
+            current_repo_doc = imported_repo_repo.find_by_id(repo_id)
+            last_synced_run_ts = None
+            if current_repo_doc and current_repo_doc.latest_synced_run_created_at:
+                last_synced_run_ts = current_repo_doc.latest_synced_run_created_at
+                # Ensure timezone awareness
+                if last_synced_run_ts.tzinfo is None:
+                    last_synced_run_ts = last_synced_run_ts.replace(tzinfo=timezone.utc)
 
             # Metadata Collection (Newest -> Oldest)
             for run in gh.paginate_workflow_runs(
@@ -188,10 +203,31 @@ def import_repo(
                 )
 
                 existing = workflow_run_repo.find_by_repo_and_run_id(repo_id, run_id)
-                if not existing:
-                    workflow_run_repo.insert_one(workflow_run)
+
+                if existing:
+                    if (
+                        existing.status != workflow_run.status
+                        or existing.conclusion != workflow_run.conclusion
+                    ):
+                        workflow_run_repo.update_one(
+                            str(existing.id),
+                            {
+                                "status": workflow_run.status,
+                                "conclusion": workflow_run.conclusion,
+                                "updated_at": workflow_run.updated_at,
+                            },
+                        )
+
+                    if (
+                        last_synced_run_ts
+                        and workflow_run.created_at <= last_synced_run_ts
+                    ):
+                        logger.info(
+                            f"Reached previously synced run {run_id} ({workflow_run.created_at}). Stopping backfill."
+                        )
+                        break
                 else:
-                    pass
+                    workflow_run_repo.insert_one(workflow_run)
 
                 run_created_at = workflow_run.created_at
                 if (
@@ -269,14 +305,9 @@ def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str
     full_name = repo.full_name
     installation_id = repo.installation_id
 
-    full_name = repo.full_name
-    installation_id = repo.installation_id
-
-    # Determine which client to use
     if installation_id:
         client_context = get_app_github_client(self.db, installation_id)
     else:
-        # Public repo import using system tokens
         from app.services.github.github_client import get_public_github_client
 
         client_context = get_public_github_client()

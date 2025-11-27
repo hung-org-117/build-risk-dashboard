@@ -36,3 +36,17 @@ def get_github_installation(
 ):
     service = IntegrationService(db)
     return service.get_github_installation(installation_id)
+
+
+@router.post(
+    "/github/sync",
+    response_model=GithubInstallationListResponse,
+    response_model_by_alias=False,
+)
+def sync_github_installations(
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Sync GitHub App installations from GitHub API."""
+    service = IntegrationService(db)
+    return service.sync_installations(current_user["_id"])

@@ -62,7 +62,7 @@ def _handle_installation_event(
     if action == "created":
         # User installed the app
         db.github_installations.update_one(
-            {"_id": installation_id},
+            {"installation_id": installation_id},
             {
                 "$set": {
                     "installation_id": installation_id,
@@ -73,7 +73,7 @@ def _handle_installation_event(
                     "suspended_at": None,
                     "metadata": installation,
                 },
-                "$setOnInsert": {"_id": installation_id, "created_at": now},
+                "$setOnInsert": {"created_at": now},
             },
             upsert=True,
         )
@@ -83,14 +83,14 @@ def _handle_installation_event(
             "installation_id": installation_id,
         }
 
-    elif action == "created" or action == "added" or action == "removed":
+    elif action == "added" or action == "removed":
         # For installation_repositories event, action is 'added' or 'removed'
         pass
 
     elif action == "deleted":
         # User uninstalled the app
         db.github_installations.update_one(
-            {"_id": installation_id},
+            {"installation_id": installation_id},
             {"$set": {"revoked_at": now, "uninstalled_at": now}},
         )
         # Clear cached token
@@ -104,7 +104,7 @@ def _handle_installation_event(
 
     elif action == "suspend":
         db.github_installations.update_one(
-            {"_id": installation_id}, {"$set": {"suspended_at": now}}
+            {"installation_id": installation_id}, {"$set": {"suspended_at": now}}
         )
 
         clear_installation_token(installation_id)
@@ -116,7 +116,7 @@ def _handle_installation_event(
 
     elif action == "unsuspend":
         db.github_installations.update_one(
-            {"_id": installation_id}, {"$set": {"suspended_at": None}}
+            {"installation_id": installation_id}, {"$set": {"suspended_at": None}}
         )
         return {
             "status": "processed",

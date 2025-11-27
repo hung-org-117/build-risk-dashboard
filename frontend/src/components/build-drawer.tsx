@@ -153,6 +153,12 @@ export function BuildDrawer({ repoId, buildId, onClose }: BuildDrawerProps) {
 
                                         <div className="grid grid-cols-2 gap-4 rounded-lg border p-4 sm:grid-cols-4">
                                             <div>
+                                                <p className="text-xs text-muted-foreground">Workflow ID</p>
+                                                <p className="font-medium font-mono text-xs mt-1">
+                                                    {build.workflow_run_id}
+                                                </p>
+                                            </div>
+                                            <div>
                                                 <p className="text-xs text-muted-foreground">Duration</p>
                                                 <p className="font-medium">
                                                     {build.duration ? `${build.duration.toFixed(1)}s` : "—"}
@@ -167,9 +173,15 @@ export function BuildDrawer({ repoId, buildId, onClose }: BuildDrawerProps) {
                                                 <p className="font-medium">{build.num_tests ?? "—"}</p>
                                             </div>
                                             <div>
-                                                <p className="text-xs text-muted-foreground">Repo Age</p>
+                                                <p className="text-xs text-muted-foreground">Commit Age</p>
                                                 <p className="font-medium">
                                                     {build.gh_repo_age ? `${build.gh_repo_age.toFixed(1)} days` : "—"}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-muted-foreground">Total Commits</p>
+                                                <p className="font-medium">
+                                                    {build.gh_repo_num_commits ?? "—"}
                                                 </p>
                                             </div>
                                         </div>

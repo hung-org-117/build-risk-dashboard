@@ -1,7 +1,6 @@
 import logging
 import shutil
 import subprocess
-import jellyfish
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -24,8 +23,8 @@ from app.services.extracts.diff_analyzer import (
 
 logger = logging.getLogger(__name__)
 
-REPOS_DIR = Path("repos")
-REPOS_DIR.mkdir(exist_ok=True)
+REPOS_DIR = Path("../repo-data/repos")
+REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class GitFeatureExtractor:

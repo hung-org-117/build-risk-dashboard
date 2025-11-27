@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
     AlertCircle,
@@ -15,12 +15,16 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { reposApi } from "@/lib/api";
-import type {
+import { integrationApi, reposApi } from "@/lib/api";
+import {
     RepoSuggestion,
     RepoImportPayload,
+    TestFramework,
+    SourceLanguage,
+    CIProvider,
 } from "@/types";
 import { useAuth } from "@/contexts/auth-context";
+import { useDebounce } from "@/hooks/use-debounce";
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
     const [mounted, setMounted] = useState(false);
@@ -43,6 +47,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     const [step, setStep] = useState<1 | 2>(1);
     const [searchTerm, setSearchTerm] = useState("");
     const [isSearching, setIsSearching] = useState(false);
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
+    const lastSearchedTerm = useRef<string | null>(null);
 
     // Search results
     const [privateMatches, setPrivateMatches] = useState<RepoSuggestion[]>([]);
@@ -62,16 +68,30 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     const [importing, setImporting] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
 
+    const performSearch = useCallback(async (query: string, force = false) => {
+        if (!force && query === lastSearchedTerm.current) return;
+        lastSearchedTerm.current = query;
+
+        setIsSearching(true);
+        setSearchError(null);
+        try {
+            const data = await reposApi.search(query.trim() || undefined);
+            setPrivateMatches(data.private_matches);
+            setPublicMatches(data.public_matches);
+        } catch (err) {
+            console.error(err);
+            setSearchError("Failed to search repositories.");
+        } finally {
+            setIsSearching(false);
+        }
+    }, []);
+
     // Debounce search
     useEffect(() => {
-        const timer = setTimeout(() => {
-            if (isOpen) {
-                performSearch(searchTerm);
-            }
-        }, 500);
-
-        return () => clearTimeout(timer);
-    }, [searchTerm, isOpen]);
+        if (isOpen && debouncedSearchTerm === searchTerm) {
+            performSearch(debouncedSearchTerm);
+        }
+    }, [debouncedSearchTerm, isOpen, searchTerm, performSearch]);
 
     // Reset state on open
     useEffect(() => {
@@ -85,31 +105,16 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setSearchError(null);
             setImportError(null);
             // Initial load (empty search)
-            performSearch("");
+            performSearch("", true);
         }
-    }, [isOpen]);
-
-    const performSearch = async (query: string) => {
-        setIsSearching(true);
-        setSearchError(null);
-        try {
-            const data = await reposApi.search(query.trim() || undefined);
-            setPrivateMatches(data.private_matches);
-            setPublicMatches(data.public_matches);
-        } catch (err) {
-            console.error(err);
-            setSearchError("Failed to search repositories.");
-        } finally {
-            setIsSearching(false);
-        }
-    };
+    }, [isOpen, performSearch]);
 
     const handleSync = async () => {
         setIsSearching(true);
         try {
             await reposApi.sync();
             // Re-run search to update list
-            await performSearch(searchTerm);
+            await performSearch(searchTerm, true);
         } catch (err) {
             console.error(err);
             setSearchError("Failed to sync repositories from GitHub.");
@@ -136,7 +141,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                     [repo.full_name]: {
                         test_frameworks: [],
                         source_languages: [],
-                        ci_provider: "github_actions",
+                        ci_provider: CIProvider.GITHUB_ACTIONS,
                     },
                 }));
             }
@@ -175,8 +180,65 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
         }
     };
 
-    const { status } = useAuth();
-    const appInstalled = status?.app_installed;
+    const { status, refresh } = useAuth();
+    const [isAppInstalled, setIsAppInstalled] = useState(false);
+    const [isPolling, setIsPolling] = useState(false);
+
+    // Check installation status on mount and when status changes
+    useEffect(() => {
+        if (status?.app_installed) {
+            setIsAppInstalled(true);
+        } else {
+            checkInstallation();
+        }
+    }, [status]);
+
+    const checkInstallation = async () => {
+        try {
+            const response = await integrationApi.syncInstallations();
+
+            if (response.installations.length > 0) {
+                setIsAppInstalled(true);
+            }
+        } catch (error) {
+            console.error("Failed to check installation status", error);
+        }
+    };
+
+    const handleInstallApp = () => {
+        window.open("https://github.com/apps/builddefection", "_blank");
+        setIsPolling(true);
+    };
+
+    // Polling logic
+    useEffect(() => {
+        let intervalId: NodeJS.Timeout;
+        let attempts = 0;
+        const maxAttempts = 24; // 2 minutes (5s interval)
+
+        if (isPolling && !isAppInstalled) {
+            intervalId = setInterval(async () => {
+                attempts++;
+                await checkInstallation();
+
+                // If installed (checked via effect on status) or max attempts reached
+                if (attempts >= maxAttempts) {
+                    setIsPolling(false);
+                }
+            }, 5000);
+        }
+
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [isPolling, isAppInstalled]);
+
+    // Stop polling if installed
+    useEffect(() => {
+        if (isAppInstalled) {
+            setIsPolling(false);
+        }
+    }, [isAppInstalled]);
 
     if (!isOpen) return null;
 
@@ -200,7 +262,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         </button>
                     </div>
 
-                    {!appInstalled && (
+                    {!isAppInstalled ? (
                         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20">
                             <div className="flex items-start gap-3">
                                 <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
@@ -211,14 +273,43 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
                                         To import private repositories and enable automatic build tracking, you must install the BuildGuard GitHub App.
                                     </p>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="mt-3 border-amber-200 bg-white text-amber-900 hover:bg-amber-50 hover:text-amber-900 dark:border-amber-800 dark:bg-slate-950 dark:text-amber-200 dark:hover:bg-amber-900/20"
-                                        onClick={() => window.open("https://github.com/apps/builddefection", "_blank")}
-                                    >
-                                        Install GitHub App
-                                    </Button>
+                                    <div className="mt-3 flex items-center gap-3">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="border-amber-200 bg-white text-amber-900 hover:bg-amber-50 hover:text-amber-900 dark:border-amber-800 dark:bg-slate-950 dark:text-amber-200 dark:hover:bg-amber-900/20"
+                                            onClick={handleInstallApp}
+                                            disabled={isPolling}
+                                        >
+                                            {isPolling ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Checking installation...
+                                                </>
+                                            ) : (
+                                                "Install GitHub App"
+                                            )}
+                                        </Button>
+                                        {isPolling && (
+                                            <span className="text-xs text-amber-700 dark:text-amber-300 animate-pulse">
+                                                Listening for installation...
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-900/20">
+                            <div className="flex items-center gap-3">
+                                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                                <div>
+                                    <h3 className="text-sm font-medium text-green-900 dark:text-green-200">
+                                        GitHub App Connected
+                                    </h3>
+                                    <p className="text-sm text-green-700 dark:text-green-300">
+                                        Your private repositories are ready to be imported.
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -444,7 +535,7 @@ function RepoConfigItem({
                         <div>
                             <span className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Python</span>
                             <div className="grid grid-cols-2 gap-2">
-                                {["PYTEST", "UNITTEST"].map((fw) => (
+                                {[TestFramework.PYTEST, TestFramework.UNITTEST].map((fw) => (
                                     <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
                                         <input
                                             type="checkbox"
@@ -462,7 +553,7 @@ function RepoConfigItem({
                         <div>
                             <span className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Ruby</span>
                             <div className="grid grid-cols-2 gap-2">
-                                {["RSPEC", "MINITEST", "TESTUNIT", "CUCUMBER"].map((fw) => (
+                                {[TestFramework.RSPEC, TestFramework.MINITEST, TestFramework.TESTUNIT, TestFramework.CUCUMBER].map((fw) => (
                                     <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
                                         <input
                                             type="checkbox"
@@ -480,7 +571,7 @@ function RepoConfigItem({
                         <div>
                             <span className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Java</span>
                             <div className="grid grid-cols-2 gap-2">
-                                {["JUNIT", "TESTNG"].map((fw) => (
+                                {[TestFramework.JUNIT, TestFramework.TESTNG].map((fw) => (
                                     <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
                                         <input
                                             type="checkbox"
@@ -501,7 +592,7 @@ function RepoConfigItem({
                         Source Languages
                     </label>
                     <div className="grid grid-cols-2 gap-2">
-                        {["PYTHON", "RUBY", "JAVA"].map((lang) => (
+                        {[SourceLanguage.PYTHON, SourceLanguage.RUBY, SourceLanguage.JAVA].map((lang) => (
                             <label key={lang} className="flex items-center gap-2 text-sm cursor-pointer">
                                 <input
                                     type="checkbox"
@@ -525,7 +616,7 @@ function RepoConfigItem({
                     value={config.ci_provider}
                     onChange={(e) => onChange({ ...config, ci_provider: e.target.value })}
                 >
-                    <option value="github_actions">GitHub Actions</option>
+                    <option value={CIProvider.GITHUB_ACTIONS}>GitHub Actions</option>
                 </select>
             </div>
         </div>

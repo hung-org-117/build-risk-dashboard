@@ -15,6 +15,7 @@ from app.api import (
     webhook,
     websockets,
     logs,
+    sonar,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
 
@@ -48,6 +49,7 @@ app.include_router(users.router, prefix="/api", tags=["Users"])
 app.include_router(webhook.router, prefix="/api", tags=["Webhooks"])
 app.include_router(websockets.router, prefix="/api", tags=["WebSockets"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
+app.include_router(sonar.router, prefix="/api/sonar", tags=["SonarQube"])
 
 
 @app.get("/")
@@ -60,7 +62,6 @@ async def root():
     }
 
 
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+@app.on_event("startup")
+async def startup_event():
+    pass
