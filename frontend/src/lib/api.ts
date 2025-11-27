@@ -118,6 +118,7 @@ export const buildApi = {
     params?: {
       skip?: number;
       limit?: number;
+      q?: string;
     }
   ) => {
     const response = await api.get<BuildListResponse>(`/repos/${repoId}/builds`, {
@@ -135,7 +136,7 @@ export const buildApi = {
 };
 
 export const reposApi = {
-  list: async (params?: { skip?: number; limit?: number }) => {
+  list: async (params?: { skip?: number; limit?: number; q?: string }) => {
     const response = await api.get<RepoListResponse>("/repos/", { params });
     return response.data;
   },

@@ -56,13 +56,14 @@ def bulk_import_repositories(
 def list_repositories(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
+    q: str | None = Query(default=None, description="Search query"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """List tracked repositories with pagination."""
     user_id = str(current_user["_id"])
     service = RepositoryService(db)
-    return service.list_repositories(user_id, skip, limit)
+    return service.list_repositories(user_id, skip, limit, q)
 
 
 @router.get("/search", response_model=RepoSearchResponse)
@@ -142,12 +143,13 @@ def get_repo_builds(
     repo_id: str = Path(..., description="Repository id (Mongo ObjectId)"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
+    q: str | None = Query(default=None, description="Search query"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """List builds for a repository."""
     service = BuildService(db)
-    return service.get_builds_by_repo(repo_id, skip, limit)
+    return service.get_builds_by_repo(repo_id, skip, limit, q)
 
 
 @router.get(

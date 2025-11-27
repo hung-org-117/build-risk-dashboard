@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     CELERY_BROKER_HEARTBEAT: int = 30
 
     # Repository mirrors / schedulers
-    REPO_MIRROR_ROOT: str = "./repo-mirrors"
-    ARTIFACTS_ROOT: str = "./artifacts"
+    REPO_MIRROR_ROOT: str = "../repo-data/repo-mirrors"
+    ARTIFACTS_ROOT: str = "../repo-data/artifacts"
     WORKFLOW_POLL_INTERVAL_MINUTES: int = 15
 
     # Security

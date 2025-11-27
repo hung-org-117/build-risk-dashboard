@@ -67,4 +67,4 @@ logs/
 # OS
 Thumbs.db
 
-repo-data/
+repo-data/*

@@ -40,6 +40,8 @@ export interface Build {
   num_jobs?: number;
   num_tests?: number;
   workflow_run_id: number;
+  error_message?: string;
+  is_missing_commit?: boolean;
 }
 
 export interface BuildDetail extends Build {

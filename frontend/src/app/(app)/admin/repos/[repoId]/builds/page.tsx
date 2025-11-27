@@ -10,6 +10,8 @@ import {
     RefreshCw,
     AlertCircle,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -30,8 +32,6 @@ import { formatDurationFromSeconds, formatTimestamp } from "@/lib/utils";
 import type { Build, RepoDetail, LazySyncPreviewResponse } from "@/types";
 
 const PAGE_SIZE = 20;
-
-
 
 function StatusBadge({ status }: { status: string }) {
     switch (status.toLowerCase()) {
@@ -108,6 +108,10 @@ export default function RepoBuildsPage() {
     const [total, setTotal] = useState(0);
     const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
 
+    // Search state
+    const [searchQuery, setSearchQuery] = useState("");
+    const debouncedSearchQuery = useDebounce(searchQuery, 500);
+
     // Lazy Sync State
     const [syncing, setSyncing] = useState(false);
 
@@ -122,8 +126,6 @@ export default function RepoBuildsPage() {
             setError("Unable to load repository details.");
         }
     }, [repoId]);
-
-
 
     const handleSync = async () => {
         setSyncing(true);
@@ -157,6 +159,7 @@ export default function RepoBuildsPage() {
                 const data = await buildApi.getByRepo(repoId, {
                     skip: (pageNumber - 1) * PAGE_SIZE,
                     limit: PAGE_SIZE,
+                    q: debouncedSearchQuery || undefined,
                 });
                 setBuilds(data.items);
                 setTotal(data.total);
@@ -169,15 +172,13 @@ export default function RepoBuildsPage() {
                 setTableLoading(false);
             }
         },
-        [repoId]
+        [repoId, debouncedSearchQuery]
     );
 
     useEffect(() => {
         loadRepo();
         loadBuilds(1, true);
     }, [loadRepo, loadBuilds]);
-
-
 
     // WebSocket connection
     useEffect(() => {
@@ -239,6 +240,14 @@ export default function RepoBuildsPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    <div className="relative w-64">
+                        <Input
+                            placeholder="Search builds..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="h-9"
+                        />
+                    </div>
                     <Button
                         variant="outline"
                         size="sm"
@@ -330,7 +339,14 @@ export default function RepoBuildsPage() {
                                                 {build.workflow_run_id}
                                             </td>
                                             <td className="px-6 py-4">
-                                                <StatusBadge status={build.status} />
+                                                <div className="flex items-center gap-2">
+                                                    <StatusBadge status={build.status} />
+                                                    {(build.is_missing_commit || (build.error_message && build.error_message.startsWith("Warning:"))) && (
+                                                        <div title={build.error_message || "Missing commit"} className="text-yellow-500">
+                                                            <AlertCircle className="h-4 w-4" />
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-1 font-mono text-xs">

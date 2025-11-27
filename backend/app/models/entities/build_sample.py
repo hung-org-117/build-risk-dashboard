@@ -9,6 +9,7 @@ class BuildSample(BaseEntity):
     workflow_run_id: int
     status: str = "pending"  # pending, completed, failed
     error_message: str | None = None
+    is_missing_commit: bool = False
 
     # Log features
     tr_build_id: int | None = None

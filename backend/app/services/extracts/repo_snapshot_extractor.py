@@ -22,7 +22,7 @@ from pymongo.database import Database
 
 logger = logging.getLogger(__name__)
 
-REPOS_DIR = Path("repos")
+REPOS_DIR = Path("../repo-data/repos")
 
 
 class RepoSnapshotExtractor:
@@ -58,6 +58,14 @@ class RepoSnapshotExtractor:
             # Should have been cloned by diff extractor, but ensure it exists
             with repo_lock(str(repo.id)):
                 self._ensure_repo(repo, repo_path)
+
+        if not self._commit_exists(repo_path, commit_sha):
+            logger.warning(f"Commit {commit_sha} not found in {repo.full_name}")
+            result = self._empty_result()
+            result["extraction_warning"] = (
+                "Snapshot features missing: Commit not found (orphan/fork)"
+            )
+            return result
 
         try:
             # 1. History metrics (Age, Num Commits)
@@ -131,6 +139,18 @@ class RepoSnapshotExtractor:
             check=True,
         )
         return result.stdout.strip()
+
+    def _commit_exists(self, cwd: Path, sha: str) -> bool:
+        try:
+            subprocess.run(
+                ["git", "cat-file", "-e", sha],
+                cwd=cwd,
+                check=True,
+                capture_output=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
 
     def _get_history_metrics(
         self, repo_path: Path, commit_sha: str

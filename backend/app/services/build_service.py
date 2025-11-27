@@ -15,9 +15,20 @@ class BuildService:
         self.workflow_collection = db["workflow_runs"]
 
     def get_builds_by_repo(
-        self, repo_id: str, skip: int = 0, limit: int = 20
+        self, repo_id: str, skip: int = 0, limit: int = 20, q: Optional[str] = None
     ) -> BuildListResponse:
         query = {"repo_id": ObjectId(repo_id)}
+
+        if q:
+            # Try to match build number (int) or commit SHA/status (str)
+            or_conditions = []
+            if q.isdigit():
+                or_conditions.append({"tr_build_number": int(q)})
+
+            or_conditions.append({"tr_original_commit": {"$regex": q, "$options": "i"}})
+            or_conditions.append({"status": {"$regex": q, "$options": "i"}})
+
+            query["$or"] = or_conditions
 
         total = self.build_collection.count_documents(query)
         cursor = (

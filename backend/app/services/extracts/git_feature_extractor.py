@@ -50,7 +50,11 @@ class GitFeatureExtractor:
 
             if not self._commit_exists(repo_path, commit_sha):
                 logger.warning(f"Commit {commit_sha} not found in {repo.full_name}")
-                return self._empty_result()
+                result = self._empty_result()
+                result["extraction_warning"] = (
+                    "Git features missing: Commit not found (orphan/fork)"
+                )
+                return result
 
             git_repo = Repo(str(repo_path))
 

@@ -16,6 +16,9 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { useDebounce } from "@/hooks/use-debounce";
+
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -72,6 +75,10 @@ export default function AdminReposPage() {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 500);
+
   // Panel state
   const [panelRepo, setPanelRepo] = useState<RepoDetail | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
@@ -93,6 +100,7 @@ export default function AdminReposPage() {
         const data = await reposApi.list({
           skip: (pageNumber - 1) * PAGE_SIZE,
           limit: PAGE_SIZE,
+          q: debouncedSearchQuery || undefined,
         });
         setRepositories(data.items);
         setTotal(data.total);
@@ -106,7 +114,7 @@ export default function AdminReposPage() {
         setTableLoading(false);
       }
     },
-    []
+    [debouncedSearchQuery]
   );
 
   // WebSocket connection
@@ -235,9 +243,19 @@ export default function AdminReposPage() {
               Connect GitHub repositories and ingest builds.
             </CardDescription>
           </div>
-          <Button onClick={() => setModalOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" /> Add GitHub Repository
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="relative w-64">
+              <Input
+                placeholder="Search repositories..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <Button onClick={() => setModalOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" /> Add GitHub Repository
+            </Button>
+          </div>
         </CardHeader>
       </Card>
 

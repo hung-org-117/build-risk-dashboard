@@ -23,14 +23,22 @@ class ImportedRepositoryRepository(BaseRepository[ImportedRepository]):
         return self.find_one({"provider": provider, "full_name": full_name})
 
     def list_by_user(
-        self, user_id: Optional[str] = None, skip: int = 0, limit: int = 0
+        self,
+        user_id: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 0,
+        query: Optional[Dict[str, Any]] = None,
     ) -> tuple[List[ImportedRepository], int]:
         """List repositories for a user or all if no user specified, with pagination metadata."""
-        query: Dict[str, Any] = {}
+        final_query: Dict[str, Any] = {}
         if user_id is not None:
-            query["user_id"] = self._to_object_id(user_id)
+            final_query["user_id"] = self._to_object_id(user_id)
+
+        if query:
+            final_query.update(query)
+
         return self.paginate(
-            query, sort=[("created_at", -1)], skip=skip, limit=limit
+            final_query, sort=[("created_at", -1)], skip=skip, limit=limit
         )
 
     def update_repository(

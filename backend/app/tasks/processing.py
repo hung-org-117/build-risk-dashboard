@@ -160,7 +160,11 @@ def extract_git_features(self: PipelineTask, build_id: str) -> Dict[str, Any]:
 
     # Save features immediately so they are available for subsequent tasks in the chain
     if features:
-        build_sample_repo.update_one(build_id, features)
+        # Remove warning before saving to DB
+        features_to_save = features.copy()
+        features_to_save.pop("extraction_warning", None)
+        if features_to_save:
+            build_sample_repo.update_one(build_id, features_to_save)
 
     return features
 
@@ -248,12 +252,22 @@ def finalize_build_sample(
     merged_updates = {}
     errors = []
 
+    warnings = []
     for result in results:
         if isinstance(result, dict):
             if "error" in result:
                 errors.append(result["error"])
-            else:
-                merged_updates.update(result)
+            if "extraction_warning" in result:
+                warnings.append(result["extraction_warning"])
+
+            # Merge updates (excluding special keys)
+            clean_result = {
+                k: v
+                for k, v in result.items()
+                if k not in ["error", "extraction_warning"]
+            }
+            merged_updates.update(clean_result)
+
         elif isinstance(result, Exception):
             errors.append(str(result))
 
@@ -263,7 +277,12 @@ def finalize_build_sample(
         merged_updates["status"] = status
         merged_updates["error_message"] = error_message
     else:
-        merged_updates["status"] = "completed"
+        status = "completed"
+        merged_updates["status"] = status
+        if warnings:
+            merged_updates["error_message"] = "Warning: " + "; ".join(warnings)
+            if any("Commit not found (orphan/fork)" in w for w in warnings):
+                merged_updates["is_missing_commit"] = True
 
     build_sample_repo.update_one(build_id, merged_updates)
 

@@ -17,6 +17,8 @@ class BuildSummary(BaseModel):
     duration: Optional[float] = None
     num_jobs: Optional[int] = None
     num_tests: Optional[int] = None
+    error_message: Optional[str] = None
+    is_missing_commit: bool = False
 
     # Workflow info
     workflow_run_id: int

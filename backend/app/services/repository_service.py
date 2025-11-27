@@ -1,6 +1,6 @@
 import logging
 from app.models.entities.imported_repository import ImportStatus
-from typing import List
+from typing import List, Optional
 
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -156,10 +156,16 @@ class RepositoryService:
         return RepoSuggestionListResponse(items=items)
 
     def list_repositories(
-        self, user_id: str, skip: int, limit: int
+        self, user_id: str, skip: int, limit: int, q: Optional[str] = None
     ) -> RepoListResponse:
         """List tracked repositories with pagination."""
-        repos, total = self.repo_repo.list_by_user(user_id, skip=skip, limit=limit)
+        query = {}
+        if q:
+            query["full_name"] = {"$regex": q, "$options": "i"}
+
+        repos, total = self.repo_repo.list_by_user(
+            user_id, skip=skip, limit=limit, query=query
+        )
         return RepoListResponse(
             total=total,
             skip=skip,
