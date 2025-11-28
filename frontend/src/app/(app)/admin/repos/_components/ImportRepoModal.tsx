@@ -348,7 +348,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                 {/* Private Repos Section */}
                                 <div>
                                     <h3 className="mb-3 text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                        <Lock className="h-3 w-3" /> Your Private Repositories (App Installed)
+                                        <Lock className="h-3 w-3" /> Your Repositories (App Installed)
                                     </h3>
                                     <div className="space-y-2">
                                         {privateMatches.length === 0 && !isSearching ? (

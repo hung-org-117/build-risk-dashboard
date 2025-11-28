@@ -20,6 +20,7 @@ from app.services.extracts.diff_analyzer import (
     _is_source_file,
     _is_test_file,
 )
+from app.services.commit_replay import ensure_commit_exists
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,13 @@ class GitFeatureExtractor:
                 self._ensure_repo(repo, repo_path)
                 self._run_git(repo_path, ["fetch", "origin"])
 
-            if not self._commit_exists(repo_path, commit_sha):
+                # Ensure commit exists (handle forks)
+                token = self._get_token(repo)
+                effective_sha = ensure_commit_exists(
+                    repo_path, commit_sha, repo.full_name, token
+                )
+
+            if not effective_sha:
                 logger.warning(f"Commit {commit_sha} not found in {repo.full_name}")
                 result = self._empty_result()
                 result["extraction_warning"] = (
@@ -59,7 +66,7 @@ class GitFeatureExtractor:
             git_repo = Repo(str(repo_path))
 
             build_stats = self._calculate_build_stats(
-                build_sample, git_repo, repo.full_name
+                build_sample, git_repo, repo.full_name, effective_sha
             )
             # Calculate team stats
             team_stats = self._calculate_team_stats(
@@ -67,6 +74,7 @@ class GitFeatureExtractor:
                 git_repo,
                 repo,
                 build_stats.get("git_all_built_commits", []),
+                effective_sha,
             )
 
             diff_stats = {}
@@ -79,7 +87,7 @@ class GitFeatureExtractor:
                         repo_path,
                         built_commits,
                         prev_built_commit,
-                        commit_sha,
+                        effective_sha,
                         source_lang.value.lower(),
                     )
 
@@ -200,16 +208,14 @@ class GitFeatureExtractor:
                 shutil.rmtree(repo_path)
 
         auth_url = f"https://github.com/{repo.full_name}.git"
+        token = self._get_token(repo)
 
-        if repo.installation_id:
-            token = get_installation_token(repo.installation_id, self.db)
-            auth_url = f"https://x-access-token:{token}@github.com/{repo.full_name}.git"
-        else:
-            from app.config import settings
-
-            tokens = settings.GITHUB_TOKENS
-            if tokens and tokens[0]:
-                token = tokens[0]
+        if token:
+            if repo.installation_id:
+                auth_url = (
+                    f"https://x-access-token:{token}@github.com/{repo.full_name}.git"
+                )
+            else:
                 auth_url = f"https://{token}@github.com/{repo.full_name}.git"
 
         logger.info(f"Cloning {repo.full_name} to {repo_path}")
@@ -218,6 +224,17 @@ class GitFeatureExtractor:
             check=True,
             capture_output=True,
         )
+
+    def _get_token(self, repo: ImportedRepository) -> Optional[str]:
+        if repo.installation_id:
+            return get_installation_token(repo.installation_id, self.db)
+        else:
+            from app.config import settings
+
+            tokens = settings.GITHUB_TOKENS
+            if tokens and tokens[0]:
+                return tokens[0]
+        return None
 
     def _run_git(self, cwd: Path, args: List[str]) -> str:
         result = subprocess.run(
@@ -242,9 +259,8 @@ class GitFeatureExtractor:
             return False
 
     def _calculate_build_stats(
-        self, build_sample: BuildSample, repo: Repo, repo_slug: str
+        self, build_sample: BuildSample, repo: Repo, repo_slug: str, commit_sha: str
     ) -> Dict[str, Any]:
-        commit_sha = build_sample.tr_original_commit
         try:
             build_commit = repo.commit(commit_sha)
         except Exception:
@@ -306,6 +322,7 @@ class GitFeatureExtractor:
         git_repo: Repo,
         db_repo: ImportedRepository,
         built_commits: List[str],
+        commit_sha: str,
         chunk_size=50,
     ) -> Dict[str, Any]:
         if not built_commits:
@@ -334,8 +351,10 @@ class GitFeatureExtractor:
 
         # Check if the build trigger author is in the core team
         is_core_member = False
+        # Check if the build trigger author is in the core team
+        is_core_member = False
         try:
-            trigger_commit = git_repo.commit(build_sample.tr_original_commit)
+            trigger_commit = git_repo.commit(commit_sha)
             author_name = trigger_commit.author.name
             committer_name = trigger_commit.committer.name
 

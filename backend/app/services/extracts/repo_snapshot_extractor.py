@@ -19,6 +19,7 @@ from app.services.extracts.diff_analyzer import (
 from app.services.github.github_app import get_installation_token
 from app.utils.locking import repo_lock
 from pymongo.database import Database
+from app.services.commit_replay import ensure_commit_exists
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,13 @@ class RepoSnapshotExtractor:
             with repo_lock(str(repo.id)):
                 self._ensure_repo(repo, repo_path)
 
-        if not self._commit_exists(repo_path, commit_sha):
+        # Ensure commit exists (handle forks)
+        token = self._get_token(repo)
+        effective_sha = ensure_commit_exists(
+            repo_path, commit_sha, repo.full_name, token
+        )
+
+        if not effective_sha:
             logger.warning(f"Commit {commit_sha} not found in {repo.full_name}")
             result = self._empty_result()
             result["extraction_warning"] = (
@@ -69,14 +76,14 @@ class RepoSnapshotExtractor:
 
         try:
             # 1. History metrics (Age, Num Commits)
-            age, num_commits = self._get_history_metrics(repo_path, commit_sha)
+            age, num_commits = self._get_history_metrics(repo_path, effective_sha)
 
             # 2. Snapshot metrics (SLOC, Tests) using worktree
             # Lock during worktree operations as they modify .git/worktrees
             with repo_lock(str(repo.id)):
                 for source_lang in repo.source_languages:
                     snapshot_metrics = self._analyze_snapshot(
-                        repo_path, commit_sha, source_lang.value.lower()
+                        repo_path, effective_sha, source_lang.value.lower()
                     )
 
             return {
@@ -111,16 +118,14 @@ class RepoSnapshotExtractor:
             return
 
         auth_url = f"https://github.com/{repo.full_name}.git"
+        token = self._get_token(repo)
 
-        if repo.installation_id:
-            token = get_installation_token(repo.installation_id, self.db)
-            auth_url = f"https://x-access-token:{token}@github.com/{repo.full_name}.git"
-        else:
-            from app.config import settings
-
-            tokens = settings.GITHUB_TOKENS
-            if tokens and tokens[0]:
-                token = tokens[0]
+        if token:
+            if repo.installation_id:
+                auth_url = (
+                    f"https://x-access-token:{token}@github.com/{repo.full_name}.git"
+                )
+            else:
                 auth_url = f"https://{token}@github.com/{repo.full_name}.git"
 
         logger.info(f"Cloning {repo.full_name} to {repo_path}")
@@ -129,6 +134,17 @@ class RepoSnapshotExtractor:
             check=True,
             capture_output=True,
         )
+
+    def _get_token(self, repo: ImportedRepository) -> str | None:
+        if repo.installation_id:
+            return get_installation_token(repo.installation_id, self.db)
+        else:
+            from app.config import settings
+
+            tokens = settings.GITHUB_TOKENS
+            if tokens and tokens[0]:
+                return tokens[0]
+        return None
 
     def _run_git(self, cwd: Path, args: List[str]) -> str:
         result = subprocess.run(
