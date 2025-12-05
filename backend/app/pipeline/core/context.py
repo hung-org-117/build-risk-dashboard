@@ -8,7 +8,7 @@ The context flows through all feature nodes and accumulates:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 from enum import Enum
 
 if TYPE_CHECKING:
@@ -80,6 +80,9 @@ class ExecutionContext:
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
+    # Feature selection (optional)
+    requested_features: Optional[Set[str]] = None
+
     def get_resource(self, name: str) -> Any:
         """Get a resource by name. Raises KeyError if not found."""
         if name not in self.resources:
@@ -142,3 +145,14 @@ class ExecutionContext:
         if not self.warnings:
             return None
         return "; ".join(self.warnings)
+
+    def is_feature_requested(self, feature_name: str) -> bool:
+        """
+        Check whether a feature is part of the requested set.
+        None means all features are requested (default).
+        """
+        return (
+            True
+            if self.requested_features is None
+            else feature_name in self.requested_features
+        )

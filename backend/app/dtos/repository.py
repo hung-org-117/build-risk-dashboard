@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.entities.imported_repository import SourceLanguage
 from app.models.entities.imported_repository import TestFramework
 from app.models.entities.imported_repository import CIProvider
 from app.models.entities.base import PyObjectIdStr
@@ -20,6 +19,15 @@ class RepoImportRequest(BaseModel):
     test_frameworks: Optional[List[str]] = Field(default=None)
     source_languages: Optional[List[str]] = Field(default=None)
     ci_provider: Optional[str] = Field(default=None)
+    features: Optional[List[str]] = Field(
+        default=None, description="Specific features to extract for this repo"
+    )
+    max_builds: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=1000,
+        description="Max number of latest workflow runs/builds to ingest",
+    )
 
 
 class RepoResponse(BaseModel):
@@ -36,10 +44,13 @@ class RepoResponse(BaseModel):
     installation_id: Optional[str] = None
     ci_provider: CIProvider = CIProvider.GITHUB_ACTIONS
     test_frameworks: List[TestFramework] = Field(default_factory=list)
-    source_languages: List[SourceLanguage] = Field(default_factory=list)
+    source_languages: List[str] = Field(default_factory=list)
     total_builds_imported: int = 0
     last_sync_error: Optional[str] = None
     notes: Optional[str] = None
+    requested_features: List[str] = Field(default_factory=list)
+    max_builds_to_ingest: Optional[int] = None
+    # Always detect languages; no toggle exposed
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -65,6 +76,8 @@ class RepoUpdateRequest(BaseModel):
     source_languages: Optional[List[str]] = None
     default_branch: Optional[str] = None
     notes: Optional[str] = None
+    features: Optional[List[str]] = None
+    max_builds: Optional[int] = Field(default=None, ge=1, le=1000)
 
 
 class RepoSuggestion(BaseModel):

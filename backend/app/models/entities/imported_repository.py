@@ -3,7 +3,7 @@
 from typing import Optional
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .base import BaseEntity, PyObjectId
 
@@ -27,13 +27,6 @@ class TestFramework(str, Enum):
     TESTNG = "testng"
 
 
-class SourceLanguage(str, Enum):
-
-    PYTHON = "python"
-    RUBY = "ruby"
-    JAVA = "java"
-
-
 class CIProvider(str, Enum):
 
     GITHUB_ACTIONS = "github_actions"
@@ -48,12 +41,6 @@ class ImportStatus(str, Enum):
     FAILED = "failed"
 
 
-class ImportSource(str, Enum):
-    """Source of repository import."""
-    MAIN = "main"          # Imported via main flow (/repos) - only once
-    DATASET = "dataset"    # Imported via dataset builder - can be reused
-
-
 class ImportedRepository(BaseEntity):
     user_id: PyObjectId | None = None
     provider: Provider = Provider.GITHUB
@@ -65,7 +52,8 @@ class ImportedRepository(BaseEntity):
     main_lang: str | None = None
 
     test_frameworks: List[TestFramework] = []
-    source_languages: List[SourceLanguage] = []
+    # Stored as lower-case strings to support arbitrary languages detected from GitHub
+    source_languages: List[str] = []
 
     ci_provider: CIProvider = CIProvider.GITHUB_ACTIONS
     installation_id: str | None = None
@@ -85,8 +73,9 @@ class ImportedRepository(BaseEntity):
     last_remote_check_at: datetime | None = None
     latest_synced_run_created_at: datetime | None = None
 
-    # Import Source - distinguishes main flow vs dataset builder imports
-    import_source: ImportSource = ImportSource.MAIN
+    # Pipeline customization
+    requested_features: List[str] = []
+    max_builds_to_ingest: Optional[int] = None
 
     # Metadata
     metadata: Dict[str, Any] = {}

@@ -142,11 +142,19 @@ export enum TestFramework {
   TESTNG = "testng",
 }
 
-export enum SourceLanguage {
-  PYTHON = "python",
-  RUBY = "ruby",
-  JAVA = "java",
-}
+export type SourceLanguage = string;
+
+export const SOURCE_LANGUAGE_PRESETS: SourceLanguage[] = [
+  "python",
+  "ruby",
+  "java",
+  "javascript",
+  "typescript",
+  "go",
+  "php",
+  "c++",
+  "c#",
+];
 
 export enum CIProvider {
   GITHUB_ACTIONS = "github_actions",
@@ -211,6 +219,8 @@ export interface RepoImportPayload {
   test_frameworks?: string[];
   source_languages?: string[];
   ci_provider?: string;
+  features?: string[];
+  max_builds?: number | null;
 }
 
 export interface RepoUpdatePayload {
@@ -219,6 +229,32 @@ export interface RepoUpdatePayload {
   source_languages?: string[];
   default_branch?: string;
   notes?: string;
+  features?: string[];
+  max_builds?: number | null;
+}
+
+export interface FeatureDefinitionSummary {
+  id: string;
+  name: string;
+  display_name: string;
+  description: string;
+  category: string;
+  source: string;
+  extractor_node: string;
+  depends_on_features: string[];
+  depends_on_resources: string[];
+  data_type: string;
+  nullable: boolean;
+  is_active: boolean;
+  is_deprecated: boolean;
+  is_ml_feature: boolean;
+  example_value?: string | null;
+  unit?: string | null;
+}
+
+export interface FeatureListResponse {
+  total: number;
+  items: FeatureDefinitionSummary[];
 }
 
 export interface DashboardSummaryResponse {

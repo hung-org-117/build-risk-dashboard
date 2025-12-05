@@ -123,6 +123,8 @@ class RepositoryService:
                         "ci_provider": payload.ci_provider,
                         "import_status": ImportStatus.QUEUED.value,
                         "import_source": ImportSource.MAIN.value,
+                        "requested_features": payload.features,
+                        "max_builds_to_ingest": payload.max_builds,
                     },
                 )
 
@@ -135,6 +137,8 @@ class RepositoryService:
                     test_frameworks=payload.test_frameworks,
                     source_languages=payload.source_languages,
                     ci_provider=payload.ci_provider,
+                    features=payload.features,
+                    max_builds=payload.max_builds,
                 )
 
                 results.append(repo_doc)
@@ -260,6 +264,11 @@ class RepositoryService:
             )
 
         updates = payload.model_dump(exclude_unset=True)
+        # Map user-facing keys to stored fields
+        if "features" in updates:
+            updates["requested_features"] = updates.pop("features")
+        if "max_builds" in updates:
+            updates["max_builds_to_ingest"] = updates.pop("max_builds")
 
         if not updates:
             updated = repo_doc
@@ -300,6 +309,8 @@ class RepositoryService:
             test_frameworks=repo_doc.test_frameworks,
             source_languages=repo_doc.source_languages,
             ci_provider=repo_doc.ci_provider,
+            features=getattr(repo_doc, "requested_features", None),
+            max_builds=getattr(repo_doc, "max_builds_to_ingest", None),
         )
 
         return {"status": "queued"}

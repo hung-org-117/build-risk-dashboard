@@ -8,10 +8,8 @@ from .imported_repository import (
     ImportedRepository,
     Provider,
     TestFramework,
-    SourceLanguage,
     CIProvider,
     ImportStatus,
-    ImportSource,
 )
 from .user import User
 from .feature_definition import (
@@ -20,11 +18,6 @@ from .feature_definition import (
     FeatureDataType,
     FeatureCategory,
 )
-from .dataset_job import (
-    DatasetJob,
-    DatasetJobStatus,
-)
-
 __all__ = [
     "BaseEntity",
     "PyObjectId",
@@ -34,16 +27,12 @@ __all__ = [
     "User",
     "BuildSample",
     "FeatureDefinition",
-    "DatasetJob",
     # Enums
     "Provider",
     "TestFramework",
-    "SourceLanguage",
     "CIProvider",
     "ImportStatus",
-    "ImportSource",
     "FeatureSource",
     "FeatureDataType",
     "FeatureCategory",
-    "DatasetJobStatus",
 ]

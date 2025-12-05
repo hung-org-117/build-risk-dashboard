@@ -2,6 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Path, Query, status, Body
 from pymongo.database import Database
+from bson import ObjectId
 
 from app.database.mongo import get_db
 from app.dtos import (
@@ -17,6 +18,12 @@ from app.dtos.build import BuildListResponse, BuildDetail
 from app.middleware.auth import get_current_user
 from app.services.build_service import BuildService
 from app.services.repository_service import RepositoryService
+from app.services.github.github_client import (
+    get_app_github_client,
+    get_public_github_client,
+)
+from app.repositories.available_repository import AvailableRepositoryRepository
+from app.models.entities.imported_repository import ImportSource
 
 router = APIRouter(prefix="/repos", tags=["Repositories"])
 
@@ -50,6 +57,58 @@ def bulk_import_repositories(
     user_id = str(current_user["_id"])
     service = RepositoryService(db)
     return service.bulk_import_repositories(user_id, payloads)
+
+
+@router.get("/languages")
+def detect_repository_languages(
+    full_name: str = Query(..., description="Repository full name (owner/repo)"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Detect repository languages via GitHub API (/repos/{owner}/{repo}/languages).
+
+    Returns top 5 languages (lowercase), falling back to empty list on failure.
+    """
+    installation_id = None
+
+    available_repo_repo = AvailableRepositoryRepository(db)
+    available = available_repo_repo.find_one(
+        {"user_id": ObjectId(current_user["_id"]), "full_name": full_name}
+    )
+    if available and available.get("installation_id"):
+        installation_id = available.get("installation_id")
+
+    # Fallback to imported repo if present
+    repo_repo = RepositoryService(db).repo_repo
+    imported = repo_repo.find_by_full_name("github", full_name)
+    if imported and imported.installation_id:
+        installation_id = imported.installation_id
+
+    client_ctx = (
+        get_app_github_client(db, installation_id)
+        if installation_id
+        else get_public_github_client()
+    )
+
+    languages: list[str] = []
+    try:
+        with client_ctx as gh:
+            stats = gh.list_languages(full_name) or {}
+            languages = [
+                lang.lower()
+                for lang, _ in sorted(
+                    stats.items(), key=lambda kv: kv[1], reverse=True
+                )[:5]
+            ]
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to detect languages for %s: %s", full_name, e
+        )
+
+    return {"languages": languages}
 
 
 @router.get("/", response_model=RepoListResponse, response_model_by_alias=False)
@@ -185,7 +244,7 @@ def reprocess_build(
 ):
     """
     Reprocess a build using the new DAG-based feature pipeline.
-    
+
     Useful for:
     - Retrying failed builds
     - Re-extracting features after pipeline updates
@@ -193,15 +252,15 @@ def reprocess_build(
     """
     from fastapi import HTTPException
     from app.tasks.processing import reprocess_build as reprocess_build_task
-    
+
     service = BuildService(db)
     build = service.get_build_detail(build_id)
     if not build:
         raise HTTPException(status_code=404, detail="Build not found")
-    
+
     # Trigger async reprocessing
     reprocess_build_task.delay(build_id)
-    
+
     return {
         "status": "queued",
         "build_id": build_id,

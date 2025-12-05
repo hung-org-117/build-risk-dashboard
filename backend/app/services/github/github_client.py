@@ -183,6 +183,12 @@ class GitHubClient:
     def get_repository(self, full_name: str) -> Dict[str, Any]:
         return self._rest_request("GET", f"/repos/{full_name}")
 
+    def list_languages(self, full_name: str) -> Dict[str, int]:
+        """
+        Return language usage statistics for a repository (bytes of code per language).
+        """
+        return self._rest_request("GET", f"/repos/{full_name}/languages")
+
     def list_authenticated_repositories(
         self, per_page: int = 10
     ) -> List[Dict[str, Any]]:

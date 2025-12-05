@@ -8,8 +8,9 @@ Resources are shared dependencies that feature nodes need:
 - Workflow run data
 """
 
+import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, Set, TYPE_CHECKING
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -60,14 +61,49 @@ class ResourceManager:
     
     def __init__(self):
         self._providers: Dict[str, ResourceProvider] = {}
+        self._logger = logging.getLogger(__name__)
     
     def register(self, provider: ResourceProvider) -> None:
         """Register a resource provider."""
         self._providers[provider.name] = provider
-    
-    def initialize_all(self, context: "ExecutionContext") -> None:
-        """Initialize all registered resources."""
-        for name, provider in self._providers.items():
+
+    def get_registered_names(self) -> Set[str]:
+        """Return names of all registered providers."""
+        return set(self._providers.keys())
+
+    def initialize(
+        self, 
+        context: "ExecutionContext", 
+        required_resources: Optional[Set[str]] = None,
+    ) -> None:
+        """
+        Initialize only the resources that are required.
+
+        Args:
+            context: Execution context to attach resources to
+            required_resources: Optional subset to initialize (defaults to all)
+        """
+        resource_names = (
+            self.get_registered_names()
+            if required_resources is None
+            else required_resources
+        )
+        missing = [r for r in resource_names if r not in self._providers]
+
+        if missing:
+            self._logger.warning(
+                "No provider registered for resources: %s", ", ".join(sorted(missing))
+            )
+        
+        for name in resource_names:
+            provider = self._providers.get(name)
+            if not provider:
+                continue
+
+            # Skip if resource already exists on context
+            if hasattr(context, "has_resource") and context.has_resource(name):
+                continue
+
             try:
                 resource = provider.initialize(context)
                 context.set_resource(name, resource)
@@ -75,6 +111,10 @@ class ResourceManager:
                 raise ResourceInitializationError(
                     f"Failed to initialize resource '{name}': {e}"
                 ) from e
+    
+    def initialize_all(self, context: "ExecutionContext") -> None:
+        """Initialize all registered resources."""
+        self.initialize(context, self.get_registered_names())
     
     def cleanup_all(self, context: "ExecutionContext") -> None:
         """Cleanup all resources."""

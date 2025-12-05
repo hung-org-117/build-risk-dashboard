@@ -144,7 +144,9 @@ class FeaturePipeline:
             repo: Repository information
             workflow_run: Workflow run data (optional, will be fetched if not provided)
             parallel: Whether to parallelize level execution
-            features_filter: Optional set of specific features to extract
+            features_filter: Optional set of specific features to extract. When provided,
+                             only nodes needed for these features (and their dependencies)
+                             will be executed.
             
         Returns:
             Dict with status, features, errors, and warnings
@@ -160,17 +162,79 @@ class FeaturePipeline:
         # Set workflow_run as a resource for nodes that need it
         if workflow_run:
             context.set_resource(ResourceNames.WORKFLOW_RUN, workflow_run)
+
+        # Decide which features and nodes to run
+        target_features = self._determine_target_features(features_filter)
+        context.requested_features = target_features
+
+        if target_features is not None and len(target_features) == 0:
+            warning_msg = "No features requested; skipping pipeline execution"
+            logger.warning(warning_msg)
+            return {
+                "status": "completed",
+                "features": {},
+                "all_features": {},
+                "errors": [],
+                "warnings": [warning_msg],
+                "results": [],
+                "feature_count": 0,
+                "ml_feature_count": 0,
+            }
+
+        nodes_to_run = self._resolve_nodes_for_features(target_features)
+        if not nodes_to_run:
+            warning_msg = (
+                f"No providers found for requested features: {sorted(target_features)}"
+                if target_features
+                else "No feature nodes registered for execution"
+            )
+            logger.warning(warning_msg)
+            return {
+                "status": "completed",
+                "features": {},
+                "all_features": {},
+                "errors": [],
+                "warnings": [warning_msg],
+                "results": [],
+                "feature_count": 0,
+                "ml_feature_count": 0,
+            }
+
+        # Initialize only the resources required by the selected nodes
+        required_resources = self._collect_required_resources(nodes_to_run)
+        available_resources = self.resource_manager.get_registered_names()
+        resources_to_init = {
+            r for r in required_resources
+            if r in available_resources and not context.has_resource(r)
+        }
+        missing_resources = {
+            r for r in required_resources
+            if r not in available_resources and not context.has_resource(r)
+        }
+        if missing_resources:
+            logger.warning(
+                "No providers registered for required resources: %s",
+                ", ".join(sorted(missing_resources)),
+            )
         
         try:
-            # Initialize resources
-            self.resource_manager.initialize_all(context)
+            self.resource_manager.initialize(context, resources_to_init)
             
             # Execute pipeline
-            context = self.executor.execute(context, parallel=parallel)
+            context = self.executor.execute(
+                context,
+                node_names=nodes_to_run,
+                parallel=parallel,
+            )
             
-            # Filter features based on definitions if enabled
+            # Filter features based on caller request/definitions
             extracted_features = context.get_merged_features()
-            if self.filter_active_only and self._definition_registry:
+            if features_filter:
+                extracted_features = {
+                    k: v for k, v in extracted_features.items()
+                    if k in features_filter
+                }
+            elif self.filter_active_only and self._definition_registry:
                 active_features = self._definition_registry.get_active_features()
                 # Only filter if we have active features defined
                 # If no definitions exist, keep all features
@@ -184,13 +248,6 @@ class FeaturePipeline:
                         "No active feature definitions found in DB. "
                         "Keeping all extracted features. Run feature seed to enable filtering."
                     )
-            
-            # Apply custom filter if provided
-            if features_filter:
-                extracted_features = {
-                    k: v for k, v in extracted_features.items()
-                    if k in features_filter
-                }
             
             return {
                 "status": context.get_final_status(),
@@ -229,6 +286,81 @@ class FeaturePipeline:
         finally:
             # Cleanup resources
             self.resource_manager.cleanup_all(context)
+
+    def _determine_target_features(
+        self, features_filter: Optional[Set[str]]
+    ) -> Optional[Set[str]]:
+        """
+        Decide which feature names the caller wants.
+        
+        Priority:
+        1) Explicit features_filter from caller
+        2) Active features from definitions (if available)
+        3) None -> run all
+        """
+        if features_filter is not None:
+            return set(features_filter)
+        
+        if self.filter_active_only and self._definition_registry:
+            active_features = self._definition_registry.get_active_features()
+            return set(active_features)
+        
+        return None
+
+    def _resolve_nodes_for_features(
+        self, target_features: Optional[Set[str]]
+    ) -> Set[str]:
+        """
+        Convert desired features into the minimal set of nodes (plus dependencies)
+        required to produce them.
+        """
+        registry = self.executor.registry
+
+        if target_features is None:
+            return set(registry.get_all().keys())
+
+        nodes_to_run: Set[str] = set()
+        visited_features: Set[str] = set()
+        visited_nodes: Set[str] = set()
+
+        def add_feature(feature_name: str) -> None:
+            if feature_name in visited_features:
+                return
+            visited_features.add(feature_name)
+
+            provider = registry.get_provider(feature_name)
+            if not provider:
+                logger.warning("No provider registered for feature '%s'", feature_name)
+                return
+
+            add_node(provider)
+
+        def add_node(node_name: str) -> None:
+            if node_name in visited_nodes:
+                return
+            visited_nodes.add(node_name)
+            nodes_to_run.add(node_name)
+
+            meta = registry.get(node_name)
+            if not meta:
+                return
+
+            for required_feature in meta.requires_features:
+                add_feature(required_feature)
+
+        for feature in target_features:
+            add_feature(feature)
+
+        return nodes_to_run
+
+    def _collect_required_resources(self, node_names: Set[str]) -> Set[str]:
+        """Gather resource dependencies for the selected nodes."""
+        required: Set[str] = set()
+        for node_name in node_names:
+            meta = self.executor.registry.get(node_name)
+            if meta:
+                required.update(meta.requires_resources)
+        return required
     
     def visualize_dag(self) -> str:
         """Get ASCII visualization of the feature DAG."""

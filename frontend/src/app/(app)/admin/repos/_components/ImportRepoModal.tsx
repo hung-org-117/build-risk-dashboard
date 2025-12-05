@@ -15,16 +15,18 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { integrationApi, reposApi } from "@/lib/api";
+import { integrationApi, reposApi, featuresApi } from "@/lib/api";
 import {
     RepoSuggestion,
     RepoImportPayload,
     TestFramework,
-    SourceLanguage,
+    SOURCE_LANGUAGE_PRESETS,
     CIProvider,
+    FeatureDefinitionSummary,
 } from "@/types";
 import { useAuth } from "@/contexts/auth-context";
 import { useDebounce } from "@/hooks/use-debounce";
+import { Input } from "@/components/ui/input";
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
     const [mounted, setMounted] = useState(false);
@@ -35,6 +37,12 @@ const Portal = ({ children }: { children: React.ReactNode }) => {
 
     if (!mounted) return null;
     return createPortal(children, document.body);
+};
+
+type FeatureCategoryGroup = {
+    category: string;
+    display_name: string;
+    features: FeatureDefinitionSummary[];
 };
 
 interface ImportRepoModalProps {
@@ -62,8 +70,16 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             test_frameworks: string[];
             source_languages: string[];
             ci_provider: string;
+            features: string[];
+            max_builds?: number | null;
         }>
     >({});
+    const [languageLoading, setLanguageLoading] = useState<Record<string, boolean>>({});
+    const [languageError, setLanguageError] = useState<Record<string, string | null>>({});
+    const [featuresData, setFeaturesData] = useState<FeatureCategoryGroup[] | null>(null);
+    const [featuresDefault, setFeaturesDefault] = useState<string[]>([]);
+    const [featuresLoading, setFeaturesLoading] = useState(false);
+    const [featuresError, setFeaturesError] = useState<string | null>(null);
 
     const [importing, setImporting] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
@@ -104,6 +120,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setPublicMatches([]);
             setSearchError(null);
             setImportError(null);
+            setFeaturesData(null);
+            setFeaturesDefault([]);
             // Initial load (empty search)
             performSearch("", true);
         }
@@ -121,6 +139,55 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setIsSearching(false);
         }
     };
+
+    const loadFeatures = useCallback(async () => {
+        if (featuresLoading || featuresData) return;
+        setFeaturesLoading(true);
+        setFeaturesError(null);
+        try {
+            const data = await featuresApi.list({ is_active: true });
+            const grouped: Record<string, FeatureCategoryGroup> = {};
+            data.items.forEach((feat: FeatureDefinitionSummary) => {
+                const key = feat.category || "uncategorized";
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        category: key,
+                        display_name: key,
+                        features: [],
+                    };
+                }
+                grouped[key].features.push(feat);
+            });
+
+            const categories = Object.values(grouped).sort((a, b) =>
+                a.display_name.localeCompare(b.display_name)
+            );
+            setFeaturesData(categories);
+
+            const defaults = data.items.map((f) => f.name);
+            setFeaturesDefault(defaults);
+
+            // Initialize existing configs with defaults if missing
+            setRepoConfigs((current) => {
+                const next = { ...current };
+                Object.keys(selectedRepos).forEach((fullName) => {
+                    const cfg = next[fullName];
+                    if (cfg && (!cfg.features || cfg.features.length === 0)) {
+                        next[fullName] = {
+                            ...cfg,
+                            features: defaults,
+                        };
+                    }
+                });
+                return next;
+            });
+        } catch (err) {
+            console.error(err);
+            setFeaturesError("Failed to load available features.");
+        } finally {
+            setFeaturesLoading(false);
+        }
+    }, [featuresData, featuresLoading, selectedRepos]);
 
     const toggleSelection = (repo: RepoSuggestion) => {
         setSelectedRepos((prev) => {
@@ -142,6 +209,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         test_frameworks: [],
                         source_languages: [],
                         ci_provider: CIProvider.GITHUB_ACTIONS,
+                        features: featuresDefault,
+                        max_builds: null,
                     },
                 }));
             }
@@ -150,6 +219,63 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     };
 
     const selectedList = useMemo(() => Object.values(selectedRepos), [selectedRepos]);
+
+    // Load features and detect languages when entering config step
+    useEffect(() => {
+        if (step !== 2) return;
+        void loadFeatures();
+        selectedList.forEach((repo) => {
+            const cfg = repoConfigs[repo.full_name];
+            if (!cfg || cfg.source_languages.length === 0) {
+                void fetchLanguages(repo);
+            }
+        });
+    }, [step, loadFeatures, selectedList, repoConfigs, fetchLanguages]);
+    useEffect(() => {
+        if (step !== 2) return;
+        selectedList.forEach((repo) => {
+            const cfg = repoConfigs[repo.full_name];
+            if (!cfg || cfg.source_languages.length === 0) {
+                void fetchLanguages(repo);
+            }
+        });
+    }, [step, selectedList, repoConfigs, fetchLanguages]);
+    const fetchLanguages = useCallback(
+        async (repo: RepoSuggestion) => {
+            setLanguageLoading((prev) => ({ ...prev, [repo.full_name]: true }));
+            setLanguageError((prev) => ({ ...prev, [repo.full_name]: null }));
+            try {
+                const res = await reposApi.detectLanguages(repo.full_name);
+                const langs = res.languages && res.languages.length > 0
+                    ? res.languages
+                    : ["ruby", "java", "python"];
+                setRepoConfigs((current) => {
+                    const existing = current[repo.full_name];
+                    // Only set if not already chosen
+                    if (existing && existing.source_languages.length > 0) {
+                        return current;
+                    }
+                    return {
+                        ...current,
+                        [repo.full_name]: {
+                            test_frameworks: existing?.test_frameworks || [],
+                            source_languages: langs,
+                            ci_provider: existing?.ci_provider || CIProvider.GITHUB_ACTIONS,
+                        },
+                    };
+                });
+            } catch (err) {
+                console.error(err);
+                setLanguageError((prev) => ({
+                    ...prev,
+                    [repo.full_name]: "Failed to detect languages",
+                }));
+            } finally {
+                setLanguageLoading((prev) => ({ ...prev, [repo.full_name]: false }));
+            }
+        },
+        []
+    );
 
     const handleImport = async () => {
         if (!selectedList.length) return;
@@ -166,6 +292,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                     test_frameworks: config.test_frameworks,
                     source_languages: config.source_languages,
                     ci_provider: config.ci_provider,
+                    features: config.features,
+                    max_builds: config.max_builds ?? null,
                 };
             });
 
@@ -407,7 +535,19 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     <RepoConfigItem
                                         key={repo.full_name}
                                         repo={repo}
-                                        config={repoConfigs[repo.full_name]}
+                                        config={
+                                            repoConfigs[repo.full_name] || {
+                                                test_frameworks: [],
+                                                source_languages: [],
+                                                ci_provider: CIProvider.GITHUB_ACTIONS,
+                                                features: featuresDefault,
+                                                max_builds: null,
+                                            }
+                                        }
+                                        languageLoading={languageLoading[repo.full_name]}
+                                        languageError={languageError[repo.full_name]}
+                                        availableFeatures={featuresData}
+                                        defaultFeatures={featuresDefault}
                                         onChange={(newConfig) =>
                                             setRepoConfigs((prev) => ({
                                                 ...prev,
@@ -492,6 +632,10 @@ function RepoItem({
 function RepoConfigItem({
     repo,
     config,
+    languageLoading,
+    languageError,
+    availableFeatures,
+    defaultFeatures,
     onChange,
 }: {
     repo: RepoSuggestion;
@@ -499,9 +643,17 @@ function RepoConfigItem({
         test_frameworks: string[];
         source_languages: string[];
         ci_provider: string;
+        features?: string[];
+        max_builds?: number | null;
     };
+    languageLoading?: boolean;
+    languageError?: string | null;
+    availableFeatures?: FeatureCategory[] | null;
+    defaultFeatures?: string[];
     onChange: (config: any) => void;
 }) {
+    const selectedFeatures = config.features || [];
+
     const toggleFramework = (framework: string) => {
         const current = config.test_frameworks;
         const next = current.includes(framework)
@@ -516,6 +668,25 @@ function RepoConfigItem({
             ? current.filter((l) => l !== language)
             : [...current, language];
         onChange({ ...config, source_languages: next });
+    };
+
+    const [languageInput, setLanguageInput] = useState("");
+
+    const addLanguage = (value: string) => {
+        const lang = value.trim().toLowerCase();
+        if (!lang) return;
+        if (config.source_languages.includes(lang)) {
+            setLanguageInput("");
+            return;
+        }
+        onChange({ ...config, source_languages: [...config.source_languages, lang] });
+        setLanguageInput("");
+    };
+    const toggleFeature = (name: string) => {
+        const next = selectedFeatures.includes(name)
+            ? selectedFeatures.filter((f) => f !== name)
+            : [...selectedFeatures, name];
+        onChange({ ...config, features: next });
     };
 
     return (
@@ -587,23 +758,149 @@ function RepoConfigItem({
                     </div>
                 </div>
 
-                <div>
-                    <label className="text-xs font-semibold text-muted-foreground uppercase mb-2 block">
+                <div className="space-y-2">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase block">
                         Source Languages
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                        {[SourceLanguage.PYTHON, SourceLanguage.RUBY, SourceLanguage.JAVA].map((lang) => (
-                            <label key={lang} className="flex items-center gap-2 text-sm cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    className="rounded border-gray-300"
-                                    checked={config.source_languages.includes(lang)}
-                                    onChange={() => toggleLanguage(lang)}
-                                />
+                    <div className="flex flex-wrap gap-2">
+                        {SOURCE_LANGUAGE_PRESETS.map((lang) => (
+                            <Badge
+                                key={lang}
+                                variant={config.source_languages.includes(lang) ? "default" : "outline"}
+                                className="cursor-pointer"
+                                onClick={() => toggleLanguage(lang)}
+                            >
                                 {lang}
-                            </label>
+                            </Badge>
                         ))}
                     </div>
+                    {languageLoading && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Detecting languages from GitHub...
+                        </div>
+                    )}
+                    {languageError && (
+                        <div className="text-xs text-red-600 dark:text-red-400">
+                            {languageError}
+                        </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                        <Input
+                            placeholder="Add custom language (e.g., javascript)"
+                            value={languageInput}
+                            onChange={(e) => setLanguageInput(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === ",") {
+                                    e.preventDefault();
+                                    addLanguage(languageInput);
+                                }
+                            }}
+                        />
+                        <Button type="button" variant="outline" onClick={() => addLanguage(languageInput)}>
+                            Add
+                        </Button>
+                    </div>
+                    {config.source_languages.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                            {config.source_languages.map((lang) => (
+                                <Badge
+                                    key={lang}
+                                    variant="secondary"
+                                    className="flex items-center gap-1"
+                                >
+                                    {lang}
+                                    <button
+                                        type="button"
+                                        className="ml-1 text-xs"
+                                        onClick={() => toggleLanguage(lang)}
+                                    >
+                                        ×
+                                    </button>
+                                </Badge>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase block mb-2">
+                        Features to Extract
+                    </label>
+                    {availableFeatures && availableFeatures.length > 0 ? (
+                        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                            {availableFeatures.map((cat) => (
+                                <div key={cat.category} className="space-y-1">
+                                    <div className="text-[11px] uppercase text-muted-foreground font-semibold">
+                                        {cat.display_name || cat.category}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {cat.features.map((feat: FeatureDefinitionSummary) => (
+                                            <Badge
+                                                key={feat.name}
+                                                variant={selectedFeatures.includes(feat.name) ? "default" : "outline"}
+                                                className="cursor-pointer"
+                                                onClick={() => toggleFeature(feat.name)}
+                                            >
+                                                {feat.display_name || feat.name}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-xs text-muted-foreground">
+                            {featuresLoading
+                                ? "Loading features..."
+                                : "No features available."}
+                        </div>
+                    )}
+                    {featuresError && (
+                        <div className="text-xs text-red-600 dark:text-red-400">
+                            {featuresError}
+                        </div>
+                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onChange({ ...config, features: defaultFeatures || [] })}
+                        >
+                            Use defaults
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onChange({ ...config, features: [] })}
+                        >
+                            Clear
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase block">
+                        Max Builds to Ingest
+                    </label>
+                    <Input
+                        type="number"
+                        min={1}
+                        placeholder="e.g. 50"
+                        value={config.max_builds ?? ""}
+                        onChange={(e) =>
+                            onChange({
+                                ...config,
+                                max_builds: e.target.value ? Number(e.target.value) : null,
+                            })
+                        }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        Leave blank to ingest all available workflow runs.
+                    </p>
                 </div>
             </div>
 

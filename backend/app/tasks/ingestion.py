@@ -12,7 +12,6 @@ from app.tasks.base import PipelineTask
 from app.services.github.exceptions import GithubRateLimitError
 from app.repositories.imported_repository import ImportedRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
-from app.repositories.workflow_run import WorkflowRunRepository
 from app.models.entities.workflow_run import WorkflowRunRaw
 
 
@@ -37,6 +36,8 @@ def import_repo(
     test_frameworks: list[str] | None = None,
     source_languages: list[str] | None = None,
     ci_provider: str = "github_actions",
+    features: list[str] | None = None,
+    max_builds: int | None = None,
 ) -> Dict[str, Any]:
     import json
     from app.config import settings
@@ -94,6 +95,8 @@ def import_repo(
                     "source_languages": source_languages or [],
                     "ci_provider": ci_provider or "github_actions",
                     "import_status": ImportStatus.IMPORTING.value,
+                    "requested_features": features or [],
+                    "max_builds_to_ingest": max_builds,
                 },
             )
             repo_id = str(repo_doc.id)
@@ -127,20 +130,37 @@ def import_repo(
             if not repo_data:
                 repo_data = gh.get_repository(full_name)
 
+            detected_languages = []
+            try:
+                lang_stats = gh.list_languages(full_name) or {}
+                detected_languages = [
+                    lang.lower()
+                    for lang, _ in sorted(
+                        lang_stats.items(), key=lambda kv: kv[1], reverse=True
+                    )[:5]
+                ]
+            except Exception as e:
+                logger.warning(f"Failed to detect languages for {full_name}: {e}")
+
+            if not detected_languages:
+                detected_languages = source_languages or ["ruby", "java", "python"]
+
             imported_repo_repo.update_repository(
                 repo_id=repo_id,
                 updates={
                     "default_branch": repo_data.get("default_branch", "main"),
                     "is_private": bool(repo_data.get("private")),
-                    "main_lang": repo_data.get("language"),
+                    "main_lang": (detected_languages[0] if detected_languages else repo_data.get("language")),
                     "github_repo_id": repo_data.get("id"),
                     "metadata": repo_data,
                     "installation_id": installation_id,
                     "last_scanned_at": None,
                     "test_frameworks": test_frameworks or [],
-                    "source_languages": source_languages or [],
+                    "source_languages": detected_languages,
                     "ci_provider": ci_provider or "github_actions",
                     "import_status": ImportStatus.IMPORTING.value,
+                    "requested_features": features or [],
+                    "max_builds_to_ingest": max_builds,
                 },
             )
 
@@ -166,7 +186,7 @@ def import_repo(
 
             # Metadata Collection (Newest -> Oldest)
             for run in gh.paginate_workflow_runs(
-                full_name, params={"per_page": 100, "status": "completed"}
+                full_name, params={"per_page": 100}
             ):
                 run_id = run.get("id")
 
@@ -178,12 +198,6 @@ def import_repo(
                         f"Skipping bot-triggered run {run_id} in {full_name} (triggered by {triggering_actor.get('login', 'unknown bot')})"
                     )
                     continue
-
-                if not gh.logs_available(full_name, run_id):
-                    logger.info(
-                        f"Logs expired for run {run_id} in {full_name}. Stopping backfill."
-                    )
-                    break
 
                 workflow_run = WorkflowRunRaw(
                     repo_id=ObjectId(repo_id),
@@ -239,6 +253,12 @@ def import_repo(
                 runs_to_process.append((run_created_at, run_id))
                 total_runs += 1
 
+                if max_builds and total_runs >= max_builds:
+                    logger.info(
+                        "Reached requested max_builds (%s) for %s", max_builds, full_name
+                    )
+                    break
+
             # Processing (Oldest -> Newest)
             runs_to_process.sort(key=lambda x: x[0])
 
@@ -286,7 +306,7 @@ def import_repo(
     return {
         "status": "completed",
         "repo_id": repo_id if "repo_id" in locals() else None,
-        "runs_found": len(runs) if "runs" in locals() else 0,
+        "runs_found": total_runs,
     }
 
 
@@ -312,11 +332,12 @@ def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str
 
         client_context = get_public_github_client()
 
+    jobs = []
+    logs_collected = 0
     try:
         with client_context as gh:
             jobs = gh.list_workflow_jobs(full_name, run_id)
 
-            logs_collected = 0
             for job in jobs:
                 job_id = job.get("id")
                 try:

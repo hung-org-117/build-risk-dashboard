@@ -15,11 +15,6 @@ const navigation = [
     href: "/admin/repos",
     icon: BadgeCheck,
   },
-  {
-    label: "Dataset Builder",
-    href: "/datasets",
-    icon: Database,
-  },
 ];
 
 export function Sidebar() {
