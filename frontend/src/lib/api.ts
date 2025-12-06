@@ -21,6 +21,16 @@ import type {
   ScanResult,
   FailedScan,
   FeatureListResponse,
+  DatasetListResponse,
+  DatasetCreatePayload,
+  DatasetRecord,
+  DatasetUpdatePayload,
+  GithubToken,
+  TokenListResponse,
+  TokenPoolStatus,
+  TokenCreatePayload,
+  TokenUpdatePayload,
+  TokenVerifyResponse,
 } from "@/types";
 import axios from "axios";
 
@@ -191,6 +201,45 @@ export const reposApi = {
     });
     return response.data;
   },
+  getTestFrameworks: async () => {
+    const response = await api.get<{ frameworks: string[]; by_language?: Record<string, string[]> }>(
+      `/repos/test-frameworks`
+    );
+    return response.data;
+  },
+};
+
+export const datasetsApi = {
+  list: async (params?: { skip?: number; limit?: number; q?: string }) => {
+    const response = await api.get<DatasetListResponse>("/datasets", { params });
+    return response.data;
+  },
+  get: async (datasetId: string) => {
+    const response = await api.get<DatasetRecord>(`/datasets/${datasetId}`);
+    return response.data;
+  },
+  create: async (payload: DatasetCreatePayload) => {
+    const response = await api.post<DatasetRecord>("/datasets", payload);
+    return response.data;
+  },
+  update: async (datasetId: string, payload: DatasetUpdatePayload) => {
+    const response = await api.patch<DatasetRecord>(`/datasets/${datasetId}`, payload);
+    return response.data;
+  },
+  upload: async (file: File, payload?: { name?: string; description?: string; tags?: string[] }) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (payload?.name) formData.append("name", payload.name);
+    if (payload?.description) formData.append("description", payload.description);
+    if (payload?.tags) {
+      payload.tags.forEach((tag) => formData.append("tags", tag));
+    }
+
+    const response = await api.post<DatasetRecord>("/datasets/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  },
 };
 
 export const featuresApi = {
@@ -199,7 +248,6 @@ export const featuresApi = {
     source?: string;
     extractor_node?: string;
     is_active?: boolean;
-    is_ml_feature?: boolean;
   }) => {
     const response = await api.get<FeatureListResponse>("/features", { params });
     return response.data;
@@ -331,3 +379,32 @@ export const usersApi = {
   },
 };
 
+export const tokensApi = {
+  list: async (includeDisabled = false) => {
+    const response = await api.get<TokenListResponse>("/tokens/", {
+      params: { include_disabled: includeDisabled },
+    });
+    return response.data;
+  },
+  getStatus: async () => {
+    const response = await api.get<TokenPoolStatus>("/tokens/status");
+    return response.data;
+  },
+  create: async (payload: TokenCreatePayload) => {
+    const response = await api.post<GithubToken>("/tokens/", payload);
+    return response.data;
+  },
+  update: async (tokenId: string, payload: TokenUpdatePayload) => {
+    const response = await api.patch<GithubToken>(`/tokens/${tokenId}`, payload);
+    return response.data;
+  },
+  delete: async (tokenId: string) => {
+    await api.delete(`/tokens/${tokenId}`);
+  },
+  verify: async (tokenId: string, rawToken: string) => {
+    const response = await api.post<TokenVerifyResponse>(`/tokens/${tokenId}/verify`, {
+      raw_token: rawToken,
+    });
+    return response.data;
+  },
+};

@@ -43,11 +43,12 @@ class GitCommitInfoNode(FeatureNode):
     - Merge commits
     """
     
+    
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
         git_handle: GitRepoHandle = context.get_resource(ResourceNames.GIT_REPO)
         build_sample = context.build_sample
         db = context.db
-        
+
         if not git_handle.is_commit_available:
             return {
                 "git_all_built_commits": [],
@@ -56,85 +57,91 @@ class GitCommitInfoNode(FeatureNode):
                 "git_prev_commit_resolution_status": "commit_not_found",
                 "tr_prev_build": None,
             }
-        
+
         effective_sha = git_handle.effective_sha
-        repo_id = str(build_sample.repo_id)
+        repo = git_handle.repo
         
-        # Find previous built commit
-        build_sample_repo = BuildSampleRepository(db)
-        prev_build = self._find_previous_build(build_sample_repo, build_sample)
+        # We need to find the previous *built* commit in the history of THIS commit
+        # This requires walking back from effective_sha until we find a commit that constitutes a completed build
         
-        prev_built_commit = None
-        tr_prev_build = None
-        resolution_status = "first_build"
-        
-        if prev_build:
-            prev_built_commit = prev_build.tr_original_commit
-            tr_prev_build = prev_build.workflow_run_id
-            resolution_status = "found"
-        
-        # Calculate commits between prev and current
-        built_commits = []
-        if prev_built_commit:
-            built_commits = self._get_commits_between(
-                git_handle, prev_built_commit, effective_sha
-            )
-            if not built_commits:
-                # Commits not in same lineage - could be branch switch
-                resolution_status = "not_in_lineage"
-                built_commits = [effective_sha]
-        else:
-            built_commits = [effective_sha]
-        
-        return {
-            "git_all_built_commits": built_commits,
-            "git_num_all_built_commits": len(built_commits),
-            "git_prev_built_commit": prev_built_commit,
-            "git_prev_commit_resolution_status": resolution_status,
-            "tr_prev_build": tr_prev_build,
-        }
-    
-    def _find_previous_build(self, repo, build_sample) -> Optional[Any]:
-        """Find the most recent completed build before this one."""
-        # Query for builds before this one
-        query = {
-            "repo_id": build_sample.repo_id,
-            "workflow_run_id": {"$lt": build_sample.workflow_run_id},
-            "status": "completed",
-        }
-        
-        prev_builds = list(
-            repo.collection.find(query)
-            .sort("workflow_run_id", -1)
-            .limit(1)
+        build_stats = self._calculate_build_stats(
+            db, build_sample, repo, effective_sha
         )
         
-        if prev_builds:
-            from app.models.entities.build_sample import BuildSample
-            return BuildSample(**prev_builds[0])
-        return None
-    
-    def _get_commits_between(
-        self, 
-        git_handle: GitRepoHandle, 
-        from_sha: str, 
-        to_sha: str
-    ) -> List[str]:
-        """Get all commits between two SHAs (exclusive from, inclusive to)."""
+        return build_stats
+
+    def _calculate_build_stats(
+        self, db, build_sample, repo, commit_sha: str
+    ) -> Dict[str, Any]:
         try:
-            repo = git_handle.repo
-            
-            # Check if both commits exist
-            try:
-                from_commit = repo.commit(from_sha)
-                to_commit = repo.commit(to_sha)
-            except Exception:
-                return []
-            
-            # Get commits in range
-            commits = list(repo.iter_commits(f"{from_sha}..{to_sha}"))
-            return [c.hexsha for c in commits]
-            
-        except Exception as e:
-            logger.warning(f"Failed to get commits between {from_sha} and {to_sha}: {e}")
-            return []
+            build_commit = repo.commit(commit_sha)
+        except Exception:
+             return {
+                "git_all_built_commits": [],
+                "git_num_all_built_commits": 0,
+                "git_prev_built_commit": None,
+                "git_prev_commit_resolution_status": "commit_not_found",
+                "tr_prev_build": None,
+            }
+
+        prev_commits_objs: List[Any] = [build_commit]
+        status = "no_previous_build"
+        last_commit = None
+        prev_build_id = None
+        
+        build_coll = db["build_samples"]
+
+        # Ensure repo_id is ObjectId for query
+        from bson import ObjectId
+        repo_id_query = build_sample.repo_id
+        try:
+            if isinstance(repo_id_query, str):
+                repo_id_query = ObjectId(repo_id_query)
+        except Exception:
+            pass
+
+        # Limit to avoid infinite loops in weird histories
+        walker = repo.iter_commits(commit_sha, max_count=1000)
+        first = True
+
+        for commit in walker:
+            if first:
+                if len(commit.parents) > 1:
+                    status = "merge_found"
+                    break
+                first = False
+                continue
+
+            last_commit = commit
+
+            # Check if this commit triggered a build
+            existing_build = build_coll.find_one(
+                {
+                    "repo_id": repo_id_query,
+                    "tr_original_commit": commit.hexsha, 
+                    "status": "completed",
+                    "workflow_run_id": {"$ne": build_sample.workflow_run_id},
+                }
+            )
+
+            if existing_build:
+                status = "build_found"
+                prev_build_id = existing_build.get("workflow_run_id")
+                break
+
+            prev_commits_objs.append(commit)
+
+            if len(commit.parents) > 1:
+                status = "merge_found"
+                break
+
+        commits_hex = [c.hexsha for c in prev_commits_objs]
+        
+        return {
+            "git_prev_commit_resolution_status": status,
+            "git_prev_built_commit": last_commit.hexsha if last_commit else None,
+            "tr_prev_build": prev_build_id,
+            "git_all_built_commits": commits_hex,
+            "git_num_all_built_commits": len(commits_hex),
+        }
+

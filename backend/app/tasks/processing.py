@@ -3,6 +3,7 @@ Build Processing Tasks using the new DAG-based Feature Pipeline.
 
 This module replaces the old chord/chain pattern with the unified FeaturePipeline.
 """
+
 import logging
 from typing import Any, Dict
 
@@ -54,7 +55,7 @@ def process_workflow_run(
 ) -> Dict[str, Any]:
     """
     Process a workflow run using the new DAG-based feature pipeline.
-    
+
     This replaces the old chord/chain pattern with a unified pipeline execution.
     The pipeline handles:
     - Resource initialization (git repo, github client, log storage)
@@ -87,11 +88,12 @@ def process_workflow_run(
             status="pending",
             tr_build_number=workflow_run.run_number,
             tr_original_commit=workflow_run.head_sha,
+            gh_build_started_at=workflow_run.created_at,
         )
         build_sample = build_sample_repo.insert_one(build_sample)
 
     build_id = str(build_sample.id)
-    
+
     # Notify clients that processing started
     publish_build_update(repo_id, build_id, "in_progress")
 
@@ -100,20 +102,24 @@ def process_workflow_run(
         pipeline = FeaturePipeline(
             db=self.db,
             max_workers=4,
-            use_definitions=True,
-            filter_active_only=True,
         )
-        
+
+        # Apply feature selection from repository settings
+        features_filter = None
+        if repo.requested_features:
+            features_filter = set(repo.requested_features)
+
         result = pipeline.run(
             build_sample=build_sample,
             repo=repo,
             workflow_run=workflow_run,
             parallel=True,
+            features_filter=features_filter,
         )
-        
+
         # Prepare updates for BuildSample
         updates = result.get("features", {}).copy()
-        
+
         # Set status
         if result["status"] == "completed":
             updates["status"] = "completed"
@@ -121,52 +127,53 @@ def process_workflow_run(
             updates["status"] = "completed"  # Still mark as completed but with warnings
         else:
             updates["status"] = "failed"
-        
+
         # Handle errors and warnings
         if result.get("errors"):
             updates["error_message"] = "; ".join(result["errors"])
         elif result.get("warnings"):
             updates["error_message"] = "Warning: " + "; ".join(result["warnings"])
             # Check for orphan/fork commits
-            if any("Commit not found" in w or "orphan" in w.lower() for w in result["warnings"]):
+            if any(
+                "Commit not found" in w or "orphan" in w.lower()
+                for w in result["warnings"]
+            ):
                 updates["is_missing_commit"] = True
-        
+
         # Save to database
         build_sample_repo.update_one(build_id, updates)
-        
+
         # Notify clients of completion
         publish_build_update(repo_id, build_id, updates["status"])
-        
+
         logger.info(
             f"Pipeline completed for build {build_id}: "
             f"status={result['status']}, "
-            f"features={result.get('feature_count', 0)}, "
-            f"ml_features={result.get('ml_feature_count', 0)}"
+            f"features={result.get('feature_count', 0)}"
         )
-        
+
         return {
             "status": result["status"],
             "build_id": build_id,
             "feature_count": result.get("feature_count", 0),
-            "ml_feature_count": result.get("ml_feature_count", 0),
             "errors": result.get("errors", []),
             "warnings": result.get("warnings", []),
         }
-        
+
     except Exception as e:
         logger.error(f"Pipeline failed for build {build_id}: {e}", exc_info=True)
-        
+
         # Update build sample with error
         build_sample_repo.update_one(
             build_id,
             {
                 "status": "failed",
                 "error_message": str(e),
-            }
+            },
         )
-        
+
         publish_build_update(repo_id, build_id, "failed")
-        
+
         return {
             "status": "failed",
             "build_id": build_id,
@@ -183,7 +190,7 @@ def process_workflow_run(
 def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     """
     Reprocess an existing build sample with the new pipeline.
-    
+
     Useful for:
     - Retrying failed builds
     - Extracting new features after pipeline updates
@@ -192,15 +199,15 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     build_sample_repo = BuildSampleRepository(self.db)
     repo_repo = ImportedRepositoryRepository(self.db)
     workflow_run_repo = WorkflowRunRepository(self.db)
-    
+
     build_sample = build_sample_repo.find_by_id(ObjectId(build_id))
     if not build_sample:
         logger.error(f"BuildSample {build_id} not found")
         return {"status": "error", "message": "BuildSample not found"}
-    
+
     repo_id = str(build_sample.repo_id)
     workflow_run_id = build_sample.workflow_run_id
-    
+
     # Delegate to the main processing function
     return process_workflow_run.apply(args=[repo_id, workflow_run_id]).get()
 
@@ -210,6 +217,7 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
 # delegate to the unified pipeline. They can be removed once all callers
 # are updated.
 # =============================================================================
+
 
 @celery_app.task(
     bind=True,

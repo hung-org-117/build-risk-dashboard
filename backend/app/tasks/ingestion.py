@@ -38,6 +38,8 @@ def import_repo(
     ci_provider: str = "github_actions",
     features: list[str] | None = None,
     max_builds: int | None = None,
+    ingest_start_date: str | None = None,
+    ingest_end_date: str | None = None,
 ) -> Dict[str, Any]:
     import json
     from app.config import settings
@@ -66,6 +68,19 @@ def import_repo(
             logger.error(f"Failed to publish status update: {e}")
 
     # 1. Fetch metadata
+    from datetime import datetime
+
+    def _parse_date(val: str | None):
+        if not val:
+            return None
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    start_dt = _parse_date(ingest_start_date)
+    end_dt = _parse_date(ingest_end_date)
+
     try:
         # Find existing repo to get ID (it should exist now)
         repo = imported_repo_repo.find_one(
@@ -97,6 +112,8 @@ def import_repo(
                     "import_status": ImportStatus.IMPORTING.value,
                     "requested_features": features or [],
                     "max_builds_to_ingest": max_builds,
+                    "ingest_start_date": start_dt,
+                    "ingest_end_date": end_dt,
                 },
             )
             repo_id = str(repo_doc.id)
@@ -118,17 +135,7 @@ def import_repo(
             client_context = get_public_github_client()
 
         with client_context as gh:
-            # Try to get data from available_repo first to avoid re-fetching
-            available_repo = self.db.available_repositories.find_one(
-                {"user_id": ObjectId(user_id), "full_name": full_name}
-            )
-
-            repo_data = None
-            if available_repo and available_repo.get("metadata"):
-                repo_data = available_repo.get("metadata")
-
-            if not repo_data:
-                repo_data = gh.get_repository(full_name)
+            repo_data = gh.get_repository(full_name)
 
             detected_languages = []
             try:
@@ -161,14 +168,10 @@ def import_repo(
                     "import_status": ImportStatus.IMPORTING.value,
                     "requested_features": features or [],
                     "max_builds_to_ingest": max_builds,
+                    "ingest_start_date": start_dt,
+                    "ingest_end_date": end_dt,
                 },
             )
-
-            self.db.available_repositories.update_one(
-                {"user_id": ObjectId(user_id), "full_name": full_name},
-                {"$set": {"imported": True}},
-            )
-
             publish_status(repo_id, "importing", "Fetching workflow runs...")
 
             total_runs = 0
@@ -189,6 +192,13 @@ def import_repo(
                 full_name, params={"per_page": 100}
             ):
                 run_id = run.get("id")
+                created_at_str = run.get("created_at")
+                if created_at_str:
+                    run_created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                    if start_dt and run_created_at < start_dt:
+                        continue
+                    if end_dt and run_created_at > end_dt:
+                        continue
 
                 # Filter out bot-triggered workflow runs (e.g., Dependabot, github-actions[bot])
                 triggering_actor = run.get("triggering_actor", {})

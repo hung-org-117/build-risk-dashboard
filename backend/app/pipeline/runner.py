@@ -17,7 +17,10 @@ from pymongo.database import Database
 from app.pipeline.core.context import ExecutionContext
 from app.pipeline.core.executor import PipelineExecutor
 from app.pipeline.core.registry import feature_registry
-from app.pipeline.core.definition_registry import FeatureDefinitionRegistry, get_definition_registry
+from app.pipeline.core.definition_registry import (
+    FeatureDefinitionRegistry,
+    get_definition_registry,
+)
 from app.pipeline.resources import ResourceManager, ResourceNames
 from app.pipeline.resources.git_repo import GitRepoProvider
 from app.pipeline.resources.github_client import GitHubClientProvider
@@ -34,7 +37,11 @@ from app.repositories.feature_definition import FeatureDefinitionRepository
 
 # Import feature nodes to trigger registration
 from app.pipeline.features.build_log import BuildLogFeaturesNode
-from app.pipeline.features.git import GitCommitInfoNode, GitDiffFeaturesNode, TeamStatsNode
+from app.pipeline.features.git import (
+    GitCommitInfoNode,
+    GitDiffFeaturesNode,
+    TeamStatsNode,
+)
 from app.pipeline.features.github import GitHubDiscussionNode
 from app.pipeline.features.repo import RepoSnapshotNode
 
@@ -44,90 +51,76 @@ logger = logging.getLogger(__name__)
 class FeaturePipeline:
     """
     High-level interface for running the feature extraction pipeline.
-    
+
     Usage:
         pipeline = FeaturePipeline(db)
         result = pipeline.run(build_sample, repo, workflow_run)
-        
+
         if result["status"] == "completed":
             features = result["features"]
     """
-    
+
     def __init__(
-        self, 
-        db: Database, 
+        self,
+        db: Database,
         max_workers: int = 4,
-        use_definitions: bool = True,
-        filter_active_only: bool = True,
     ):
         """
         Initialize the feature pipeline.
-        
+
         Args:
             db: MongoDB database instance
             max_workers: Maximum parallel workers for execution
-            use_definitions: Whether to use FeatureDefinition documents for metadata
-            filter_active_only: Only extract features marked as active in definitions
         """
         self.db = db
         self.max_workers = max_workers
-        self.use_definitions = use_definitions
-        self.filter_active_only = filter_active_only
-        
+
         self.executor = PipelineExecutor(
             registry=feature_registry,
             max_workers=max_workers,
             fail_fast=False,
             skip_on_dependency_failure=True,
         )
-        
+
         # Setup resource manager
         self.resource_manager = ResourceManager()
         self.resource_manager.register(GitRepoProvider())
         self.resource_manager.register(GitHubClientProvider())
         self.resource_manager.register(LogStorageProvider())
-        
-        # Load feature definitions if enabled
+
         self._definition_registry: Optional[FeatureDefinitionRegistry] = None
-        if use_definitions:
-            try:
-                self._definition_registry = get_definition_registry(db)
-            except Exception as e:
-                logger.warning(f"Failed to load feature definitions: {e}")
-    
+        try:
+            self._definition_registry = get_definition_registry(db)
+        except Exception as e:
+            logger.warning(f"Failed to load feature definitions from DB: {e}")
+
     @property
     def definition_registry(self) -> Optional[FeatureDefinitionRegistry]:
         """Get the feature definition registry."""
         return self._definition_registry
-    
+
     def get_active_features(self) -> Set[str]:
         """Get set of active feature names from definitions."""
         if self._definition_registry:
             return self._definition_registry.get_active_features()
         return set()
-    
-    def get_ml_features(self) -> Set[str]:
-        """Get set of ML feature names from definitions."""
-        if self._definition_registry:
-            return self._definition_registry.get_ml_features()
-        return set()
-    
+
     def get_feature_info(self, feature_name: str) -> Optional[Dict[str, Any]]:
         """Get detailed info about a feature from definitions."""
         if self._definition_registry:
             return self._definition_registry.get_dependency_info(feature_name)
         return None
-    
+
     def validate_pipeline(self) -> List[str]:
         """
         Validate that code nodes match DB definitions.
-        
+
         Returns list of validation errors (empty if valid).
         """
         if not self._definition_registry:
             return ["Feature definitions not loaded"]
         return self._definition_registry.validate_all_nodes()
-    
+
     def run(
         self,
         build_sample: BuildSample,
@@ -138,7 +131,7 @@ class FeaturePipeline:
     ) -> Dict[str, Any]:
         """
         Run the complete feature pipeline.
-        
+
         Args:
             build_sample: Target build sample entity
             repo: Repository information
@@ -147,7 +140,7 @@ class FeaturePipeline:
             features_filter: Optional set of specific features to extract. When provided,
                              only nodes needed for these features (and their dependencies)
                              will be executed.
-            
+
         Returns:
             Dict with status, features, errors, and warnings
         """
@@ -158,7 +151,7 @@ class FeaturePipeline:
             workflow_run=workflow_run,
             db=self.db,
         )
-        
+
         # Set workflow_run as a resource for nodes that need it
         if workflow_run:
             context.set_resource(ResourceNames.WORKFLOW_RUN, workflow_run)
@@ -204,11 +197,13 @@ class FeaturePipeline:
         required_resources = self._collect_required_resources(nodes_to_run)
         available_resources = self.resource_manager.get_registered_names()
         resources_to_init = {
-            r for r in required_resources
+            r
+            for r in required_resources
             if r in available_resources and not context.has_resource(r)
         }
         missing_resources = {
-            r for r in required_resources
+            r
+            for r in required_resources
             if r not in available_resources and not context.has_resource(r)
         }
         if missing_resources:
@@ -216,39 +211,38 @@ class FeaturePipeline:
                 "No providers registered for required resources: %s",
                 ", ".join(sorted(missing_resources)),
             )
-        
+
         try:
             self.resource_manager.initialize(context, resources_to_init)
-            
+
             # Execute pipeline
             context = self.executor.execute(
                 context,
                 node_names=nodes_to_run,
                 parallel=parallel,
             )
-            
+
             # Filter features based on caller request/definitions
             extracted_features = context.get_merged_features()
             if features_filter:
                 extracted_features = {
-                    k: v for k, v in extracted_features.items()
-                    if k in features_filter
+                    k: v for k, v in extracted_features.items() if k in features_filter
                 }
-            elif self.filter_active_only and self._definition_registry:
+            elif self._definition_registry:
                 active_features = self._definition_registry.get_active_features()
-                # Only filter if we have active features defined
-                # If no definitions exist, keep all features
+                # Only filter if we have active features defined in DB
                 if active_features:
                     extracted_features = {
-                        k: v for k, v in extracted_features.items()
+                        k: v
+                        for k, v in extracted_features.items()
                         if k in active_features
                     }
                 else:
                     logger.warning(
                         "No active feature definitions found in DB. "
-                        "Keeping all extracted features. Run feature seed to enable filtering."
+                        "Keeping all extracted features. Run feature seed to populate definitions."
                     )
-            
+
             return {
                 "status": context.get_final_status(),
                 "features": extracted_features,
@@ -265,11 +259,8 @@ class FeaturePipeline:
                     for r in context.results
                 ],
                 "feature_count": len(extracted_features),
-                "ml_feature_count": len(
-                    set(extracted_features.keys()) & self.get_ml_features()
-                ) if self._definition_registry else 0,
             }
-            
+
         except Exception as e:
             logger.error(f"Pipeline execution failed: {e}", exc_info=True)
             return {
@@ -280,9 +271,8 @@ class FeaturePipeline:
                 "warnings": context.warnings,
                 "results": [],
                 "feature_count": 0,
-                "ml_feature_count": 0,
             }
-            
+
         finally:
             # Cleanup resources
             self.resource_manager.cleanup_all(context)
@@ -292,7 +282,7 @@ class FeaturePipeline:
     ) -> Optional[Set[str]]:
         """
         Decide which feature names the caller wants.
-        
+
         Priority:
         1) Explicit features_filter from caller
         2) Active features from definitions (if available)
@@ -300,11 +290,12 @@ class FeaturePipeline:
         """
         if features_filter is not None:
             return set(features_filter)
-        
-        if self.filter_active_only and self._definition_registry:
+
+        if self._definition_registry:
             active_features = self._definition_registry.get_active_features()
-            return set(active_features)
-        
+            if active_features:
+                return set(active_features)
+
         return None
 
     def _resolve_nodes_for_features(
@@ -361,10 +352,11 @@ class FeaturePipeline:
             if meta:
                 required.update(meta.requires_resources)
         return required
-    
+
     def visualize_dag(self) -> str:
         """Get ASCII visualization of the feature DAG."""
         from app.pipeline.core.dag import FeatureDAG
+
         dag = FeatureDAG(feature_registry)
         dag.build()
         return dag.visualize()
@@ -376,43 +368,43 @@ def run_feature_pipeline(
 ) -> Dict[str, Any]:
     """
     Convenience function to run pipeline for a build ID.
-    
+
     Fetches all necessary entities and runs the pipeline.
     This can replace the current chord/chain in processing.py.
     """
     build_sample_repo = BuildSampleRepository(db)
     repo_repo = ImportedRepositoryRepository(db)
     workflow_run_repo = WorkflowRunRepository(db)
-    
+
     # Fetch entities
     build_sample = build_sample_repo.find_by_id(ObjectId(build_id))
     if not build_sample:
         return {"status": "error", "message": "BuildSample not found"}
-    
+
     repo = repo_repo.find_by_id(str(build_sample.repo_id))
     if not repo:
         return {"status": "error", "message": "Repository not found"}
-    
+
     workflow_run = workflow_run_repo.find_by_repo_and_run_id(
         str(build_sample.repo_id), build_sample.workflow_run_id
     )
     if not workflow_run:
         return {"status": "error", "message": "WorkflowRun not found"}
-    
+
     # Run pipeline
     pipeline = FeaturePipeline(db)
     result = pipeline.run(build_sample, repo, workflow_run)
-    
+
     # Save features to BuildSample
     if result["features"]:
         updates = result["features"].copy()
         updates["status"] = result["status"]
-        
+
         if result["errors"]:
             updates["error_message"] = "; ".join(result["errors"])
         elif result["warnings"]:
             updates["error_message"] = "Warning: " + "; ".join(result["warnings"])
-        
+
         build_sample_repo.update_one(build_id, updates)
-    
+
     return result

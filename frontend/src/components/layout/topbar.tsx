@@ -1,16 +1,21 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, LogOut, Settings } from 'lucide-react'
+import { Bell, LogOut, Menu, Settings } from 'lucide-react'
 import Image from 'next/image'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 
 import { integrationApi, usersApi } from '@/lib/api'
 import type { UserAccount } from '@/types'
 import { useAuth } from '@/contexts/auth-context'
 
-export function Topbar() {
+interface TopbarProps {
+  onToggleSidebar?: () => void
+}
+
+export function Topbar({ onToggleSidebar }: TopbarProps) {
   const router = useRouter()
+  const pathname = usePathname()
   const [user, setUser] = useState<UserAccount | null>(null)
   const [signingOut, setSigningOut] = useState(false)
   const { authenticated, loading: authLoading, githubProfile, refresh } = useAuth()
@@ -47,6 +52,13 @@ export function Topbar() {
   const displayName = user?.name ?? user?.email ?? 'Not signed in'
   const displayRole = user?.role === 'admin' ? 'admin' : 'user'
 
+  const pageTitle = useMemo(() => {
+    if (pathname?.startsWith('/datasets')) return 'Projects / Datasets'
+    if (pathname?.startsWith('/admin/repos')) return 'Repositories'
+    if (pathname?.startsWith('/dashboard')) return 'Overview'
+    return 'Workspace'
+  }, [pathname])
+
   const handleLogout = async () => {
     if (signingOut) return
     setSigningOut(true)
@@ -62,9 +74,19 @@ export function Topbar() {
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-white/70 px-6 backdrop-blur dark:bg-slate-950/90">
-      <div>
-        <h1 className="text-lg font-semibold text-foreground">BuildGuard Dashboard</h1>
+    <header className="flex h-16 items-center justify-between border-b bg-white/70 px-4 md:px-6 backdrop-blur dark:bg-slate-950/90">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800 lg:hidden"
+          aria-label="Toggle navigation"
+          onClick={onToggleSidebar}
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
+        </div>
       </div>
 
       <div className="flex items-center gap-4">

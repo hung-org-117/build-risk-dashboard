@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { BadgeCheck, BarChart, Database, Home } from "lucide-react";
+import { BadgeCheck, Database, Home, Key } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 const navigation = [
@@ -11,9 +11,19 @@ const navigation = [
     icon: Home,
   },
   {
+    label: "Projects",
+    href: "/datasets",
+    icon: Database,
+  },
+  {
     label: "Repositories",
     href: "/admin/repos",
     icon: BadgeCheck,
+  },
+  {
+    label: "GitHub Tokens",
+    href: "/admin/tokens",
+    icon: Key,
   },
 ];
 
@@ -22,7 +32,7 @@ export function Sidebar() {
 
   return (
     <div className="flex h-full flex-col border-r bg-white/70 backdrop-blur dark:bg-slate-950/90">
-      <div className="flex items-center gap-2 border-b px-6 py-5">
+      <div className="flex h-16 items-center gap-2 border-b px-6">
         <div>
           <p className="text-lg font-semibold">BuildGuard</p>
         </div>

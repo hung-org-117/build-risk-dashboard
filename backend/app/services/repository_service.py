@@ -1,5 +1,5 @@
 import logging
-from app.models.entities.imported_repository import ImportStatus, ImportSource
+from app.models.entities.imported_repository import ImportStatus
 from typing import List, Optional
 
 from bson import ObjectId
@@ -16,13 +16,11 @@ from app.dtos import (
     RepoSearchResponse,
 )
 from datetime import datetime, timezone
-from app.repositories.available_repository import AvailableRepositoryRepository
 from app.repositories.imported_repository import ImportedRepositoryRepository
 from app.services.github.github_client import (
     get_public_github_client,
     get_user_github_client,
 )
-from app.services.github.github_sync import sync_user_available_repos
 from app.tasks.ingestion import import_repo
 
 
@@ -41,72 +39,18 @@ class RepositoryService:
     def __init__(self, db: Database):
         self.db = db
         self.repo_repo = ImportedRepositoryRepository(db)
-        self.available_repo_repo = AvailableRepositoryRepository(db)
 
     def bulk_import_repositories(
         self, user_id: str, payloads: List[RepoImportRequest]
     ) -> List[RepoResponse]:
         results = []
 
-        full_names = [p.full_name for p in payloads]
-        available_repos = list(
-            self.db.available_repositories.find(
-                {
-                    "user_id": ObjectId(user_id),
-                    "full_name": {"$in": full_names},
-                    "imported": {"$ne": True},
-                }
-            )
-        )
-        available_map = {r["full_name"]: r for r in available_repos}
-
         for payload in payloads:
             target_user_id = user_id
-
-            available_repo = available_map.get(payload.full_name)
             installation_id = payload.installation_id
-
-            if available_repo and available_repo.get("installation_id"):
-                installation_id = available_repo.get("installation_id")
-            # Note: For public repositories found via search, available_repo might be None.
-            # This is expected, and we will create the AvailableRepository record during ingestion.
-
-            # Note: For public repositories found via search, available_repo might be None.
-            # If so, we need to fetch it and create the AvailableRepository record.
-            if not available_repo:
-                try:
-                    with get_public_github_client() as gh:
-                        repo_data = gh.get_repository(payload.full_name)
-
-                        # Create AvailableRepository record
-                        new_available_repo = {
-                            "user_id": ObjectId(user_id),
-                            "full_name": payload.full_name,
-                            "github_id": repo_data.get("id"),
-                            "private": bool(repo_data.get("private")),
-                            "html_url": repo_data.get("html_url"),
-                            "description": repo_data.get("description"),
-                            "default_branch": repo_data.get("default_branch", "main"),
-                            "language": repo_data.get("language"),
-                            "metadata": repo_data,
-                            "installation_id": None,
-                            "imported": False,
-                            "created_at": datetime.now(timezone.utc),
-                            "updated_at": datetime.now(timezone.utc),
-                        }
-                        self.db.available_repositories.insert_one(new_available_repo)
-                        available_repo = new_available_repo
-
-                except Exception as e:
-                    logger.error(
-                        f"Failed to fetch public repo details for {payload.full_name}: {e}"
-                    )
-                    # If we can't fetch it, we can't import it properly.
-                    continue
 
             # We allow re-importing to retry failed imports or update settings.
             # The upsert_repository below will handle updates.
-            # Main flow repos are marked with import_source = "main"
 
             try:
                 repo_doc = self.repo_repo.upsert_repository(
@@ -114,19 +58,19 @@ class RepositoryService:
                         "user_id": ObjectId(target_user_id),
                         "provider": payload.provider,
                         "full_name": payload.full_name,
-                        "import_source": ImportSource.MAIN.value,  # Main flow only
                     },
                     data={
                         "installation_id": installation_id,
                         "test_frameworks": payload.test_frameworks,
                         "source_languages": payload.source_languages,
-                        "ci_provider": payload.ci_provider,
-                        "import_status": ImportStatus.QUEUED.value,
-                        "import_source": ImportSource.MAIN.value,
-                        "requested_features": payload.features,
-                        "max_builds_to_ingest": payload.max_builds,
-                    },
-                )
+                    "ci_provider": payload.ci_provider,
+                    "import_status": ImportStatus.QUEUED.value,
+                    "requested_features": payload.features,
+                    "max_builds_to_ingest": payload.max_builds,
+                    "ingest_start_date": payload.ingest_start_date,
+                    "ingest_end_date": payload.ingest_end_date,
+                },
+            )
 
                 # Trigger async import
                 import_repo.delay(
@@ -139,6 +83,8 @@ class RepositoryService:
                     ci_provider=payload.ci_provider,
                     features=payload.features,
                     max_builds=payload.max_builds,
+                    ingest_start_date=payload.ingest_start_date.isoformat() if payload.ingest_start_date else None,
+                    ingest_end_date=payload.ingest_end_date.isoformat() if payload.ingest_end_date else None,
                 )
 
                 results.append(repo_doc)
@@ -151,16 +97,35 @@ class RepositoryService:
         return [_serialize_repo(doc) for doc in results]
 
     def sync_repositories(self, user_id: str, limit: int) -> RepoSuggestionListResponse:
-        """Sync available repositories from GitHub App Installations."""
+        """
+        Fetch repositories accessible to the user directly from GitHub (no cache).
+        Uses the user's GitHub token to list repos.
+        """
+        items: List[dict] = []
         try:
-            sync_user_available_repos(self.db, user_id)
+            with get_user_github_client(self.db, user_id) as gh:
+                repos = gh._rest_request(
+                    "GET", "/user/repos", params={"per_page": min(limit, 10), "sort": "full_name"}
+                )
+                for repo in repos:
+                    full_name = repo.get("full_name")
+                    if not full_name:
+                        continue
+                    items.append(
+                        {
+                            "full_name": full_name,
+                            "description": repo.get("description"),
+                            "default_branch": repo.get("default_branch"),
+                            "private": bool(repo.get("private")),
+                            "owner": repo.get("owner", {}).get("login"),
+                            "installation_id": None,  # Not cached; resolved at import
+                            "html_url": repo.get("html_url"),
+                        }
+                    )
         except Exception as e:
-            logger.error(f"Failed to sync repositories: {e}")
+            logger.error(f"Failed to fetch user repos from GitHub: {e}")
 
-        items = self.available_repo_repo.discover_available_repositories(
-            user_id=user_id, q=None, limit=limit
-        )
-        return RepoSuggestionListResponse(items=items)
+        return RepoSuggestionListResponse(items=items[:limit])
 
     def list_repositories(
         self, user_id: str, skip: int, limit: int, q: Optional[str] = None
@@ -183,43 +148,37 @@ class RepositoryService:
     def discover_repositories(
         self, user_id: str, q: str | None, limit: int
     ) -> RepoSuggestionListResponse:
-        """List available repositories."""
-        items = self.available_repo_repo.discover_available_repositories(
-            user_id=user_id, q=q, limit=limit
-        )
-        return RepoSuggestionListResponse(items=items)
+        """List available repositories (directly from GitHub)."""
+        return self.sync_repositories(user_id, limit)
 
     def search_repositories(self, user_id: str, q: str | None) -> RepoSearchResponse:
-        """Search for repositories (both private installed and public GitHub)."""
-        # 1. Search private installed repos (DB)
-        private_matches = self.available_repo_repo.discover_available_repositories(
-            user_id=user_id, q=q, limit=50
-        )
+        """Search for repositories directly against GitHub."""
+        private_matches: List[dict] = []
+        public_matches: List[dict] = []
 
-        public_matches = []
-        # 2. Search public repos (GitHub API) - only if query is long enough
-        if q and len(q) >= 3:
-            try:
-                with get_user_github_client(self.db, user_id) as gh:
-                    # Search for public repos matching the query
-                    # We use 'in:name,description' and 'is:public' to narrow down
-                    query = f"{q} in:name,description is:public"
-                    results = gh.search_repositories(query, per_page=10)
+        if not q or len(q) < 1:
+            return RepoSearchResponse(private_matches=[], public_matches=[])
 
-                    for repo in results:
-                        public_matches.append(
-                            {
-                                "full_name": repo["full_name"],
-                                "description": repo.get("description"),
-                                "default_branch": repo.get("default_branch"),
-                                "private": False,
-                                "owner": repo["owner"]["login"],
-                                "html_url": repo["html_url"],
-                                "installation_id": None,
-                            }
-                        )
-            except Exception as e:
-                logger.error(f"Failed to search public repos: {e}")
+        try:
+            with get_user_github_client(self.db, user_id) as gh:
+                # Authenticated search returns both public and accessible private repos.
+                results = gh.search_repositories(q, per_page=10)
+                for repo in results:
+                    entry = {
+                        "full_name": repo.get("full_name"),
+                        "description": repo.get("description"),
+                        "default_branch": repo.get("default_branch"),
+                        "private": bool(repo.get("private")),
+                        "owner": repo.get("owner", {}).get("login"),
+                        "html_url": repo.get("html_url"),
+                        "installation_id": None,
+                    }
+                    if entry["private"]:
+                        private_matches.append(entry)
+                    else:
+                        public_matches.append(entry)
+        except Exception as e:
+            logger.error(f"Failed to search repos on GitHub: {e}")
 
         return RepoSearchResponse(
             private_matches=private_matches, public_matches=public_matches
@@ -269,6 +228,10 @@ class RepositoryService:
             updates["requested_features"] = updates.pop("features")
         if "max_builds" in updates:
             updates["max_builds_to_ingest"] = updates.pop("max_builds")
+        if "ingest_start_date" in updates:
+            updates["ingest_start_date"] = updates["ingest_start_date"]
+        if "ingest_end_date" in updates:
+            updates["ingest_end_date"] = updates["ingest_end_date"]
 
         if not updates:
             updated = repo_doc

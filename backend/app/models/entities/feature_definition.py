@@ -93,16 +93,6 @@ class FeatureDefinition(BaseEntity):
     deprecated_reason: Optional[str] = Field(default=None, description="Reason for deprecation")
     replaced_by: Optional[str] = Field(default=None, description="Feature that replaces this one")
     
-    # ML/Analysis metadata
-    is_ml_feature: bool = Field(
-        default=True, 
-        description="Whether this feature is used in ML models"
-    )
-    feature_importance: Optional[float] = Field(
-        default=None, 
-        description="Importance score from ML model (0-1)"
-    )
-    
     # Versioning
     version: str = Field(default="1.0", description="Feature definition version")
     added_in_version: str = Field(default="1.0", description="Pipeline version when added")

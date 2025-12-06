@@ -1,0 +1,110 @@
+"""Dataset API - manage uploaded CSV projects for enrichment."""
+
+from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
+from pymongo.database import Database
+
+from app.database.mongo import get_db
+from app.dtos import (
+    DatasetCreateRequest,
+    DatasetListResponse,
+    DatasetResponse,
+    DatasetUpdateRequest,
+)
+from app.middleware.auth import get_current_user
+from app.services.dataset_service import DatasetService
+
+router = APIRouter(prefix="/datasets", tags=["Datasets"])
+
+
+@router.get("/", response_model=DatasetListResponse, response_model_by_alias=False)
+def list_datasets(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    q: str | None = Query(default=None, description="Search by name, file, or tag"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """List datasets for the signed-in user."""
+    user_id = str(current_user["_id"])
+    service = DatasetService(db)
+    return service.list_datasets(user_id, skip=skip, limit=limit, q=q)
+
+
+@router.post(
+    "/", response_model=DatasetResponse, status_code=status.HTTP_201_CREATED, response_model_by_alias=False
+)
+def create_dataset(
+    payload: DatasetCreateRequest,
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a dataset record (metadata only)."""
+    user_id = str(current_user["_id"])
+    service = DatasetService(db)
+    return service.create_dataset(user_id, payload)
+
+
+@router.post(
+    "/upload",
+    response_model=DatasetResponse,
+    status_code=status.HTTP_201_CREATED,
+    response_model_by_alias=False,
+)
+async def upload_dataset(
+    file: UploadFile = File(...),
+    name: str | None = Form(default=None),
+    description: str | None = Form(default=None),
+    tags: list[str] = Form(default=[]),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Upload a CSV dataset and persist metadata."""
+    user_id = str(current_user["_id"])
+    upload_fobj = file.file
+    try:
+        upload_fobj.seek(0)
+    except Exception:
+        pass
+
+    service = DatasetService(db)
+    return service.create_from_upload(
+        user_id=user_id,
+        filename=file.filename,
+        upload_file=upload_fobj,
+        name=name,
+        description=description,
+        tags=tags,
+    )
+
+
+@router.get(
+    "/{dataset_id}",
+    response_model=DatasetResponse,
+    response_model_by_alias=False,
+)
+def get_dataset(
+    dataset_id: str = Path(..., description="Dataset id (Mongo ObjectId)"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get dataset details."""
+    user_id = str(current_user["_id"])
+    service = DatasetService(db)
+    return service.get_dataset(dataset_id, user_id)
+
+
+@router.patch(
+    "/{dataset_id}",
+    response_model=DatasetResponse,
+    response_model_by_alias=False,
+)
+def update_dataset(
+    dataset_id: str = Path(..., description="Dataset id (Mongo ObjectId)"),
+    payload: DatasetUpdateRequest = ...,
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Update mappings, tags, or feature selections for a dataset."""
+    user_id = str(current_user["_id"])
+    service = DatasetService(db)
+    return service.update_dataset(dataset_id, user_id, payload)

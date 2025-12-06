@@ -66,6 +66,75 @@ export interface BuildDetail extends Build {
   gh_num_commits_on_files_touched?: number;
 }
 
+export interface DatasetMapping {
+  build_id?: string | null;
+  commit_sha?: string | null;
+  repo_name?: string | null;
+  timestamp?: string | null;
+}
+
+export interface DatasetStats {
+  coverage: number;
+  missing_rate: number;
+  duplicate_rate: number;
+  build_coverage: number;
+}
+
+export type DatasetPreviewRow = Record<string, string | number>;
+
+export interface DatasetRecord {
+  id: string;
+  user_id?: string | null;
+  name: string;
+  description?: string | null;
+  file_name: string;
+  source: string;
+  rows: number;
+  size_mb: number;
+  columns: string[];
+  mapped_fields: DatasetMapping;
+  stats: DatasetStats;
+  tags: string[];
+  selected_template?: string | null;
+  selected_features: string[];
+  preview: DatasetPreviewRow[];
+  created_at?: string;
+  updated_at?: string | null;
+}
+
+export interface DatasetListResponse {
+  total: number;
+  skip: number;
+  limit: number;
+  items: DatasetRecord[];
+}
+
+export interface DatasetCreatePayload {
+  name: string;
+  file_name: string;
+  rows: number;
+  size_mb: number;
+  columns: string[];
+  description?: string | null;
+  source?: string;
+  mapped_fields?: DatasetMapping;
+  stats?: DatasetStats;
+  tags?: string[];
+  selected_template?: string | null;
+  selected_features?: string[];
+  preview?: DatasetPreviewRow[];
+}
+
+export interface DatasetUpdatePayload {
+  name?: string;
+  description?: string | null;
+  mapped_fields?: DatasetMapping;
+  stats?: DatasetStats;
+  tags?: string[];
+  selected_template?: string | null;
+  selected_features?: string[];
+}
+
 export interface BuildListResponse {
   items: Build[];
   total: number;
@@ -221,6 +290,8 @@ export interface RepoImportPayload {
   ci_provider?: string;
   features?: string[];
   max_builds?: number | null;
+  ingest_start_date?: string | null;
+  ingest_end_date?: string | null;
 }
 
 export interface RepoUpdatePayload {
@@ -247,7 +318,6 @@ export interface FeatureDefinitionSummary {
   nullable: boolean;
   is_active: boolean;
   is_deprecated: boolean;
-  is_ml_feature: boolean;
   example_value?: string | null;
   unit?: string | null;
 }
@@ -321,4 +391,54 @@ export interface RefreshTokenResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
+}
+
+export type GithubTokenStatus = 'active' | 'rate_limited' | 'invalid' | 'disabled';
+
+export interface GithubToken {
+  id: string;
+  masked_token: string;
+  label: string;
+  status: GithubTokenStatus;
+  rate_limit_remaining: number | null;
+  rate_limit_limit: number | null;
+  rate_limit_reset_at: string | null;
+  last_used_at: string | null;
+  total_requests: number;
+  created_at: string | null;
+  last_validated_at: string | null;
+  validation_error: string | null;
+}
+
+export interface TokenPoolStatus {
+  total_tokens: number;
+  active_tokens: number;
+  rate_limited_tokens: number;
+  invalid_tokens: number;
+  disabled_tokens: number;
+  estimated_requests_available: number;
+  next_reset_at: string | null;
+  pool_healthy: boolean;
+}
+
+export interface TokenListResponse {
+  items: GithubToken[];
+  total: number;
+}
+
+export interface TokenCreatePayload {
+  token: string;
+  label?: string;
+}
+
+export interface TokenUpdatePayload {
+  label?: string;
+  status?: 'active' | 'disabled';
+}
+
+export interface TokenVerifyResponse {
+  valid: boolean;
+  error?: string;
+  rate_limit_remaining?: number;
+  rate_limit_limit?: number;
 }

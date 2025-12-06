@@ -77,7 +77,19 @@ class BuildLogFeaturesNode(FeatureNode):
                 total_jobs += 1
                 
                 content = log_file.read()
-                parsed = self.parser.parse(content)
+                allowed_frameworks = [
+                    f.value.lower() if hasattr(f, "value") else str(f).lower()
+                    for f in getattr(repo, "test_frameworks", []) or []
+                ]
+                language_hint = None
+                if repo.source_languages:
+                    lang = repo.source_languages[0]
+                    language_hint = lang.lower() if isinstance(lang, str) else str(lang).lower()
+                parsed = self.parser.parse(
+                    content,
+                    language_hint=language_hint,
+                    allowed_frameworks=allowed_frameworks or None,
+                )
                 
                 if parsed.framework:
                     frameworks.add(parsed.framework)

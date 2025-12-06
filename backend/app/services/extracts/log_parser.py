@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 
 @dataclass
@@ -23,6 +23,23 @@ class ParsedLog:
 
 class TestLogParser:
     """Detects test framework and extracts aggregate metrics."""
+
+    # Exposed list for UI/config selection
+    SUPPORTED_FRAMEWORKS: List[str] = [
+        "pytest",
+        "unittest",
+        "rspec",
+        "minitest",
+        "testunit",
+        "cucumber",
+        "junit",
+        "testng",
+    ]
+    FRAMEWORKS_BY_LANG = {
+        "python": ["pytest", "unittest"],
+        "ruby": ["rspec", "minitest", "testunit", "cucumber"],
+        "java": ["junit", "testng"],
+    }
 
     PYTEST_PATTERN = re.compile(
         r"=+\s*(?P<passed>\d+)\s+passed(?:,\s*(?P<failed>\d+)\s+failed)?(?:,\s*(?P<skipped>\d+)\s+skipped)?(?:,\s*(?P<xfailed>\d+)\s+xfailed)?\s+in\s+(?P<duration>[\d\.]+)s",
@@ -78,12 +95,21 @@ class TestLogParser:
         re.IGNORECASE,
     )
 
-    def parse(self, text: str, language_hint: Optional[str] = None) -> ParsedLog:
+    def parse(
+        self,
+        text: str,
+        language_hint: Optional[str] = None,
+        allowed_frameworks: Optional[list[str]] = None,
+    ) -> ParsedLog:
         language_hint = (language_hint or "").lower()
         framework = None
+        allowed = {f.lower() for f in allowed_frameworks} if allowed_frameworks else None
+
+        def is_allowed(name: str) -> bool:
+            return allowed is None or name in allowed
 
         match = self.PYTEST_PATTERN.search(text)
-        if match:
+        if match and is_allowed("pytest"):
             framework = "pytest"
             failed = int(match.group("failed") or 0)
             skipped = int(match.group("skipped") or 0)
@@ -99,7 +125,7 @@ class TestLogParser:
             )
 
         unit = self.UNITTEST_PATTERN.search(text)
-        if unit:
+        if unit and is_allowed("unittest"):
             framework = "unittest"
             tests = int(unit.group("tests"))
             duration = float(unit.group("duration"))
@@ -113,7 +139,7 @@ class TestLogParser:
             )
 
         rspec = self.RSPec_PATTERN.search(text)
-        if rspec:
+        if rspec and is_allowed("rspec"):
             framework = "rspec"
             examples = int(rspec.group("examples"))
             failures = int(rspec.group("failures"))
@@ -125,7 +151,7 @@ class TestLogParser:
             return ParsedLog(framework, "ruby", examples, failures, pending, duration)
 
         minitest = self.MINITEST_PATTERN.search(text)
-        if minitest:
+        if minitest and is_allowed("minitest"):
             framework = "minitest"
             runs = int(minitest.group("runs"))
             failures = int(minitest.group("failures"))
@@ -139,7 +165,7 @@ class TestLogParser:
             return ParsedLog(framework, "ruby", runs, failed_total, skips, duration)
 
         testunit = self.TESTUNIT_PATTERN.search(text)
-        if testunit:
+        if testunit and is_allowed("testunit"):
             framework = "testunit"
             tests = int(testunit.group("tests"))
             failures = int(testunit.group("failures"))
@@ -155,7 +181,7 @@ class TestLogParser:
             return ParsedLog(framework, "ruby", tests, failed_total, skipped, duration)
 
         cucumber = self.CUCUMBER_SCENARIO_PATTERN.search(text)
-        if cucumber:
+        if cucumber and is_allowed("cucumber"):
             framework = "cucumber"
             total = int(cucumber.group("total"))
             failed = int(cucumber.group("failed") or 0)
@@ -176,7 +202,7 @@ class TestLogParser:
 
         # Java Maven/Gradle (JUnit)
         maven_junit = self.MAVEN_JUNIT_PATTERN.search(text)
-        if maven_junit:
+        if maven_junit and is_allowed("junit"):
             framework = "junit"
             tests = int(maven_junit.group("tests"))
             failures = int(maven_junit.group("failures"))
@@ -194,7 +220,7 @@ class TestLogParser:
 
         # Java Maven (TestNG)
         maven_testng = self.MAVEN_TESTNG_PATTERN.search(text)
-        if maven_testng:
+        if maven_testng and is_allowed("testng"):
             framework = "testng"
             tests = int(maven_testng.group("tests"))
             failures = int(maven_testng.group("failures"))

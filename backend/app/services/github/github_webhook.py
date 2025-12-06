@@ -9,7 +9,6 @@ from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.config import settings
-from app.services.github.github_sync import sync_user_available_repos
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.models.entities.workflow_run import WorkflowRunRaw
 from app.celery_app import celery_app
@@ -225,34 +224,7 @@ def handle_github_event(
     db: Database, event: str, payload: Dict[str, object]
 ) -> Dict[str, object]:
     if event in {"installation", "installation_repositories"}:
-        result = _handle_installation_event(db, event, payload)
-
-        # Trigger Sync for the user who initiated this
-        sender = payload.get("sender", {})
-        sender_login = sender.get("login")
-
-        if sender_login:
-            # Find user by GitHub login
-            # We need to find the user who has this GitHub account linked
-            identity = db.oauth_identities.find_one(
-                {
-                    "$or": [
-                        {"account_login": sender_login},
-                        {"profile.login": sender_login},
-                    ]
-                }
-            )
-
-            if identity:
-                user_id = str(identity["user_id"])
-                try:
-                    sync_user_available_repos(db, user_id)
-                    result["sync_triggered"] = True
-                    result["user_id"] = user_id
-                except Exception as e:
-                    result["sync_error"] = str(e)
-
-        return result
+        return _handle_installation_event(db, event, payload)
 
     elif event == "workflow_run":
         return _handle_workflow_run_event(db, payload)

@@ -40,7 +40,6 @@ class FeatureDefinitionResponse(BaseModel):
     nullable: bool
     is_active: bool
     is_deprecated: bool
-    is_ml_feature: bool
     example_value: Optional[str]
     unit: Optional[str]
     
@@ -58,7 +57,6 @@ class FeatureSummaryResponse(BaseModel):
     """Summary statistics about features."""
     total_features: int
     active_features: int
-    ml_features: int
     deprecated_features: int
     by_category: dict
     by_source: dict
@@ -87,7 +85,6 @@ def list_features(
     source: Optional[str] = Query(None, description="Filter by source"),
     extractor_node: Optional[str] = Query(None, description="Filter by extractor node"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    is_ml_feature: Optional[bool] = Query(None, description="Filter ML features only"),
     db: Database = Depends(get_db),
 ):
     """List all feature definitions with optional filters."""
@@ -103,9 +100,6 @@ def list_features(
         query["extractor_node"] = extractor_node
     if is_active is not None:
         query["is_active"] = is_active
-    if is_ml_feature is not None:
-        query["is_ml_feature"] = is_ml_feature
-    
     features = repo.find_many(query, sort=[("category", 1), ("name", 1)])
     
     return FeatureListResponse(
@@ -125,7 +119,6 @@ def list_features(
                 nullable=f.nullable,
                 is_active=f.is_active,
                 is_deprecated=f.is_deprecated,
-                is_ml_feature=f.is_ml_feature,
                 example_value=f.example_value,
                 unit=f.unit,
             )
@@ -143,7 +136,6 @@ def get_feature_summary(
     
     all_features = repo.find_many({})
     active = [f for f in all_features if f.is_active]
-    ml = [f for f in all_features if f.is_ml_feature and f.is_active]
     deprecated = [f for f in all_features if f.is_deprecated]
     
     # Group by category
@@ -167,7 +159,6 @@ def get_feature_summary(
     return FeatureSummaryResponse(
         total_features=len(all_features),
         active_features=len(active),
-        ml_features=len(ml),
         deprecated_features=len(deprecated),
         by_category=by_category,
         by_source=by_source,
@@ -267,7 +258,6 @@ def get_feature(
         nullable=feature.nullable,
         is_active=feature.is_active,
         is_deprecated=feature.is_deprecated,
-        is_ml_feature=feature.is_ml_feature,
         example_value=feature.example_value,
         unit=feature.unit,
     )

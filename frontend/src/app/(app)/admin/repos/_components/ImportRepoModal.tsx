@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
     AlertCircle,
@@ -15,12 +15,12 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { integrationApi, reposApi, featuresApi } from "@/lib/api";
 import {
     RepoSuggestion,
     RepoImportPayload,
     TestFramework,
-    SOURCE_LANGUAGE_PRESETS,
     CIProvider,
     FeatureDefinitionSummary,
 } from "@/types";
@@ -45,6 +45,55 @@ type FeatureCategoryGroup = {
     features: FeatureDefinitionSummary[];
 };
 
+type FeatureTemplate = {
+    id: string;
+    name: string;
+    description: string;
+    badges: string[];
+    recommended: string[];
+};
+
+const FEATURE_TEMPLATES: FeatureTemplate[] = [
+    {
+        id: "reliability",
+        name: "Build reliability",
+        description: "Focus on flakiness, duration, and failure signals.",
+        badges: ["stability", "tests"],
+        recommended: [
+            "build_duration_minutes",
+            "failed_test_count",
+            "test_flakiness_index",
+            "change_failure_rate",
+        ],
+    },
+    {
+        id: "delivery",
+        name: "Delivery velocity",
+        description: "Lead time, deployment frequency, and change risk.",
+        badges: ["velocity", "risk"],
+        recommended: [
+            "lead_time",
+            "deployment_frequency",
+            "commit_churn",
+            "change_failure_rate",
+        ],
+    },
+    {
+        id: "custom",
+        name: "Custom mix",
+        description: "Start empty and select only what you need.",
+        badges: ["custom"],
+        recommended: [],
+    },
+];
+
+// Map languages to suggested test frameworks
+const FRAMEWORKS_BY_LANG: Record<string, string[]> = {
+    python: [TestFramework.PYTEST, TestFramework.UNITTEST],
+    ruby: [TestFramework.RSPEC, TestFramework.MINITEST, TestFramework.TESTUNIT, TestFramework.CUCUMBER],
+    java: [TestFramework.JUNIT, TestFramework.TESTNG],
+};
+
 interface ImportRepoModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -52,7 +101,7 @@ interface ImportRepoModalProps {
 }
 
 export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalProps) {
-    const [step, setStep] = useState<1 | 2>(1);
+    const [step, setStep] = useState<1 | 2 | 3>(1);
     const [searchTerm, setSearchTerm] = useState("");
     const [isSearching, setIsSearching] = useState(false);
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
@@ -76,13 +125,20 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     >({});
     const [languageLoading, setLanguageLoading] = useState<Record<string, boolean>>({});
     const [languageError, setLanguageError] = useState<Record<string, string | null>>({});
+    const [availableLanguages, setAvailableLanguages] = useState<Record<string, string[]>>({});
     const [featuresData, setFeaturesData] = useState<FeatureCategoryGroup[] | null>(null);
-    const [featuresDefault, setFeaturesDefault] = useState<string[]>([]);
     const [featuresLoading, setFeaturesLoading] = useState(false);
     const [featuresError, setFeaturesError] = useState<string | null>(null);
+    const [featureSearch, setFeatureSearch] = useState<Record<string, string>>({});
+    const [frameworks, setFrameworks] = useState<string[]>([]);
+    const [frameworksByLang, setFrameworksByLang] = useState<Record<string, string[]>>({});
+    const [frameworksLoading, setFrameworksLoading] = useState(false);
+    const [frameworksError, setFrameworksError] = useState<string | null>(null);
+    const [frameworksLoaded, setFrameworksLoaded] = useState(false);
 
     const [importing, setImporting] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
+    const [activeRepo, setActiveRepo] = useState<string | null>(null);
 
     const performSearch = useCallback(async (query: string, force = false) => {
         if (!force && query === lastSearchedTerm.current) return;
@@ -101,44 +157,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setIsSearching(false);
         }
     }, []);
-
-    // Debounce search
-    useEffect(() => {
-        if (isOpen && debouncedSearchTerm === searchTerm) {
-            performSearch(debouncedSearchTerm);
-        }
-    }, [debouncedSearchTerm, isOpen, searchTerm, performSearch]);
-
-    // Reset state on open
-    useEffect(() => {
-        if (isOpen) {
-            setStep(1);
-            setSearchTerm("");
-            setSelectedRepos({});
-            setRepoConfigs({});
-            setPrivateMatches([]);
-            setPublicMatches([]);
-            setSearchError(null);
-            setImportError(null);
-            setFeaturesData(null);
-            setFeaturesDefault([]);
-            // Initial load (empty search)
-            performSearch("", true);
-        }
-    }, [isOpen, performSearch]);
-
-    const handleSync = async () => {
-        setIsSearching(true);
-        try {
-            await reposApi.sync();
-            // Re-run search to update list
-            await performSearch(searchTerm, true);
-        } catch (err) {
-            console.error(err);
-            setSearchError("Failed to sync repositories from GitHub.");
-            setIsSearching(false);
-        }
-    };
 
     const loadFeatures = useCallback(async () => {
         if (featuresLoading || featuresData) return;
@@ -163,24 +181,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                 a.display_name.localeCompare(b.display_name)
             );
             setFeaturesData(categories);
-
-            const defaults = data.items.map((f) => f.name);
-            setFeaturesDefault(defaults);
-
-            // Initialize existing configs with defaults if missing
-            setRepoConfigs((current) => {
-                const next = { ...current };
-                Object.keys(selectedRepos).forEach((fullName) => {
-                    const cfg = next[fullName];
-                    if (cfg && (!cfg.features || cfg.features.length === 0)) {
-                        next[fullName] = {
-                            ...cfg,
-                            features: defaults,
-                        };
-                    }
-                });
-                return next;
-            });
         } catch (err) {
             console.error(err);
             setFeaturesError("Failed to load available features.");
@@ -188,6 +188,101 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setFeaturesLoading(false);
         }
     }, [featuresData, featuresLoading, selectedRepos]);
+
+    const loadFrameworks = useCallback(async () => {
+        if (frameworksLoading || frameworksLoaded) return;
+        setFrameworksLoading(true);
+        setFrameworksError(null);
+        try {
+            const res = await reposApi.getTestFrameworks();
+            setFrameworks(res.frameworks || []);
+            setFrameworksByLang(res.by_language || {});
+        } catch (err) {
+            console.error(err);
+            setFrameworksError("Failed to load test frameworks.");
+        } finally {
+            setFrameworksLoaded(true);
+            setFrameworksLoading(false);
+        }
+    }, [frameworksLoading, frameworksLoaded]);
+
+    // Debounce search
+    useEffect(() => {
+        if (isOpen && debouncedSearchTerm === searchTerm) {
+            performSearch(debouncedSearchTerm);
+        }
+    }, [debouncedSearchTerm, isOpen, searchTerm, performSearch]);
+
+    // Reset state on open
+    useEffect(() => {
+        if (isOpen) {
+            setStep(1);
+            setSearchTerm("");
+            setSelectedRepos({});
+            setRepoConfigs({});
+            setAvailableLanguages({});
+            setLanguageLoading({});
+            setLanguageError({});
+            setPrivateMatches([]);
+            setPublicMatches([]);
+            setSearchError(null);
+            setImportError(null);
+            setFeaturesData(null);
+            void loadFrameworks();
+            // Initial load (empty search)
+            performSearch("", true);
+            setActiveRepo(null);
+        }
+    }, [isOpen, performSearch, loadFrameworks]);
+
+    const handleSync = async () => {
+        setIsSearching(true);
+        try {
+            await reposApi.sync();
+            // Re-run search to update list
+            await performSearch(searchTerm, true);
+        } catch (err) {
+            console.error(err);
+            setSearchError("Failed to sync repositories from GitHub.");
+            setIsSearching(false);
+        }
+    };
+
+    const fetchLanguages = useCallback(
+        async (repo: RepoSuggestion) => {
+            setLanguageLoading((prev) => ({ ...prev, [repo.full_name]: true }));
+            setLanguageError((prev) => ({ ...prev, [repo.full_name]: null }));
+            try {
+                const res = await reposApi.detectLanguages(repo.full_name);
+                const langs = res.languages && res.languages.length > 0
+                    ? res.languages
+                    : [];
+                setAvailableLanguages((prev) => ({ ...prev, [repo.full_name]: langs }));
+                setRepoConfigs((current) => {
+                    const existing = current[repo.full_name];
+                    return {
+                        ...current,
+                        [repo.full_name]: {
+                            test_frameworks: existing?.test_frameworks || [],
+                            source_languages: existing?.source_languages || [],
+                            ci_provider: existing?.ci_provider || CIProvider.GITHUB_ACTIONS,
+                            features: existing?.features || [],
+                            max_builds: existing?.max_builds ?? null,
+                        },
+                    };
+                });
+            } catch (err) {
+                console.error(err);
+                setLanguageError((prev) => ({
+                    ...prev,
+                    [repo.full_name]: "Failed to detect languages",
+                }));
+            } finally {
+                setLanguageLoading((prev) => ({ ...prev, [repo.full_name]: false }));
+            }
+        },
+        []
+    );
 
     const toggleSelection = (repo: RepoSuggestion) => {
         setSelectedRepos((prev) => {
@@ -209,8 +304,10 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         test_frameworks: [],
                         source_languages: [],
                         ci_provider: CIProvider.GITHUB_ACTIONS,
-                        features: featuresDefault,
+                        features: [],
                         max_builds: null,
+                        ingest_start_date: null,
+                        ingest_end_date: null,
                     },
                 }));
             }
@@ -219,63 +316,59 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     };
 
     const selectedList = useMemo(() => Object.values(selectedRepos), [selectedRepos]);
-
-    // Load features and detect languages when entering config step
-    useEffect(() => {
-        if (step !== 2) return;
-        void loadFeatures();
-        selectedList.forEach((repo) => {
-            const cfg = repoConfigs[repo.full_name];
-            if (!cfg || cfg.source_languages.length === 0) {
-                void fetchLanguages(repo);
-            }
-        });
-    }, [step, loadFeatures, selectedList, repoConfigs, fetchLanguages]);
-    useEffect(() => {
-        if (step !== 2) return;
-        selectedList.forEach((repo) => {
-            const cfg = repoConfigs[repo.full_name];
-            if (!cfg || cfg.source_languages.length === 0) {
-                void fetchLanguages(repo);
-            }
-        });
-    }, [step, selectedList, repoConfigs, fetchLanguages]);
-    const fetchLanguages = useCallback(
-        async (repo: RepoSuggestion) => {
-            setLanguageLoading((prev) => ({ ...prev, [repo.full_name]: true }));
-            setLanguageError((prev) => ({ ...prev, [repo.full_name]: null }));
-            try {
-                const res = await reposApi.detectLanguages(repo.full_name);
-                const langs = res.languages && res.languages.length > 0
-                    ? res.languages
-                    : ["ruby", "java", "python"];
-                setRepoConfigs((current) => {
-                    const existing = current[repo.full_name];
-                    // Only set if not already chosen
-                    if (existing && existing.source_languages.length > 0) {
-                        return current;
-                    }
-                    return {
-                        ...current,
-                        [repo.full_name]: {
-                            test_frameworks: existing?.test_frameworks || [],
-                            source_languages: langs,
-                            ci_provider: existing?.ci_provider || CIProvider.GITHUB_ACTIONS,
-                        },
-                    };
-                });
-            } catch (err) {
-                console.error(err);
-                setLanguageError((prev) => ({
-                    ...prev,
-                    [repo.full_name]: "Failed to detect languages",
-                }));
-            } finally {
-                setLanguageLoading((prev) => ({ ...prev, [repo.full_name]: false }));
-            }
-        },
-        []
+    const anyLanguageLoading = selectedList.some((repo) => languageLoading[repo.full_name]);
+    const anyLanguageMissing = selectedList.some(
+        (repo) => !repoConfigs[repo.full_name]?.source_languages?.length
     );
+    const step2Loading =
+        frameworksLoading ||
+        selectedList.some(
+            (repo) => languageLoading[repo.full_name] || !availableLanguages[repo.full_name]
+        );
+
+    useEffect(() => {
+        if (selectedList.length === 0) {
+            setActiveRepo(null);
+            return;
+        }
+        if (!activeRepo || !selectedRepos[activeRepo]) {
+            setActiveRepo(selectedList[0].full_name);
+        }
+    }, [selectedList, activeRepo, selectedRepos]);
+
+    const getFrameworkSuggestions = useCallback(
+        (config: {
+            source_languages: string[];
+        }) => {
+            const languageSet = new Set(config.source_languages.map((l) => l.toLowerCase()));
+            const fromApi = Array.from(
+                new Set(
+                    Array.from(languageSet).flatMap((lang) => frameworksByLang[lang] || [])
+                )
+            );
+            const fromPreset = Array.from(
+                new Set(
+                    Array.from(languageSet).flatMap((lang) => FRAMEWORKS_BY_LANG[lang] || [])
+                )
+            );
+            if (fromApi.length) return fromApi;
+            if (fromPreset.length) return fromPreset;
+            return frameworks || [];
+        },
+        [frameworksByLang, frameworks]
+    );
+
+    // Load features and detect languages when entering config/feature steps
+    useEffect(() => {
+        if (step < 2) return;
+        void loadFeatures();
+        void loadFrameworks();
+        selectedList.forEach((repo) => {
+            if (!availableLanguages[repo.full_name]) {
+                void fetchLanguages(repo);
+            }
+        });
+    }, [step, loadFeatures, loadFrameworks, selectedList, availableLanguages, fetchLanguages]);
 
     const handleImport = async () => {
         if (!selectedList.length) return;
@@ -294,6 +387,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                     ci_provider: config.ci_provider,
                     features: config.features,
                     max_builds: config.max_builds ?? null,
+                    ingest_start_date: (config as any).ingest_start_date || null,
+                    ingest_end_date: (config as any).ingest_end_date || null,
                 };
             });
 
@@ -308,7 +403,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
         }
     };
 
-    const { status, refresh } = useAuth();
+    const { status } = useAuth();
     const [isAppInstalled, setIsAppInstalled] = useState(false);
     const [isPolling, setIsPolling] = useState(false);
 
@@ -373,12 +468,17 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     return (
         <Portal>
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-950 border dark:border-slate-800">
+                <div className="w-full max-w-7xl h-[90vh] rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-950 border dark:border-slate-800 flex flex-col overflow-hidden">
                     <div className="mb-6 flex items-center justify-between">
                         <div>
                             <h2 className="text-xl font-semibold">Import Repositories</h2>
                             <p className="text-sm text-muted-foreground">
-                                Step {step} of 2: {step === 1 ? "Select repositories" : "Configure settings"}
+                                Step {step} of 3:{" "}
+                                {step === 1
+                                    ? "Select repositories"
+                                    : step === 2
+                                        ? "Configure languages & frameworks"
+                                        : "Choose features"}
                             </p>
                         </div>
                         <button
@@ -443,6 +543,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         </div>
                     )}
 
+                    <div className="flex-1 overflow-y-auto">
                     {step === 1 ? (
                         <div className="space-y-6">
                             <div className="flex gap-2">
@@ -450,7 +551,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                                     <input
                                         type="text"
-                                        className="w-full rounded-lg border bg-transparent pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                        className="w-full rounded-lg border border-slate-200 bg-transparent pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-0 focus:border-primary"
                                         placeholder="Search repositories (e.g. owner/repo)..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
@@ -465,6 +566,31 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     <RefreshCw className={`h-4 w-4 ${isSearching ? "animate-spin" : ""}`} />
                                 </Button>
                             </div>
+                            {selectedList.length > 0 && (
+                                <div className="rounded-lg border bg-slate-50 dark:bg-slate-900/30 px-3 py-2">
+                                    <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">
+                                        Selected ({selectedList.length})
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedList.map((repo) => (
+                                            <Badge
+                                                key={repo.full_name}
+                                                variant="secondary"
+                                                className="flex items-center gap-2"
+                                            >
+                                                <span className="truncate max-w-[200px]">{repo.full_name}</span>
+                                                <button
+                                                    type="button"
+                                                    className="text-xs"
+                                                    onClick={() => toggleSelection(repo)}
+                                                >
+                                                    ×
+                                                </button>
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="h-[400px] overflow-y-auto pr-2 space-y-6">
                                 {searchError && (
@@ -529,56 +655,157 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                             </div>
                         </div>
                     ) : (
-                        <div className="space-y-4">
-                            <div className="h-[400px] overflow-y-auto pr-2 space-y-4">
-                                {selectedList.map((repo) => (
-                                    <RepoConfigItem
-                                        key={repo.full_name}
-                                        repo={repo}
-                                        config={
-                                            repoConfigs[repo.full_name] || {
-                                                test_frameworks: [],
-                                                source_languages: [],
-                                                ci_provider: CIProvider.GITHUB_ACTIONS,
-                                                features: featuresDefault,
-                                                max_builds: null,
+                        <div className="flex h-full gap-4">
+                            <div className="w-60 flex-shrink-0 rounded-xl border bg-slate-50 dark:bg-slate-900/40 overflow-hidden">
+                                <div className="px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">
+                                    Selected Repos
+                                </div>
+                                <div className="divide-y divide-slate-200 dark:divide-slate-800 max-h-[480px] overflow-y-auto">
+                                    {selectedList.map((repo) => (
+                                        <button
+                                            key={repo.full_name}
+                                            className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 transition-colors ${
+                                                activeRepo === repo.full_name
+                                                    ? "bg-white dark:bg-slate-800 font-semibold border-l-2 border-primary"
+                                                    : "hover:bg-white/70 dark:hover:bg-slate-800/70"
+                                            }`}
+                                            onClick={() => setActiveRepo(repo.full_name)}
+                                        >
+                                            <span className="truncate">{repo.full_name}</span>
+                                            <Badge variant="secondary" className="text-[10px] h-5">
+                                                {repo.private ? "Private" : "Public"}
+                                            </Badge>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex-1 overflow-y-auto pr-0">
+                                {step === 2 ? (
+                                    step2Loading || !activeRepo ? (
+                                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Loading languages & frameworks...
+                                        </div>
+                                    ) : (
+                                        <RepoConfigItem
+                                            key={activeRepo}
+                                            repo={
+                                                selectedList.find((r) => r.full_name === activeRepo) ||
+                                                selectedList[0]
                                             }
+                                            config={
+                                                repoConfigs[activeRepo] || {
+                                                    test_frameworks: [],
+                                                    source_languages: [],
+                                                    ci_provider: CIProvider.GITHUB_ACTIONS,
+                                                    features: [],
+                                                    max_builds: null,
+                                                }
+                                            }
+                                            languageLoading={languageLoading[activeRepo]}
+                                            languageError={languageError[activeRepo]}
+                                            availableLanguages={availableLanguages[activeRepo] || []}
+                                            availableFrameworks={getFrameworkSuggestions(
+                                                repoConfigs[activeRepo] || {
+                                                    source_languages: [],
+                                                }
+                                            )}
+                                            frameworksError={frameworksError}
+                                            frameworksLoading={frameworksLoading}
+                                            frameworks={frameworks}
+                                            onChange={(newConfig) =>
+                                                setRepoConfigs((prev) => ({
+                                                    ...prev,
+                                                    [activeRepo]: newConfig,
+                                                }))
+                                            }
+                                        />
+                                    )
+                                ) : (
+                                    <FeaturesStep
+                                        selectedList={
+                                            activeRepo
+                                                ? selectedList.filter((r) => r.full_name === activeRepo)
+                                                : []
                                         }
-                                        languageLoading={languageLoading[repo.full_name]}
-                                        languageError={languageError[repo.full_name]}
+                                        repoConfigs={repoConfigs}
                                         availableFeatures={featuresData}
-                                        defaultFeatures={featuresDefault}
-                                        onChange={(newConfig) =>
+                                        featuresLoading={featuresLoading}
+                                        featuresError={featuresError}
+                                        templates={FEATURE_TEMPLATES}
+                                        searchTerms={featureSearch}
+                                        onSearchChange={(fullName, value) =>
+                                            setFeatureSearch((prev) => ({
+                                                ...prev,
+                                                [fullName]: value,
+                                            }))
+                                        }
+                                        onUpdateFeatures={(fullName, features) =>
                                             setRepoConfigs((prev) => ({
                                                 ...prev,
-                                                [repo.full_name]: newConfig,
+                                                [fullName]: {
+                                                    ...prev[fullName],
+                                                    features,
+                                                },
+                                            }))
+                                        }
+                                        onApplyTemplate={(fullName, featureIds) =>
+                                            setRepoConfigs((prev) => ({
+                                                ...prev,
+                                                [fullName]: {
+                                                    ...prev[fullName],
+                                                    features: Array.from(
+                                                        new Set([...(prev[fullName]?.features || []), ...featureIds])
+                                                    ),
+                                                },
                                             }))
                                         }
                                     />
-                                ))}
+                                )}
                             </div>
                         </div>
                     )}
+                    </div>
 
                     <div className="mt-6 flex items-center justify-between border-t pt-4">
                         <Button variant="ghost" onClick={onClose}>
                             Cancel
                         </Button>
                         <div className="flex gap-2">
-                            {step === 2 && (
-                                <Button variant="outline" onClick={() => setStep(1)}>
+                            {step > 1 && (
+                                <Button
+                                    variant="outline"
+                                    onClick={() =>
+                                        setStep((prev) => (prev > 1 ? ((prev - 1) as 1 | 2 | 3) : prev))
+                                    }
+                                >
                                     Back
                                 </Button>
                             )}
                             {step === 1 ? (
                                 <Button
                                     onClick={() => setStep(2)}
-                                    disabled={selectedList.length === 0}
+                                    disabled={selectedList.length === 0 || frameworksLoading || anyLanguageLoading}
                                 >
                                     Next ({selectedList.length})
                                 </Button>
+                            ) : step === 2 ? (
+                                <Button
+                                    onClick={() => setStep(3)}
+                                    disabled={
+                                        frameworksLoading ||
+                                        anyLanguageLoading ||
+                                        anyLanguageMissing ||
+                                        selectedList.length === 0
+                                    }
+                                >
+                                    Next (Features)
+                                </Button>
                             ) : (
-                                <Button onClick={handleImport} disabled={importing}>
+                                <Button
+                                    onClick={handleImport}
+                                    disabled={importing || frameworksLoading || anyLanguageLoading}
+                                >
                                     {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Import {selectedList.length} Repositories
                                 </Button>
@@ -634,8 +861,11 @@ function RepoConfigItem({
     config,
     languageLoading,
     languageError,
-    availableFeatures,
-    defaultFeatures,
+    availableLanguages,
+    availableFrameworks,
+    frameworksError,
+    frameworksLoading,
+    frameworks,
     onChange,
 }: {
     repo: RepoSuggestion;
@@ -645,15 +875,18 @@ function RepoConfigItem({
         ci_provider: string;
         features?: string[];
         max_builds?: number | null;
+        ingest_start_date?: string | null;
+        ingest_end_date?: string | null;
     };
     languageLoading?: boolean;
     languageError?: string | null;
-    availableFeatures?: FeatureCategory[] | null;
-    defaultFeatures?: string[];
+    availableLanguages?: string[];
+    availableFrameworks?: string[];
+    frameworksError?: string | null;
+    frameworksLoading?: boolean;
+    frameworks?: string[];
     onChange: (config: any) => void;
 }) {
-    const selectedFeatures = config.features || [];
-
     const toggleFramework = (framework: string) => {
         const current = config.test_frameworks;
         const next = current.includes(framework)
@@ -670,25 +903,6 @@ function RepoConfigItem({
         onChange({ ...config, source_languages: next });
     };
 
-    const [languageInput, setLanguageInput] = useState("");
-
-    const addLanguage = (value: string) => {
-        const lang = value.trim().toLowerCase();
-        if (!lang) return;
-        if (config.source_languages.includes(lang)) {
-            setLanguageInput("");
-            return;
-        }
-        onChange({ ...config, source_languages: [...config.source_languages, lang] });
-        setLanguageInput("");
-    };
-    const toggleFeature = (name: string) => {
-        const next = selectedFeatures.includes(name)
-            ? selectedFeatures.filter((f) => f !== name)
-            : [...selectedFeatures, name];
-        onChange({ ...config, features: next });
-    };
-
     return (
         <div className="rounded-xl border p-4 space-y-4">
             <div className="flex items-center justify-between">
@@ -701,59 +915,45 @@ function RepoConfigItem({
                     <label className="text-xs font-semibold text-muted-foreground uppercase mb-2 block">
                         Test Frameworks
                     </label>
-                    <div className="space-y-3">
-                        {/* Python Frameworks */}
-                        <div>
-                            <span className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Python</span>
-                            <div className="grid grid-cols-2 gap-2">
-                                {[TestFramework.PYTEST, TestFramework.UNITTEST].map((fw) => (
-                                    <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            className="rounded border-gray-300"
-                                            checked={config.test_frameworks.includes(fw)}
-                                            onChange={() => toggleFramework(fw)}
-                                        />
-                                        {fw}
-                                    </label>
-                                ))}
+                    <div className="space-y-2">
+                        {frameworksError ? (
+                            <div className="text-xs text-red-600 dark:text-red-400">
+                                {frameworksError}
                             </div>
-                        </div>
-
-                        {/* Ruby Frameworks */}
-                        <div>
-                            <span className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Ruby</span>
-                            <div className="grid grid-cols-2 gap-2">
-                                {[TestFramework.RSPEC, TestFramework.MINITEST, TestFramework.TESTUNIT, TestFramework.CUCUMBER].map((fw) => (
-                                    <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            className="rounded border-gray-300"
-                                            checked={config.test_frameworks.includes(fw)}
-                                            onChange={() => toggleFramework(fw)}
-                                        />
-                                        {fw}
-                                    </label>
-                                ))}
+                        ) : null}
+                        {frameworksLoading ? (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Loading frameworks...
                             </div>
-                        </div>
-
-                        {/* Java Frameworks */}
-                        <div>
-                            <span className="text-[10px] font-medium text-muted-foreground uppercase mb-1 block">Java</span>
-                            <div className="grid grid-cols-2 gap-2">
-                                {[TestFramework.JUNIT, TestFramework.TESTNG].map((fw) => (
-                                    <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            className="rounded border-gray-300"
-                                            checked={config.test_frameworks.includes(fw)}
-                                            onChange={() => toggleFramework(fw)}
-                                        />
-                                        {fw}
-                                    </label>
-                                ))}
+                        ) : null}
+                        {!frameworksLoading && config.source_languages.length === 0 ? (
+                            <div className="text-xs text-muted-foreground">
+                                Select a source language to see suggested frameworks.
                             </div>
+                        ) : null}
+                        {!frameworksLoading && config.source_languages.length > 0 && (availableFrameworks?.length ?? 0) === 0 ? (
+                            <div className="text-xs text-muted-foreground">
+                                No framework suggestions for the selected languages. You can still choose from all frameworks.
+                            </div>
+                        ) : null}
+                        <div className="grid grid-cols-2 gap-2">
+                            {(availableFrameworks && availableFrameworks.length
+                                ? availableFrameworks
+                                : frameworks && frameworks.length
+                                    ? frameworks
+                                    : Object.values(TestFramework)
+                            ).map((fw) => (
+                                <label key={fw} className="flex items-center gap-2 text-sm cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="rounded border-gray-300"
+                                        checked={config.test_frameworks.includes(fw)}
+                                        onChange={() => toggleFramework(fw)}
+                                        disabled={frameworksLoading || config.source_languages.length === 0}
+                                    />
+                                    {fw}
+                                </label>
+                            ))}
                         </div>
                     </div>
                 </div>
@@ -762,8 +962,19 @@ function RepoConfigItem({
                     <label className="text-xs font-semibold text-muted-foreground uppercase block">
                         Source Languages
                     </label>
+                    {languageLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Detecting languages from GitHub...
+                        </div>
+                    ) : null}
+                    {languageError ? (
+                        <div className="text-xs text-red-600 dark:text-red-400">
+                            {languageError}
+                        </div>
+                    ) : null}
+
                     <div className="flex flex-wrap gap-2">
-                        {SOURCE_LANGUAGE_PRESETS.map((lang) => (
+                        {(availableLanguages || []).map((lang) => (
                             <Badge
                                 key={lang}
                                 variant={config.source_languages.includes(lang) ? "default" : "outline"}
@@ -774,33 +985,12 @@ function RepoConfigItem({
                             </Badge>
                         ))}
                     </div>
-                    {languageLoading && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Loader2 className="h-3 w-3 animate-spin" /> Detecting languages from GitHub...
+                    {(!availableLanguages || availableLanguages.length === 0) && !languageLoading ? (
+                        <div className="text-xs text-muted-foreground">
+                            No languages detected. Try syncing repo or add manually later.
                         </div>
-                    )}
-                    {languageError && (
-                        <div className="text-xs text-red-600 dark:text-red-400">
-                            {languageError}
-                        </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                        <Input
-                            placeholder="Add custom language (e.g., javascript)"
-                            value={languageInput}
-                            onChange={(e) => setLanguageInput(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === ",") {
-                                    e.preventDefault();
-                                    addLanguage(languageInput);
-                                }
-                            }}
-                        />
-                        <Button type="button" variant="outline" onClick={() => addLanguage(languageInput)}>
-                            Add
-                        </Button>
-                    </div>
-                    {config.source_languages.length > 0 && (
+                    ) : null}
+                    {config.source_languages.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
                             {config.source_languages.map((lang) => (
                                 <Badge
@@ -819,71 +1009,12 @@ function RepoConfigItem({
                                 </Badge>
                             ))}
                         </div>
-                    )}
+                    ) : null}
                 </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                    <label className="text-xs font-semibold text-muted-foreground uppercase block mb-2">
-                        Features to Extract
-                    </label>
-                    {availableFeatures && availableFeatures.length > 0 ? (
-                        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                            {availableFeatures.map((cat) => (
-                                <div key={cat.category} className="space-y-1">
-                                    <div className="text-[11px] uppercase text-muted-foreground font-semibold">
-                                        {cat.display_name || cat.category}
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {cat.features.map((feat: FeatureDefinitionSummary) => (
-                                            <Badge
-                                                key={feat.name}
-                                                variant={selectedFeatures.includes(feat.name) ? "default" : "outline"}
-                                                className="cursor-pointer"
-                                                onClick={() => toggleFeature(feat.name)}
-                                            >
-                                                {feat.display_name || feat.name}
-                                            </Badge>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-xs text-muted-foreground">
-                            {featuresLoading
-                                ? "Loading features..."
-                                : "No features available."}
-                        </div>
-                    )}
-                    {featuresError && (
-                        <div className="text-xs text-red-600 dark:text-red-400">
-                            {featuresError}
-                        </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-2">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => onChange({ ...config, features: defaultFeatures || [] })}
-                        >
-                            Use defaults
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => onChange({ ...config, features: [] })}
-                        >
-                            Clear
-                        </Button>
-                    </div>
-                </div>
-
-                <div className="space-y-2">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase block">
+                        <div className="space-y-2 max-w-full">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase block">
                         Max Builds to Ingest
                     </label>
                     <Input
@@ -891,18 +1022,53 @@ function RepoConfigItem({
                         min={1}
                         placeholder="e.g. 50"
                         value={config.max_builds ?? ""}
-                        onChange={(e) =>
-                            onChange({
-                                ...config,
-                                max_builds: e.target.value ? Number(e.target.value) : null,
-                            })
+                    onChange={(e) =>
+                        onChange({
+                            ...config,
+                            max_builds: e.target.value ? Number(e.target.value) : null,
+                        })
                         }
                     />
                     <p className="text-xs text-muted-foreground">
                         Leave blank to ingest all available workflow runs.
                     </p>
+                    <div className="grid grid-cols-2 gap-4 mt-3">
+                        <div className="space-y-1">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase block">
+                                Start Date
+                            </label>
+                            <Input
+                                type="date"
+                                value={config.ingest_start_date || ""}
+                                onChange={(e) =>
+                                    onChange({
+                                        ...config,
+                                        ingest_start_date: e.target.value || null,
+                                    })
+                                }
+                                className="w-full appearance-none [appearance:none] pr-3"
+                                style={{ appearance: "none" }}
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase block">
+                                End Date
+                            </label>
+                            <Input
+                                type="date"
+                                value={config.ingest_end_date || ""}
+                                onChange={(e) =>
+                                    onChange({
+                                        ...config,
+                                        ingest_end_date: e.target.value || null,
+                                    })
+                                }
+                                className="w-full appearance-none [appearance:none] pr-3"
+                                style={{ appearance: "none" }}
+                            />
+                        </div>
+                    </div>
                 </div>
-            </div>
 
             <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase mb-2 block">
@@ -916,6 +1082,201 @@ function RepoConfigItem({
                     <option value={CIProvider.GITHUB_ACTIONS}>GitHub Actions</option>
                 </select>
             </div>
+        </div>
+    );
+}
+
+function FeaturesStep({
+    selectedList,
+    repoConfigs,
+    availableFeatures,
+    featuresLoading,
+    featuresError,
+    templates,
+    searchTerms,
+    onSearchChange,
+    onUpdateFeatures,
+    onApplyTemplate,
+}: {
+    selectedList: RepoSuggestion[];
+    repoConfigs: Record<string, { features?: string[] }>;
+    availableFeatures: FeatureCategoryGroup[] | null;
+    featuresLoading: boolean;
+    featuresError: string | null;
+    templates: FeatureTemplate[];
+    searchTerms: Record<string, string>;
+    onSearchChange: (fullName: string, value: string) => void;
+    onUpdateFeatures: (fullName: string, features: string[]) => void;
+    onApplyTemplate: (fullName: string, features: string[]) => void;
+}) {
+    const groupedFeatures = availableFeatures || [];
+    const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+    const toggleCategory = (cat: string) => {
+        setCollapsed((prev) => {
+            const next = new Set(prev);
+            if (next.has(cat)) {
+                next.delete(cat);
+            } else {
+                next.add(cat);
+            }
+            return next;
+        });
+    };
+
+    const filterMatch = (feat: FeatureDefinitionSummary, term: string) => {
+        if (!term.trim()) return true;
+        const q = term.toLowerCase();
+        return (
+            feat.name.toLowerCase().includes(q) ||
+            (feat.display_name || "").toLowerCase().includes(q) ||
+            (feat.category || "").toLowerCase().includes(q)
+        );
+    };
+
+    return (
+        <div className="space-y-4">
+            {featuresLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading features...
+                </div>
+            ) : null}
+            {featuresError ? (
+                <div className="text-sm text-red-600 dark:text-red-400">{featuresError}</div>
+            ) : null}
+            {!featuresLoading && groupedFeatures.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No features available.</div>
+            ) : null}
+
+            {selectedList.map((repo) => {
+                const current = repoConfigs[repo.full_name]?.features || [];
+                const searchTerm = searchTerms[repo.full_name] || "";
+                return (
+                    <div key={repo.full_name} className="rounded-xl border p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="font-semibold">{repo.full_name}</h3>
+                                <p className="text-xs text-muted-foreground">
+                                    Select features or apply a template for this repository.
+                                </p>
+                            </div>
+                            <Badge variant="outline">{repo.private ? "Private" : "Public"}</Badge>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-3">
+                            {templates.map((tpl) => (
+                                <div
+                                    key={tpl.id}
+                                    className="rounded-lg border p-3 space-y-2"
+                                >
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold">{tpl.name}</p>
+                                            <p className="text-xs text-muted-foreground">{tpl.description}</p>
+                                        </div>
+                                        <Badge variant="secondary">{tpl.recommended.length} feats</Badge>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                        {tpl.badges.map((b) => (
+                                            <Badge key={b} variant="outline" className="text-[11px]">
+                                                {b}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        className="w-full"
+                                        variant="outline"
+                                        onClick={() => onApplyTemplate(repo.full_name, tpl.recommended)}
+                                    >
+                                        Apply template
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Input
+                                placeholder="Search features in this repo..."
+                                value={searchTerm}
+                                onChange={(e) => onSearchChange(repo.full_name, e.target.value)}
+                                className="flex-1"
+                            />
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onSearchChange(repo.full_name, "")}
+                            >
+                                Clear
+                            </Button>
+                        </div>
+
+                        <div className="space-y-3 max-w-full">
+                            {groupedFeatures.map((cat) => {
+                                const visibleFeatures = cat.features.filter((feat) =>
+                                    filterMatch(feat, searchTerm)
+                                );
+                                if (!visibleFeatures.length) return null;
+
+                                const isCollapsed = collapsed.has(cat.category);
+                                return (
+                                    <div key={cat.category} className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-[11px] uppercase text-muted-foreground font-semibold">
+                                                {cat.display_name || cat.category}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Badge variant="secondary">{visibleFeatures.length} features</Badge>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    onClick={() => toggleCategory(cat.category)}
+                                                    className="h-7 px-2 text-xs"
+                                                >
+                                                    {isCollapsed ? "Expand" : "Collapse"}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        {!isCollapsed && (
+                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                {visibleFeatures.map((feat) => (
+                                                    <label
+                                                        key={feat.name}
+                                                        className="flex items-start gap-2 rounded-lg border border-transparent p-2 hover:border-slate-200 dark:hover:border-slate-800"
+                                                    >
+                                                        <Checkbox
+                                                            checked={current.includes(feat.name)}
+                                                            onChange={() => {
+                                                                const next = current.includes(feat.name)
+                                                                    ? current.filter((f) => f !== feat.name)
+                                                                    : [...current, feat.name];
+                                                                onUpdateFeatures(repo.full_name, next);
+                                                            }}
+                                                        />
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-sm font-semibold">{feat.display_name || feat.name}</span>
+                                                                <Badge variant="outline" className="text-[11px]">
+                                                                    {feat.data_type}
+                                                                </Badge>
+                                                            </div>
+                                                            <p className="text-xs text-muted-foreground line-clamp-2">
+                                                                {feat.description}
+                                                            </p>
+                                                        </div>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }

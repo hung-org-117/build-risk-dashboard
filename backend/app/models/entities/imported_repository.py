@@ -76,6 +76,8 @@ class ImportedRepository(BaseEntity):
     # Pipeline customization
     requested_features: List[str] = []
     max_builds_to_ingest: Optional[int] = None
+    ingest_start_date: Optional[datetime] = None
+    ingest_end_date: Optional[datetime] = None
 
     # Metadata
     metadata: Dict[str, Any] = {}

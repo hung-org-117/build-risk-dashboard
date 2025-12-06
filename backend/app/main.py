@@ -17,6 +17,8 @@ from app.api import (
     logs,
     sonar,
     features,
+    datasets,
+    tokens,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
 
@@ -52,6 +54,8 @@ app.include_router(websockets.router, prefix="/api", tags=["WebSockets"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(sonar.router, prefix="/api/sonar", tags=["SonarQube"])
 app.include_router(features.router, prefix="/api", tags=["Feature Definitions"])
+app.include_router(datasets.router, prefix="/api", tags=["Datasets"])
+app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
 
 
 @app.get("/")
@@ -66,4 +70,33 @@ async def root():
 
 @app.on_event("startup")
 async def startup_event():
-    pass
+    """Application startup tasks."""
+    from app.database.mongo import get_database
+    from app.services.github.github_token_manager import seed_tokens_from_env
+
+    # Seed GitHub tokens from environment variables into database
+    try:
+        db = get_database()
+        added = seed_tokens_from_env(db)
+        if added > 0:
+            logger.info(
+                f"Seeded {added} GitHub tokens from environment variables to MongoDB"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to seed GitHub tokens to MongoDB: {e}")
+
+    # Seed tokens to Redis pool for distributed round-robin
+    try:
+        from app.services.github.redis_token_pool import get_redis_token_pool
+
+        pool = get_redis_token_pool(db)
+        synced = pool.sync_from_mongodb(db)
+        if synced > 0:
+            logger.info(f"Synced {synced} GitHub tokens to Redis pool")
+        else:
+            # Check if we already have tokens in Redis
+            status = pool.get_pool_status()
+            if status["total_tokens"] > 0:
+                logger.info(f"Redis pool has {status['total_tokens']} tokens ready")
+    except Exception as e:
+        logger.warning(f"Failed to seed GitHub tokens to Redis: {e}")

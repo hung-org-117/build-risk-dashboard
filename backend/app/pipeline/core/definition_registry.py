@@ -71,12 +71,6 @@ class FeatureDefinitionRegistry:
             self.load()
         return set(self._definitions.keys())
     
-    def get_ml_features(self) -> Set[str]:
-        """Get names of features used for ML."""
-        if not self._loaded:
-            self.load()
-        return {name for name, f in self._definitions.items() if f.is_ml_feature}
-    
     def is_active(self, feature_name: str) -> bool:
         """Check if a feature is active."""
         if not self._loaded:
@@ -187,7 +181,6 @@ class FeatureDefinitionRegistry:
             "depends_on_resources": definition.depends_on_resources,
             "source": definition.source,
             "category": definition.category,
-            "is_ml_feature": definition.is_ml_feature,
             "data_type": definition.data_type,
         }
     

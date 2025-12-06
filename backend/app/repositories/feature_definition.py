@@ -68,13 +68,6 @@ class FeatureDefinitionRepository(BaseRepository[FeatureDefinition]):
         """Find all active features."""
         return self.find_many({"is_active": True}, sort=[("category", 1), ("name", 1)])
     
-    def find_ml_features(self) -> List[FeatureDefinition]:
-        """Find all features used in ML models."""
-        return self.find_many(
-            {"is_active": True, "is_ml_feature": True},
-            sort=[("category", 1), ("name", 1)]
-        )
-    
     def find_deprecated(self) -> List[FeatureDefinition]:
         """Find all deprecated features."""
         return self.find_many({"is_deprecated": True}, sort=[("name", 1)])

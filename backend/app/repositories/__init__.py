@@ -1,6 +1,5 @@
 """Repository layer for database operations"""
 
-from .available_repository import AvailableRepositoryRepository
 from .base import BaseRepository
 from .build_sample import BuildSampleRepository
 from .github_installation import GithubInstallationRepository
@@ -18,6 +17,5 @@ __all__ = [
     "UserRepository",
     "BuildSampleRepository",
     "WorkflowRunRepository",
-    "AvailableRepositoryRepository",
     "FeatureDefinitionRepository",
 ]

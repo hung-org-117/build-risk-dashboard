@@ -21,9 +21,9 @@ from app.services.repository_service import RepositoryService
 from app.services.github.github_client import (
     get_app_github_client,
     get_public_github_client,
+    get_user_github_client,
 )
-from app.repositories.available_repository import AvailableRepositoryRepository
-from app.models.entities.imported_repository import ImportSource
+from app.services.extracts.log_parser import TestLogParser
 
 router = APIRouter(prefix="/repos", tags=["Repositories"])
 
@@ -71,25 +71,16 @@ def detect_repository_languages(
     Returns top 5 languages (lowercase), falling back to empty list on failure.
     """
     installation_id = None
-
-    available_repo_repo = AvailableRepositoryRepository(db)
-    available = available_repo_repo.find_one(
-        {"user_id": ObjectId(current_user["_id"]), "full_name": full_name}
-    )
-    if available and available.get("installation_id"):
-        installation_id = available.get("installation_id")
-
-    # Fallback to imported repo if present
     repo_repo = RepositoryService(db).repo_repo
     imported = repo_repo.find_by_full_name("github", full_name)
     if imported and imported.installation_id:
         installation_id = imported.installation_id
 
-    client_ctx = (
-        get_app_github_client(db, installation_id)
-        if installation_id
-        else get_public_github_client()
-    )
+    # Prefer installation if available, else fallback to user token, else public
+    if installation_id:
+        client_ctx = get_app_github_client(db, installation_id)
+    else:
+        client_ctx = get_user_github_client(db, str(current_user["_id"]))
 
     languages: list[str] = []
     try:
@@ -109,6 +100,19 @@ def detect_repository_languages(
         )
 
     return {"languages": languages}
+
+
+@router.get("/test-frameworks")
+def list_test_frameworks(
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    List supported test frameworks for log parsing.
+
+    Use this to drive UI selection when importing repositories.
+    """
+    return {"by_language": TestLogParser.FRAMEWORKS_BY_LANG}
 
 
 @router.get("/", response_model=RepoListResponse, response_model_by_alias=False)

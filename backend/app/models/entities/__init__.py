@@ -18,6 +18,10 @@ from .feature_definition import (
     FeatureDataType,
     FeatureCategory,
 )
+from .dataset_template import DatasetTemplate
+from .dataset import DatasetProject, DatasetMapping, DatasetStats
+from .github_token import GithubToken
+
 __all__ = [
     "BaseEntity",
     "PyObjectId",
@@ -26,7 +30,12 @@ __all__ = [
     "ImportedRepository",
     "User",
     "BuildSample",
+    "DatasetProject",
+    "DatasetMapping",
+    "DatasetStats",
     "FeatureDefinition",
+    "GithubToken",
+    "DatasetTemplate",
     # Enums
     "Provider",
     "TestFramework",
