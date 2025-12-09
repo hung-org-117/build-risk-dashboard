@@ -10,9 +10,7 @@ class DatasetMapping(BaseModel):
     """Mappings from dataset columns to required build identifiers."""
 
     build_id: Optional[str] = None
-    commit_sha: Optional[str] = None
     repo_name: Optional[str] = None
-    timestamp: Optional[str] = None
 
 
 class DatasetStats(BaseModel):

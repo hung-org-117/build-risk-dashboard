@@ -70,9 +70,7 @@ export interface BuildDetail extends Build {
 
 export interface DatasetMapping {
   build_id?: string | null;
-  commit_sha?: string | null;
   repo_name?: string | null;
-  timestamp?: string | null;
 }
 
 export interface DatasetStats {

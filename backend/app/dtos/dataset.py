@@ -10,9 +10,7 @@ from app.entities.base import PyObjectIdStr
 
 class DatasetMappingDto(BaseModel):
     build_id: Optional[str] = None
-    commit_sha: Optional[str] = None
     repo_name: Optional[str] = None
-    timestamp: Optional[str] = None
 
 
 class DatasetStatsDto(BaseModel):
