@@ -1,7 +1,8 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,7 @@ import type { StepConfigureReposProps } from "./types";
 
 export function StepConfigureRepos({
     uniqueRepos,
+    invalidFormatRepos,
     repoConfigs,
     activeRepo,
     availableLanguages,
@@ -42,135 +44,159 @@ export function StepConfigureRepos({
     }
 
     return (
-        <div className="flex gap-6 h-full">
-            {/* Repo List */}
-            <div className="w-64 flex-shrink-0 border-r pr-4">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase mb-3">
-                    Repositories ({uniqueRepos.length})
-                </h3>
-                <div className="space-y-1">
-                    {uniqueRepos.map((repo) => (
-                        <button
-                            key={repo}
-                            onClick={() => onActiveRepoChange(repo)}
-                            className={cn(
-                                "w-full text-left px-3 py-2 rounded-lg text-sm transition",
-                                activeRepo === repo
-                                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                                    : "hover:bg-slate-100 dark:hover:bg-slate-800"
+        <div className="space-y-4">
+            {/* Warning for invalid format repos */}
+            {invalidFormatRepos.length > 0 && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Invalid Repository Format</AlertTitle>
+                    <AlertDescription>
+                        <p className="mb-2">
+                            {invalidFormatRepos.length} repo(s) have invalid format. Expected: <code>owner/repo</code>
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                            {invalidFormatRepos.slice(0, 5).map(r => (
+                                <Badge key={r} variant="outline" className="text-xs">{r}</Badge>
+                            ))}
+                            {invalidFormatRepos.length > 5 && (
+                                <Badge variant="outline" className="text-xs">+{invalidFormatRepos.length - 5} more</Badge>
                             )}
-                        >
-                            <p className="font-medium truncate">{repo}</p>
-                            <p className="text-xs text-muted-foreground">
-                                {repoConfigs[repo]?.source_languages?.length || 0} langs, {repoConfigs[repo]?.test_frameworks?.length || 0} frameworks
-                            </p>
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {/* Config Panel */}
-            <div className="flex-1 space-y-6">
-                {activeRepo && repoConfigs[activeRepo] && (
-                    <>
-                        <div>
-                            <h3 className="text-lg font-semibold mb-1">{activeRepo}</h3>
-                            <p className="text-sm text-muted-foreground">Configure languages, frameworks, and CI provider</p>
                         </div>
+                        <p className="mt-2 text-xs">These rows will be skipped during enrichment.</p>
+                    </AlertDescription>
+                </Alert>
+            )}
 
-                        {/* CI Provider */}
-                        <div className="space-y-2">
-                            <Label>CI Provider</Label>
-                            <Select
-                                value={repoConfigs[activeRepo].ci_provider}
-                                onValueChange={(v) => onSetCiProvider(activeRepo, v as CIProvider)}
+            <div className="flex gap-6 h-full">
+                {/* Repo List */}
+                <div className="w-64 flex-shrink-0 border-r pr-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase mb-3">
+                        Repositories ({uniqueRepos.length})
+                    </h3>
+                    <div className="space-y-1">
+                        {uniqueRepos.map((repo) => (
+                            <button
+                                key={repo}
+                                onClick={() => onActiveRepoChange(repo)}
+                                className={cn(
+                                    "w-full text-left px-3 py-2 rounded-lg text-sm transition",
+                                    activeRepo === repo
+                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                                        : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                                )}
                             >
-                                <SelectTrigger className="w-64">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {Object.values(CIProvider).map((p) => (
-                                        <SelectItem key={p} value={p}>{CIProviderLabels[p]}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                                <p className="font-medium truncate">{repo}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {repoConfigs[repo]?.source_languages?.length || 0} langs, {repoConfigs[repo]?.test_frameworks?.length || 0} frameworks
+                                </p>
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
-                        {/* Languages */}
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <Label>Source Languages</Label>
-                                {languageLoading[activeRepo] && (
-                                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                        <Loader2 className="h-3 w-3 animate-spin" /> Detecting...
-                                    </span>
+                {/* Config Panel */}
+                <div className="flex-1 space-y-6">
+                    {activeRepo && repoConfigs[activeRepo] && (
+                        <>
+                            <div>
+                                <h3 className="text-lg font-semibold mb-1">{activeRepo}</h3>
+                                <p className="text-sm text-muted-foreground">Configure languages, frameworks, and CI provider</p>
+                            </div>
+
+                            {/* CI Provider */}
+                            <div className="space-y-2">
+                                <Label>CI Provider</Label>
+                                <Select
+                                    value={repoConfigs[activeRepo].ci_provider}
+                                    onValueChange={(v) => onSetCiProvider(activeRepo, v as CIProvider)}
+                                >
+                                    <SelectTrigger className="w-64">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {Object.values(CIProvider).map((p) => (
+                                            <SelectItem key={p} value={p}>{CIProviderLabels[p]}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* Languages */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <Label>Source Languages</Label>
+                                    {languageLoading[activeRepo] && (
+                                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                            <Loader2 className="h-3 w-3 animate-spin" /> Detecting...
+                                        </span>
+                                    )}
+                                </div>
+                                {(availableLanguages[activeRepo]?.length || 0) > 0 ? (
+                                    <div className="flex flex-wrap gap-2">
+                                        {availableLanguages[activeRepo]?.map((lang) => (
+                                            <label
+                                                key={lang}
+                                                className={cn(
+                                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition text-sm",
+                                                    repoConfigs[activeRepo].source_languages.includes(lang)
+                                                        ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20"
+                                                        : "hover:bg-slate-50 dark:hover:bg-slate-800"
+                                                )}
+                                            >
+                                                <Checkbox
+                                                    checked={repoConfigs[activeRepo].source_languages.includes(lang)}
+                                                    onCheckedChange={() => onToggleLanguage(activeRepo, lang)}
+                                                />
+                                                {lang}
+                                            </label>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground italic">
+                                        No supported languages detected for this repository.
+                                    </p>
                                 )}
                             </div>
-                            {(availableLanguages[activeRepo]?.length || 0) > 0 ? (
-                                <div className="flex flex-wrap gap-2">
-                                    {availableLanguages[activeRepo]?.map((lang) => (
-                                        <label
-                                            key={lang}
-                                            className={cn(
-                                                "flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition text-sm",
-                                                repoConfigs[activeRepo].source_languages.includes(lang)
-                                                    ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20"
-                                                    : "hover:bg-slate-50 dark:hover:bg-slate-800"
-                                            )}
-                                        >
-                                            <Checkbox
-                                                checked={repoConfigs[activeRepo].source_languages.includes(lang)}
-                                                onCheckedChange={() => onToggleLanguage(activeRepo, lang)}
-                                            />
-                                            {lang}
-                                        </label>
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="text-sm text-muted-foreground italic">
-                                    No supported languages detected for this repository.
-                                </p>
-                            )}
-                        </div>
 
-                        {/* Frameworks */}
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                                <Label>Test Frameworks</Label>
-                                <Badge variant="outline" className="text-xs">Optional</Badge>
-                            </div>
-                            {repoConfigs[activeRepo].source_languages.length === 0 ? (
-                                <p className="text-sm text-muted-foreground italic">
-                                    Select a source language first to see available test frameworks.
-                                </p>
-                            ) : getSuggestedFrameworks(repoConfigs[activeRepo]).length > 0 ? (
-                                <div className="flex flex-wrap gap-2">
-                                    {getSuggestedFrameworks(repoConfigs[activeRepo]).map((fw) => (
-                                        <label
-                                            key={fw}
-                                            className={cn(
-                                                "flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition text-sm",
-                                                repoConfigs[activeRepo].test_frameworks.includes(fw)
-                                                    ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20"
-                                                    : "hover:bg-slate-50 dark:hover:bg-slate-800"
-                                            )}
-                                        >
-                                            <Checkbox
-                                                checked={repoConfigs[activeRepo].test_frameworks.includes(fw)}
-                                                onCheckedChange={() => onToggleFramework(activeRepo, fw)}
-                                            />
-                                            {fw}
-                                        </label>
-                                    ))}
+                            {/* Frameworks */}
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <Label>Test Frameworks</Label>
+                                    <Badge variant="outline" className="text-xs">Optional</Badge>
                                 </div>
-                            ) : (
-                                <p className="text-sm text-muted-foreground italic">
-                                    No test frameworks available for the selected languages.
-                                </p>
-                            )}
-                        </div>
-                    </>
-                )}
+                                {repoConfigs[activeRepo].source_languages.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground italic">
+                                        Select a source language first to see available test frameworks.
+                                    </p>
+                                ) : getSuggestedFrameworks(repoConfigs[activeRepo]).length > 0 ? (
+                                    <div className="flex flex-wrap gap-2">
+                                        {getSuggestedFrameworks(repoConfigs[activeRepo]).map((fw) => (
+                                            <label
+                                                key={fw}
+                                                className={cn(
+                                                    "flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition text-sm",
+                                                    repoConfigs[activeRepo].test_frameworks.includes(fw)
+                                                        ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20"
+                                                        : "hover:bg-slate-50 dark:hover:bg-slate-800"
+                                                )}
+                                            >
+                                                <Checkbox
+                                                    checked={repoConfigs[activeRepo].test_frameworks.includes(fw)}
+                                                    onCheckedChange={() => onToggleFramework(activeRepo, fw)}
+                                                />
+                                                {fw}
+                                            </label>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground italic">
+                                        No test frameworks available for the selected languages.
+                                    </p>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
             </div>
         </div>
     );

@@ -206,14 +206,7 @@ export default function RepoBuildsPage() {
         }
     };
 
-    const handleScan = async (buildId: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        try {
-            await reposApi.triggerScan(repoId, buildId);
-        } catch (err) {
-            console.error("Failed to trigger scan", err);
-        }
-    };
+    // Scan functionality removed - scanning is now pipeline-driven
 
     const loadBuilds = useCallback(
         async (pageNumber = 1, withSpinner = false) => {
@@ -442,14 +435,6 @@ export default function RepoBuildsPage() {
                                                     }}
                                                 >
                                                     View
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="ml-2"
-                                                    onClick={(e) => handleScan(build.id, e)}
-                                                >
-                                                    Scan
                                                 </Button>
                                             </td>
                                         </tr>

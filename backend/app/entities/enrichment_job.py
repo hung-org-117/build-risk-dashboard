@@ -19,7 +19,7 @@ class EnrichmentJob(BaseEntity):
 
     Enrichment jobs process uploaded CSV datasets to:
     1. Auto-import missing repositories
-    2. Create BuildSample records for each row
+    2. Create EnrichmentBuild records for each row
     3. Run the feature extraction pipeline
     4. Save enriched features to database
     5. Generate downloadable enriched CSV
@@ -50,11 +50,10 @@ class EnrichmentJob(BaseEntity):
     # Auto-import tracking
     repos_auto_imported: List[str] = Field(
         default_factory=list,
-        description="Repositories that were auto-imported during enrichment"
+        description="Repositories that were auto-imported during enrichment",
     )
     repos_failed_import: List[str] = Field(
-        default_factory=list,
-        description="Repositories that failed to import"
+        default_factory=list, description="Repositories that failed to import"
     )
 
     # Timing
@@ -64,14 +63,12 @@ class EnrichmentJob(BaseEntity):
     # Error handling
     error: Optional[str] = None
     row_errors: List[dict] = Field(
-        default_factory=list,
-        description="List of {row_index, error} for failed rows"
+        default_factory=list, description="List of {row_index, error} for failed rows"
     )
 
     # Output
     output_file: Optional[str] = Field(
-        None,
-        description="Path to the enriched CSV file"
+        None, description="Path to the enriched CSV file"
     )
 
     # Celery task tracking

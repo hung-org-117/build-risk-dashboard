@@ -1,4 +1,4 @@
-from app.entities.imported_repository import ImportStatus
+from app.entities.model_repository import ImportStatus
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Set, Optional
@@ -11,7 +11,7 @@ from app.celery_app import celery_app
 from app.services.github.github_client import get_app_github_client
 from app.tasks.base import PipelineTask
 from app.services.github.exceptions import GithubRateLimitError
-from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.repositories.model_repository import ModelRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.entities.workflow_run import WorkflowRunRaw
 from app.pipeline.core.registry import feature_registry
@@ -53,7 +53,7 @@ def import_repo(
     from app.config import settings
     import redis
 
-    imported_repo_repo = ImportedRepositoryRepository(self.db)
+    model_repo_repo = ModelRepositoryRepository(self.db)
     workflow_run_repo = WorkflowRunRepository(self.db)
     redis_client = redis.from_url(settings.REDIS_URL)
 
@@ -81,7 +81,7 @@ def import_repo(
 
     try:
         # Find existing repo to get ID (it should exist now)
-        repo = imported_repo_repo.find_one(
+        repo = model_repo_repo.find_one(
             {
                 "user_id": ObjectId(user_id),
                 "provider": provider,
@@ -90,7 +90,7 @@ def import_repo(
             }
         )
         if not repo:
-            repo_doc = imported_repo_repo.upsert_repository(
+            repo_doc = model_repo_repo.upsert_repository(
                 query={
                     "user_id": ObjectId(user_id),
                     "provider": provider,
@@ -117,7 +117,7 @@ def import_repo(
             repo_id = str(repo_doc.id)
         else:
             repo_id = str(repo.id)
-            imported_repo_repo.update_repository(
+            model_repo_repo.update_repository(
                 repo_id, {"import_status": ImportStatus.IMPORTING.value}
             )
 
@@ -147,7 +147,7 @@ def import_repo(
             if not detected_languages:
                 detected_languages = source_languages or ["ruby", "java", "python"]
 
-            imported_repo_repo.update_repository(
+            model_repo_repo.update_repository(
                 repo_id=repo_id,
                 updates={
                     "default_branch": repo_data.get("default_branch", "main"),
@@ -177,7 +177,7 @@ def import_repo(
             runs_to_process = []
 
             # Get the latest synced run timestamp from the DB to avoid re-processing
-            current_repo_doc = imported_repo_repo.find_by_id(repo_id)
+            current_repo_doc = model_repo_repo.find_by_id(repo_id)
             last_synced_run_ts = None
             if current_repo_doc and current_repo_doc.latest_synced_run_created_at:
                 last_synced_run_ts = current_repo_doc.latest_synced_run_created_at
@@ -321,7 +321,7 @@ def import_repo(
                         args=[repo_id, run_id],
                     )
 
-            imported_repo_repo.update_repository(
+            model_repo_repo.update_repository(
                 repo_id,
                 {
                     "import_status": ImportStatus.IMPORTED.value,
@@ -341,7 +341,7 @@ def import_repo(
     except Exception as e:
         logger.error(f"Failed to import repo {full_name}: {e}")
         if "repo_id" in locals():
-            imported_repo_repo.update_repository(
+            model_repo_repo.update_repository(
                 repo_id,
                 {
                     "import_status": ImportStatus.FAILED.value,
@@ -367,7 +367,7 @@ def import_repo(
     queue="collect_workflow_logs",
 )
 def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str, Any]:
-    repo_repo = ImportedRepositoryRepository(self.db)
+    repo_repo = ModelRepositoryRepository(self.db)
     repo = repo_repo.find_by_id(repo_id)
     if not repo:
         return {"status": "error", "message": "Repository not found"}

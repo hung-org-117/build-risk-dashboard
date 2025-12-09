@@ -99,6 +99,7 @@ export function UploadDatasetModal({
                         {form.step === 2 && (
                             <StepConfigureRepos
                                 uniqueRepos={form.uniqueRepos}
+                                invalidFormatRepos={form.invalidFormatRepos}
                                 repoConfigs={form.repoConfigs}
                                 activeRepo={form.activeRepo}
                                 availableLanguages={form.availableLanguages}

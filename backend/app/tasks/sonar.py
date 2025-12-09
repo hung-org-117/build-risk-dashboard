@@ -1,251 +1,174 @@
+"""
+SonarQube Celery Tasks.
+
+Tasks:
+- start_sonar_scan: Start async SonarQube scan (CPU-intensive, dedicated queue)
+- export_metrics_from_webhook: Handle webhook callback when scan completes
+"""
+
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+
 from bson import ObjectId
 
 from app.celery_app import celery_app
-from app.services.sonar.runner import SonarCommitRunner
-from app.services.sonar.exporter import MetricsExporter
-from app.database.mongo import get_db
-from app.repositories.scan_job import ScanJobRepository
-from app.repositories.scan_result import ScanResultRepository
-from app.repositories.failed_scan import FailedScanRepository
-from app.repositories.imported_repository import ImportedRepositoryRepository
-from app.entities.scan_job import ScanJobStatus
-from app.entities.failed_scan import FailedScan, ScanErrorType, ScanStatus
 from app.config import settings
+from app.database.mongo import get_database
+from app.entities.sonar_scan_pending import SonarScanPending, ScanPendingStatus
+from app.repositories.sonar_scan_pending import SonarScanPendingRepository
+from app.repositories.enrichment_build import EnrichmentBuildRepository
+from app.repositories.model_build import ModelBuildRepository
+from app.services.sonar.exporter import MetricsExporter
+from app.services.sonar.runner import SonarCommitRunner
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="app.tasks.sonar.run_sonar_scan")
-def run_sonar_scan(self, job_id: str):
-    logger.info(f"Starting SonarQube scan job {job_id}")
+@celery_app.task(
+    bind=True,
+    name="app.tasks.sonar.start_sonar_scan",
+    queue="sonar_scan",  # Dedicated CPU-intensive queue
+    soft_time_limit=1800,  # 30 min soft limit
+    time_limit=2100,  # 35 min hard limit
+)
+def start_sonar_scan(
+    self,
+    build_id: str,
+    build_type: str,
+    repo_url: str,
+    commit_sha: str,
+    component_key: str,
+    config_content: str = None,
+):
+    """
+    Start SonarQube scan for a commit (CPU-intensive).
 
-    db = next(get_db())
-    job_repo = ScanJobRepository(db)
-    scan_result_repo = ScanResultRepository(db)
-    failed_scan_repo = FailedScanRepository(db)
-    repo_repo = ImportedRepositoryRepository(db)
-    build_collection = db["build_samples"]
+    This task:
+    1. Creates a pending scan record
+    2. Runs sonar-scanner
+    3. Webhook will handle metrics export when done
 
-    job = job_repo.get(job_id)
-    if not job:
-        logger.error(f"ScanJob {job_id} not found")
-        return
+    Args:
+        build_id: Build ID (ModelBuild or EnrichmentBuild)
+        build_type: "model" or "enrichment"
+        repo_url: Repository URL to clone
+        commit_sha: Commit SHA to scan
+        component_key: SonarQube component key
+        config_content: Optional sonar-project.properties content
+    """
+    logger.info(f"Starting SonarQube scan for {component_key}")
 
-    # Update status to RUNNING
-    job_repo.update(
-        job_id,
-        {
-            "status": ScanJobStatus.RUNNING,
-            "started_at": datetime.utcnow(),
-            "worker_id": self.request.id,
-        },
+    db = get_database()
+    pending_repo = SonarScanPendingRepository(db)
+
+    # Check if already pending
+    existing = pending_repo.find_pending_by_component_key(component_key)
+    if existing:
+        logger.info(f"Scan already in progress for {component_key}")
+        return {"status": "already_pending", "component_key": component_key}
+
+    # Create pending record
+    pending = SonarScanPending(
+        build_id=ObjectId(build_id),
+        build_type=build_type,
+        component_key=component_key,
+        commit_sha=commit_sha,
+        repo_url=repo_url,
+        status=ScanPendingStatus.SCANNING,
     )
+    pending = pending_repo.insert_one(pending)
 
     try:
-        repo_doc = repo_repo.get(str(job.repo_id))
-        if not repo_doc:
-            raise ValueError("Repository not found")
+        # Get project key from component key (component_key = project_key_commit_sha)
+        project_key = component_key.rsplit("_", 1)[0]
 
-        repo_url = repo_doc.html_url
-        if not repo_url:
-            raise ValueError("Repository URL not found")
-
-        project_key_prefix = settings.SONAR_DEFAULT_PROJECT_KEY
-        project_key = f"{project_key_prefix}_{repo_doc.name}"
-
-        # Check for config override from failed scan
-        config_content = repo_doc.sonar_config
-        failed_scan = failed_scan_repo.get_by_job_id(job_id)
-        if failed_scan and failed_scan.config_override:
-            logger.info(f"Using config override from failed scan {failed_scan.id}")
-            config_content = failed_scan.config_override
-
-        # 2. Run Scan
+        # Run scanner
         runner = SonarCommitRunner(project_key)
-        component_key = runner.scan_commit(
-            repo_url, job.commit_sha, sonar_config_content=config_content
+        runner.scan_commit(repo_url, commit_sha, sonar_config_content=config_content)
+
+        logger.info(
+            f"SonarQube scan completed for {component_key}, waiting for webhook"
         )
-
-        # 3. Export Metrics
-        exporter = MetricsExporter()
-        metrics = exporter.collect_metrics(component_key)
-
-        # 4. Store ScanResult
-        scan_result_repo.upsert_by_job(
-            job_id,
-            {
-                "repo_id": job.repo_id,
-                "job_id": job.id,
-                "sonar_project_key": component_key,
-                "metrics": metrics,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            },
-        )
-
-        # 5. Update BuildSample (for backward compatibility)
-        build_collection.update_one(
-            {"_id": job.build_id},
-            {
-                "$set": {
-                    "features.sonar_metrics": metrics,
-                    "features.sonar_project_key": component_key,
-                    "sonar_scan_status": "completed",
-                }
-            },
-        )
-
-        # 6. Update ScanJob
-        job_repo.update(
-            job_id,
-            {
-                "status": ScanJobStatus.SUCCESS,
-                "finished_at": datetime.utcnow(),
-                "sonar_component_key": component_key,
-            },
-        )
-
-        # 7. Resolve FailedScan if exists
-        if failed_scan:
-            failed_scan_repo.update(
-                str(failed_scan.id),
-                {"status": ScanStatus.RESOLVED, "resolved_at": datetime.utcnow()},
-            )
-
-        logger.info(f"Completed SonarQube scan job {job_id}")
-        return {"status": "success", "component_key": component_key}
+        return {"status": "scanning", "component_key": component_key}
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"SonarQube scan failed for job {job_id}: {error_msg}")
+        logger.error(f"SonarQube scan failed for {component_key}: {error_msg}")
 
-        # Update job status
-        job_repo.update(
-            job_id,
-            {
-                "status": ScanJobStatus.FAILED,
-                "finished_at": datetime.utcnow(),
-                "error_message": error_msg,
-            },
-        )
-
-        # Update build sample status
-        build_collection.update_one(
-            {"_id": job.build_id},
-            {"$set": {"sonar_scan_status": "failed", "sonar_scan_error": error_msg}},
-        )
-
-        # Create or update FailedScan record if not already retrying
-        existing_failed = failed_scan_repo.get_by_job_id(job_id)
-        if not existing_failed:
-            failed_scan = FailedScan(
-                repo_id=job.repo_id,
-                build_id=job.build_id,
-                job_id=job.id,
-                commit_sha=job.commit_sha,
-                reason=error_msg,
-                error_type=ScanErrorType.SCAN_ERROR,
-                status=ScanStatus.PENDING,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-            )
-            failed_scan_repo.create(failed_scan)
-        else:
-            # Increment retry count
-            failed_scan_repo.update(
-                str(existing_failed.id),
-                {
-                    "retry_count": (existing_failed.retry_count or 0) + 1,
-                    "reason": error_msg,
-                    "status": ScanStatus.PENDING,
-                    "updated_at": datetime.utcnow(),
-                },
-            )
+        # Mark as failed
+        pending_repo.mark_failed(pending.id, error_msg)
 
         # Retry with exponential backoff
         raise self.retry(
-            exc=e, countdown=min(60 * (2**self.request.retries), 3600), max_retries=3
+            exc=e,
+            countdown=min(60 * (2**self.request.retries), 1800),
+            max_retries=2,
         )
 
 
-@celery_app.task(bind=True, name="app.tasks.sonar.export_metrics_from_webhook")
-def export_metrics_from_webhook(self, component_key: str, job_id: str):
-    logger.info(f"Exporting metrics for {component_key} from webhook (job {job_id})")
+@celery_app.task(
+    bind=True,
+    name="app.tasks.sonar.export_metrics_from_webhook",
+    queue="data_processing",
+)
+def export_metrics_from_webhook(self, component_key: str, build_id: str = None):
+    """
+    Handle SonarQube webhook callback when scan completes.
 
-    db = next(get_db())
-    job_repo = ScanJobRepository(db)
-    scan_result_repo = ScanResultRepository(db)
-    failed_scan_repo = FailedScanRepository(db)
-    build_collection = db["build_samples"]
+    This is called by the webhook handler when SonarQube finishes analysis.
+    Fetches metrics and updates the associated build.
 
-    job = job_repo.get(job_id)
-    if not job:
-        logger.error(f"ScanJob {job_id} not found")
-        return
+    Args:
+        component_key: SonarQube project/component key
+        build_id: Optional build ID to update (deprecated, use pending record)
+    """
+    logger.info(f"Exporting metrics for {component_key} from webhook")
+
+    db = get_database()
+    pending_repo = SonarScanPendingRepository(db)
+
+    # Find pending scan
+    pending = pending_repo.find_pending_by_component_key(component_key)
 
     try:
-        # Export metrics
+        # Export metrics from SonarQube API
         exporter = MetricsExporter()
         metrics = exporter.collect_metrics(component_key)
 
         if not metrics:
-            raise RuntimeError(f"No metrics available for {component_key}")
+            logger.warning(f"No metrics available for {component_key}")
+            if pending:
+                pending_repo.mark_failed(pending.id, "No metrics available")
+            return {"status": "no_metrics", "component_key": component_key}
 
-        # Store ScanResult
-        scan_result_repo.upsert_by_job(
-            job_id,
-            {
-                "repo_id": job.repo_id,
-                "job_id": job.id,
-                "sonar_project_key": component_key,
-                "metrics": metrics,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            },
-        )
+        # Convert to sonar_* feature format
+        sonar_features = {f"sonar_{k}": v for k, v in metrics.items()}
 
-        # Update BuildSample
-        build_collection.update_one(
-            {"_id": job.build_id},
-            {
-                "$set": {
-                    "features.sonar_metrics": metrics,
-                    "features.sonar_project_key": component_key,
-                    "sonar_scan_status": "completed",
-                }
-            },
-        )
+        # Update build features if pending record exists
+        if pending:
+            if pending.build_type == "enrichment":
+                build_repo = EnrichmentBuildRepository(db)
+            else:
+                build_repo = ModelBuildRepository(db)
 
-        # Update ScanJob
-        job_repo.update(
-            job_id,
-            {
-                "status": ScanJobStatus.SUCCESS,
-                "finished_at": datetime.utcnow(),
-            },
-        )
+            # Update build with sonar features
+            build_repo.update_features(str(pending.build_id), sonar_features)
 
-        # Resolve FailedScan if exists
-        failed_scan = failed_scan_repo.get_by_job_id(job_id)
-        if failed_scan:
-            failed_scan_repo.update(
-                str(failed_scan.id),
-                {"status": ScanStatus.RESOLVED, "resolved_at": datetime.utcnow()},
+            # Mark pending as completed
+            pending_repo.mark_completed(pending.id, metrics)
+
+            logger.info(
+                f"Updated {pending.build_type} build {pending.build_id} with "
+                f"{len(metrics)} sonar features"
             )
+        else:
+            logger.warning(f"No pending scan found for {component_key}")
 
-        logger.info(f"Successfully exported metrics for {component_key}")
+        logger.info(f"Successfully exported {len(metrics)} metrics for {component_key}")
         return {"status": "success", "metrics_count": len(metrics)}
 
     except Exception as e:
         logger.error(f"Failed to export metrics for {component_key}: {e}")
-        job_repo.update(
-            job_id,
-            {
-                "status": ScanJobStatus.FAILED,
-                "finished_at": datetime.utcnow(),
-                "error_message": f"Metrics export failed: {str(e)}",
-            },
-        )
+        if pending:
+            pending_repo.mark_failed(pending.id, str(e))
         raise

@@ -57,7 +57,8 @@ interface ImportRepoModalProps {
 }
 
 export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalProps) {
-    const [step, setStep] = useState<1 | 2 | 3>(1);
+    // Simplified to 2 steps: Select repos -> Configure (features auto-applied)
+    const [step, setStep] = useState<1 | 2>(1);
     const [searchTerm, setSearchTerm] = useState("");
     const [isSearching, setIsSearching] = useState(false);
     const debouncedSearchTerm = useDebounce(searchTerm, 500);
@@ -75,7 +76,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             test_frameworks: string[];
             source_languages: string[];
             ci_provider: string;
-            feature_names: string[];  // FeatureDefinition names
+            // feature_names removed - TravisTorrent features are auto-applied
             max_builds?: number | null;
             since_days?: number | null;
         }>
@@ -257,7 +258,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                             test_frameworks: existing?.test_frameworks || [],
                             source_languages: existing?.source_languages || [],
                             ci_provider: existing?.ci_provider || CIProvider.GITHUB_ACTIONS,
-                            feature_names: existing?.feature_names || [],
                             max_builds: existing?.max_builds ?? null,
                         },
                     };
@@ -316,7 +316,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         test_frameworks: [],
                         source_languages: [],
                         ci_provider: CIProvider.GITHUB_ACTIONS,
-                        feature_names: [],
                         max_builds: null,
                         since_days: null,
                     },
@@ -402,7 +401,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                     test_frameworks: config.test_frameworks,
                     source_languages: config.source_languages,
                     ci_provider: config.ci_provider,
-                    feature_names: config.feature_names,
+                    // feature_names removed - TravisTorrent features auto-applied server-side
                     max_builds: config.max_builds ?? null,
                     since_days: config.since_days ?? null,
                 };
@@ -489,12 +488,10 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         <div>
                             <h2 className="text-xl font-semibold">Import Repositories</h2>
                             <p className="text-sm text-muted-foreground">
-                                Step {step} of 3:{" "}
+                                Step {step} of 2:{" "}
                                 {step === 1
                                     ? "Select repositories"
-                                    : step === 2
-                                        ? "Configure languages & frameworks"
-                                        : "Choose features"}
+                                    : "Configure & Import"}
                             </p>
                         </div>
                         <button
@@ -685,13 +682,28 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     </div>
                                 </div>
                                 <div className="flex-1 overflow-y-auto pr-0">
-                                    {step === 2 ? (
-                                        step2Loading || !activeRepo ? (
-                                            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                Loading languages & frameworks...
+                                    {step2Loading || !activeRepo ? (
+                                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Loading languages & frameworks...
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {/* Info banner about TravisTorrent features */}
+                                            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-900/20">
+                                                <div className="flex items-start gap-3">
+                                                    <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+                                                    <div>
+                                                        <h3 className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                                                            TravisTorrent Features (42)
+                                                        </h3>
+                                                        <p className="mt-1 text-sm text-blue-700 dark:text-blue-300">
+                                                            All repositories will automatically extract the complete TravisTorrent feature set for Bayesian risk prediction model.
+                                                        </p>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        ) : (
+
                                             <RepoConfigItem
                                                 key={activeRepo}
                                                 repo={
@@ -703,7 +715,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                                         test_frameworks: [],
                                                         source_languages: [],
                                                         ci_provider: CIProvider.GITHUB_ACTIONS,
-                                                        feature_names: [],
                                                         max_builds: null,
                                                     }
                                                 }
@@ -725,45 +736,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                                     }))
                                                 }
                                             />
-                                        )
-                                    ) : (
-                                        <FeaturesStep
-                                            selectedList={
-                                                activeRepo
-                                                    ? selectedList.filter((r) => r.full_name === activeRepo)
-                                                    : []
-                                            }
-                                            repoConfigs={repoConfigs}
-                                            availableFeatures={featuresData}
-                                            featuresLoading={featuresLoading}
-                                            featuresError={featuresError}
-                                            templates={templates}
-                                            searchTerms={featureSearch}
-                                            onSearchChange={(repoName, val) =>
-                                                setFeatureSearch((prev) => ({ ...prev, [repoName]: val }))
-                                            }
-                                            onUpdateFeatures={(fullName, featureNames) =>
-                                                setRepoConfigs((prev) => ({
-                                                    ...prev,
-                                                    [fullName]: {
-                                                        ...prev[fullName],
-                                                        feature_names: featureNames,
-                                                    },
-                                                }))
-                                            }
-                                            onApplyTemplate={(fullName, featureNames) =>
-                                                setRepoConfigs((prev) => ({
-                                                    ...prev,
-                                                    [fullName]: {
-                                                        ...prev[fullName],
-                                                        feature_names: featureNames, // Overwrite selection
-                                                    },
-                                                }))
-                                            }
-                                            dagData={dagData}
-                                            dagLoading={dagLoading}
-                                            onLoadDAG={loadDAG}
-                                        />
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -779,7 +752,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                 <Button
                                     variant="outline"
                                     onClick={() =>
-                                        setStep((prev) => (prev > 1 ? ((prev - 1) as 1 | 2 | 3) : prev))
+                                        setStep((prev) => (prev > 1 ? ((prev - 1) as 1 | 2) : prev))
                                     }
                                 >
                                     Back
@@ -792,22 +765,17 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                 >
                                     Next
                                 </Button>
-                            ) : step === 2 ? (
+                            ) : (
+                                // Step 2 is now final - Import button directly
                                 <Button
-                                    onClick={() => setStep(3)}
+                                    onClick={handleImport}
                                     disabled={
+                                        importing ||
                                         frameworksLoading ||
                                         anyLanguageLoading ||
                                         anyLanguageMissing ||
                                         selectedList.length === 0
                                     }
-                                >
-                                    Next
-                                </Button>
-                            ) : (
-                                <Button
-                                    onClick={handleImport}
-                                    disabled={importing || frameworksLoading || anyLanguageLoading}
                                 >
                                     {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Import {selectedList.length} Repositories

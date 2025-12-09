@@ -199,12 +199,7 @@ export const reposApi = {
     );
     return response.data;
   },
-  triggerScan: async (repoId: string, buildId: string) => {
-    const response = await api.post<{ status: string; job_id: string }>(
-      `/repos/${repoId}/builds/${buildId}/scan`
-    );
-    return response.data;
-  },
+  // Note: triggerScan removed - scanning now done via pipeline SonarMeasuresNode
   detectLanguages: async (fullName: string) => {
     const response = await api.get<{ languages: string[] }>(`/repos/languages`, {
       params: { full_name: fullName },
@@ -261,12 +256,6 @@ export const datasetsApi = {
     });
     return response.data;
   },
-  validateGithubRepos: async (datasetId: string) => {
-    const response = await api.post<RepoValidationResponse>(
-      `/datasets/${datasetId}/validate-github-repos`
-    );
-    return response.data;
-  },
   delete: async (datasetId: string) => {
     await api.delete(`/datasets/${datasetId}`);
   },
@@ -307,19 +296,8 @@ export const sonarApi = {
     );
     return response.data;
   },
-  listJobs: async (repoId: string, params?: { skip?: number; limit?: number }) => {
-    const response = await api.get<{ items: ScanJob[]; total: number }>(
-      `/repos/${repoId}/sonar/jobs`,
-      { params }
-    );
-    return response.data;
-  },
-  retryJob: async (jobId: string) => {
-    const response = await api.post<{ status: string; job_id: string }>(
-      `/repos/sonar/jobs/${jobId}/retry`
-    );
-    return response.data;
-  },
+  // Note: listJobs removed - scan jobs no longer created via API
+  // Note: retryJob removed - scanning now done via pipeline
   listResults: async (repoId: string, params?: { skip?: number; limit?: number }) => {
     const response = await api.get<{ items: ScanResult[]; total: number }>(
       `/repos/${repoId}/sonar/results`,
@@ -341,12 +319,7 @@ export const sonarApi = {
     );
     return response.data;
   },
-  retryFailedScan: async (failedScanId: string) => {
-    const response = await api.post<{ status: string; job_id: string }>(
-      `/repos/sonar/failed/${failedScanId}/retry`
-    );
-    return response.data;
-  },
+  // Note: retryFailedScan removed - scanning now done via pipeline
 };
 
 export const dashboardApi = {
@@ -587,17 +560,7 @@ export const enrichmentApi = {
     const host = process.env.NEXT_PUBLIC_API_URL?.replace(/^https?:\/\//, "") || "localhost:8000";
     return `${wsProtocol}//${host}/api/ws/enrichment/${jobId}`;
   },
-
-  getPollingWebSocketUrl: (jobId: string): string => {
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = process.env.NEXT_PUBLIC_API_URL?.replace(/^https?:\/\//, "") || "localhost:8000";
-    return `${wsProtocol}//${host}/api/ws/enrichment/${jobId}/polling`;
-  },
 };
-
-// ============================================================================
-// EXPORT API
-// ============================================================================
 
 export interface ExportPreviewResponse {
   total_rows: number;

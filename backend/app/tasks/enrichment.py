@@ -3,7 +3,7 @@ Enrichment Task - Background processing for dataset enrichment.
 
 This task processes CSV rows to:
 1. Auto-import missing repositories
-2. Create BuildSample records
+2. Create EnrichmentBuild records for each row
 3. Run the feature extraction pipeline
 4. Save enriched features to database
 5. Emit WebSocket progress events
@@ -21,11 +21,12 @@ from celery import shared_task
 from app.database.mongo import get_database
 from app.config import settings
 from app.entities.enrichment_job import EnrichmentJob
-from app.entities.build_sample import BuildSample
+from app.entities.enrichment_build import EnrichmentBuild
+from app.entities.enrichment_repository import EnrichmentRepository
 from app.entities.workflow_run import WorkflowRunRaw
 from app.repositories.enrichment_job import EnrichmentJobRepository
-from app.repositories.build_sample import BuildSampleRepository
-from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.repositories.enrichment_build import EnrichmentBuildRepository
+from app.repositories.enrichment_repository import EnrichmentRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.repositories.dataset_repository import DatasetRepository
 from app.pipeline.runner import FeaturePipeline
@@ -86,8 +87,8 @@ def enrich_dataset_task(
     db = get_database()
     job_repo = EnrichmentJobRepository(db)
     dataset_repo = DatasetRepository(db)
-    repo_repo = ImportedRepositoryRepository(db)
-    build_repo = BuildSampleRepository(db)
+    enrichment_repo_repo = EnrichmentRepositoryRepository(db)
+    enrichment_build_repo = EnrichmentBuildRepository(db)
     workflow_repo = WorkflowRunRepository(db)
 
     # Mark job as started
@@ -153,18 +154,22 @@ def enrich_dataset_task(
                     processed += 1
                     continue
 
-                # Check if repo exists
-                repo = repo_repo.find_by_full_name(repo_name)
+                # Check if repo exists for this dataset
+                enrichment_repo = enrichment_repo_repo.find_by_dataset_and_full_name(
+                    dataset_id, repo_name
+                )
 
-                if not repo:
+                if not enrichment_repo:
                     if auto_import_repos:
-                        # Auto-import repo
-                        repo = _auto_import_repo(repo_repo, repo_name, user_id)
-                        if repo:
+                        # Auto-import repo for this dataset
+                        enrichment_repo = _auto_import_enrichment_repo(
+                            enrichment_repo_repo, dataset_id, repo_name
+                        )
+                        if enrichment_repo:
                             repos_imported.add(repo_name)
                             job_repo.add_auto_imported_repo(job_id, repo_name)
 
-                    if not repo:
+                    if not enrichment_repo:
                         failed += 1
                         job_repo.update_progress(
                             job_id,
@@ -179,9 +184,9 @@ def enrich_dataset_task(
                         processed += 1
                         continue
 
-                # Check if BuildSample exists
-                existing_build = build_repo.find_by_build_id_and_repo(
-                    build_id, str(repo.id)
+                # Check if EnrichmentBuild exists
+                existing_build = enrichment_build_repo.find_by_build_id_and_repo(
+                    build_id, str(enrichment_repo.id)
                 )
 
                 if existing_build and skip_existing:
@@ -198,24 +203,26 @@ def enrich_dataset_task(
 
                 # Create or get workflow run
                 workflow_run = _get_or_create_workflow_run(
-                    workflow_repo, repo, build_id, commit_sha
+                    workflow_repo, enrichment_repo, build_id, commit_sha
                 )
 
-                # Create BuildSample
-                build_sample = existing_build or BuildSample(
-                    repository_id=str(repo.id),
-                    workflow_run_id=str(workflow_run.id) if workflow_run else None,
+                # Create EnrichmentBuild
+                enrichment_build = existing_build or EnrichmentBuild(
+                    enrichment_repo_id=enrichment_repo.id,
+                    dataset_id=enrichment_repo.dataset_id,
                     build_id=build_id,
                     commit_sha=commit_sha or "",
                 )
 
                 if not existing_build:
-                    build_sample = build_repo.create(build_sample)
+                    enrichment_build = enrichment_build_repo.insert_one(
+                        enrichment_build
+                    )
 
                 # Run pipeline
                 result = pipeline.run(
-                    build_sample=build_sample,
-                    repo=repo,
+                    build_sample=enrichment_build,
+                    repo=enrichment_repo,
                     workflow_run=workflow_run,
                     features_filter=(
                         set(selected_features) if selected_features else None
@@ -230,8 +237,10 @@ def enrich_dataset_task(
                         result["features"]
                     )
 
-                    # Save features to build sample
-                    build_repo.update_features(str(build_sample.id), formatted_features)
+                    # Save features to enrichment build
+                    enrichment_build_repo.update_features(
+                        str(enrichment_build.id), formatted_features
+                    )
                     enriched += 1
                     enriched_rows.append(
                         {
@@ -338,46 +347,42 @@ def enrich_dataset_task(
         }
 
 
-def _auto_import_repo(
-    repo_repo: ImportedRepositoryRepository,
+def _auto_import_enrichment_repo(
+    enrichment_repo_repo: EnrichmentRepositoryRepository,
+    dataset_id: str,
     repo_name: str,
-    user_id: str,
-) -> Optional[Any]:
+) -> Optional[EnrichmentRepository]:
     """
-    Auto-import a repository from GitHub.
+    Auto-import a repository for dataset enrichment.
 
     Args:
-        repo_repo: Repository repository
+        enrichment_repo_repo: Enrichment repository repository
+        dataset_id: Dataset ID to link the repo to
         repo_name: Full repo name (owner/repo)
-        user_id: User ID
 
     Returns:
-        ImportedRepository if successful, None otherwise
+        EnrichmentRepository if successful, None otherwise
     """
     try:
-        from app.entities.imported_repository import ImportedRepository, ImportStatus
+        from bson import ObjectId
+        from app.entities.enrichment_repository import EnrichmentImportStatus
+        from app.ci_providers.models import CIProvider
 
-        # Parse owner/repo
+        # Validate repo name format
         parts = repo_name.split("/")
         if len(parts) != 2:
             logger.warning(f"Invalid repo name format: {repo_name}")
             return None
 
-        owner, name = parts
-
-        # Create basic repo record (GitHub data fetch happens async)
-        repo = ImportedRepository(
+        # Create enrichment repo linked to dataset
+        return enrichment_repo_repo.create_for_dataset(
+            dataset_id=dataset_id,
             full_name=repo_name,
-            owner=owner,
-            name=name,
-            import_status=ImportStatus.PENDING,
-            imported_by=user_id,
+            ci_provider=CIProvider.GITHUB_ACTIONS.value,
         )
 
-        return repo_repo.create(repo)
-
     except Exception as e:
-        logger.error(f"Failed to auto-import repo {repo_name}: {e}")
+        logger.error(f"Failed to auto-import enrichment repo {repo_name}: {e}")
         return None
 
 

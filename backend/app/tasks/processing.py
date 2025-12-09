@@ -12,14 +12,15 @@ import redis
 import json
 
 from app.celery_app import celery_app
-from app.entities.build_sample import BuildSample
-from app.repositories.build_sample import BuildSampleRepository
-from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.entities.model_build import ModelBuild
+from app.repositories.model_build import ModelBuildRepository
+from app.repositories.model_repository import ModelRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.tasks.base import PipelineTask
 from app.pipeline.runner import FeaturePipeline
 from app.config import settings
 from app.pipeline.core.registry import feature_registry
+from app.pipeline.constants import TRAVISTORRENT_FEATURES
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +55,9 @@ def publish_build_update(repo_id: str, build_id: str, status: str):
 def process_workflow_run(
     self: PipelineTask, repo_id: str, workflow_run_id: int
 ) -> Dict[str, Any]:
-    """
-    Process a workflow run using the new DAG-based feature pipeline.
-
-    This replaces the old chord/chain pattern with a unified pipeline execution.
-    The pipeline handles:
-    - Resource initialization (git repo, github client, log storage)
-    - DAG-based feature extraction with proper dependency resolution
-    - Parallel execution of independent features
-    - Error handling and warnings
-    """
     workflow_run_repo = WorkflowRunRepository(self.db)
-    build_sample_repo = BuildSampleRepository(self.db)
-    repo_repo = ImportedRepositoryRepository(self.db)
+    model_build_repo = ModelBuildRepository(self.db)
+    model_repo_repo = ModelRepositoryRepository(self.db)
 
     # Validate workflow run exists
     workflow_run = workflow_run_repo.find_by_repo_and_run_id(repo_id, workflow_run_id)
@@ -75,22 +66,22 @@ def process_workflow_run(
         return {"status": "error", "message": "WorkflowRunRaw not found"}
 
     # Validate repository exists
-    repo = repo_repo.find_by_id(repo_id)
+    repo = model_repo_repo.find_by_id(repo_id)
     if not repo:
         logger.error(f"Repository {repo_id} not found")
         return {"status": "error", "message": "Repository not found"}
 
-    # Find or create BuildSample
-    build_sample = build_sample_repo.find_by_repo_and_run_id(repo_id, workflow_run_id)
-    if not build_sample:
-        build_sample = BuildSample(
+    # Find or create ModelBuild
+    model_build = model_build_repo.find_by_repo_and_run_id(repo_id, workflow_run_id)
+    if not model_build:
+        model_build = ModelBuild(
             repo_id=ObjectId(repo_id),
             workflow_run_id=workflow_run_id,
             status="pending",
         )
-        build_sample = build_sample_repo.insert_one(build_sample)
+        model_build = model_build_repo.insert_one(model_build)
 
-    build_id = str(build_sample.id)
+    build_id = str(model_build.id)
 
     # Notify clients that processing started
     publish_build_update(repo_id, build_id, "in_progress")
@@ -102,15 +93,16 @@ def process_workflow_run(
             max_workers=4,
         )
 
-        # Apply feature selection from repository settings
-        feature_names = getattr(repo, "requested_feature_names", [])
+        # ALWAYS use TravisTorrent features for Bayesian model training
+        # NOTE: repo.requested_feature_names is deprecated and ignored
+        feature_names = TRAVISTORRENT_FEATURES
 
         result = pipeline.run(
-            build_sample=build_sample,
+            build_sample=model_build,
             repo=repo,
             workflow_run=workflow_run,
             parallel=True,
-            features_filter=set(feature_names),
+            features_filter=feature_names,
         )
 
         updates = {}
@@ -138,7 +130,7 @@ def process_workflow_run(
                 updates["is_missing_commit"] = True
 
         # Save to database
-        build_sample_repo.update_one(build_id, updates)
+        model_build_repo.update_one(build_id, updates)
 
         # Notify clients of completion
         publish_build_update(repo_id, build_id, updates["status"])
@@ -160,8 +152,8 @@ def process_workflow_run(
     except Exception as e:
         logger.error(f"Pipeline failed for build {build_id}: {e}", exc_info=True)
 
-        # Update build sample with error
-        build_sample_repo.update_one(
+        # Update model build with error
+        model_build_repo.update_one(
             build_id,
             {
                 "status": "failed",
@@ -186,21 +178,21 @@ def process_workflow_run(
 )
 def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     """
-    Reprocess an existing build sample with the new pipeline.
+    Reprocess an existing model build with the pipeline.
 
     Useful for:
     - Retrying failed builds
     - Extracting new features after pipeline updates
     - Testing pipeline changes on existing data
     """
-    build_sample_repo = BuildSampleRepository(self.db)
-    build_sample = build_sample_repo.find_by_id(ObjectId(build_id))
-    if not build_sample:
-        logger.error(f"BuildSample {build_id} not found")
-        return {"status": "error", "message": "BuildSample not found"}
+    model_build_repo = ModelBuildRepository(self.db)
+    model_build = model_build_repo.find_by_id(ObjectId(build_id))
+    if not model_build:
+        logger.error(f"ModelBuild {build_id} not found")
+        return {"status": "error", "message": "ModelBuild not found"}
 
-    repo_id = str(build_sample.repo_id)
-    workflow_run_id = build_sample.workflow_run_id
+    repo_id = str(model_build.repo_id)
+    workflow_run_id = model_build.workflow_run_id
 
     # Delegate to the main processing function
     return process_workflow_run.apply(args=[repo_id, workflow_run_id]).get()
@@ -224,17 +216,17 @@ def reprocess_repo_builds(self: PipelineTask, repo_id: str) -> Dict[str, Any]:
     Unlike import_repo (which fetches new workflow runs from GitHub),
     this task only reprocesses existing builds in the database.
     """
-    build_sample_repo = BuildSampleRepository(self.db)
-    repo_repo = ImportedRepositoryRepository(self.db)
+    model_build_repo = ModelBuildRepository(self.db)
+    model_repo_repo = ModelRepositoryRepository(self.db)
 
     # Validate repository exists
-    repo = repo_repo.find_by_id(repo_id)
+    repo = model_repo_repo.find_by_id(repo_id)
     if not repo:
         logger.error(f"Repository {repo_id} not found")
         return {"status": "error", "message": "Repository not found"}
 
     # Find all builds for this repository
-    builds, _ = build_sample_repo.list_by_repo(repo_id, limit=0)  # limit=0 means all
+    builds, _ = model_build_repo.list_by_repo(repo_id, limit=0)  # limit=0 means all
     if not builds:
         logger.info(f"No builds found for repository {repo_id}")
         return {

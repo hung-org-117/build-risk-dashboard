@@ -1,5 +1,5 @@
 import logging
-from app.entities.imported_repository import ImportStatus
+from app.entities.model_repository import ImportStatus
 from typing import List, Optional
 
 from bson import ObjectId
@@ -16,7 +16,7 @@ from app.dtos import (
     RepoSearchResponse,
 )
 from datetime import datetime, timezone
-from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.repositories.model_repository import ModelRepositoryRepository
 from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.services.github.github_client import (
     get_public_github_client,
@@ -39,7 +39,7 @@ def _serialize_repo_detail(repo_doc) -> RepoDetailResponse:
 class RepositoryService:
     def __init__(self, db: Database):
         self.db = db
-        self.repo_repo = ImportedRepositoryRepository(db)
+        self.repo_repo = ModelRepositoryRepository(db)
         self.template_repo = DatasetTemplateRepository(db)
 
     def _resolve_feature_names(self, payload: RepoImportRequest) -> Optional[List[str]]:

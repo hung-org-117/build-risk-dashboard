@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.entities.imported_repository import TestFramework
-from app.entities.imported_repository import CIProvider
+from app.entities.model_repository import TestFramework
+from app.ci_providers.models import CIProvider
 from app.entities.base import PyObjectIdStr
 
 
@@ -22,13 +22,15 @@ class RepoImportRequest(BaseModel):
         default="github_actions",
         description="CI/CD provider: github_actions, gitlab_ci, jenkins, circleci, travis_ci",
     )
+    # DEPRECATED: TravisTorrent features are now always applied
     template_id: Optional[str] = Field(
         default=None,
-        description="Feature template ID to apply (overrides feature_ids)",
+        description="[DEPRECATED] Feature template ID - ignored, TravisTorrent template is always used",
     )
+    # DEPRECATED: TravisTorrent features are now always applied
     feature_names: Optional[List[str]] = Field(
         default=None,
-        description="List of features to extract (ignored if template_id is set)",
+        description="[DEPRECATED] Custom feature list - ignored, TravisTorrent features are always used",
     )
     max_builds: Optional[int] = Field(
         default=None,
@@ -66,7 +68,8 @@ class RepoResponse(BaseModel):
     total_builds_imported: int = 0
     last_sync_error: Optional[str] = None
     notes: Optional[str] = None
-    requested_feature_names: List[str] = Field(default_factory=list)  # Feature names
+    # DEPRECATED: TravisTorrent features are now always applied
+    requested_feature_names: List[str] = Field(default_factory=list)  # [DEPRECATED]
     max_builds_to_ingest: Optional[int] = None
     # Always detect languages; no toggle exposed
 
@@ -94,7 +97,8 @@ class RepoUpdateRequest(BaseModel):
     source_languages: Optional[List[str]] = None
     default_branch: Optional[str] = None
     notes: Optional[str] = None
-    feature_names: Optional[List[str]] = None
+    # DEPRECATED: TravisTorrent features are now always applied
+    feature_names: Optional[List[str]] = None  # [DEPRECATED] ignored
     max_builds: Optional[int] = Field(default=None, ge=1, le=1000)
     since_days: Optional[int] = Field(default=None, ge=1, le=365)
 

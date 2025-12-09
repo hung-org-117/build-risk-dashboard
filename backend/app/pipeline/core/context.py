@@ -12,9 +12,15 @@ from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 from enum import Enum
 
 if TYPE_CHECKING:
-    from app.entities.build_sample import BuildSample
-    from app.entities.imported_repository import ImportedRepository
+    from app.entities.model_build import ModelBuild
+    from app.entities.enrichment_build import EnrichmentBuild
+    from app.entities.model_repository import ModelRepository
+    from app.entities.enrichment_repository import EnrichmentRepository
     from app.entities.workflow_run import WorkflowRunRaw
+
+    # Union types for pipeline compatibility with both flows
+    BuildType = ModelBuild | EnrichmentBuild
+    RepoType = ModelRepository | EnrichmentRepository
 
 
 class FeatureStatus(str, Enum):
@@ -59,9 +65,9 @@ class ExecutionContext:
     - Tracking of execution results
     """
 
-    # Core entities
-    build_sample: "BuildSample"
-    repo: "ImportedRepository"
+    # Core entities (supports both Model and Enrichment flows)
+    build_sample: Any  # ModelBuild | EnrichmentBuild
+    repo: Any  # ModelRepository | EnrichmentRepository
     workflow_run: Optional["WorkflowRunRaw"] = None
 
     # Database reference (for accessing repositories if needed)

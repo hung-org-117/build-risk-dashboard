@@ -1,6 +1,5 @@
-"""Repository entity - represents a tracked repository"""
+"""Model Repository entity - for Bayesian model training flow."""
 
-from typing import Optional
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -9,10 +8,7 @@ from .base import BaseEntity, PyObjectId
 
 
 class Provider(str, Enum):
-
     GITHUB = "github"
-    GITLAB = "gitlab"
-    BITBUCKET = "bitbucket"
 
 
 class TestFramework(str, Enum):
@@ -41,22 +37,21 @@ class TestFramework(str, Enum):
     CTEST = "ctest"
 
 
-from app.ci_providers.models import CIProvider
-
-
 class ImportStatus(str, Enum):
-
     QUEUED = "queued"
     IMPORTING = "importing"
     IMPORTED = "imported"
     FAILED = "failed"
 
 
-class ImportedRepository(BaseEntity):
-    user_id: PyObjectId | None = None
+from app.ci_providers.models import CIProvider
+
+
+class ModelRepository(BaseEntity):
+    user_id: PyObjectId
     provider: Provider = Provider.GITHUB
 
-    full_name: str  # "owner/repo"
+    full_name: str
     github_repo_id: int | None = None
     default_branch: str | None = None
     is_private: bool = False
@@ -75,16 +70,12 @@ class ImportedRepository(BaseEntity):
     notes: str | None = None
 
     last_synced_at: Optional[datetime] = None
-
-    sonar_config: Optional[str] = None  # Content of sonar-project.properties
-    last_sync_status: str | None = None  # "success", "failed"
-    last_remote_check_at: datetime | None = None
+    last_sync_status: str | None = None
     latest_synced_run_created_at: datetime | None = None
 
-    requested_feature_names: List[str] = []  # Feature names from registry
     max_builds_to_ingest: Optional[int] = None
-    ingest_start_date: Optional[datetime] = None
-    ingest_end_date: Optional[datetime] = None
 
-    # Metadata
     metadata: Dict[str, Any] = {}
+
+    class Config:
+        collection = "model_repositories"

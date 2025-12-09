@@ -36,6 +36,7 @@ export function useUploadDatasetForm({
 
     // Step 2: Repo configuration state
     const [uniqueRepos, setUniqueRepos] = useState<string[]>([]);
+    const [invalidFormatRepos, setInvalidFormatRepos] = useState<string[]>([]);
     const [repoConfigs, setRepoConfigs] = useState<Record<string, RepoConfig>>({});
     const [availableLanguages, setAvailableLanguages] = useState<Record<string, string[]>>({});
     const [languageLoading, setLanguageLoading] = useState<Record<string, boolean>>({});
@@ -239,17 +240,30 @@ export function useUploadDatasetForm({
     }, [parseCSVPreview, guessMapping]);
 
     // Extract unique repos from preview when mapping changes
-    const extractUniqueRepos = useCallback(() => {
-        if (!preview || !mappings.repo_name) return [];
+    // Returns { valid: repos with owner/name format, invalid: repos with bad format }
+    const extractUniqueRepos = useCallback((): { valid: string[], invalid: string[] } => {
+        if (!preview || !mappings.repo_name) return { valid: [], invalid: [] };
 
-        const repos = new Set<string>();
+        const validRepos = new Set<string>();
+        const invalidRepos = new Set<string>();
+
         preview.rows.forEach(row => {
             const repoName = row[mappings.repo_name]?.trim();
-            if (repoName && repoName.includes("/")) {
-                repos.add(repoName);
+            if (!repoName) return;
+
+            // Check format: must be owner/repo
+            if (repoName.includes("/") && repoName.split("/").length === 2) {
+                const [owner, name] = repoName.split("/");
+                if (owner && name) {
+                    validRepos.add(repoName);
+                } else {
+                    invalidRepos.add(repoName);
+                }
+            } else {
+                invalidRepos.add(repoName);
             }
         });
-        return Array.from(repos);
+        return { valid: Array.from(validRepos), invalid: Array.from(invalidRepos) };
     }, [preview, mappings.repo_name]);
 
     // Load frameworks and languages on mount
@@ -268,49 +282,61 @@ export function useUploadDatasetForm({
 
     // Initialize repo configs when entering step 2
     useEffect(() => {
-        if (step === 2 && uniqueRepos.length > 0) {
-            const configs: Record<string, RepoConfig> = {};
-            uniqueRepos.forEach(repo => {
-                if (!repoConfigs[repo]) {
-                    configs[repo] = {
-                        source_languages: [],
-                        test_frameworks: [],
-                        ci_provider: CIProvider.GITHUB_ACTIONS,
-                    };
-                } else {
-                    configs[repo] = repoConfigs[repo];
-                }
-            });
-            setRepoConfigs(configs);
-            if (!activeRepo && uniqueRepos.length > 0) {
-                setActiveRepo(uniqueRepos[0]);
-            }
+        if (step !== 2 || uniqueRepos.length === 0) return;
 
-            if (isResuming && supportedLanguages.length > 0) {
-                const needsFetch = uniqueRepos.some(repo => !availableLanguages[repo] && !languageLoading[repo]);
-                if (needsFetch) {
-                    setTransitionLoading(true);
-                    Promise.all(uniqueRepos.map(repo => {
-                        if (!availableLanguages[repo] && !languageLoading[repo]) {
-                            return reposApi.detectLanguages(repo).then(res => {
-                                const detected = res.languages || [];
-                                const validLangs = detected.filter(l =>
-                                    supportedLanguages.some(sl => sl.toLowerCase() === l.toLowerCase())
-                                );
-                                setAvailableLanguages(prev => ({ ...prev, [repo]: validLangs }));
-                            }).catch(err => {
-                                console.error(`Failed to detect languages for ${repo}:`, err);
-                                setAvailableLanguages(prev => ({ ...prev, [repo]: [] }));
-                            });
-                        }
-                        return Promise.resolve();
-                    })).finally(() => {
-                        setTransitionLoading(false);
-                    });
-                }
+        // Only run once when entering step 2
+        const configs: Record<string, RepoConfig> = {};
+        uniqueRepos.forEach(repo => {
+            if (!repoConfigs[repo]) {
+                configs[repo] = {
+                    source_languages: [],
+                    test_frameworks: [],
+                    ci_provider: CIProvider.GITHUB_ACTIONS,
+                };
+            } else {
+                configs[repo] = repoConfigs[repo];
             }
+        });
+        setRepoConfigs(configs);
+        if (!activeRepo && uniqueRepos.length > 0) {
+            setActiveRepo(uniqueRepos[0]);
         }
-    }, [step, uniqueRepos, isResuming, supportedLanguages, availableLanguages, languageLoading]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [step, uniqueRepos.length]);
+
+    // Fetch languages when resuming an existing dataset
+    useEffect(() => {
+        if (step !== 2 || !isResuming || supportedLanguages.length === 0) return;
+        if (uniqueRepos.length === 0) return;
+
+        // Check if we need to fetch any languages
+        const reposNeedingFetch = uniqueRepos.filter(repo =>
+            !availableLanguages[repo] && !languageLoading[repo]
+        );
+
+        if (reposNeedingFetch.length === 0) return;
+
+        setTransitionLoading(true);
+        Promise.all(reposNeedingFetch.map(repo => {
+            setLanguageLoading(prev => ({ ...prev, [repo]: true }));
+            return reposApi.detectLanguages(repo).then(res => {
+                const detected = res.languages || [];
+                const validLangs = detected.filter(l =>
+                    supportedLanguages.some(sl => sl.toLowerCase() === l.toLowerCase())
+                );
+                setAvailableLanguages(prev => ({ ...prev, [repo]: validLangs }));
+                setLanguageLoading(prev => ({ ...prev, [repo]: false }));
+            }).catch(err => {
+                console.error(`Failed to detect languages for ${repo}:`, err);
+                setAvailableLanguages(prev => ({ ...prev, [repo]: [] }));
+                setLanguageLoading(prev => ({ ...prev, [repo]: false }));
+            });
+        })).finally(() => {
+            setTransitionLoading(false);
+        });
+        // Only run when entering step 2 with resuming flag
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [step, isResuming, supportedLanguages.length, uniqueRepos.length]);
 
     // Load features and templates when entering step 3
     useEffect(() => {
@@ -396,22 +422,22 @@ export function useUploadDatasetForm({
                     build_id: mappings.build_id || null,
                     repo_name: mappings.repo_name || null,
                     commit_sha: null,
-                    timestamp: null,
                 },
             });
 
             setCreatedDataset(dataset);
 
-            const repos = extractUniqueRepos();
-            setUniqueRepos(repos);
+            const { valid: validRepos, invalid: invalidRepos } = extractUniqueRepos();
+            setUniqueRepos(validRepos);
+            setInvalidFormatRepos(invalidRepos);
 
             setStep(2);
             setTransitionLoading(true);
 
-            await Promise.all(repos.map(repo => fetchLanguagesForRepo(repo)));
+            await Promise.all(validRepos.map((repo: string) => fetchLanguagesForRepo(repo)));
 
-            if (repos.length > 0) {
-                setActiveRepo(repos[0]);
+            if (validRepos.length > 0) {
+                setActiveRepo(validRepos[0]);
             }
         } catch (err) {
             console.error("Upload failed:", err);
@@ -553,6 +579,7 @@ export function useUploadDatasetForm({
         mappings,
         isMappingValid,
         uniqueRepos,
+        invalidFormatRepos,
         repoConfigs,
         availableLanguages,
         languageLoading,

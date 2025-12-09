@@ -50,6 +50,7 @@ export interface StepUploadProps {
 
 export interface StepConfigureReposProps {
     uniqueRepos: string[];
+    invalidFormatRepos: string[];
     repoConfigs: Record<string, RepoConfig>;
     activeRepo: string | null;
     availableLanguages: Record<string, string[]>;

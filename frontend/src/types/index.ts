@@ -45,32 +45,13 @@ export interface Build {
 }
 
 export interface BuildDetail extends Build {
-  git_diff_src_churn?: number;
-  git_diff_test_churn?: number;
-  gh_diff_files_added?: number;
-  gh_diff_files_deleted?: number;
-  gh_diff_files_modified?: number;
-  gh_diff_tests_added?: number;
-  gh_diff_tests_deleted?: number;
-  gh_repo_age?: number;
-  gh_repo_num_commits?: number;
-  gh_sloc?: number;
-  error_message?: string;
-  // New Git Features
-  git_prev_commit_resolution_status?: string;
-  git_prev_built_commit?: string;
-  tr_prev_build?: number;
-  gh_team_size?: number;
-  git_num_all_built_commits?: number;
-  gh_by_core_team_member?: boolean;
-  gh_num_commits_on_files_touched?: number;
-  // Features object from API
   features?: Record<string, unknown>;
 }
 
 export interface DatasetMapping {
   build_id?: string | null;
   repo_name?: string | null;
+  commit_sha?: string | null;
 }
 
 export interface DatasetStats {
@@ -348,6 +329,7 @@ export interface RepoImportPayload {
   test_frameworks?: string[];
   source_languages?: string[];
   ci_provider?: string;
+  /** @deprecated TravisTorrent features are now always applied server-side */
   feature_names?: string[];
   max_builds?: number | null;
   since_days?: number | null;

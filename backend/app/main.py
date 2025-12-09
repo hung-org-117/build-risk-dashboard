@@ -13,14 +13,13 @@ from app.api import (
     repos,
     users,
     webhook,
-    websockets,
+    websocket,
     logs,
     sonar,
     features,
     datasets,
     tokens,
     pipeline,
-    websocket as enrichment_ws,
     export,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -53,14 +52,13 @@ app.include_router(auth.router, prefix="/api", tags=["Auth"])
 app.include_router(repos.router, prefix="/api", tags=["Repositories"])
 app.include_router(users.router, prefix="/api", tags=["Users"])
 app.include_router(webhook.router, prefix="/api", tags=["Webhooks"])
-app.include_router(websockets.router, prefix="/api", tags=["WebSockets"])
+app.include_router(websocket.router, prefix="/api", tags=["WebSocket"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(sonar.router, prefix="/api/sonar", tags=["SonarQube"])
 app.include_router(features.router, prefix="/api", tags=["Feature Definitions"])
 app.include_router(datasets.router, prefix="/api", tags=["Datasets"])
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
 app.include_router(pipeline.router, prefix="/api", tags=["Pipeline"])
-app.include_router(enrichment_ws.router, prefix="/api", tags=["Enrichment WebSocket"])
 app.include_router(export.router, prefix="/api", tags=["Export"])
 
 

@@ -4,7 +4,7 @@ Pipeline Integration - Bridge between new DAG pipeline and existing Celery tasks
 This module provides:
 1. A high-level function to run the entire feature pipeline
 2. Integration with existing Celery task structure
-3. Backwards compatibility with current BuildSample saving
+3. Backwards compatibility with current ModelBuild saving
 4. Pipeline execution history tracking
 5. Slack/webhook notifications on failures
 """
@@ -25,23 +25,31 @@ from app.pipeline.resources.git_repo import GitRepoProvider
 from app.pipeline.resources.github_client import GitHubClientProvider
 from app.pipeline.resources.log_storage import LogStorageProvider
 from app.pipeline.constants import DEFAULT_FEATURES
-from app.pipeline.features.build_log import job_metadata, workflow_metadata, test_log_parser
-from app.pipeline.features.git import commit_info, diff_features, file_touch_history, team_membership
+from app.pipeline.features.build_log import (
+    job_metadata,
+    workflow_metadata,
+    test_log_parser,
+)
+from app.pipeline.features.git import (
+    commit_info,
+    diff_features,
+    file_touch_history,
+    team_membership,
+)
 from app.pipeline.features.github import discussion
 from app.pipeline.features.repo import snapshot
 
-from app.entities.build_sample import BuildSample
-from app.entities.imported_repository import ImportedRepository
+# Use Any type for build_sample to support both ModelBuild and EnrichmentBuild
+from typing import Any
 from app.entities.workflow_run import WorkflowRunRaw
 from app.entities.pipeline_run import PipelineRun, NodeExecutionResult
-from app.repositories.build_sample import BuildSampleRepository
-from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.repositories.model_build import ModelBuildRepository
+from app.repositories.model_repository import ModelRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.repositories.pipeline_run import PipelineRunRepository
 from app.services.notifications import NotificationService, get_notification_service
 
 logger = logging.getLogger(__name__)
-
 
 
 class FeaturePipeline:
@@ -93,6 +101,11 @@ class FeaturePipeline:
         self.resource_manager.register(GitHubClientProvider())
         self.resource_manager.register(LogStorageProvider())
 
+        # Register SonarQube resource provider
+        from app.pipeline.resources.sonar import SonarClientProvider
+
+        self.resource_manager.register(SonarClientProvider())
+
         # Repository for history tracking
         self.pipeline_run_repo = PipelineRunRepository(db) if track_history else None
 
@@ -137,8 +150,8 @@ class FeaturePipeline:
 
     def _create_pipeline_run(
         self,
-        build_sample: BuildSample,
-        repo: ImportedRepository,
+        build_sample: Any,  # ModelBuild or EnrichmentBuild
+        repo: Any,  # ModelRepository or EnrichmentRepository
         workflow_run: Optional[WorkflowRunRaw],
         nodes_requested: int,
     ) -> Optional[PipelineRun]:
@@ -181,7 +194,9 @@ class FeaturePipeline:
                     node_name=result.node_name,
                     status=result.status.value,
                     duration_ms=result.duration_ms,
-                    features_extracted=list(result.features.keys()) if result.features else [],
+                    features_extracted=(
+                        list(result.features.keys()) if result.features else []
+                    ),
                     error=result.error,
                     warning=result.warning,
                 )
@@ -204,15 +219,17 @@ class FeaturePipeline:
             pipeline_run.warnings.extend(context.warnings)
             pipeline_run.errors.extend(context.errors)
 
-            self.pipeline_run_repo.update_one(str(pipeline_run.id), pipeline_run.model_dump(exclude={"id"}))
+            self.pipeline_run_repo.update_one(
+                str(pipeline_run.id), pipeline_run.model_dump(exclude={"id"})
+            )
 
         except Exception as e:
             logger.warning(f"Failed to update pipeline run record: {e}")
 
     def _send_failure_notification(
         self,
-        repo: ImportedRepository,
-        build_sample: BuildSample,
+        repo: Any,  # ModelRepository or EnrichmentRepository
+        build_sample: Any,  # ModelBuild or EnrichmentBuild
         error: str,
         pipeline_run_id: Optional[str],
         context: "ExecutionContext",
@@ -224,14 +241,13 @@ class FeaturePipeline:
         try:
             # Collect failed node names
             failed_nodes = [
-                r.node_name for r in context.results 
-                if r.status == FeatureStatus.FAILED
+                r.node_name for r in context.results if r.status == FeatureStatus.FAILED
             ]
-            
+
             # Get retry stats
             retry_stats = self.executor.get_retry_stats()
             total_retries = sum(retry_stats.values())
-            
+
             # Run async notification in sync context
             asyncio.run(
                 self.notification_service.notify_pipeline_failure(
@@ -246,11 +262,10 @@ class FeaturePipeline:
         except Exception as e:
             logger.warning(f"Failed to send failure notification: {e}")
 
-
     def run(
         self,
-        build_sample: BuildSample,
-        repo: ImportedRepository,
+        build_sample: Any,  # ModelBuild or EnrichmentBuild
+        repo: Any,  # ModelRepository or EnrichmentRepository
         workflow_run: Optional[WorkflowRunRaw] = None,
         parallel: bool = True,
         features_filter: Optional[Set[str]] = None,
@@ -281,7 +296,7 @@ class FeaturePipeline:
 
         # Set workflow_run as a resource for nodes that need it
         # Core features that should always be extracted if possible
-        # These match the top-level fields in BuildSample
+        # These match the top-level fields in ModelBuild
         # Imported DEFAULT_FEATURES from constants
 
         # Resolve feature_ids to names if provided
@@ -394,7 +409,9 @@ class FeaturePipeline:
                         "results": [],
                         "feature_count": 0,
                     }
-                logger.info(f"Continuing with {len(nodes_to_run)} nodes after filtering")
+                logger.info(
+                    f"Continuing with {len(nodes_to_run)} nodes after filtering"
+                )
 
             # Execute pipeline
             context = self.executor.execute(
@@ -423,7 +440,9 @@ class FeaturePipeline:
 
             # Send notification if there were failures
             if final_status == "failed" or context.errors:
-                error_msg = context.errors[0] if context.errors else "One or more nodes failed"
+                error_msg = (
+                    context.errors[0] if context.errors else "One or more nodes failed"
+                )
                 self._send_failure_notification(
                     repo=repo,
                     build_sample=build_sample,
@@ -488,7 +507,6 @@ class FeaturePipeline:
             self.resource_manager.cleanup_all(context)
             # Reset executor metrics for next run
             self.executor.reset_metrics()
-
 
     def _determine_target_features(
         self, features_filter: Optional[Set[str]]
@@ -569,12 +587,12 @@ class FeaturePipeline:
         """
         runnable_nodes: Set[str] = set()
         skipped_nodes: List[str] = []
-        
+
         for node_name in node_names:
             meta = self.executor.registry.get(node_name)
             if not meta:
                 continue
-            
+
             # Check if node requires any failed resource
             required_failed = meta.requires_resources & failed_resources
             if required_failed:
@@ -584,10 +602,10 @@ class FeaturePipeline:
                 )
             else:
                 runnable_nodes.add(node_name)
-        
+
         if skipped_nodes:
             logger.info(f"Skipped {len(skipped_nodes)} nodes: {skipped_nodes}")
-        
+
         return runnable_nodes
 
     def visualize_dag(self) -> str:
@@ -606,21 +624,21 @@ def run_feature_pipeline(
     """
     Function to run pipeline for a build ID.
     """
-    build_sample_repo = BuildSampleRepository(db)
-    repo_repo = ImportedRepositoryRepository(db)
+    model_build_repo = ModelBuildRepository(db)
+    repo_repo = ModelRepositoryRepository(db)
     workflow_run_repo = WorkflowRunRepository(db)
 
     # Fetch entities
-    build_sample = build_sample_repo.find_by_id(ObjectId(build_id))
-    if not build_sample:
-        return {"status": "error", "message": "BuildSample not found"}
+    model_build = model_build_repo.find_by_id(ObjectId(build_id))
+    if not model_build:
+        return {"status": "error", "message": "ModelBuild not found"}
 
-    repo = repo_repo.find_by_id(str(build_sample.repo_id))
+    repo = repo_repo.find_by_id(str(model_build.repo_id))
     if not repo:
         return {"status": "error", "message": "Repository not found"}
 
     workflow_run = workflow_run_repo.find_by_repo_and_run_id(
-        str(build_sample.repo_id), build_sample.workflow_run_id
+        str(model_build.repo_id), model_build.workflow_run_id
     )
     if not workflow_run:
         return {"status": "error", "message": "WorkflowRun not found"}
@@ -632,13 +650,13 @@ def run_feature_pipeline(
     feature_names = getattr(repo, "requested_feature_names", None) or []
 
     result = pipeline.run(
-        build_sample,
+        model_build,
         repo,
         workflow_run,
         features_filter=set(feature_names) if feature_names else None,
     )
 
-    # Save features to BuildSample
+    # Save features to ModelBuild
     if result["features"]:
         updates = {}
         updates["features"] = result["features"]
@@ -649,6 +667,6 @@ def run_feature_pipeline(
         elif result.get("warnings"):
             updates["error_message"] = "Warning: " + "; ".join(result["warnings"])
 
-        build_sample_repo.update_one(build_id, updates)
+        model_build_repo.update_one(build_id, updates)
 
     return result

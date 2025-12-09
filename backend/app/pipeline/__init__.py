@@ -17,6 +17,7 @@ from app.pipeline.features.git import team_membership  # noqa: F401
 from app.pipeline.features.git import file_touch_history  # noqa: F401
 from app.pipeline.features.repo import snapshot  # noqa: F401
 from app.pipeline.features.github import discussion  # noqa: F401
+from app.pipeline.features.sonar import measures  # noqa: F401
 
 __all__ = [
     "ExecutionContext",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -78,6 +79,7 @@ function formatDate(value?: string | null) {
 const PAGE_SIZE = 20;
 
 export default function DatasetsPage() {
+  const router = useRouter();
   const [datasets, setDatasets] = useState<DatasetRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
@@ -330,7 +332,7 @@ export default function DatasetsPage() {
                     <tr
                       key={dataset.id}
                       className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                      onClick={() => openPanel(dataset.id)}
+                      onClick={() => router.push(`/datasets/${dataset.id}`)}
                     >
                       <td className="px-6 py-4">
                         <div>

@@ -136,7 +136,7 @@ export function EnrichmentPanel({
     // Connect to WebSocket for progress
     const connectWebSocket = useCallback((jobId: string) => {
         try {
-            const wsUrl = enrichmentApi.getPollingWebSocketUrl(jobId);
+            const wsUrl = enrichmentApi.getWebSocketUrl(jobId);
             const ws = new WebSocket(wsUrl);
             wsRef.current = ws;
 

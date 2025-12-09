@@ -1,5 +1,3 @@
-"""Dataset API - manage uploaded CSV projects for enrichment."""
-
 from pathlib import Path
 
 from fastapi import (
@@ -35,7 +33,7 @@ from app.services.dataset_template_service import DatasetTemplateService
 from app.entities.enrichment_job import EnrichmentJob
 from app.repositories.enrichment_job import EnrichmentJobRepository
 from app.repositories.dataset_repository import DatasetRepository
-from app.repositories.imported_repository import ImportedRepositoryRepository
+from app.repositories.enrichment_repository import EnrichmentRepositoryRepository
 from app.tasks.enrichment import enrich_dataset_task
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
@@ -173,130 +171,6 @@ def apply_template_to_dataset(
 
 
 @router.post(
-    "/{dataset_id}/validate-github-repos",
-    response_model_by_alias=False,
-)
-def validate_github_repos(
-    dataset_id: str = PathParam(..., description="Dataset id"),
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Validate that repositories in the CSV exist on GitHub.
-
-    This checks each unique repo_name against the GitHub API to verify
-    the repository exists and is accessible.
-    """
-    import pandas as pd
-    from app.dtos import RepoValidationItem, RepoValidationResponse
-    from app.services.github.github_client import get_public_github_client
-
-    user_id = str(current_user["_id"])
-    dataset_repo = DatasetRepository(db)
-
-    dataset = dataset_repo.find_by_id(dataset_id)
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-
-    if dataset.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Get mapping
-    mapping = dataset.get("mapped_fields", {})
-    repo_name_col = mapping.get("repo_name")
-
-    if not repo_name_col:
-        raise HTTPException(
-            status_code=400,
-            detail="repo_name column must be mapped before validation",
-        )
-
-    # Read CSV and count repos using pandas
-    file_path = dataset.get("file_path")
-    if not file_path or not Path(file_path).exists():
-        raise HTTPException(status_code=400, detail="CSV file not found")
-
-    try:
-        df = pd.read_csv(file_path, usecols=[repo_name_col], dtype=str)
-        df[repo_name_col] = df[repo_name_col].fillna("").str.strip()
-        repo_counts = df[repo_name_col].value_counts().to_dict()
-        repo_counts.pop("", None)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read CSV: {e}")
-
-    results: list[RepoValidationItem] = []
-    valid_count = 0
-    invalid_count = 0
-
-    try:
-        gh_client = get_public_github_client(db)
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Cannot connect to GitHub: {str(e)}",
-        )
-
-    for repo_name, count in repo_counts.items():
-        # Check format
-        if "/" not in repo_name:
-            results.append(
-                RepoValidationItem(
-                    repo_name=repo_name,
-                    status="invalid_format",
-                    build_count=count,
-                    message="Expected format: owner/repo",
-                )
-            )
-            invalid_count += 1
-            continue
-
-        # Check on GitHub
-        try:
-            gh_client.get_repository(repo_name)
-            results.append(
-                RepoValidationItem(
-                    repo_name=repo_name,
-                    status="exists",
-                    build_count=count,
-                )
-            )
-            valid_count += 1
-        except Exception as e:
-            error_msg = str(e)
-            if "404" in error_msg or "Not Found" in error_msg:
-                results.append(
-                    RepoValidationItem(
-                        repo_name=repo_name,
-                        status="not_found",
-                        build_count=count,
-                        message="Repository not found on GitHub",
-                    )
-                )
-            else:
-                results.append(
-                    RepoValidationItem(
-                        repo_name=repo_name,
-                        status="error",
-                        build_count=count,
-                        message=error_msg[:100],
-                    )
-                )
-            invalid_count += 1
-
-    return RepoValidationResponse(
-        total_repos=len(results),
-        valid_repos=valid_count,
-        invalid_repos=invalid_count,
-        repos=sorted(results, key=lambda x: (x.status != "exists", -x.build_count)),
-    )
-
-
-# ============================================================================
-# ENRICHMENT ENDPOINTS
-# ============================================================================
-
-
-@router.post(
     "/{dataset_id}/validate",
     response_model=EnrichmentValidateResponse,
     response_model_by_alias=False,
@@ -318,7 +192,7 @@ def validate_for_enrichment(
 
     user_id = str(current_user["_id"])
     dataset_repo = DatasetRepository(db)
-    repo_repo = ImportedRepositoryRepository(db)
+    repo_repo = EnrichmentRepositoryRepository(db)
 
     dataset = dataset_repo.find_by_id(dataset_id)
     if not dataset:
@@ -368,7 +242,7 @@ def validate_for_enrichment(
     return EnrichmentValidateResponse(
         valid=mapping_complete and len(repos_invalid) == 0,
         total_rows=total_rows,
-        enrichable_rows=total_rows,  # All rows can potentially be enriched
+        enrichable_rows=total_rows,
         repos_found=repos_found,
         repos_missing=repos_missing,
         repos_invalid=repos_invalid,
@@ -391,10 +265,6 @@ def start_enrichment(
 ):
     """
     Start dataset enrichment job.
-
-    This is an async operation. Use the returned job_id to:
-    - Poll /enrich/status for progress
-    - Connect to WebSocket for real-time updates
     """
     user_id = str(current_user["_id"])
     job_repo = EnrichmentJobRepository(db)

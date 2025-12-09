@@ -1,22 +1,21 @@
 """
-WebSocket API for real-time enrichment progress.
+WebSocket API for real-time updates.
 
 This module provides WebSocket endpoints for:
 - Real-time enrichment job progress updates
 - Row-by-row processing events
+- General broadcast events
 """
 
 import asyncio
 import json
 import logging
-from typing import Set
+from typing import List, Set
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from pymongo.database import Database
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import settings
-from app.database.mongo import get_db
 from app.repositories.enrichment_job import EnrichmentJobRepository
 
 logger = logging.getLogger(__name__)
@@ -62,11 +61,13 @@ async def enrichment_progress_websocket(
 
     try:
         # Send initial connection confirmation
-        await websocket.send_json({
-            "type": "connected",
-            "job_id": job_id,
-            "message": "Connected to enrichment progress stream",
-        })
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "job_id": job_id,
+                "message": "Connected to enrichment progress stream",
+            }
+        )
 
         # Subscribe to Redis channel for this job
         redis = await get_async_redis()
@@ -78,7 +79,7 @@ async def enrichment_progress_websocket(
             try:
                 message = await asyncio.wait_for(
                     pubsub.get_message(ignore_subscribe_messages=True),
-                    timeout=30.0  # Heartbeat every 30s
+                    timeout=30.0,  # Heartbeat every 30s
                 )
 
                 if message:
@@ -107,10 +108,12 @@ async def enrichment_progress_websocket(
     except Exception as e:
         logger.error(f"WebSocket error for job {job_id}: {e}")
         try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e),
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": str(e),
+                }
+            )
         except Exception:
             pass
     finally:
@@ -119,7 +122,7 @@ async def enrichment_progress_websocket(
             active_connections[job_id].discard(websocket)
             if not active_connections[job_id]:
                 del active_connections[job_id]
-        
+
         try:
             await pubsub.unsubscribe(f"{REDIS_CHANNEL_PREFIX}{job_id}")
             await redis.close()
@@ -127,80 +130,59 @@ async def enrichment_progress_websocket(
             pass
 
 
-@router.websocket("/ws/enrichment/{job_id}/polling")
-async def enrichment_polling_websocket(
-    websocket: WebSocket,
-    job_id: str,
-):
-    """
-    Simpler WebSocket that polls database for progress.
-    
-    Use this as fallback if Redis pub/sub is not available.
-    Polls every 2 seconds.
-    """
-    await websocket.accept()
+class ConnectionManager:
+    """Manages WebSocket connections for general event broadcasts."""
 
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self._redis_client = None
+
+    @property
+    def redis_client(self):
+        if self._redis_client is None:
+            self._redis_client = aioredis.from_url(settings.REDIS_URL)
+        return self._redis_client
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception as e:
+                logger.error(f"Error sending message to websocket: {e}")
+
+    async def subscribe_to_redis(self):
+        pubsub = self.redis_client.pubsub()
+        await pubsub.subscribe("events")
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                await self.broadcast(message["data"].decode("utf-8"))
+
+
+manager = ConnectionManager()
+
+
+@router.websocket("/ws/events")
+async def events_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for general event broadcasts.
+
+    Connect to receive server-wide events published to Redis 'events' channel.
+    """
+    await manager.connect(websocket)
     try:
-        # Get database connection (sync)
-        from app.database.mongo import get_database
-        db = get_database()
-        job_repo = EnrichmentJobRepository(db)
-
-        await websocket.send_json({
-            "type": "connected",
-            "job_id": job_id,
-            "message": "Connected (polling mode)",
-        })
-
-        last_processed = -1
-
         while True:
-            # Poll database
-            job = job_repo.find_by_id(job_id)
-            
-            if not job:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "Job not found",
-                })
-                break
-
-            # Send update if changed
-            if job.processed_rows != last_processed:
-                last_processed = job.processed_rows
-                await websocket.send_json({
-                    "type": "progress",
-                    "job_id": job_id,
-                    "status": job.status,
-                    "processed_rows": job.processed_rows,
-                    "total_rows": job.total_rows,
-                    "enriched_rows": job.enriched_rows,
-                    "failed_rows": job.failed_rows,
-                    "progress_percent": job.progress_percent,
-                })
-
-            # Check if complete
-            if job.is_complete:
-                await websocket.send_json({
-                    "type": "complete",
-                    "job_id": job_id,
-                    "status": job.status,
-                    "total_rows": job.total_rows,
-                    "enriched_rows": job.enriched_rows,
-                    "failed_rows": job.failed_rows,
-                    "output_file": job.output_file,
-                    "error": job.error,
-                })
-                break
-
-            # Wait before next poll
-            await asyncio.sleep(2)
-
+            # Keep connection alive
+            await websocket.receive_text()
     except WebSocketDisconnect:
-        logger.info(f"Polling WebSocket disconnected for job {job_id}")
+        manager.disconnect(websocket)
     except Exception as e:
-        logger.error(f"Polling WebSocket error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)

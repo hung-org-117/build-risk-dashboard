@@ -19,6 +19,7 @@ celery_app = Celery(
         "app.tasks.maintenance",
         "app.tasks.enrichment",
         "app.tasks.export",
+        "app.tasks.sonar",
     ],
 )
 
@@ -57,6 +58,11 @@ celery_app.conf.update(
             "export",
             Exchange("buildguard"),
             routing_key="pipeline.export",
+        ),
+        Queue(
+            "sonar_scan",
+            Exchange("buildguard"),
+            routing_key="pipeline.sonar_scan",
         ),
     ],
     broker_connection_retry_on_startup=True,

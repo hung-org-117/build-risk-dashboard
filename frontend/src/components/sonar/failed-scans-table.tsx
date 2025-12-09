@@ -1,3 +1,13 @@
+/**
+ * Failed Scans Table - DEPRECATED
+ * 
+ * This component displayed failed scan jobs with retry functionality.
+ * Since scanning is now done via pipeline SonarMeasuresNode,
+ * manual retry is no longer available.
+ * 
+ * Users can view failed configurations and update them for future pipeline runs.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, AlertCircle, Edit, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { sonarApi } from "@/lib/api";
 import { formatTimestamp } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
@@ -39,7 +50,6 @@ export function FailedScansTable({ repoId }: FailedScansTableProps) {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editConfig, setEditConfig] = useState("");
     const [saving, setSaving] = useState(false);
-    const [retrying, setRetrying] = useState<string | null>(null);
     const { toast } = useToast();
 
     const loadFailedScans = useCallback(async () => {
@@ -55,8 +65,6 @@ export function FailedScansTable({ repoId }: FailedScansTableProps) {
 
     useEffect(() => {
         loadFailedScans();
-        const interval = setInterval(loadFailedScans, 10000); // Poll every 10s
-        return () => clearInterval(interval);
     }, [loadFailedScans]);
 
     const handleEdit = (scan: FailedScan) => {
@@ -70,7 +78,7 @@ export function FailedScansTable({ repoId }: FailedScansTableProps) {
             await sonarApi.updateFailedScanConfig(scanId, editConfig);
             toast({
                 title: "Config Saved",
-                description: "Configuration override has been saved.",
+                description: "Configuration override has been saved for future pipeline runs.",
             });
             setEditingId(null);
             loadFailedScans();
@@ -85,26 +93,6 @@ export function FailedScansTable({ repoId }: FailedScansTableProps) {
         }
     };
 
-    const handleRetry = async (scanId: string) => {
-        setRetrying(scanId);
-        try {
-            await sonarApi.retryFailedScan(scanId);
-            toast({
-                title: "Retry Queued",
-                description: "The scan has been queued for retry.",
-            });
-            loadFailedScans();
-        } catch (error) {
-            toast({
-                title: "Error",
-                description: "Failed to retry scan.",
-                variant: "destructive",
-            });
-        } finally {
-            setRetrying(null);
-        }
-    };
-
     if (loading && failed.length === 0) {
         return (
             <div className="flex justify-center p-8">
@@ -115,17 +103,14 @@ export function FailedScansTable({ repoId }: FailedScansTableProps) {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h3 className="text-lg font-medium">Failed Scans</h3>
-                    <p className="text-sm text-muted-foreground">
-                        Scans that failed and need configuration fixes
-                    </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => loadFailedScans()}>
-                    <RotateCcw className="mr-2 h-4 w-4" /> Refresh
-                </Button>
-            </div>
+            <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Pipeline-Driven Scanning</AlertTitle>
+                <AlertDescription>
+                    SonarQube scans are now triggered automatically when you select sonar_* features
+                    during dataset enrichment. Update config overrides here for future pipeline runs.
+                </AlertDescription>
+            </Alert>
 
             {failed.length === 0 ? (
                 <div className="rounded-md border p-8 text-center">
@@ -165,27 +150,13 @@ export function FailedScansTable({ repoId }: FailedScansTableProps) {
                                         <TableCell className="text-muted-foreground text-sm">
                                             {formatTimestamp(scan.created_at)}
                                         </TableCell>
-                                        <TableCell className="text-right space-x-2">
+                                        <TableCell className="text-right">
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
                                                 onClick={() => handleEdit(scan)}
                                             >
                                                 <Edit className="h-3 w-3 mr-1" /> Edit Config
-                                            </Button>
-                                            <Button
-                                                variant="default"
-                                                size="sm"
-                                                onClick={() => handleRetry(scan.id)}
-                                                disabled={retrying === scan.id}
-                                            >
-                                                {retrying === scan.id ? (
-                                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                                ) : (
-                                                    <>
-                                                        <RotateCcw className="h-3 w-3 mr-1" /> Retry
-                                                    </>
-                                                )}
                                             </Button>
                                         </TableCell>
                                     </TableRow>

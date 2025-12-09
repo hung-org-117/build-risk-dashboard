@@ -57,7 +57,7 @@ def detect_repository_languages(
     """
     installation_id = None
     repo_repo = RepositoryService(db).repo_repo
-    imported = repo_repo.find_by_full_name("github", full_name)
+    imported = repo_repo.find_by_full_name(full_name)
     if imported and imported.installation_id:
         installation_id = imported.installation_id
 
@@ -103,9 +103,9 @@ def list_test_frameworks(
     Use this to drive UI selection when importing repositories.
     """
     from app.pipeline.log_parsers import LogParserRegistry
-    
+
     registry = LogParserRegistry()
-    
+
     return {
         "frameworks": registry.get_supported_frameworks(),
         "by_language": registry.get_frameworks_by_language(),
@@ -332,61 +332,6 @@ async def list_scan_jobs(
 ):
     """List scan jobs for the repository."""
     from app.services.sonar_service import SonarService
-
-    service = SonarService(db)
-    return service.list_jobs(repo_id, skip, limit)
-
-
-@router.post("/{repo_id}/builds/{build_id}/scan")
-async def trigger_build_scan(
-    repo_id: str,
-    build_id: str,
-    db: Database = Depends(get_db),
-):
-    """Trigger a SonarQube scan for a specific build."""
-    from app.services.sonar_service import SonarService
-
-    service = SonarService(db)
-    try:
-        job = service.trigger_scan(build_id)
-        return {"status": "queued", "job_id": str(job.id)}
-    except ValueError as e:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=500, detail=str(e))
-
-    from app.services.sonar_service import SonarService
-
-    service = SonarService(db)
-    try:
-        job = service.retry_job(job_id)
-        return {"status": "queued", "job_id": str(job.id)}
-    except ValueError as e:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.post("/sonar/jobs/{job_id}/retry")
-async def retry_scan_job(
-    job_id: str,
-    payload: dict = Body(default={"config_override": None}),
-    db: Database = Depends(get_db),
-):
-    """Retry a failed scan job."""
-    from app.services.sonar_service import SonarService
-
-    service = SonarService(db)
-    try:
-        config_override = payload.get("config_override")
-        job = service.retry_job(job_id, config_override=config_override)
-        return {"status": "queued", "job_id": str(job.id)}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/{repo_id}/sonar/results")

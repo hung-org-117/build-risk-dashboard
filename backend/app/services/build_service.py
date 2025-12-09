@@ -1,22 +1,23 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from bson import ObjectId
 from pymongo.database import Database
 
 from app.dtos.build import BuildDetail, BuildListResponse, BuildSummary
-from app.entities.build_sample import BuildSample
+from app.entities.model_build import ModelBuild
 from app.entities.workflow_run import WorkflowRunRaw
 
 
 class BuildService:
     def __init__(self, db: Database):
         self.db = db
-        self.build_collection = db["build_samples"]
+        self.build_collection = db["model_builds"]
         self.workflow_collection = db["workflow_runs"]
 
-    def _get_feature(self, sample: BuildSample, key: str, default=None):
+    def _get_feature(self, sample: Any, key: str, default=None):
         """Helper to get feature value from sample.features dict."""
-        return sample.features.get(key, default) if sample.features else default
+        features = getattr(sample, "features", None) or {}
+        return features.get(key, default)
 
     def get_builds_by_repo(
         self, repo_id: str, skip: int = 0, limit: int = 20, q: Optional[str] = None
@@ -28,7 +29,9 @@ class BuildService:
             if q.isdigit():
                 or_conditions.append({"features.tr_build_number": int(q)})
 
-            or_conditions.append({"features.tr_original_commit": {"$regex": q, "$options": "i"}})
+            or_conditions.append(
+                {"features.tr_original_commit": {"$regex": q, "$options": "i"}}
+            )
             or_conditions.append({"status": {"$regex": q, "$options": "i"}})
 
             query["$or"] = or_conditions
@@ -41,7 +44,7 @@ class BuildService:
             .limit(limit)
         )
 
-        build_samples = [BuildSample(**doc) for doc in cursor]
+        build_samples = [ModelBuild(**doc) for doc in cursor]
 
         if not build_samples:
             return BuildListResponse(
@@ -89,7 +92,7 @@ class BuildService:
         if not doc:
             return None
 
-        sample = BuildSample(**doc)
+        sample = ModelBuild(**doc)
         workflow_doc = self.workflow_collection.find_one(
             {"workflow_run_id": sample.workflow_run_id}
         )
@@ -114,7 +117,7 @@ class BuildService:
     def get_recent_builds(self, limit: int = 10) -> List[BuildSummary]:
         cursor = self.build_collection.find({}).sort("_id", -1).limit(limit)
 
-        build_samples = [BuildSample(**doc) for doc in cursor]
+        build_samples = [ModelBuild(**doc) for doc in cursor]
         if not build_samples:
             return []
 
@@ -147,20 +150,3 @@ class BuildService:
                 )
             )
         return items
-
-    def trigger_sonar_scan_direct(self, build_id: str):
-        from app.tasks.sonar import run_sonar_scan
-
-        # Verify build exists
-        if not self.build_collection.find_one({"_id": ObjectId(build_id)}):
-            raise ValueError("Build not found")
-
-        # Trigger Celery task
-        run_sonar_scan.delay(build_id)
-
-        # Update status
-        self.build_collection.update_one(
-            {"_id": ObjectId(build_id)}, {"$set": {"sonar_scan_status": "queued"}}
-        )
-        return True
-
