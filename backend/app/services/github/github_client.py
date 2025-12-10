@@ -699,6 +699,20 @@ class GitHubClient:
         return self._rest_request("GET", f"/repos/{full_name}/compare/{base}...{head}")
 
     def download_job_logs(self, full_name: str, job_id: int) -> bytes:
+        """
+        Download logs for a specific job.
+
+        Raises:
+            GithubLogsUnavailableError: When logs cannot be retrieved due to
+                permissions, expiration, or job not found.
+            GithubRateLimitError: When rate limited (retryable).
+            GithubRetryableError: For other transient errors.
+        """
+        from app.services.github.exceptions import (
+            GithubLogsUnavailableError,
+            LogUnavailableReason,
+        )
+
         def _do_request():
             return self._rest.get(
                 f"/repos/{full_name}/actions/jobs/{job_id}/logs",
@@ -706,8 +720,51 @@ class GitHubClient:
                 follow_redirects=True,
             )
 
-        response = self._retry_on_rate_limit(_do_request)
-        return response.content
+        try:
+            response = self._retry_on_rate_limit(_do_request)
+            return response.content
+        except GithubRetryableError as exc:
+            # Parse the underlying HTTP error to determine the reason
+            original_error = str(exc)
+            error_lower = original_error.lower()
+
+            # Check for 403 - Permission denied or rate limit
+            if "403" in original_error:
+                if "rate limit" in error_lower:
+                    # Already handled by _retry_on_rate_limit, but re-raise just in case
+                    raise
+                # Permission denied - user doesn't have admin rights
+                if "admin" in error_lower or "permission" in error_lower:
+                    raise GithubLogsUnavailableError(
+                        f"Permission denied: admin rights required to download logs for job {job_id}",
+                        reason=LogUnavailableReason.PERMISSION_DENIED,
+                        job_id=job_id,
+                    ) from exc
+                # Resource not accessible by integration (GitHub App permission issue)
+                if "resource not accessible" in error_lower:
+                    raise GithubLogsUnavailableError(
+                        f"Resource not accessible: missing actions:read permission for job {job_id}",
+                        reason=LogUnavailableReason.PERMISSION_DENIED,
+                        job_id=job_id,
+                    ) from exc
+
+            # Check for 404 - Logs expired, job not found, or run in progress
+            if "404" in original_error:
+                raise GithubLogsUnavailableError(
+                    f"Logs not found for job {job_id} (expired or job doesn't exist)",
+                    reason=LogUnavailableReason.LOGS_EXPIRED,
+                    job_id=job_id,
+                ) from exc
+
+            # Check for 410 - Gone (explicitly deleted/expired)
+            if "410" in original_error:
+                raise GithubLogsUnavailableError(
+                    f"Logs have been deleted for job {job_id}",
+                    reason=LogUnavailableReason.LOGS_EXPIRED,
+                    job_id=job_id,
+                ) from exc
+
+            raise
 
     def logs_available(self, full_name: str, run_id: int) -> bool:
         """Return True if the workflow run log archive is still retrievable."""

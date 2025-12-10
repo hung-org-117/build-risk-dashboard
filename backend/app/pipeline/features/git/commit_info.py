@@ -68,13 +68,13 @@ class GitCommitInfoNode(FeatureNode):
         # This requires walking back from effective_sha until we find a commit that constitutes a completed build
 
         build_stats = self._calculate_build_stats(
-            db, build_sample, repo, repo_path, effective_sha
+            context, db, build_sample, repo, repo_path, effective_sha
         )
 
         return build_stats
 
     def _calculate_build_stats(
-        self, db, build_sample, repo, repo_path, commit_sha: str
+        self, context, db, build_sample, repo, repo_path, commit_sha: str
     ) -> Dict[str, Any]:
         commits_hex: List[str] = [commit_sha]
         status = "no_previous_build"
@@ -106,7 +106,7 @@ class GitCommitInfoNode(FeatureNode):
         if use_subprocess:
             # Subprocess fallback
             return self._calculate_build_stats_subprocess(
-                build_coll, build_sample, repo_path, commit_sha, repo_id_query
+                context, build_coll, build_sample, repo_path, commit_sha, repo_id_query
             )
 
         # Use GitPython walker
@@ -161,6 +161,7 @@ class GitCommitInfoNode(FeatureNode):
                         break
             except Exception as e:
                 logger.warning(f"Error processing commit in history: {e}")
+                context.add_warning(f"Git commit walking error: {e}")
                 break  # Stop iteration on error
 
         return {
@@ -172,7 +173,13 @@ class GitCommitInfoNode(FeatureNode):
         }
 
     def _calculate_build_stats_subprocess(
-        self, build_coll, build_sample, repo_path, commit_sha: str, repo_id_query
+        self,
+        context,
+        build_coll,
+        build_sample,
+        repo_path,
+        commit_sha: str,
+        repo_id_query,
     ) -> Dict[str, Any]:
         """Calculate build stats using subprocess when GitPython fails."""
         commits_hex: List[str] = [commit_sha]

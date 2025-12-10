@@ -65,6 +65,7 @@ class GitHubDiscussionNode(FeatureNode):
                 num_commit_comments += len(comments)
             except Exception as e:
                 logger.warning(f"Failed to fetch comments for commit {sha}: {e}")
+                context.add_warning(f"Failed to fetch commit comments: {e}")
 
         # 2. PR comments and complexity
         num_pr_comments = 0
@@ -82,6 +83,7 @@ class GitHubDiscussionNode(FeatureNode):
                 num_pr_comments = len(pr_comments)
             except Exception as e:
                 logger.warning(f"Failed to fetch PR data for #{pr_number}: {e}")
+                context.add_warning(f"Failed to fetch PR #{pr_number} data: {e}")
 
         # 3. Issue comments (within time window around the build)
         num_issue_comments = 0
@@ -92,6 +94,7 @@ class GitHubDiscussionNode(FeatureNode):
                 )
             except Exception as e:
                 logger.warning(f"Failed to fetch issue comments: {e}")
+                context.add_warning(f"Failed to fetch issue comments: {e}")
 
         return {
             "gh_num_issue_comments": num_issue_comments,

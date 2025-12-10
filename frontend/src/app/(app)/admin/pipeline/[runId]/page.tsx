@@ -264,7 +264,7 @@ export default function PipelineRunDetailPage() {
                         <span className="text-slate-500">Started:</span>{" "}
                         <span className="font-medium">
                             {run.started_at
-                                ? `${format(new Date(run.started_at), "PPpp")} (${formatDistanceToNow(new Date(run.started_at), { addSuffix: true })})`
+                                ? `${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(run.started_at))} (${formatDistanceToNow(new Date(run.started_at), { addSuffix: true })})`
                                 : "-"
                             }
                         </span>
@@ -273,7 +273,7 @@ export default function PipelineRunDetailPage() {
                         <span className="text-slate-500">Completed:</span>{" "}
                         <span className="font-medium">
                             {run.completed_at
-                                ? format(new Date(run.completed_at), "PPpp")
+                                ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(new Date(run.completed_at))
                                 : "-"
                             }
                         </span>

@@ -30,7 +30,7 @@ class DatasetResponse(BaseModel):
     source: str
     ci_provider: str = "github_actions"
     rows: int
-    size_mb: float
+    size_bytes: int
     columns: List[str]
     mapped_fields: DatasetMappingDto = Field(default_factory=DatasetMappingDto)
     stats: DatasetStatsDto = Field(default_factory=DatasetStatsDto)
@@ -55,7 +55,7 @@ class DatasetCreateRequest(BaseModel):
     name: str
     file_name: str
     rows: int
-    size_mb: float
+    size_bytes: int
     columns: List[str]
     description: Optional[str] = None
     source: str = "upload"

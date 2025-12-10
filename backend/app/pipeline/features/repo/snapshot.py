@@ -86,7 +86,7 @@ class RepoSnapshotNode(FeatureNode):
         repo_path = git_handle.path
 
         # History metrics
-        age, num_commits = self._get_history_metrics(repo_path, effective_sha)
+        age, num_commits = self._get_history_metrics(context, repo_path, effective_sha)
 
         # Snapshot metrics (SLOC, tests)
         languages = []
@@ -118,7 +118,9 @@ class RepoSnapshotNode(FeatureNode):
             "gh_build_started_at": workflow_run.created_at if workflow_run else None,
         }
 
-    def _get_history_metrics(self, repo_path: Path, sha: str) -> Tuple[float, int]:
+    def _get_history_metrics(
+        self, context, repo_path: Path, sha: str
+    ) -> Tuple[float, int]:
         """Calculate repository age and total commits."""
         try:
             # First commit timestamp
@@ -151,6 +153,7 @@ class RepoSnapshotNode(FeatureNode):
             return float(age_days), int(commit_count)
         except Exception as e:
             logger.warning(f"Failed to get history metrics: {e}")
+            context.add_warning(f"Failed to get history metrics: {e}")
             return 0.0, 0
 
     def _analyze_snapshot(

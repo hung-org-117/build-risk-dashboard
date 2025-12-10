@@ -10,7 +10,10 @@ import asyncio
 from app.celery_app import celery_app
 from app.services.github.github_client import get_app_github_client
 from app.tasks.base import PipelineTask
-from app.services.github.exceptions import GithubRateLimitError
+from app.services.github.exceptions import (
+    GithubRateLimitError,
+    GithubLogsUnavailableError,
+)
 from app.repositories.model_repository import ModelRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.entities.workflow_run import WorkflowRunRaw
@@ -407,6 +410,7 @@ def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str
 
     jobs = []
     logs_collected = 0
+    logs_unavailable = 0
     try:
         with client_context as gh:
             jobs = gh.list_workflow_jobs(full_name, run_id)
@@ -426,6 +430,16 @@ def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str
 
                         time.sleep(0.1)
 
+                except GithubLogsUnavailableError as e:
+                    logs_unavailable += 1
+                    logger.info(
+                        "Logs unavailable for job %s in run %s (repo: %s): %s [reason: %s]",
+                        job_id,
+                        run_id,
+                        full_name,
+                        str(e),
+                        e.reason,
+                    )
                 except Exception as e:
                     logger.error(
                         "Failed to download logs for job %s in run %s (repo: %s): %s",

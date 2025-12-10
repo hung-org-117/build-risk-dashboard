@@ -120,6 +120,9 @@ class SonarMeasuresNode(FeatureNode):
                         return self._format_metrics(measures)
                 except Exception as e:
                     logger.warning(f"Failed to fetch existing measures: {e}")
+                    context.add_warning(
+                        f"Failed to fetch existing SonarQube measures: {e}"
+                    )
 
             # 4. Start async scan
             from app.tasks.sonar import start_sonar_scan

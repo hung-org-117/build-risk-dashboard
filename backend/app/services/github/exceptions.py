@@ -44,3 +44,34 @@ class GithubSecondaryRateLimitError(GithubRateLimitError):
     """
 
     pass
+
+
+class LogUnavailableReason:
+    """Reasons why job logs are unavailable."""
+
+    PERMISSION_DENIED = "permission_denied"
+    LOGS_EXPIRED = "logs_expired"
+    JOB_NOT_FOUND = "job_not_found"
+    RUN_IN_PROGRESS = "run_in_progress"
+    RATE_LIMITED = "rate_limited"
+
+
+class GithubLogsUnavailableError(GithubError):
+    """
+    Raised when job logs cannot be retrieved.
+
+    This is a non-retryable error for cases like:
+    - Permission denied (public repo without admin rights)
+    - Logs expired (past retention period)
+    - Job not found
+    """
+
+    def __init__(
+        self,
+        message: str,
+        reason: str = LogUnavailableReason.PERMISSION_DENIED,
+        job_id: int | None = None,
+    ):
+        super().__init__(message)
+        self.reason = reason
+        self.job_id = job_id

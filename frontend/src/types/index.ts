@@ -73,7 +73,7 @@ export interface DatasetRecord {
   source: string;
   ci_provider?: CIProvider;
   rows: number;
-  size_mb: number;
+  size_bytes: number;
   columns: string[];
   mapped_fields: DatasetMapping;
   stats: DatasetStats;
@@ -126,7 +126,7 @@ export interface DatasetCreatePayload {
   name: string;
   file_name: string;
   rows: number;
-  size_mb: number;
+  size_bytes: number;
   columns: string[];
   description?: string | null;
   source?: string;

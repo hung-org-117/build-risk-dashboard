@@ -96,7 +96,7 @@ export function DatasetOverviewTab({ dataset, onRefresh }: DatasetOverviewTabPro
                     <CardDescription>Required field mappings for enrichment</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <div className="grid gap-3 md:grid-cols-2">
                         <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800">
                             <span className="text-sm text-muted-foreground">Build ID</span>
                             <span className="font-medium">
@@ -110,14 +110,6 @@ export function DatasetOverviewTab({ dataset, onRefresh }: DatasetOverviewTabPro
                             <span className="font-medium">
                                 {dataset.mapped_fields?.repo_name || (
                                     <span className="text-amber-600">Not mapped</span>
-                                )}
-                            </span>
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800">
-                            <span className="text-sm text-muted-foreground">Commit SHA</span>
-                            <span className="font-medium">
-                                {dataset.mapped_fields?.commit_sha || (
-                                    <span className="text-slate-400">Optional</span>
                                 )}
                             </span>
                         </div>

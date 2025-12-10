@@ -7,6 +7,7 @@ Extracts cheap metadata from workflow run without parsing logs:
 - tr_log_lan_all
 """
 
+from app.pipeline.core.registry import OutputFormat
 from typing import Any, Dict
 
 from app.pipeline.features import FeatureNode
@@ -30,6 +31,9 @@ from app.pipeline.feature_metadata.build_log import WORKFLOW_METADATA
     group="build_log",
     priority=10,
     feature_metadata=WORKFLOW_METADATA,
+    output_formats={
+        "tr_log_lan_all": OutputFormat.COMMA_SEPARATED,
+    },
 )
 class WorkflowMetadataNode(FeatureNode):
     """Extracts cheap metadata from workflow run (no log parsing)."""

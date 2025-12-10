@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def repo_lock(repo_id: str, timeout: int = 300) -> Generator[bool, None, None]:
+def repo_lock(repo_id: str, timeout: int = 600) -> Generator[bool, None, None]:
     """
     Acquires a lock for a specific repository to prevent concurrent git operations.
 
@@ -21,8 +21,9 @@ def repo_lock(repo_id: str, timeout: int = 300) -> Generator[bool, None, None]:
     r = redis.from_url(settings.REDIS_URL)
     lock_name = f"lock:repo:{repo_id}"
     # expire: Time in seconds after which the lock will be automatically released
+    # Should be > clone timeout (600s) + blob fetch (300s) = 900s
     # timeout: Time in seconds to wait to acquire the lock
-    lock = r.lock(lock_name, timeout=300, blocking_timeout=timeout)
+    lock = r.lock(lock_name, timeout=900, blocking_timeout=timeout)
 
     acquired = False
     try:

@@ -12,11 +12,9 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Dict, List, Optional, Set
 import logging
-
-if TYPE_CHECKING:
-    from app.pipeline.core.registry import FeatureRegistry
+from app.pipeline.core.registry import FeatureRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +42,7 @@ class FeatureDAG:
 
     def __init__(
         self,
-        registry: "FeatureRegistry",
+        registry: FeatureRegistry,
     ):
         self.registry = registry
         self._graph: Dict[str, Set[str]] = defaultdict(set)  # node -> dependencies
@@ -59,7 +57,7 @@ class FeatureDAG:
     def build(self, node_names: Optional[Set[str]] = None) -> FeatureDAG:
         """
         Build DAG from FeatureRegistry.
-        
+
         Args:
             node_names: If provided, include only these nodes (+ their dependencies).
                         If None, include all enabled nodes.
@@ -82,7 +80,7 @@ class FeatureDAG:
         if node_names:
             node_name_set = set(all_nodes.keys())
             to_include_nodes = node_names & node_name_set
-            
+
             # Include dependency nodes transitively
             queue = deque(to_include_nodes)
             visited = set(to_include_nodes)
@@ -96,7 +94,7 @@ class FeatureDAG:
                             if dep_node not in visited:
                                 visited.add(dep_node)
                                 queue.append(dep_node)
-            
+
             # Filter to only needed nodes
             all_nodes = {k: v for k, v in all_nodes.items() if k in visited}
             self._node_features = {

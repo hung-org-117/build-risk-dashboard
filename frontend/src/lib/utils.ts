@@ -57,3 +57,22 @@ export function formatTimestamp(value?: string): string {
     return value;
   }
 }
+
+/**
+ * Format bytes to human-readable format
+ * @param bytes - Size in bytes
+ * @param decimals - Number of decimal places (default: 2)
+ * @returns Formatted string like "1.5 MB" or "256 KB"
+ */
+export function formatBytes(bytes?: number, decimals: number = 2): string {
+  if (bytes === undefined || bytes === null || bytes === 0) return "0 Bytes";
+
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB"];
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const index = Math.min(i, sizes.length - 1);
+
+  return `${parseFloat((bytes / Math.pow(k, index)).toFixed(dm))} ${sizes[index]}`;
+}

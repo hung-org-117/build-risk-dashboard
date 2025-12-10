@@ -76,13 +76,14 @@ class FileTouchHistoryNode(FeatureNode):
         start_date = ref_date - timedelta(days=self.LOOKBACK_DAYS)
 
         num_commits = self._calculate_file_history(
-            repo, repo_path, built_commits, effective_sha, start_date
+            context, repo, repo_path, built_commits, effective_sha, start_date
         )
 
         return {"gh_num_commits_on_files_touched": num_commits}
 
     def _calculate_file_history(
         self,
+        context,
         repo,
         repo_path,
         built_commits: List[str],
@@ -144,6 +145,7 @@ class FileTouchHistoryNode(FeatureNode):
 
         except Exception as e:
             logger.warning(f"Failed to count commits on files: {e}")
+            context.add_warning(f"Failed to count commits on files: {e}")
             return 0
 
         return len(all_shas)

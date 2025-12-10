@@ -164,9 +164,7 @@ class DatasetService:
         ci_provider: str = "github_actions",
     ) -> DatasetResponse:
         """
-        Create a dataset record from an uploaded CSV, streaming to disk to avoid large memory use.
-
-        `upload_file` should be a file-like object (e.g., Starlette UploadFile).
+        Create a dataset record from an uploaded CSV
         """
         temp_path = DATASET_DIR / f"tmp_{uuid4()}_{filename}"
         size_bytes = 0
@@ -218,7 +216,6 @@ class DatasetService:
             )
 
         mapping = self._guess_mapping(columns)
-        size_mb = round(size_bytes / 1024 / 1024, 2)
         coverage = len([v for v in mapping.values() if v]) / 4 if mapping else 0
 
         now = datetime.now(timezone.utc)
@@ -231,11 +228,11 @@ class DatasetService:
             "name": name or filename.rsplit(".", 1)[0],
             "description": description,
             "file_name": filename,
-            "file_path": str(final_path.resolve()),  # Store file path for enrichment
+            "file_path": str(final_path.resolve()),
             "source": "upload",
             "ci_provider": ci_provider,
             "rows": row_count,
-            "size_mb": size_mb,
+            "size_bytes": size_bytes,
             "columns": columns,
             "mapped_fields": mapping,
             "stats": {

@@ -7,20 +7,19 @@ The context flows through all feature nodes and accumulates:
 - Errors: Any errors encountered during extraction
 """
 
+from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set
 from enum import Enum
 
-if TYPE_CHECKING:
-    from app.entities.model_build import ModelBuild
-    from app.entities.enrichment_build import EnrichmentBuild
-    from app.entities.model_repository import ModelRepository
-    from app.entities.enrichment_repository import EnrichmentRepository
-    from app.entities.workflow_run import WorkflowRunRaw
+from app.entities.model_build import ModelBuild
+from app.entities.enrichment_build import EnrichmentBuild
+from app.entities.model_repository import ModelRepository
+from app.entities.enrichment_repository import EnrichmentRepository
+from app.entities.workflow_run import WorkflowRunRaw
 
-    # Union types for pipeline compatibility with both flows
-    BuildType = ModelBuild | EnrichmentBuild
-    RepoType = ModelRepository | EnrichmentRepository
+BuildType = ModelBuild | EnrichmentBuild
+RepoType = ModelRepository | EnrichmentRepository
 
 
 class FeatureStatus(str, Enum):
@@ -66,9 +65,9 @@ class ExecutionContext:
     """
 
     # Core entities (supports both Model and Enrichment flows)
-    build_sample: Any  # ModelBuild | EnrichmentBuild
-    repo: Any  # ModelRepository | EnrichmentRepository
-    workflow_run: Optional["WorkflowRunRaw"] = None
+    build_sample: BuildType
+    repo: RepoType
+    workflow_run: Optional[WorkflowRunRaw] = None
 
     # Database reference (for accessing repositories if needed)
     db: Any = None

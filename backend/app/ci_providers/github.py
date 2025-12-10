@@ -173,6 +173,8 @@ class GitHubActionsProvider(CIProviderInterface):
         job_id: Optional[str] = None,
     ) -> List[LogFile]:
         """Fetch logs for a workflow run or specific job."""
+        from app.services.github.exceptions import GithubLogsUnavailableError
+
         if ":" in build_id:
             repo_name, _ = build_id.rsplit(":", 1)
         else:
@@ -193,6 +195,8 @@ class GitHubActionsProvider(CIProviderInterface):
                             size_bytes=len(content),
                         )
                     )
+                except GithubLogsUnavailableError as e:
+                    logger.debug(f"Logs unavailable for job {job_id}: {e.reason}")
                 except Exception as e:
                     logger.warning(f"Failed to fetch log for job {job_id}: {e}")
             else:
@@ -208,6 +212,10 @@ class GitHubActionsProvider(CIProviderInterface):
                                 content=content.decode("utf-8", errors="replace"),
                                 size_bytes=len(content),
                             )
+                        )
+                    except GithubLogsUnavailableError as e:
+                        logger.debug(
+                            f"Logs unavailable for job {job.job_id}: {e.reason}"
                         )
                     except Exception as e:
                         logger.warning(f"Failed to fetch log for job {job.job_id}: {e}")

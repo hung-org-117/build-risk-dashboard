@@ -71,7 +71,7 @@ class TeamMembershipNode(FeatureNode):
 
         # 2. PR mergers
         merger_logins = self._get_pr_mergers(
-            db, str(build_sample.repo_id), start_date, ref_date
+            context, db, str(build_sample.repo_id), start_date, ref_date
         )
 
         core_team = committer_names | merger_logins
@@ -153,7 +153,7 @@ class TeamMembershipNode(FeatureNode):
         return direct_committers
 
     def _get_pr_mergers(
-        self, db, repo_id: str, start_date: datetime, end_date: datetime
+        self, context, db, repo_id: str, start_date: datetime, end_date: datetime
     ) -> Set[str]:
         """Get logins of users who triggered PR workflow runs."""
         mergers = set()
@@ -180,5 +180,6 @@ class TeamMembershipNode(FeatureNode):
                         mergers.add(login)
         except Exception as e:
             logger.warning(f"Failed to get workflow run actors: {e}")
+            context.add_warning(f"Failed to get PR mergers: {e}")
 
         return mergers

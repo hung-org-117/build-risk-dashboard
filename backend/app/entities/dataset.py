@@ -35,7 +35,7 @@ class DatasetProject(BaseEntity):
         description="CI/CD provider for build data",
     )
     rows: int = 0
-    size_mb: float = 0.0
+    size_bytes: int = 0
     columns: List[str] = Field(default_factory=list)
     mapped_fields: DatasetMapping = Field(default_factory=DatasetMapping)
     stats: DatasetStats = Field(default_factory=DatasetStats)

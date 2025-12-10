@@ -123,7 +123,7 @@ export function useUploadDatasetForm({
                 rows: previewRows,
                 totalRows: existingDataset.rows || 0,
                 fileName: existingDataset.file_name || "dataset.csv",
-                fileSize: (existingDataset.size_mb || 0) * 1024 * 1024,
+                fileSize: existingDataset.size_bytes || 0,
             });
         }
 
