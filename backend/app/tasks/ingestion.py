@@ -205,7 +205,6 @@ def import_repo(
                     created_at=run_created_at or datetime.now(timezone.utc),
                     updated_at=run_created_at or datetime.now(timezone.utc),
                     raw_payload=build.raw_data or {},
-                    log_fetched=False,
                 )
 
                 existing = workflow_run_repo.find_by_repo_and_run_id(
@@ -347,93 +346,4 @@ def import_repo(
         "status": "completed",
         "repo_id": repo_id if "repo_id" in locals() else None,
         "runs_found": total_runs,
-    }
-
-
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.ingestion.download_job_logs",
-    queue="collect_workflow_logs",
-)
-def download_job_logs(self: PipelineTask, repo_id: str, run_id: int) -> Dict[str, Any]:
-    repo_repo = ModelRepositoryRepository(self.db)
-    repo = repo_repo.find_by_id(repo_id)
-    if not repo:
-        return {"status": "error", "message": "Repository not found"}
-
-    full_name = repo.full_name
-    installation_id = repo.installation_id
-
-    if installation_id:
-        client_context = get_app_github_client(self.db, installation_id)
-    else:
-        from app.services.github.github_client import get_public_github_client
-
-        client_context = get_public_github_client()
-
-    jobs = []
-    logs_collected = 0
-    logs_unavailable = 0
-    try:
-        with client_context as gh:
-            jobs = gh.list_workflow_jobs(full_name, run_id)
-
-            for job in jobs:
-                job_id = job.get("id")
-                try:
-                    log_content = gh.download_job_logs(full_name, job_id)
-                    if log_content:
-                        logs_collected += 1
-                        # Save log to file
-                        log_path = LOG_DIR / str(repo_id) / str(run_id)
-                        log_path.mkdir(parents=True, exist_ok=True)
-                        file_path = log_path / f"{job_id}.log"
-                        with open(file_path, "wb") as f:
-                            f.write(log_content)
-
-                        time.sleep(0.1)
-
-                except GithubLogsUnavailableError as e:
-                    logs_unavailable += 1
-                    logger.info(
-                        "Logs unavailable for job %s in run %s (repo: %s): %s [reason: %s]",
-                        job_id,
-                        run_id,
-                        full_name,
-                        str(e),
-                        e.reason,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "Failed to download logs for job %s in run %s (repo: %s): %s",
-                        job_id,
-                        run_id,
-                        full_name,
-                        str(e),
-                        exc_info=True,
-                    )
-    except GithubRateLimitError as e:
-        wait = e.retry_after if e.retry_after else 60
-        logger.warning(
-            "Rate limit hit in download_job_logs. Retrying in %s seconds.", wait
-        )
-        raise self.retry(exc=e, countdown=wait)
-
-    # Update WorkflowRunRaw.log_fetched = true
-    workflow_run_repo = WorkflowRunRepository(self.db)
-    workflow_run = workflow_run_repo.find_by_repo_and_run_id(repo_id, run_id)
-    if workflow_run:
-        workflow_run_repo.update_one(str(workflow_run.id), {"log_fetched": True})
-
-    # Trigger orchestrator
-    celery_app.send_task(
-        "app.tasks.processing.process_workflow_run", args=[repo_id, run_id]
-    )
-
-    return {
-        "repo_id": repo_id,
-        "run_id": run_id,
-        "jobs_processed": len(jobs),
-        "logs_collected": logs_collected,
     }

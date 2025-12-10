@@ -105,7 +105,6 @@ def process_workflow_run(
             max_workers=4,
         )
 
-        # Query feature names from DatasetTemplate
         template_repo = DatasetTemplateRepository(self.db)
         template = template_repo.find_by_name("TravisTorrent Full")
         if template:
@@ -121,7 +120,7 @@ def process_workflow_run(
             repo=repo,
             workflow_run=workflow_run,
             parallel=True,
-            features_filter=feature_names,
+            features_filter=set(feature_names),
         )
 
         updates = {}
@@ -209,7 +208,13 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     repo_id = str(model_build.repo_id)
     workflow_run_id = model_build.workflow_run_id
 
-    return process_workflow_run.apply(args=[repo_id, workflow_run_id]).get()
+    process_workflow_run.delay(repo_id, workflow_run_id)
+
+    return {
+        "status": "queued",
+        "build_id": build_id,
+        "message": f"Build {build_id} queued for reprocessing",
+    }
 
 
 @celery_app.task(

@@ -9,6 +9,7 @@ import {
     XCircle,
     RefreshCw,
     AlertCircle,
+    RotateCcw,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -187,6 +188,8 @@ export default function RepoBuildsPage() {
 
     // Lazy Sync State
     const [syncing, setSyncing] = useState(false);
+
+    const [reprocessingBuilds, setReprocessingBuilds] = useState<Record<string, boolean>>({});
 
     const { subscribe } = useWebSocket();
 
@@ -434,16 +437,43 @@ export default function RepoBuildsPage() {
                                                 <ExtractionStatusBadge status={build.extraction_status} />
                                             </td>
                                             <td className="px-6 py-4">
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedBuildId(build.id);
-                                                    }}
-                                                >
-                                                    View
-                                                </Button>
+                                                <div className="flex items-center gap-1">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            if (reprocessingBuilds[build.id]) return;
+                                                            setReprocessingBuilds((prev) => ({ ...prev, [build.id]: true }));
+                                                            try {
+                                                                await buildApi.reprocess(repoId, build.id);
+                                                            } catch (err) {
+                                                                console.error("Failed to reprocess build", err);
+                                                                setError("Failed to reprocess build.");
+                                                            } finally {
+                                                                setReprocessingBuilds((prev) => ({ ...prev, [build.id]: false }));
+                                                            }
+                                                        }}
+                                                        disabled={reprocessingBuilds[build.id]}
+                                                        title="Reprocess this build"
+                                                    >
+                                                        {reprocessingBuilds[build.id] ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="h-4 w-4" />
+                                                        )}
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedBuildId(build.id);
+                                                        }}
+                                                    >
+                                                        View
+                                                    </Button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))

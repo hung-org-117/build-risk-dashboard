@@ -271,11 +271,23 @@ def reprocess_build(
     """
     from fastapi import HTTPException
     from app.tasks.processing import reprocess_build as reprocess_build_task
+    from app.entities.model_build import ExtractionStatus
+    from app.repositories.model_build import ModelBuildRepository
 
     service = BuildService(db)
     build = service.get_build_detail(build_id)
     if not build:
         raise HTTPException(status_code=404, detail="Build not found")
+
+    # Reset extraction status to pending before reprocessing
+    build_repo = ModelBuildRepository(db)
+    build_repo.update_one(
+        build_id,
+        {
+            "extraction_status": ExtractionStatus.PENDING.value,
+            "error_message": None,
+        },
+    )
 
     # Trigger async reprocessing
     reprocess_build_task.delay(build_id)
@@ -285,9 +297,6 @@ def reprocess_build(
         "build_id": build_id,
         "message": "Build reprocessing has been queued",
     }
-
-
-# --- SonarQube Integration Endpoints ---
 
 
 @router.post("/{repo_id}/sonar/config")

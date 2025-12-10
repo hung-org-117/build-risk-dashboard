@@ -164,19 +164,31 @@ def _handle_workflow_run_event(
     existing_run = workflow_run_repo.find_by_repo_and_run_id(repo_id, run_id)
 
     if existing_run:
+        # Update existing run but don't reprocess (avoid duplicate processing)
+        updated_at = workflow_run.get("updated_at")
         workflow_run_repo.update_one(
             str(existing_run.id),
             {
                 "status": workflow_run.get("status"),
                 "conclusion": workflow_run.get("conclusion"),
-                "updated_at": datetime.fromisoformat(
-                    workflow_run.get("updated_at").replace("Z", "+00:00")
+                "updated_at": (
+                    datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                    if updated_at
+                    else datetime.now(timezone.utc)
                 ),
                 "raw_payload": workflow_run,
             },
         )
-        log_fetched = existing_run.log_fetched
+        return {
+            "status": "updated",
+            "action": "workflow_run_updated",
+            "repo_id": repo_id,
+            "run_id": run_id,
+        }
     else:
+        # New workflow run - insert and trigger processing
+        created_at = workflow_run.get("created_at")
+        updated_at = workflow_run.get("updated_at")
         new_run = WorkflowRunRaw(
             repo_id=ObjectId(repo_id),
             workflow_run_id=run_id,
@@ -184,14 +196,17 @@ def _handle_workflow_run_event(
             run_number=workflow_run.get("run_number"),
             status=workflow_run.get("status"),
             conclusion=workflow_run.get("conclusion"),
-            created_at=datetime.fromisoformat(
-                workflow_run.get("created_at").replace("Z", "+00:00")
+            created_at=(
+                datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if created_at
+                else datetime.now(timezone.utc)
             ),
-            updated_at=datetime.fromisoformat(
-                workflow_run.get("updated_at").replace("Z", "+00:00")
+            updated_at=(
+                datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                if updated_at
+                else datetime.now(timezone.utc)
             ),
             raw_payload=workflow_run,
-            log_fetched=False,
         )
         workflow_run_repo.insert_one(new_run)
 
@@ -199,18 +214,9 @@ def _handle_workflow_run_event(
             {"_id": ObjectId(repo_id)}, {"$inc": {"total_builds_imported": 1}}
         )
 
-        log_fetched = False
-
-    if not log_fetched:
-        # Trigger download logs
-        celery_app.send_task(
-            "app.tasks.ingestion.download_job_logs", args=[repo_id, run_id]
-        )
-    else:
-        # Trigger processing directly
-        celery_app.send_task(
-            "app.tasks.processing.process_workflow_run", args=[repo_id, run_id]
-        )
+    celery_app.send_task(
+        "app.tasks.processing.process_workflow_run", args=[repo_id, run_id]
+    )
 
     return {
         "status": "processed",

@@ -14,4 +14,3 @@ class WorkflowRunRaw(BaseEntity):
     created_at: datetime
     updated_at: datetime
     raw_payload: Dict[str, Any]
-    log_fetched: bool = False

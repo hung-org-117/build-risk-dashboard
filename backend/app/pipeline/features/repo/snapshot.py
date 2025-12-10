@@ -10,7 +10,6 @@ Extracts point-in-time repository metrics:
 
 import logging
 import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -21,7 +20,6 @@ from app.pipeline.core.context import ExecutionContext
 from app.pipeline.resources import ResourceNames
 from app.pipeline.resources.git_repo import GitRepoHandle
 from app.pipeline.languages import LanguageRegistry
-from app.utils.locking import repo_lock
 from app.pipeline.feature_metadata.repo import REPO_METADATA
 
 logger = logging.getLogger(__name__)
@@ -97,17 +95,18 @@ class RepoSnapshotNode(FeatureNode):
                 )
                 languages.append(val)
 
-        # Use shared worktree from GitRepoProvider (preferred)
         if git_handle.has_worktree:
             snapshot_metrics = self._analyze_worktree(
                 git_handle.worktree_path, languages
             )
         else:
-            # Fallback: create temporary worktree
-            with repo_lock(str(repo.id)):
-                snapshot_metrics = self._analyze_snapshot_legacy(
-                    repo_path, effective_sha, languages
-                )
+            logger.warning("No shared worktree available for snapshot analysis")
+            snapshot_metrics = {
+                "gh_sloc": None,
+                "gh_test_lines_per_kloc": None,
+                "gh_test_cases_per_kloc": None,
+                "gh_asserts_case_per_kloc": None,
+            }
 
         return {
             "gh_repo_age": age,
@@ -250,53 +249,6 @@ class RepoSnapshotNode(FeatureNode):
                 continue
 
         return src_lines, test_lines, test_cases, asserts
-
-    def _analyze_snapshot_legacy(
-        self, repo_path: Path, sha: str, languages: list[str]
-    ) -> Dict[str, Any]:
-        """Analyze code using temporary worktree (fallback)."""
-        metrics = {
-            "gh_sloc": 0,
-            "gh_test_lines_per_kloc": 0.0,
-            "gh_test_cases_per_kloc": 0.0,
-            "gh_asserts_case_per_kloc": 0.0,
-        }
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            worktree_path = Path(tmpdir) / "snapshot"
-
-            try:
-                subprocess.run(
-                    ["git", "worktree", "add", "--detach", str(worktree_path), sha],
-                    cwd=str(repo_path),
-                    capture_output=True,
-                    check=True,
-                )
-
-                src_lines, test_lines, test_cases, asserts = self._count_code_metrics(
-                    worktree_path, languages
-                )
-
-                metrics["gh_sloc"] = src_lines
-                if src_lines > 0:
-                    kloc = src_lines / 1000.0
-                    metrics["gh_test_lines_per_kloc"] = test_lines / kloc
-                    metrics["gh_test_cases_per_kloc"] = test_cases / kloc
-                    metrics["gh_asserts_case_per_kloc"] = asserts / kloc
-
-            except Exception as e:
-                logger.error(f"Failed to analyze snapshot: {e}")
-            finally:
-                try:
-                    subprocess.run(
-                        ["git", "worktree", "remove", "--force", str(worktree_path)],
-                        cwd=str(repo_path),
-                        capture_output=True,
-                    )
-                except Exception:
-                    pass
-
-        return metrics
 
     def _metadata_only(
         self, repo, workflow_run, head_branch, is_pr, pr_number, pr_created_at
