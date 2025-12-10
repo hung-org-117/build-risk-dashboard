@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.entities.base import PyObjectIdStr
+from app.ci_providers.models import CIProvider
 
 
 class DatasetMappingDto(BaseModel):
@@ -28,7 +29,7 @@ class DatasetResponse(BaseModel):
     file_name: str
     file_path: Optional[str] = None
     source: str
-    ci_provider: str = "github_actions"
+    ci_provider: CIProvider = CIProvider.GITHUB_ACTIONS
     rows: int
     size_bytes: int
     columns: List[str]

@@ -97,6 +97,7 @@ class GitHubActionsProvider(CIProviderInterface):
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
+        only_completed: bool = True,
     ) -> List[BuildData]:
         """Fetch workflow runs from GitHub Actions."""
         builds = []
@@ -107,16 +108,16 @@ class GitHubActionsProvider(CIProviderInterface):
             params["branch"] = branch
         if since:
             params["created"] = f">={since.isoformat()}"
+        if only_completed:
+            params["status"] = "completed"
 
         with self._get_github_client() as client:
             for run in client.paginate_workflow_runs(repo_name, params):
                 build_data = self._parse_workflow_run(run, repo_name)
 
-                # Check if this is a bot commit
                 is_bot = _is_bot_author(build_data.commit_author)
                 build_data.is_bot_commit = is_bot
 
-                # Skip bot commits if exclude_bots is True
                 if exclude_bots and is_bot:
                     logger.debug(f"Skipping bot commit: {build_data.commit_author}")
                     continue

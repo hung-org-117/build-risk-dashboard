@@ -63,6 +63,7 @@ class JenkinsProvider(CIProviderInterface):
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
+        only_completed: bool = True,
     ) -> List[BuildData]:
         base_url = self._get_base_url()
         job_path = repo_name.replace("/", "/job/")
@@ -88,6 +89,11 @@ class JenkinsProvider(CIProviderInterface):
                 all_builds = all_builds[:limit]
 
             for build in all_builds:
+                if only_completed and (
+                    build.get("building") or build.get("result") is None
+                ):
+                    continue
+
                 build_data = self._parse_build(build, repo_name)
 
                 is_bot = _is_bot_author(build_data.commit_author)

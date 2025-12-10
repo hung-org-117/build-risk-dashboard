@@ -27,10 +27,6 @@ from app.dtos.feature import (
 router = APIRouter(prefix="/features", tags=["Feature Definitions"])
 
 
-# Ensure pipeline modules are imported (triggers @register_feature decorators)
-import app.pipeline  # noqa: F401, E402
-
-
 @router.get("/dag", response_model=DAGResponse)
 def get_feature_dag(
     selected_features: Optional[List[str]] = Query(
@@ -269,16 +265,16 @@ def get_supported_languages():
     """
     from app.pipeline.log_parsers import LogParserRegistry
     from app.pipeline.languages import LanguageRegistry
-    
+
     log_parser_registry = LogParserRegistry()
-    
+
     # Get unique languages from both registries
     log_parser_langs = set(log_parser_registry.get_languages())
     language_strategy_langs = set(LanguageRegistry.get_supported_languages())
-    
+
     # Union of all supported languages
     all_supported = log_parser_langs | language_strategy_langs
-    
+
     return {
         "languages": sorted(all_supported),
         "log_parser_languages": sorted(log_parser_langs),
@@ -358,4 +354,3 @@ def validate_features():
         errors=errors,
         warnings=[],
     )
-

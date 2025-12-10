@@ -14,6 +14,8 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pymongo.database import Database
 
+from app.ci_providers.models import CIProvider
+
 from app.database.mongo import get_db
 from app.dtos import (
     DatasetCreateRequest,
@@ -119,7 +121,7 @@ async def upload_dataset(
     name: str | None = Form(default=None),
     description: str | None = Form(default=None),
     tags: list[str] = Form(default=[]),
-    ci_provider: str = Form(default="github_actions"),
+    ci_provider: CIProvider = Form(default=CIProvider.GITHUB_ACTIONS),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):

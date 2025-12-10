@@ -32,6 +32,7 @@ class CIProviderInterface(ABC):
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
+        only_completed: bool = True,
     ) -> List[BuildData]:
         """
         Fetch builds from the CI provider.
@@ -43,6 +44,7 @@ class CIProviderInterface(ABC):
             branch: Filter by branch name
             only_with_logs: If True and limit is None, only fetch builds with available logs
             exclude_bots: If True, skip builds triggered by bot commits
+            only_completed: If True, only fetch builds that have completed
 
         Returns:
             List of normalized BuildData objects

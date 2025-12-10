@@ -4,6 +4,7 @@ Build Processing Tasks using the new DAG-based Feature Pipeline.
 This module replaces the old chord/chain pattern with the unified FeaturePipeline.
 """
 
+from app.entities.model_build import ExtractionStatus, BuildStatus
 import logging
 from typing import Any, Dict
 
@@ -20,7 +21,7 @@ from app.tasks.base import PipelineTask
 from app.pipeline.runner import FeaturePipeline
 from app.config import settings
 from app.pipeline.core.registry import feature_registry
-from app.pipeline.constants import TRAVISTORRENT_FEATURES
+from app.repositories.dataset_template_repository import DatasetTemplateRepository
 
 logger = logging.getLogger(__name__)
 
@@ -74,26 +75,23 @@ def process_workflow_run(
     model_build = model_build_repo.find_by_repo_and_run_id(repo_id, workflow_run_id)
     if not model_build:
         logger.info(f"Creating ModelBuild during processing (not pre-created)")
-        build_status = workflow_run.conclusion or "success"
-        if build_status == "success":
-            build_status = "success"
-        elif build_status == "failure":
-            build_status = "failure"
-        elif build_status == "cancelled":
-            build_status = "cancelled"
-        elif build_status == "skipped":
-            build_status = "skipped"
-        elif build_status == "timed_out":
-            build_status = "timed_out"
-        else:
-            logger.warning(f"Unknown build status: {build_status}")
-            build_status = "success"
+        conclusion = workflow_run.conclusion
+        # Map conclusion to BuildStatus enum
+        status_map = {
+            "success": BuildStatus.SUCCESS.value,
+            "failure": BuildStatus.FAILURE.value,
+            "cancelled": BuildStatus.CANCELLED.value,
+            "skipped": BuildStatus.SKIPPED.value,
+            "timed_out": BuildStatus.TIMED_OUT.value,
+            "neutral": BuildStatus.NEUTRAL.value,
+        }
+        build_status = status_map.get(conclusion, BuildStatus.UNKOWN.value)
 
         model_build = ModelBuild(
             repo_id=ObjectId(repo_id),
             workflow_run_id=workflow_run_id,
             status=build_status,
-            extraction_status="pending",
+            extraction_status=ExtractionStatus.PENDING.value,
         )
         model_build = model_build_repo.insert_one(model_build)
 
@@ -109,9 +107,16 @@ def process_workflow_run(
             max_workers=4,
         )
 
-        # ALWAYS use TravisTorrent features for Bayesian model training
-        # NOTE: repo.requested_feature_names is deprecated and ignored
-        feature_names = TRAVISTORRENT_FEATURES
+        # Query feature names from DatasetTemplate
+        template_repo = DatasetTemplateRepository(self.db)
+        template = template_repo.find_by_name("TravisTorrent Full")
+        if template:
+            feature_names = template.feature_names
+        else:
+            logger.warning(
+                "TravisTorrent Full template not found, using empty feature list"
+            )
+            feature_names = []
 
         result = pipeline.run(
             build_sample=model_build,
@@ -126,11 +131,11 @@ def process_workflow_run(
         updates["features"] = feature_registry.format_features_for_storage(raw_features)
 
         if result["status"] == "completed":
-            updates["extraction_status"] = "completed"
+            updates["extraction_status"] = ExtractionStatus.COMPLETED.value
         elif result["status"] == "partial":
-            updates["extraction_status"] = "partial"
+            updates["extraction_status"] = ExtractionStatus.PARTIAL.value
         else:
-            updates["extraction_status"] = "failed"
+            updates["extraction_status"] = ExtractionStatus.FAILED.value
 
         # Handle errors and warnings
         if result.get("errors"):
@@ -144,10 +149,8 @@ def process_workflow_run(
             ):
                 updates["is_missing_commit"] = True
 
-        # Save to database
         model_build_repo.update_one(build_id, updates)
 
-        # Notify clients of extraction completion
         publish_build_update(repo_id, build_id, updates["extraction_status"])
 
         logger.info(
@@ -167,11 +170,10 @@ def process_workflow_run(
     except Exception as e:
         logger.error(f"Pipeline failed for build {build_id}: {e}", exc_info=True)
 
-        # Update model build with error
         model_build_repo.update_one(
             build_id,
             {
-                "status": "failed",
+                "status": BuildStatus.FAILURE.value,
                 "error_message": str(e),
             },
         )
@@ -209,7 +211,6 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     repo_id = str(model_build.repo_id)
     workflow_run_id = model_build.workflow_run_id
 
-    # Delegate to the main processing function
     return process_workflow_run.apply(args=[repo_id, workflow_run_id]).get()
 
 

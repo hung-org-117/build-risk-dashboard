@@ -18,7 +18,6 @@ from app.dtos import (
 from datetime import datetime, timezone
 from app.repositories.model_repository import ModelRepositoryRepository
 from app.services.github.github_client import (
-    get_public_github_client,
     get_user_github_client,
 )
 from app.tasks.ingestion import import_repo
@@ -57,11 +56,11 @@ class RepositoryService:
                     user_id=target_user_id,
                     full_name=payload.full_name,
                     data={
-                        "provider": payload.provider,
+                        "provider": "github",
                         "installation_id": installation_id,
                         "test_frameworks": payload.test_frameworks,
                         "source_languages": payload.source_languages,
-                        "ci_provider": payload.ci_provider or "github_actions",
+                        "ci_provider": payload.ci_provider,
                         "import_status": ImportStatus.QUEUED.value,
                         "max_builds_to_ingest": payload.max_builds,
                         "since_days": payload.since_days,
@@ -74,10 +73,9 @@ class RepositoryService:
                     user_id=target_user_id,
                     full_name=payload.full_name,
                     installation_id=installation_id,
-                    provider=payload.provider,
                     test_frameworks=payload.test_frameworks,
                     source_languages=payload.source_languages,
-                    ci_provider=payload.ci_provider or "github_actions",
+                    ci_provider=payload.ci_provider.value,
                     max_builds=payload.max_builds,
                     since_days=payload.since_days,
                     only_with_logs=payload.only_with_logs,
@@ -255,10 +253,13 @@ class RepositoryService:
             user_id=user_id,
             full_name=repo_doc.full_name,
             installation_id=repo_doc.installation_id,
-            provider=repo_doc.provider,
             test_frameworks=repo_doc.test_frameworks,
             source_languages=repo_doc.source_languages,
-            ci_provider=repo_doc.ci_provider,
+            ci_provider=(
+                repo_doc.ci_provider.value
+                if hasattr(repo_doc.ci_provider, "value")
+                else repo_doc.ci_provider
+            ),
             max_builds=getattr(repo_doc, "max_builds_to_ingest", None),
             since_days=getattr(repo_doc, "since_days", None),
             only_with_logs=getattr(repo_doc, "only_with_logs", False),

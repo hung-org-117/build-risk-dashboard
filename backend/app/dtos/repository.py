@@ -11,15 +11,16 @@ from app.entities.base import PyObjectIdStr
 
 class RepoImportRequest(BaseModel):
     full_name: str = Field(..., description="Repository full name (e.g., owner/name)")
-    provider: str = Field(default="github")
     installation_id: Optional[str] = Field(
         default=None,
         description="GitHub App installation id (required for private repos, optional for public repos)",
     )
-    test_frameworks: Optional[List[str]] = Field(default=None)
-    source_languages: Optional[List[str]] = Field(default=None)
-    ci_provider: Optional[str] = Field(
-        default="github_actions",
+    test_frameworks: List[str] = Field(default_factory=list)
+    source_languages: List[str] = Field(
+        ..., min_length=1, description="Source languages for the repository (required)"
+    )
+    ci_provider: CIProvider = Field(
+        default=CIProvider.GITHUB_ACTIONS,
         description="CI/CD provider: github_actions, gitlab_ci, jenkins, circleci, travis_ci",
     )
     max_builds: Optional[int] = Field(
@@ -84,7 +85,7 @@ class RepoListResponse(BaseModel):
 
 
 class RepoUpdateRequest(BaseModel):
-    ci_provider: Optional[str] = None
+    ci_provider: Optional[CIProvider] = None
     test_frameworks: Optional[List[str]] = None
     source_languages: Optional[List[str]] = None
     default_branch: Optional[str] = None

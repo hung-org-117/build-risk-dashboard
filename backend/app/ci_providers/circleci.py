@@ -77,6 +77,7 @@ class CircleCIProvider(CIProviderInterface):
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
+        only_completed: bool = True,
     ) -> List[BuildData]:
         base_url = self._get_base_url()
         project_slug = self._get_project_slug(repo_name)
@@ -109,6 +110,14 @@ class CircleCIProvider(CIProviderInterface):
 
                 for pipeline in items:
                     build_data = await self._parse_pipeline(client, pipeline, repo_name)
+
+                    if only_completed and build_data.status in [
+                        BuildStatus.PENDING.value,
+                        BuildStatus.RUNNING.value,
+                        "pending",
+                        "running",
+                    ]:
+                        continue
 
                     is_bot = _is_bot_author(build_data.commit_author)
                     build_data.is_bot_commit = is_bot

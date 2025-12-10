@@ -74,6 +74,7 @@ class GitLabCIProvider(CIProviderInterface):
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
+        only_completed: bool = True,
     ) -> List[BuildData]:
         base_url = self._get_base_url()
         project_path = self._encode_project_path(repo_name)
@@ -85,6 +86,8 @@ class GitLabCIProvider(CIProviderInterface):
             params["ref"] = branch
         if since:
             params["updated_after"] = since.isoformat()
+        if only_completed:
+            params["status"] = "success,failed,canceled,skipped"
 
         builds = []
         stop_fetching = False

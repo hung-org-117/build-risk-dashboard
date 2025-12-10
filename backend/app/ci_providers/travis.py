@@ -80,6 +80,7 @@ class TravisCIProvider(CIProviderInterface):
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
+        only_completed: bool = True,
     ) -> List[BuildData]:
         """Fetch builds from Travis CI."""
         base_url = self._get_base_url()
@@ -93,6 +94,9 @@ class TravisCIProvider(CIProviderInterface):
         }
         if branch:
             params["branch.name"] = branch
+        # Only fetch finished builds
+        if only_completed:
+            params["state"] = "passed,failed,errored,canceled"
 
         builds = []
         stop_fetching = False

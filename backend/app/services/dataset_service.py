@@ -10,6 +10,8 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 from pymongo.database import Database
 
+from app.ci_providers.models import CIProvider
+
 from app.dtos import (
     DatasetCreateRequest,
     DatasetListResponse,
@@ -156,7 +158,7 @@ class DatasetService:
         upload_file,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        ci_provider: str = "github_actions",
+        ci_provider: CIProvider = CIProvider.GITHUB_ACTIONS,
     ) -> DatasetResponse:
         """
         Create a dataset record from an uploaded CSV

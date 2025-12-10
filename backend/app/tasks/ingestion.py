@@ -1,3 +1,5 @@
+from app.ci_providers.models import BuildStatus
+from app.entities.model_build import ExtractionStatus
 from app.entities.model_repository import ImportStatus
 import logging
 from datetime import datetime, timezone, timedelta
@@ -17,8 +19,6 @@ from app.services.github.exceptions import (
 from app.repositories.model_repository import ModelRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.entities.workflow_run import WorkflowRunRaw
-from app.pipeline.core.registry import feature_registry
-from app.pipeline.resources import ResourceNames
 from app.ci_providers import (
     CIProvider,
     get_provider_config,
@@ -43,10 +43,9 @@ def import_repo(
     user_id: str,
     full_name: str,
     installation_id: str,
-    provider: str = "github",
-    test_frameworks: list[str] | None = None,
-    source_languages: list[str] | None = None,
-    ci_provider: str = "github_actions",
+    test_frameworks: list[str] = [],
+    source_languages: list[str] = [],
+    ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
     max_builds: int | None = None,
     since_days: int | None = None,
     only_with_logs: bool = False,
@@ -86,7 +85,7 @@ def import_repo(
         repo = model_repo_repo.find_one(
             {
                 "user_id": ObjectId(user_id),
-                "provider": provider,
+                "provider": "github",
                 "full_name": full_name,
                 "import_status": ImportStatus.QUEUED.value,
             }
@@ -96,7 +95,7 @@ def import_repo(
                 user_id=user_id,
                 full_name=full_name,
                 data={
-                    "provider": provider,
+                    "provider": "github",
                     "default_branch": "main",
                     "is_private": False,
                     "main_lang": None,
@@ -106,7 +105,7 @@ def import_repo(
                     "last_scanned_at": None,
                     "test_frameworks": test_frameworks or [],
                     "source_languages": source_languages or [],
-                    "ci_provider": ci_provider or "github_actions",
+                    "ci_provider": ci_provider.value,
                     "import_status": ImportStatus.IMPORTING.value,
                     "max_builds_to_ingest": max_builds,
                     "since_days": since_days,
@@ -131,38 +130,19 @@ def import_repo(
         with client_context as gh:
             repo_data = gh.get_repository(full_name)
 
-            detected_languages = []
-            try:
-                lang_stats = gh.list_languages(full_name) or {}
-                detected_languages = [
-                    lang.lower()
-                    for lang, _ in sorted(
-                        lang_stats.items(), key=lambda kv: kv[1], reverse=True
-                    )[:5]
-                ]
-            except Exception as e:
-                logger.warning(f"Failed to detect languages for {full_name}: {e}")
-
-            if not detected_languages:
-                detected_languages = source_languages or ["ruby", "java", "python"]
-
             model_repo_repo.update_repository(
                 repo_id=repo_id,
                 updates={
                     "default_branch": repo_data.get("default_branch", "main"),
                     "is_private": bool(repo_data.get("private")),
-                    "main_lang": (
-                        detected_languages[0]
-                        if detected_languages
-                        else repo_data.get("language")
-                    ),
+                    "main_lang": repo_data.get("language"),
                     "github_repo_id": repo_data.get("id"),
                     "metadata": repo_data,
                     "installation_id": installation_id,
                     "last_scanned_at": None,
                     "test_frameworks": test_frameworks or [],
-                    "source_languages": source_languages or detected_languages,
-                    "ci_provider": ci_provider or "github_actions",
+                    "source_languages": source_languages,
+                    "ci_provider": ci_provider.value,
                     "import_status": ImportStatus.IMPORTING.value,
                     "since_days": since_days,
                     "only_with_logs": only_with_logs,
@@ -185,7 +165,6 @@ def import_repo(
             ci_provider_enum = CIProvider(ci_provider)
             provider_config = get_provider_config(ci_provider_enum)
 
-            # For GitHub with installation, use installation token
             if ci_provider_enum == CIProvider.GITHUB_ACTIONS and installation_id:
                 provider_config.token = gh._get_token()
 
@@ -193,16 +172,13 @@ def import_repo(
                 ci_provider_enum, provider_config, db=self.db
             )
 
-            # Run async fetch in sync context
-            # When limit is None, only_with_logs determines if we should
-            # only fetch builds that still have downloadable logs
             builds = asyncio.get_event_loop().run_until_complete(
                 ci_provider_instance.fetch_builds(
                     full_name,
                     since=since_dt,
                     limit=max_builds,
                     only_with_logs=(max_builds is None),
-                    exclude_bots=True,  # Skip bot commits (dependabot, renovate, etc.)
+                    exclude_bots=True,
                 )
             )
 
@@ -293,19 +269,6 @@ def import_repo(
                 f"Scheduling {len(runs_to_process)} runs for processing...",
             )
 
-            # Uses registry to dynamically determine this from feature metadata
-            from app.pipeline.constants import TRAVISTORRENT_FEATURES
-
-            needs_logs = feature_registry.needs_resource_for_features(
-                ResourceNames.LOG_STORAGE,
-                TRAVISTORRENT_FEATURES,
-            )
-
-            logger.info(
-                f"Scheduling {len(runs_to_process)} runs for processing "
-                f"(logs_required={needs_logs}, features=TravisTorrent default)"
-            )
-
             from app.repositories.model_build import ModelBuildRepository
             from app.entities.model_build import ModelBuild
 
@@ -317,26 +280,27 @@ def import_repo(
                         repo_id, run_id
                     )
                     if workflow_run:
-                        build_status = workflow_run.conclusion or "success"
+                        build_status = (
+                            workflow_run.conclusion or BuildStatus.UNKNOWN.value
+                        )
                         model_build = ModelBuild(
                             repo_id=ObjectId(repo_id),
                             workflow_run_id=run_id,
                             head_sha=workflow_run.head_sha,
+                            build_number=workflow_run.run_number,
+                            build_created_at=workflow_run.created_at,
                             status=build_status,
-                            extraction_status="pending",
+                            extraction_status=ExtractionStatus.PENDING.value,
                         )
                         model_build_repo.insert_one(model_build)
 
+            logger.info(f"Scheduling {len(runs_to_process)} runs for processing")
+
             for _, run_id in runs_to_process:
-                if needs_logs:
-                    # Queue log download, which will trigger processing after
-                    download_job_logs.delay(repo_id, run_id)
-                else:
-                    # Skip log download, go directly to processing
-                    celery_app.send_task(
-                        "app.tasks.processing.process_workflow_run",
-                        args=[repo_id, run_id],
-                    )
+                celery_app.send_task(
+                    "app.tasks.processing.process_workflow_run",
+                    args=[repo_id, run_id],
+                )
 
             # Count of scheduled runs is the accurate total
             scheduled_count = len(runs_to_process)

@@ -30,7 +30,6 @@ const Portal = ({ children }: { children: React.ReactNode }) => {
     return createPortal(children, document.body);
 };
 
-// Build status enum matching backend - represents workflow run conclusion
 export enum BuildStatus {
     SUCCESS = "success",
     PASSED = "passed",
@@ -43,14 +42,15 @@ export enum BuildStatus {
     STARTUP_FAILURE = "startup_failure",
     STALE = "stale",
     QUEUED = "queued",
+    UNKNOWN = "unknown",
 }
 
-// Extraction status enum matching backend
 export enum ExtractionStatus {
     PENDING = "pending",
     COMPLETED = "completed",
     PARTIAL = "partial",
     FAILED = "failed",
+    UNKNOWN = "unknown",
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -146,6 +146,15 @@ function StatusBadge({ status }: { status: string }) {
         );
     }
 
+    // Unknown
+    if (normalizedStatus === BuildStatus.UNKNOWN) {
+        return (
+            <Badge variant="secondary" className="gap-1">
+                <Clock className="h-3 w-3" /> Unknown
+            </Badge>
+        );
+    }
+
     // Default fallback
     return (
         <Badge variant="secondary" className="gap-1">
@@ -185,6 +194,14 @@ function ExtractionStatusBadge({ status }: { status: string }) {
         return (
             <Badge variant="secondary" className="gap-1">
                 <Clock className="h-3 w-3" /> Pending
+            </Badge>
+        );
+    }
+
+    if (normalizedStatus === ExtractionStatus.UNKNOWN) {
+        return (
+            <Badge variant="secondary" className="gap-1">
+                <Clock className="h-3 w-3" /> Unknown
             </Badge>
         );
     }

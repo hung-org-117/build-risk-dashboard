@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Dict
 
@@ -11,6 +12,7 @@ class BuildStatus(str, Enum):
     SKIPPED = "skipped"
     TIMED_OUT = "timed_out"
     NEUTRAL = "neutral"
+    UNKOWN = "unknown"
 
 
 class ExtractionStatus(str, Enum):
@@ -18,12 +20,15 @@ class ExtractionStatus(str, Enum):
     COMPLETED = "completed"
     PARTIAL = "partial"
     FAILED = "failed"
+    UNKOWN = "unknown"
 
 
 class ModelBuild(BaseEntity):
     repo_id: PyObjectId
     workflow_run_id: int
-    head_sha: str | None = None  # Commit SHA for previous build lookup
+    head_sha: str
+    build_number: int
+    build_created_at: datetime
 
     status: str = BuildStatus.SUCCESS.value
     extraction_status: str = ExtractionStatus.PENDING.value

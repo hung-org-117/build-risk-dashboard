@@ -51,7 +51,6 @@ class BuildService:
                 items=[], total=total, page=skip // limit + 1, size=limit
             )
 
-        # Fetch workflow runs
         workflow_run_ids = [b.workflow_run_id for b in build_samples]
         workflow_runs_cursor = self.workflow_collection.find(
             {"workflow_run_id": {"$in": workflow_run_ids}}
@@ -67,16 +66,15 @@ class BuildService:
             items.append(
                 BuildSummary(
                     _id=str(sample.id),
-                    build_number=self._get_feature(sample, "tr_build_number", 0),
-                    status=self._get_feature(sample, "tr_status", "unknown"),
+                    build_number=sample.build_number,
+                    status=sample.status,
                     extraction_status=sample.extraction_status,
-                    commit_sha=self._get_feature(sample, "tr_original_commit")
-                    or (workflow.head_sha if workflow else ""),
+                    commit_sha=sample.head_sha,
                     created_at=workflow.created_at if workflow else None,
+                    workflow_run_id=sample.workflow_run_id,
                     duration=self._get_feature(sample, "tr_duration"),
                     num_jobs=self._get_feature(sample, "tr_log_num_jobs"),
                     num_tests=self._get_feature(sample, "tr_log_tests_run_sum"),
-                    workflow_run_id=sample.workflow_run_id,
                 )
             )
 
