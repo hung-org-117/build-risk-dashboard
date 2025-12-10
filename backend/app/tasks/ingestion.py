@@ -301,18 +301,16 @@ def import_repo(
                     args=[repo_id, run_id],
                 )
 
-            # Count of scheduled runs is the accurate total
-            scheduled_count = len(runs_to_process)
+            actual_build_count = model_build_repo.count_by_repo_id(repo_id)
             logger.info(
-                f"Import complete for {full_name}: scheduled={scheduled_count}, "
-                f"total_runs_counter={total_runs}, latest_run={latest_run_created_at}"
+                f"Import complete for {full_name}: total_builds={actual_build_count}, latest_run={latest_run_created_at}"
             )
 
             model_repo_repo.update_repository(
                 repo_id,
                 {
                     "import_status": ImportStatus.IMPORTED.value,
-                    "total_builds_imported": scheduled_count,
+                    "total_builds_imported": actual_build_count,
                     "last_scanned_at": datetime.now(timezone.utc),
                     "last_synced_at": datetime.now(timezone.utc),
                     "last_sync_status": "success",
@@ -320,7 +318,7 @@ def import_repo(
                 },
             )
             publish_status(
-                repo_id, "imported", f"Imported {scheduled_count} workflow runs."
+                repo_id, "imported", f"Imported {actual_build_count} workflow runs."
             )
 
     except GithubRateLimitError as e:

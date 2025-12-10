@@ -117,8 +117,22 @@ class SonarCommitRunner:
         return [scanner_exe, *scanner_args]
 
     def scan_commit(
-        self, repo_url: str, commit_sha: str, sonar_config_content: Optional[str] = None
+        self,
+        repo_url: str,
+        commit_sha: str,
+        sonar_config_content: Optional[str] = None,
+        shared_worktree_path: Optional[Path] = None,
     ) -> str:
+        """
+        Run SonarQube scan on a commit.
+
+        Args:
+            repo_url: Repository URL (used if shared_worktree_path not provided)
+            commit_sha: Commit SHA to scan
+            sonar_config_content: Optional custom sonar-project.properties content
+            shared_worktree_path: Optional path to shared worktree from pipeline.
+                                  If provided, uses this instead of creating own worktree.
+        """
         component_key = f"{self.project_key}_{commit_sha}"
 
         # Check if already exists
@@ -126,11 +140,22 @@ class SonarCommitRunner:
             logger.info(f"Component {component_key} already exists, skipping scan.")
             return component_key
 
+        # Use shared worktree if provided, otherwise create our own
+        use_shared_worktree = shared_worktree_path is not None
         worktree = None
+
         try:
-            with self.repo_mutex():
-                self.refresh_repo(repo_url)
-                worktree = self.create_worktree(commit_sha)
+            if use_shared_worktree:
+                # Use shared worktree from pipeline
+                worktree = Path(shared_worktree_path)
+                if not worktree.exists():
+                    raise ValueError(f"Shared worktree path does not exist: {worktree}")
+                logger.info(f"Using shared worktree at {worktree} for scan")
+            else:
+                # Create our own worktree (legacy behavior)
+                with self.repo_mutex():
+                    self.refresh_repo(repo_url)
+                    worktree = self.create_worktree(commit_sha)
 
             # Write custom config if provided
             if sonar_config_content:
@@ -154,7 +179,8 @@ class SonarCommitRunner:
             logger.error(f"Scan failed: {e.stderr}")
             raise
         finally:
-            if worktree:
+            # Only cleanup if we created our own worktree
+            if worktree and not use_shared_worktree:
                 with self.repo_mutex():
                     self.remove_worktree(commit_sha)
 

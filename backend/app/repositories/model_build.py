@@ -35,3 +35,7 @@ class ModelBuildRepository(BaseRepository[ModelBuild]):
             skip=skip,
             limit=limit,
         )
+
+    def count_by_repo_id(self, repo_id: str) -> int:
+        """Count total builds for a repository."""
+        return self.collection.count_documents({"repo_id": self._to_object_id(repo_id)})

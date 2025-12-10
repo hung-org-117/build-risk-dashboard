@@ -33,7 +33,7 @@ SONAR_FEATURE_NAMES = {f"sonar_{metric}" for metric in SONAR_METRICS}
 @register_feature(
     name="sonar_measures",
     group="sonar",
-    requires_resources={"sonar_client"},
+    requires_resources={"sonar_client", "git_repo"},
     provides=SONAR_FEATURE_NAMES,
     feature_metadata=SONAR_METADATA,
 )
@@ -124,11 +124,14 @@ class SonarMeasuresNode(FeatureNode):
                         f"Failed to fetch existing SonarQube measures: {e}"
                     )
 
-            # 4. Start async scan
-            from app.tasks.sonar import start_sonar_scan
+            git_repo_handle = context.get_resource("git_repo")
+            shared_worktree_path = None
+            if git_repo_handle and git_repo_handle.has_worktree:
+                shared_worktree_path = str(git_repo_handle.worktree_path)
 
-            # Get config override if available
             config_content = getattr(repo, "sonar_config", None)
+
+            from app.tasks.sonar import start_sonar_scan
 
             start_sonar_scan.delay(
                 build_id=build_id,
@@ -137,6 +140,7 @@ class SonarMeasuresNode(FeatureNode):
                 commit_sha=commit_sha,
                 component_key=component_key,
                 config_content=config_content,
+                shared_worktree_path=shared_worktree_path,
             )
 
             context.add_warning(

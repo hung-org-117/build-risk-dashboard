@@ -39,6 +39,7 @@ def start_sonar_scan(
     commit_sha: str,
     component_key: str,
     config_content: str = None,
+    shared_worktree_path: str = None,
 ):
     """
     Start SonarQube scan for a commit (CPU-intensive).
@@ -55,6 +56,7 @@ def start_sonar_scan(
         commit_sha: Commit SHA to scan
         component_key: SonarQube component key
         config_content: Optional sonar-project.properties content
+        shared_worktree_path: Optional path to shared worktree from pipeline
     """
     logger.info(f"Starting SonarQube scan for {component_key}")
 
@@ -82,9 +84,14 @@ def start_sonar_scan(
         # Get project key from component key (component_key = project_key_commit_sha)
         project_key = component_key.rsplit("_", 1)[0]
 
-        # Run scanner
+        # Run scanner (use shared worktree if available)
         runner = SonarCommitRunner(project_key)
-        runner.scan_commit(repo_url, commit_sha, sonar_config_content=config_content)
+        runner.scan_commit(
+            repo_url,
+            commit_sha,
+            sonar_config_content=config_content,
+            shared_worktree_path=shared_worktree_path,
+        )
 
         logger.info(
             f"SonarQube scan completed for {component_key}, waiting for webhook"
