@@ -20,7 +20,6 @@ class ExtractionStatus(str, Enum):
     COMPLETED = "completed"
     PARTIAL = "partial"
     FAILED = "failed"
-    UNKOWN = "unknown"
 
 
 class ModelBuild(BaseEntity):

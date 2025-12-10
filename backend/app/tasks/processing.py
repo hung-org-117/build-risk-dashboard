@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 def publish_build_update(repo_id: str, build_id: str, status: str):
-    """Publish build status update via Redis pub/sub."""
     try:
         redis_client = redis.from_url(settings.REDIS_URL)
         redis_client.publish(
@@ -76,7 +75,6 @@ def process_workflow_run(
     if not model_build:
         logger.info(f"Creating ModelBuild during processing (not pre-created)")
         conclusion = workflow_run.conclusion
-        # Map conclusion to BuildStatus enum
         status_map = {
             "success": BuildStatus.SUCCESS.value,
             "failure": BuildStatus.FAILURE.value,
@@ -173,7 +171,7 @@ def process_workflow_run(
         model_build_repo.update_one(
             build_id,
             {
-                "status": BuildStatus.FAILURE.value,
+                "extraction_status": ExtractionStatus.FAILED.value,
                 "error_message": str(e),
             },
         )

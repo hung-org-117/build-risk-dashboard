@@ -198,14 +198,6 @@ function ExtractionStatusBadge({ status }: { status: string }) {
         );
     }
 
-    if (normalizedStatus === ExtractionStatus.UNKNOWN) {
-        return (
-            <Badge variant="secondary" className="gap-1">
-                <Clock className="h-3 w-3" /> Unknown
-            </Badge>
-        );
-    }
-
     return (
         <Badge variant="secondary" className="text-xs">{status}</Badge>
     );
