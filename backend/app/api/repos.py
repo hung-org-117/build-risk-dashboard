@@ -55,36 +55,8 @@ def detect_repository_languages(
 
     Returns top 5 languages (lowercase), falling back to empty list on failure.
     """
-    installation_id = None
-    repo_repo = RepositoryService(db).repo_repo
-    imported = repo_repo.find_by_full_name(full_name)
-    if imported and imported.installation_id:
-        installation_id = imported.installation_id
-
-    # Prefer installation if available, else fallback to user token, else public
-    if installation_id:
-        client_ctx = get_app_github_client(db, installation_id)
-    else:
-        client_ctx = get_user_github_client(db, str(current_user["_id"]))
-
-    languages: list[str] = []
-    try:
-        with client_ctx as gh:
-            stats = gh.list_languages(full_name) or {}
-            languages = [
-                lang.lower()
-                for lang, _ in sorted(
-                    stats.items(), key=lambda kv: kv[1], reverse=True
-                )[:5]
-            ]
-    except Exception as e:
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "Failed to detect languages for %s: %s", full_name, e
-        )
-
-    return {"languages": languages}
+    service = RepositoryService(db)
+    return service.detect_languages(full_name, current_user)
 
 
 @router.get("/test-frameworks")
@@ -102,15 +74,8 @@ def list_test_frameworks(
 
     Use this to drive UI selection when importing repositories.
     """
-    from app.pipeline.log_parsers import LogParserRegistry
-
-    registry = LogParserRegistry()
-
-    return {
-        "frameworks": registry.get_supported_frameworks(),
-        "by_language": registry.get_frameworks_by_language(),
-        "languages": registry.get_languages(),
-    }
+    service = RepositoryService(db)
+    return service.list_test_frameworks()
 
 
 @router.get("/", response_model=RepoListResponse, response_model_by_alias=False)
@@ -269,34 +234,8 @@ def reprocess_build(
     - Re-extracting features after pipeline updates
     - Testing new feature extractors on existing data
     """
-    from fastapi import HTTPException
-    from app.tasks.processing import reprocess_build as reprocess_build_task
-    from app.entities.model_build import ExtractionStatus
-    from app.repositories.model_build import ModelBuildRepository
-
-    service = BuildService(db)
-    build = service.get_build_detail(build_id)
-    if not build:
-        raise HTTPException(status_code=404, detail="Build not found")
-
-    # Reset extraction status to pending before reprocessing
-    build_repo = ModelBuildRepository(db)
-    build_repo.update_one(
-        build_id,
-        {
-            "extraction_status": ExtractionStatus.PENDING.value,
-            "error_message": None,
-        },
-    )
-
-    # Trigger async reprocessing
-    reprocess_build_task.delay(build_id)
-
-    return {
-        "status": "queued",
-        "build_id": build_id,
-        "message": "Build reprocessing has been queued",
-    }
+    service = RepositoryService(db)
+    return service.reprocess_build(repo_id, build_id, current_user)
 
 
 @router.post("/{repo_id}/sonar/config")

@@ -1,5 +1,5 @@
-from app.ci_providers.models import BuildStatus
-from app.entities.model_build import ExtractionStatus
+from app.ci_providers.models import BuildStatus, BuildConclusion
+from app.entities.model_build import ExtractionStatus, ModelBuildConclusion
 from app.entities.model_repository import ImportStatus
 import logging
 from datetime import datetime, timezone, timedelta
@@ -190,8 +190,8 @@ def import_repo(
                 run_id = build.build_id
                 run_created_at = build.created_at
 
-                # Only keep completed workflow runs
-                if str(build.status).lower() != "completed":
+                # Skip builds that are not completed
+                if build.status != BuildStatus.COMPLETED:
                     continue
 
                 # Filter by since_days
@@ -199,29 +199,14 @@ def import_repo(
                     continue
 
                 # Create WorkflowRunRaw from BuildData
-                # Normalize status/conclusion to enums (fallback to UNKNOWN)
-                from app.entities.workflow_run import (
-                    WorkflowRunStatus,
-                    WorkflowConclusion,
-                )
-
-                try:
-                    status_enum = WorkflowRunStatus(str(build.status))
-                except Exception:
-                    status_enum = WorkflowRunStatus.UNKNOWN
-
-                try:
-                    conclusion_enum = WorkflowConclusion(str(build.conclusion))
-                except Exception:
-                    conclusion_enum = WorkflowConclusion.UNKNOWN
-
+                # build.status and build.conclusion are already proper enums from CI provider
                 workflow_run = WorkflowRunRaw(
                     repo_id=ObjectId(repo_id),
                     workflow_run_id=int(run_id) if run_id.isdigit() else hash(run_id),
                     head_sha=build.commit_sha,
                     run_number=build.build_number,
-                    status=status_enum,
-                    conclusion=conclusion_enum,
+                    status=build.status,
+                    conclusion=build.conclusion,
                     ci_created_at=run_created_at or datetime.now(timezone.utc),
                     ci_updated_at=run_created_at or datetime.now(timezone.utc),
                     raw_payload=build.raw_data or {},
@@ -301,7 +286,7 @@ def import_repo(
                     )
                     if workflow_run:
                         build_status = (
-                            workflow_run.conclusion or BuildStatus.UNKNOWN.value
+                            workflow_run.conclusion or BuildConclusion.UNKNOWN
                         )
                         model_build = ModelBuild(
                             repo_id=ObjectId(repo_id),
@@ -310,7 +295,7 @@ def import_repo(
                             build_number=workflow_run.run_number,
                             build_created_at=workflow_run.ci_created_at,
                             status=build_status,
-                            extraction_status=ExtractionStatus.PENDING.value,
+                            extraction_status=ExtractionStatus.PENDING,
                         )
                         model_build_repo.insert_one(model_build)
 

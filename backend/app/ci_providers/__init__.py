@@ -2,6 +2,7 @@
 from .models import (
     CIProvider,
     BuildStatus,
+    BuildConclusion,
     BuildData,
     JobData,
     LogFile,
@@ -12,7 +13,6 @@ from .factory import CIProviderRegistry, get_ci_provider
 from .config import get_provider_config, get_configured_provider
 
 from . import github
-from . import gitlab
 from . import jenkins
 from . import circleci
 from . import travis
@@ -21,6 +21,7 @@ __all__ = [
     # Enums
     "CIProvider",
     "BuildStatus",
+    "BuildConclusion",
     # Models
     "BuildData",
     "JobData",

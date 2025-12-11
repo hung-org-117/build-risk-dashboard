@@ -16,6 +16,7 @@ import httpx
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
+    BuildConclusion,
     BuildData,
     BuildStatus,
     CIProvider,
@@ -320,19 +321,37 @@ class CircleCIProvider(CIProviderInterface):
             size_bytes=len(content.encode()),
         )
 
-    def normalize_status(self, raw_status: str) -> str:
-        """Normalize CircleCI status to BuildStatus."""
+    def normalize_status(self, raw_status: str) -> BuildStatus:
+        """Normalize CircleCI status to BuildStatus enum."""
         status_map = {
             "pending": BuildStatus.PENDING,
+            "queued": BuildStatus.QUEUED,
             "running": BuildStatus.RUNNING,
-            "success": BuildStatus.SUCCESS,
-            "failed": BuildStatus.FAILURE,
-            "error": BuildStatus.FAILURE,
-            "canceled": BuildStatus.CANCELLED,
-            "not_run": BuildStatus.SKIPPED,
             "on_hold": BuildStatus.PENDING,
+            # Completed states
+            "success": BuildStatus.COMPLETED,
+            "failed": BuildStatus.COMPLETED,
+            "error": BuildStatus.COMPLETED,
+            "canceled": BuildStatus.COMPLETED,
+            "not_run": BuildStatus.COMPLETED,
         }
-        return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN).value
+        return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN)
+
+    def normalize_conclusion(self, raw_status: str) -> BuildConclusion:
+        """Normalize CircleCI status to BuildConclusion enum."""
+        conclusion_map = {
+            "success": BuildConclusion.SUCCESS,
+            "failed": BuildConclusion.FAILURE,
+            "error": BuildConclusion.FAILURE,
+            "canceled": BuildConclusion.CANCELLED,
+            "not_run": BuildConclusion.SKIPPED,
+            "timedout": BuildConclusion.TIMED_OUT,
+        }
+        return (
+            conclusion_map.get(raw_status.lower(), BuildConclusion.NONE)
+            if raw_status
+            else BuildConclusion.NONE
+        )
 
     async def _parse_pipeline(
         self, client: httpx.AsyncClient, pipeline: dict, repo_name: str
@@ -382,7 +401,7 @@ class CircleCIProvider(CIProviderInterface):
                 else None
             ),
             status=self.normalize_status(status),
-            conclusion=status,
+            conclusion=self.normalize_conclusion(status),
             created_at=created_at,
             provider=CIProvider.CIRCLECI,
             raw_data=pipeline,

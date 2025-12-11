@@ -141,9 +141,7 @@ def validate_dataset_task(self, dataset_id: str):
 
                 ci_provider = get_ci_provider(ci_provider_value, db)
 
-                enrichment_repo_repo.update_one(
-                    repo_id, {"builds_total": len(builds)}
-                )
+                enrichment_repo_repo.update_one(repo_id, {"builds_total": len(builds)})
                 stats.repos_valid += 1
 
                 builds_found = 0
@@ -271,6 +269,12 @@ def validate_dataset_task(self, dataset_id: str):
                     pass
 
             # Complete validation
+            build_coverage = (
+                round((stats.builds_found / stats.builds_total) * 100, 2)
+                if stats.builds_total > 0
+                else 0.0
+            )
+
             dataset_repo.update_one(
                 dataset_id,
                 {
@@ -278,6 +282,7 @@ def validate_dataset_task(self, dataset_id: str):
                     "validation_completed_at": datetime.utcnow(),
                     "validation_progress": 100,
                     "validation_stats": stats.model_dump(),
+                    "stats.build_coverage": build_coverage,
                 },
             )
 

@@ -196,12 +196,30 @@ class DatasetService:
 
             preview = df_preview.head(3).fillna("").to_dict(orient="records")
 
-            row_count = (
-                sum(1 for _ in open(temp_path, "r", encoding="utf-8", errors="ignore"))
-                - 1
+            # Read full file for stats calculation
+            df_full = pd.read_csv(temp_path, dtype=str)
+            row_count = len(df_full)
+
+            # Calculate missing_rate: percentage of empty cells
+            total_cells = df_full.size  # rows * columns
+            if total_cells > 0:
+                empty_cells = df_full.isna().sum().sum() + (df_full == "").sum().sum()
+                missing_rate = round((empty_cells / total_cells) * 100, 2)
+            else:
+                missing_rate = 0.0
+
+            # Calculate duplicate_rate: percentage of duplicate rows
+            if row_count > 0:
+                duplicate_count = df_full.duplicated().sum()
+                duplicate_rate = round((duplicate_count / row_count) * 100, 2)
+            else:
+                duplicate_rate = 0.0
+
+            stats = DatasetStats(
+                missing_rate=missing_rate,
+                duplicate_rate=duplicate_rate,
+                build_coverage=0.0,  # Calculated after validation
             )
-            if row_count < 0:
-                row_count = 0
 
         except HTTPException:
             temp_path.unlink(missing_ok=True)
@@ -228,7 +246,7 @@ class DatasetService:
             size_bytes=size_bytes,
             columns=columns,
             mapped_fields=DatasetMapping(**mapping),
-            stats=DatasetStats(),
+            stats=stats,
             preview=preview,
             created_at=now,
             updated_at=now,

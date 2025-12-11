@@ -8,6 +8,7 @@ import httpx
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
+    BuildConclusion,
     BuildData,
     BuildStatus,
     CIProvider,
@@ -231,18 +232,28 @@ class JenkinsProvider(CIProviderInterface):
 
         return logs
 
-    def normalize_status(self, raw_status: str) -> str:
-        if raw_status is None:
-            return BuildStatus.RUNNING.value
+    def normalize_status(self, raw_result: str, building: bool = False) -> BuildStatus:
+        """Normalize Jenkins build status to BuildStatus enum."""
+        if building:
+            return BuildStatus.RUNNING
+        if raw_result is None:
+            return BuildStatus.RUNNING
+        # Jenkins: if has result and not building, it's completed
+        return BuildStatus.COMPLETED
 
-        status_map = {
-            "success": BuildStatus.SUCCESS,
-            "failure": BuildStatus.FAILURE,
-            "unstable": BuildStatus.FAILURE,
-            "aborted": BuildStatus.CANCELLED,
-            "not_built": BuildStatus.SKIPPED,
+    def normalize_conclusion(self, raw_result: str) -> BuildConclusion:
+        """Normalize Jenkins result to BuildConclusion enum."""
+        if raw_result is None:
+            return BuildConclusion.NONE
+
+        conclusion_map = {
+            "success": BuildConclusion.SUCCESS,
+            "failure": BuildConclusion.FAILURE,
+            "unstable": BuildConclusion.FAILURE,
+            "aborted": BuildConclusion.CANCELLED,
+            "not_built": BuildConclusion.SKIPPED,
         }
-        return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN).value
+        return conclusion_map.get(raw_result.lower(), BuildConclusion.UNKNOWN)
 
     def _parse_build(self, build: dict, job_name: str) -> BuildData:
         timestamp = build.get("timestamp")
@@ -266,10 +277,7 @@ class JenkinsProvider(CIProviderInterface):
                     )
 
         result = build.get("result")
-        if build.get("building"):
-            status = BuildStatus.RUNNING.value
-        else:
-            status = self.normalize_status(result)
+        building = build.get("building", False)
 
         return BuildData(
             build_id=str(build.get("number")),
@@ -277,8 +285,8 @@ class JenkinsProvider(CIProviderInterface):
             repo_name=job_name,
             branch=branch,
             commit_sha=commit_sha,
-            status=status,
-            conclusion=result,
+            status=self.normalize_status(result, building),
+            conclusion=self.normalize_conclusion(result),
             created_at=created_at,
             started_at=created_at,
             completed_at=None,

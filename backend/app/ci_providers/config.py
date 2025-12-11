@@ -22,13 +22,6 @@ def get_provider_config(provider_type: CIProvider) -> ProviderConfig:
             base_url=settings.GITHUB_API_URL,
         )
 
-    elif provider_type == CIProvider.GITLAB_CI:
-        return ProviderConfig(
-            provider=provider_type,
-            token=settings.GITLAB_TOKEN,
-            base_url=settings.GITLAB_BASE_URL,
-        )
-
     elif provider_type == CIProvider.JENKINS:
         return ProviderConfig(
             provider=provider_type,

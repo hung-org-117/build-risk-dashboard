@@ -4,7 +4,7 @@ Build Processing Tasks using the new DAG-based Feature Pipeline.
 This module replaces the old chord/chain pattern with the unified FeaturePipeline.
 """
 
-from app.entities.model_build import ExtractionStatus, BuildStatus
+from app.entities.model_build import ExtractionStatus, ModelBuildConclusion
 import logging
 from typing import Any, Dict
 
@@ -76,20 +76,20 @@ def process_workflow_run(
         logger.info(f"Creating ModelBuild during processing (not pre-created)")
         conclusion = workflow_run.conclusion
         status_map = {
-            "success": BuildStatus.SUCCESS.value,
-            "failure": BuildStatus.FAILURE.value,
-            "cancelled": BuildStatus.CANCELLED.value,
-            "skipped": BuildStatus.SKIPPED.value,
-            "timed_out": BuildStatus.TIMED_OUT.value,
-            "neutral": BuildStatus.NEUTRAL.value,
+            "success": ModelBuildConclusion.SUCCESS,
+            "failure": ModelBuildConclusion.FAILURE,
+            "cancelled": ModelBuildConclusion.CANCELLED,
+            "skipped": ModelBuildConclusion.SKIPPED,
+            "timed_out": ModelBuildConclusion.TIMED_OUT,
+            "neutral": ModelBuildConclusion.NEUTRAL,
         }
-        build_status = status_map.get(conclusion, BuildStatus.UNKOWN.value)
+        build_status = status_map.get(conclusion, ModelBuildConclusion.UNKNOWN)
 
         model_build = ModelBuild(
             repo_id=ObjectId(repo_id),
             workflow_run_id=workflow_run_id,
             status=build_status,
-            extraction_status=ExtractionStatus.PENDING.value,
+            extraction_status=ExtractionStatus.PENDING,
         )
         model_build = model_build_repo.insert_one(model_build)
 
@@ -128,11 +128,11 @@ def process_workflow_run(
         updates["features"] = feature_registry.format_features_for_storage(raw_features)
 
         if result["status"] == "completed":
-            updates["extraction_status"] = ExtractionStatus.COMPLETED.value
+            updates["extraction_status"] = ExtractionStatus.COMPLETED
         elif result["status"] == "partial":
-            updates["extraction_status"] = ExtractionStatus.PARTIAL.value
+            updates["extraction_status"] = ExtractionStatus.PARTIAL
         else:
-            updates["extraction_status"] = ExtractionStatus.FAILED.value
+            updates["extraction_status"] = ExtractionStatus.FAILED
 
         # Handle errors and warnings
         if result.get("errors"):
@@ -170,7 +170,7 @@ def process_workflow_run(
         model_build_repo.update_one(
             build_id,
             {
-                "extraction_status": ExtractionStatus.FAILED.value,
+                "extraction_status": ExtractionStatus.FAILED,
                 "error_message": str(e),
             },
         )

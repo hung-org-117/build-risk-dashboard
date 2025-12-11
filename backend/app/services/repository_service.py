@@ -287,3 +287,98 @@ class RepositoryService:
         reprocess_repo_builds.delay(repo_id)
 
         return {"status": "queued", "message": "Re-extraction of features queued"}
+
+    def detect_languages(self, full_name: str, current_user: dict) -> dict:
+        """
+        Detect repository languages via GitHub API.
+        Returns top 5 languages (lowercase).
+        """
+        from app.services.github.github_client import (
+            get_app_github_client,
+            get_user_github_client,
+        )
+
+        user_id = str(current_user["_id"])
+
+        # Check if repo is already imported with installation
+        installation_id = None
+        imported = self.repo_repo.find_by_full_name(full_name)
+        if imported and imported.installation_id:
+            installation_id = imported.installation_id
+
+        # Prefer installation if available, else fallback to user token
+        if installation_id:
+            client_ctx = get_app_github_client(self.db, installation_id)
+        else:
+            client_ctx = get_user_github_client(self.db, user_id)
+
+        languages: list[str] = []
+        try:
+            with client_ctx as gh:
+                stats = gh.list_languages(full_name) or {}
+                languages = [
+                    lang.lower()
+                    for lang, _ in sorted(
+                        stats.items(), key=lambda kv: kv[1], reverse=True
+                    )[:5]
+                ]
+        except Exception as e:
+            logger.warning("Failed to detect languages for %s: %s", full_name, e)
+
+        return {"languages": languages}
+
+    def list_test_frameworks(self) -> dict:
+        """
+        List supported test frameworks for log parsing.
+
+        Returns:
+            - frameworks: List of all supported framework names
+            - by_language: Frameworks grouped by language
+            - languages: List of languages with test framework support
+        """
+        from app.pipeline.log_parsers import LogParserRegistry
+
+        registry = LogParserRegistry()
+
+        return {
+            "frameworks": registry.get_supported_frameworks(),
+            "by_language": registry.get_frameworks_by_language(),
+            "languages": registry.get_languages(),
+        }
+
+    def reprocess_build(self, repo_id: str, build_id: str, current_user: dict) -> dict:
+        """
+        Reprocess a build using the DAG-based feature pipeline.
+
+        Useful for:
+        - Retrying failed builds
+        - Re-extracting features after pipeline updates
+        """
+        from app.tasks.processing import reprocess_build as reprocess_build_task
+        from app.entities.model_build import ExtractionStatus
+        from app.repositories.model_build import ModelBuildRepository
+        from app.services.build_service import BuildService
+
+        build_service = BuildService(self.db)
+        build = build_service.get_build_detail(build_id)
+        if not build:
+            raise HTTPException(status_code=404, detail="Build not found")
+
+        # Reset extraction status to pending before reprocessing
+        build_repo = ModelBuildRepository(self.db)
+        build_repo.update_one(
+            build_id,
+            {
+                "extraction_status": ExtractionStatus.PENDING.value,
+                "error_message": None,
+            },
+        )
+
+        # Trigger async reprocessing
+        reprocess_build_task.delay(build_id)
+
+        return {
+            "status": "queued",
+            "build_id": build_id,
+            "message": "Build reprocessing has been queued",
+        }

@@ -8,8 +8,9 @@ from .model_repository import (
     Provider,
     TestFramework,
     ImportStatus,
+    SyncStatus,
 )
-from .model_build import ModelBuild, BuildStatus, ExtractionStatus
+from .model_build import ModelBuild, ModelBuildConclusion, ExtractionStatus
 
 # Enrichment flow entities (Dataset enrichment)
 from .enrichment_repository import (
@@ -25,10 +26,22 @@ from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
 from .user import User
 from .dataset_template import DatasetTemplate
-from .dataset import DatasetProject, DatasetMapping, DatasetStats, ValidationStats
-from .github_token import GithubToken
-from .pipeline_run import PipelineRun, NodeExecutionResult
-from .enrichment_job import EnrichmentJob
+from .dataset import (
+    DatasetProject,
+    DatasetMapping,
+    DatasetStats,
+    ValidationStats,
+    DatasetValidationStatus,
+)
+from .github_token import GithubToken, GitHubTokenStatus
+from .pipeline_run import (
+    PipelineRun,
+    NodeExecutionResult,
+    PipelineRunStatus,
+    NodeExecutionStatus,
+)
+from .enrichment_job import EnrichmentJob, EnrichmentJobStatus
+from .export_job import ExportJob, ExportStatus, ExportFormat
 from .workflow_run import WorkflowRunRaw
 
 # CI Provider
@@ -40,7 +53,7 @@ __all__ = [
     # Model flow
     "ModelRepository",
     "ModelBuild",
-    "BuildStatus",
+    "ModelBuildConclusion",
     "ExtractionStatus",
     # Enrichment flow
     "EnrichmentRepository",
@@ -58,15 +71,24 @@ __all__ = [
     "DatasetMapping",
     "DatasetStats",
     "ValidationStats",
+    "DatasetValidationStatus",
     "GithubToken",
+    "GitHubTokenStatus",
     "DatasetTemplate",
     "PipelineRun",
     "NodeExecutionResult",
+    "PipelineRunStatus",
+    "NodeExecutionStatus",
     "EnrichmentJob",
+    "EnrichmentJobStatus",
+    "ExportJob",
+    "ExportStatus",
+    "ExportFormat",
     "WorkflowRunRaw",
     # Enums
     "Provider",
     "TestFramework",
     "CIProvider",
     "ImportStatus",
+    "SyncStatus",
 ]

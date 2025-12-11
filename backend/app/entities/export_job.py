@@ -34,8 +34,8 @@ class ExportJob(BaseEntity):
 
     repo_id: PyObjectId
     user_id: PyObjectId
-    format: str = ExportFormat.CSV.value
-    status: str = ExportStatus.PENDING.value
+    format: ExportFormat = ExportFormat.CSV
+    status: ExportStatus = ExportStatus.PENDING
 
     # Filters
     features: Optional[List[str]] = None
@@ -55,3 +55,4 @@ class ExportJob(BaseEntity):
 
     class Config:
         populate_by_name = True
+        use_enum_values = True

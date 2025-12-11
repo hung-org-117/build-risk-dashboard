@@ -1,11 +1,21 @@
 """GitHub Token entity model for database storage."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import Field
 
 from app.entities.base import BaseEntity
+
+
+class GitHubTokenStatus(str, Enum):
+    """Token status."""
+
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    RATE_LIMITED = "rate_limited"
+    INVALID = "invalid"
 
 
 class GithubToken(BaseEntity):
@@ -26,10 +36,7 @@ class GithubToken(BaseEntity):
     label: str = Field(default="", description="User-defined label for this token")
 
     # Status tracking
-    status: str = Field(
-        default="active",
-        description="Token status: active, rate_limited, invalid, disabled",
-    )
+    status: GitHubTokenStatus = GitHubTokenStatus.ACTIVE
 
     # Rate limit information (updated from GitHub API response headers)
     rate_limit_remaining: Optional[int] = Field(
@@ -61,3 +68,4 @@ class GithubToken(BaseEntity):
 
     class Config:
         collection = "github_tokens"
+        use_enum_values = True

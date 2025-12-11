@@ -8,93 +8,26 @@ Provides:
 - Get DAG information
 """
 
-from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Path, Query, HTTPException, status
-from pydantic import BaseModel
 from pymongo.database import Database
 
 from app.database.mongo import get_db
 from app.middleware.auth import get_current_user
 from app.repositories.pipeline_run import PipelineRunRepository
 from app.pipeline.core.registry import feature_registry
+from app.dtos.pipeline import (
+    NodeResultDTO,
+    PipelineRunDTO,
+    PipelineRunDetailDTO,
+    PipelineStatsDTO,
+    DAGInfoDTO,
+    PipelineRunListResponse,
+)
 
 
 router = APIRouter(prefix="/pipeline", tags=["Pipeline"])
-
-
-# ============================================================================
-# DTOs
-# ============================================================================
-
-
-class NodeResultDTO(BaseModel):
-    """Node execution result."""
-    node_name: str
-    status: str
-    duration_ms: float
-    features_extracted: List[str]
-    error: Optional[str] = None
-    warning: Optional[str] = None
-    retry_count: int = 0
-
-
-class PipelineRunDTO(BaseModel):
-    """Pipeline run summary."""
-    id: str
-    build_sample_id: str
-    repo_id: str
-    workflow_run_id: int
-    status: str
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    duration_ms: Optional[float] = None
-    feature_count: int = 0
-    nodes_executed: int = 0
-    nodes_failed: int = 0
-    nodes_skipped: int = 0
-    total_retries: int = 0
-    dag_version: Optional[str] = None
-    errors: List[str] = []
-    warnings: List[str] = []
-    created_at: datetime
-
-
-class PipelineRunDetailDTO(PipelineRunDTO):
-    """Pipeline run with full details."""
-    features_extracted: List[str] = []
-    node_results: List[NodeResultDTO] = []
-
-
-class PipelineStatsDTO(BaseModel):
-    """Pipeline statistics."""
-    total_runs: int
-    completed: int
-    failed: int
-    success_rate: float
-    avg_duration_ms: float
-    total_features: int
-    total_retries: int
-    avg_nodes_executed: float
-    period_days: int
-
-
-class DAGInfoDTO(BaseModel):
-    """DAG information."""
-    version: str
-    node_count: int
-    feature_count: int
-    nodes: List[str]
-    groups: List[str]
-
-
-class PipelineRunListResponse(BaseModel):
-    """Paginated list of pipeline runs."""
-    items: List[PipelineRunDTO]
-    total: int
-    skip: int
-    limit: int
 
 
 # ============================================================================
@@ -116,7 +49,7 @@ async def list_pipeline_runs(
     if repo_id:
         runs, total = repo.find_by_repo(repo_id, skip=skip, limit=limit)
     else:
-        runs = repo.find_recent(limit=skip + limit)[skip:skip + limit]
+        runs = repo.find_recent(limit=skip + limit)[skip : skip + limit]
         # For total count when not filtering
         total = repo.collection.count_documents({})
 
@@ -265,35 +198,38 @@ async def get_dag_visualization(
                 node_level = level.level
                 break
 
-        nodes.append({
-            "id": node_name,
-            "type": "extractor",
-            "label": node_name.replace("_", " ").title(),
-            "features": list(meta.provides),
-            "feature_count": len(meta.provides),
-            "requires_resources": list(meta.requires_resources),
-            "requires_features": list(meta.requires_features),
-            "level": node_level,
-            "group": meta.group,
-        })
+        nodes.append(
+            {
+                "id": node_name,
+                "type": "extractor",
+                "label": node_name.replace("_", " ").title(),
+                "features": list(meta.provides),
+                "feature_count": len(meta.provides),
+                "requires_resources": list(meta.requires_resources),
+                "requires_features": list(meta.requires_features),
+                "level": node_level,
+                "group": meta.group,
+            }
+        )
 
         # Create edges for feature dependencies
         for req_feature in meta.requires_features:
             provider = feature_registry.get_provider(req_feature)
             if provider:
-                edges.append({
-                    "id": f"{provider}->{node_name}",
-                    "source": provider,
-                    "target": node_name,
-                    "type": "feature_dependency",
-                })
+                edges.append(
+                    {
+                        "id": f"{provider}->{node_name}",
+                        "source": provider,
+                        "target": node_name,
+                        "type": "feature_dependency",
+                    }
+                )
 
     return {
         "nodes": nodes,
         "edges": edges,
         "execution_levels": [
-            {"level": level.level, "nodes": level.node_names}
-            for level in levels
+            {"level": level.level, "nodes": level.node_names} for level in levels
         ],
         "total_features": len(feature_registry.get_all_features()),
         "total_nodes": len(all_nodes),
@@ -303,7 +239,9 @@ async def get_dag_visualization(
 
 @router.delete("/runs/cleanup")
 async def cleanup_old_runs(
-    days: int = Query(default=30, ge=7, le=365, description="Delete runs older than N days"),
+    days: int = Query(
+        default=30, ge=7, le=365, description="Delete runs older than N days"
+    ),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):

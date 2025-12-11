@@ -6,11 +6,22 @@ using the mini-Airflow pipeline.
 """
 
 from datetime import datetime, timezone
-from typing import List, Literal, Optional
+from enum import Enum
+from typing import List, Optional
 
 from pydantic import Field
 
 from app.entities.base import BaseEntity
+
+
+class EnrichmentJobStatus(str, Enum):
+    """Enrichment job status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class EnrichmentJob(BaseEntity):
@@ -27,15 +38,14 @@ class EnrichmentJob(BaseEntity):
 
     class Config:
         collection_name = "enrichment_jobs"
+        use_enum_values = True
 
     # Job identification
     dataset_id: str = Field(..., description="ID of the dataset being enriched")
     user_id: str = Field(..., description="User who started the job")
 
     # Status
-    status: Literal["pending", "running", "completed", "failed", "cancelled"] = Field(
-        default="pending"
-    )
+    status: EnrichmentJobStatus = EnrichmentJobStatus.PENDING
 
     # Progress tracking
     total_rows: int = Field(default=0, description="Total rows in CSV")

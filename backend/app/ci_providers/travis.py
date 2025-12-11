@@ -7,6 +7,7 @@ import httpx
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
+    BuildConclusion,
     BuildData,
     BuildStatus,
     CIProvider,
@@ -289,19 +290,34 @@ class TravisCIProvider(CIProviderInterface):
             size_bytes=len(content.encode()),
         )
 
-    def normalize_status(self, raw_status: str) -> str:
-        """Normalize Travis CI state to BuildStatus."""
+    def normalize_status(self, raw_state: str) -> BuildStatus:
+        """Normalize Travis CI state to BuildStatus enum."""
         status_map = {
             "created": BuildStatus.PENDING,
-            "queued": BuildStatus.PENDING,
+            "queued": BuildStatus.QUEUED,
             "received": BuildStatus.PENDING,
             "started": BuildStatus.RUNNING,
-            "passed": BuildStatus.SUCCESS,
-            "failed": BuildStatus.FAILURE,
-            "errored": BuildStatus.FAILURE,
-            "canceled": BuildStatus.CANCELLED,
+            # Completed states
+            "passed": BuildStatus.COMPLETED,
+            "failed": BuildStatus.COMPLETED,
+            "errored": BuildStatus.COMPLETED,
+            "canceled": BuildStatus.COMPLETED,
         }
-        return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN).value
+        return status_map.get(raw_state.lower(), BuildStatus.UNKNOWN)
+
+    def normalize_conclusion(self, raw_state: str) -> BuildConclusion:
+        """Normalize Travis CI state to BuildConclusion enum."""
+        conclusion_map = {
+            "passed": BuildConclusion.SUCCESS,
+            "failed": BuildConclusion.FAILURE,
+            "errored": BuildConclusion.FAILURE,
+            "canceled": BuildConclusion.CANCELLED,
+        }
+        return (
+            conclusion_map.get(raw_state.lower(), BuildConclusion.NONE)
+            if raw_state
+            else BuildConclusion.NONE
+        )
 
     def _parse_build(self, build: dict, repo_name: str) -> BuildData:
         """Parse Travis CI build to BuildData."""
@@ -335,7 +351,7 @@ class TravisCIProvider(CIProviderInterface):
                 commit.get("author", {}).get("name") if commit.get("author") else None
             ),
             status=self.normalize_status(build.get("state", "unknown")),
-            conclusion=build.get("state"),
+            conclusion=self.normalize_conclusion(build.get("state")),
             created_at=created_at,
             started_at=created_at,
             completed_at=finished_at,

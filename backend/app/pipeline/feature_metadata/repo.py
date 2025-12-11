@@ -116,7 +116,7 @@ SNAPSHOT = {
     ),
     "ci_provider": FeatureMetadata(
         display_name="CI Provider",
-        description="The CI/CD platform used (github_actions, gitlab_ci, etc.)",
+        description="The CI/CD platform used (github_actions, jenkins, circleci, travis_ci)",
         category=FeatureCategory.METADATA,
         data_type=FeatureDataType.STRING,
         source=FeatureSource.METADATA,

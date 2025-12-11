@@ -65,3 +65,11 @@ class TokenListResponse(BaseModel):
 
     items: List[TokenResponse]
     total: int
+
+
+class RefreshAllResponse(BaseModel):
+    """Response for refresh all tokens."""
+
+    refreshed: int
+    failed: int
+    results: List[dict]

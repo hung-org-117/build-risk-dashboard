@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
     Database,
-    FileSpreadsheet,
     Loader2,
     Plug,
     Settings,
@@ -43,6 +42,13 @@ export default function DatasetDetailPage() {
     const loadDataset = useCallback(async () => {
         try {
             const data = await datasetsApi.get(datasetId);
+
+            // Redirect to datasets page if validation not completed
+            if (data.validation_status !== "completed") {
+                router.replace("/datasets");
+                return;
+            }
+
             setDataset(data);
             setError(null);
         } catch (err) {
@@ -51,7 +57,7 @@ export default function DatasetDetailPage() {
         } finally {
             setLoading(false);
         }
-    }, [datasetId]);
+    }, [datasetId, router]);
 
     useEffect(() => {
         loadDataset();
@@ -102,11 +108,6 @@ export default function DatasetDetailPage() {
         }
     };
 
-    // Configuration status
-    const hasMapping = Boolean(dataset?.mapped_fields?.build_id && dataset?.mapped_fields?.repo_name);
-    const isValidated = dataset?.validation_status === "completed";
-    const isFullyConfigured = hasMapping && isValidated;
-
     // Count enrichments (features are per-enrichment-job now)
     const enrichmentsCount = dataset?.enrichment_jobs_count || 0;
 
@@ -153,11 +154,7 @@ export default function DatasetDetailPage() {
                                 <Database className="h-4 w-4" />
                                 Overview
                             </TabsTrigger>
-                            <TabsTrigger
-                                value="enrichment"
-                                className="gap-2"
-                                disabled={!isFullyConfigured}
-                            >
+                            <TabsTrigger value="enrichment" className="gap-2">
                                 <Zap className="h-4 w-4" />
                                 Enrichment
                                 {enrichmentsCount > 0 && (
@@ -170,42 +167,11 @@ export default function DatasetDetailPage() {
                                 <Settings className="h-4 w-4" />
                                 Configuration
                             </TabsTrigger>
-                            <TabsTrigger
-                                value="integrations"
-                                className="gap-2"
-                                disabled={!isFullyConfigured}
-                            >
+                            <TabsTrigger value="integrations" className="gap-2">
                                 <Plug className="h-4 w-4" />
                                 Integrations
                             </TabsTrigger>
                         </TabsList>
-
-                        {/* Configuration Warning Banner */}
-                        {!isFullyConfigured && activeTab === "overview" && (
-                            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
-                                <div className="flex items-center gap-3">
-                                    <div className="flex-shrink-0">
-                                        <FileSpreadsheet className="h-5 w-5 text-amber-600" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                                            Configuration Required
-                                        </p>
-                                        <p className="text-sm text-amber-700 dark:text-amber-400">
-                                            {!hasMapping && "Please complete column mapping. "}
-                                            {!isValidated && "Please complete validation."}
-                                        </p>
-                                    </div>
-                                    <Button
-                                        size="sm"
-                                        className="bg-amber-600 hover:bg-amber-700 text-white"
-                                        onClick={() => setActiveTab("configuration")}
-                                    >
-                                        Configure
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
 
                         <TabsContent value="overview" className="mt-6">
                             <OverviewTab dataset={dataset} onRefresh={loadDataset} />

@@ -1,10 +1,21 @@
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from .base import BaseEntity, PyObjectId
 from app.ci_providers.models import CIProvider
+
+
+class DatasetValidationStatus(str, Enum):
+    """Dataset validation status."""
+
+    PENDING = "pending"
+    VALIDATING = "validating"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class DatasetMapping(BaseModel):
@@ -17,7 +28,6 @@ class DatasetMapping(BaseModel):
 class DatasetStats(BaseModel):
     """Basic data quality stats for a dataset."""
 
-    coverage: float = 0.0
     missing_rate: float = 0.0
     duplicate_rate: float = 0.0
     build_coverage: float = 0.0
@@ -54,9 +64,7 @@ class DatasetProject(BaseEntity):
     preview: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Validation status
-    validation_status: str = (
-        "pending"  # pending, validating, completed, failed, cancelled
-    )
+    validation_status: DatasetValidationStatus = DatasetValidationStatus.PENDING
     validation_task_id: Optional[str] = None
     validation_started_at: Optional[datetime] = None
     validation_completed_at: Optional[datetime] = None
@@ -66,3 +74,6 @@ class DatasetProject(BaseEntity):
 
     # Setup progress tracking (1=uploaded, 2=configured, 3=validated)
     setup_step: int = 1
+
+    class Config:
+        use_enum_values = True

@@ -23,3 +23,10 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
                 "repo_id": self._to_object_id(repo_id),
             }
         )
+
+    def delete_by_dataset(self, dataset_id) -> int:
+        """Delete all builds for a dataset."""
+        oid = self._to_object_id(dataset_id)
+        if not oid:
+            return 0
+        return self.delete_many({"dataset_id": oid})

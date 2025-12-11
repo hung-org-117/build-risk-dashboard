@@ -44,6 +44,13 @@ class ImportStatus(str, Enum):
     FAILED = "failed"
 
 
+class SyncStatus(str, Enum):
+    """Repository sync status."""
+
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
 from app.ci_providers.models import CIProvider
 
 
@@ -70,7 +77,7 @@ class ModelRepository(BaseEntity):
     notes: str | None = None
 
     last_synced_at: Optional[datetime] = None
-    last_sync_status: str | None = None
+    last_sync_status: Optional[SyncStatus] = None
     latest_synced_run_created_at: datetime | None = None
 
     max_builds_to_ingest: Optional[int] = None
@@ -79,3 +86,4 @@ class ModelRepository(BaseEntity):
 
     class Config:
         collection = "model_repositories"
+        use_enum_values = True

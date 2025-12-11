@@ -6,17 +6,36 @@ enabling monitoring, debugging, and analytics.
 """
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional
 from pydantic import Field
 
 from .base import BaseEntity, PyObjectId
 
 
+class PipelineRunStatus(str, Enum):
+    """Pipeline run status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class NodeExecutionStatus(str, Enum):
+    """Node execution status."""
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class NodeExecutionResult(BaseEntity):
     """Result of a single node execution within a pipeline run."""
 
     node_name: str
-    status: str  # "success", "failed", "skipped"
+    status: NodeExecutionStatus = NodeExecutionStatus.SUCCESS
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_ms: float = 0.0
@@ -29,6 +48,7 @@ class NodeExecutionResult(BaseEntity):
         # Override to not require _id for embedded documents
         populate_by_name = True
         arbitrary_types_allowed = True
+        use_enum_values = True
 
 
 class PipelineRun(BaseEntity):
@@ -48,7 +68,7 @@ class PipelineRun(BaseEntity):
     workflow_run_id: int
 
     # Execution metadata
-    status: str = "pending"  # "pending", "running", "completed", "failed", "cancelled"
+    status: PipelineRunStatus = PipelineRunStatus.PENDING
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_ms: Optional[float] = None
@@ -75,15 +95,18 @@ class PipelineRun(BaseEntity):
     # Retry tracking
     total_retries: int = 0
 
+    class Config:
+        use_enum_values = True
+
     def mark_started(self) -> "PipelineRun":
         """Mark pipeline as started."""
-        self.status = "running"
+        self.status = PipelineRunStatus.RUNNING
         self.started_at = datetime.now(timezone.utc)
         return self
 
     def mark_completed(self, features: List[str]) -> "PipelineRun":
         """Mark pipeline as successfully completed."""
-        self.status = "completed"
+        self.status = PipelineRunStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
             self.duration_ms = (
@@ -96,7 +119,7 @@ class PipelineRun(BaseEntity):
 
     def mark_failed(self, error: str) -> "PipelineRun":
         """Mark pipeline as failed."""
-        self.status = "failed"
+        self.status = PipelineRunStatus.FAILED
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
             self.duration_ms = (

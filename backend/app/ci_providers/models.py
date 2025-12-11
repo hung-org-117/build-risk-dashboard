@@ -9,22 +9,34 @@ class CIProvider(str, Enum):
     """Supported CI/CD providers."""
 
     GITHUB_ACTIONS = "github_actions"
-    GITLAB_CI = "gitlab_ci"
     JENKINS = "jenkins"
     CIRCLECI = "circleci"
     TRAVIS_CI = "travis_ci"
 
 
 class BuildStatus(str, Enum):
-    """Normalized build status across all providers."""
+    """Workflow run status - indicates current state."""
 
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
+    COMPLETED = "completed"
+    UNKNOWN = "unknown"
+
+
+class BuildConclusion(str, Enum):
+    """Workflow run conclusion - indicates final result when completed."""
+
     SUCCESS = "success"
     FAILURE = "failure"
     CANCELLED = "cancelled"
     SKIPPED = "skipped"
+    TIMED_OUT = "timed_out"
+    ACTION_REQUIRED = "action_required"
+    NEUTRAL = "neutral"
+    STALE = "stale"
     UNKNOWN = "unknown"
+    NONE = "none"  # For builds still running
 
 
 class BuildData(BaseModel):
@@ -45,9 +57,13 @@ class BuildData(BaseModel):
     commit_message: Optional[str] = None
     commit_author: Optional[str] = None
 
-    # Status
-    status: BuildStatus = BuildStatus.UNKNOWN
-    conclusion: Optional[str] = None  # Provider-specific conclusion
+    # Status and Conclusion (separate concepts)
+    status: BuildStatus = (
+        BuildStatus.UNKNOWN
+    )  # Current state: pending/running/completed
+    conclusion: BuildConclusion = (
+        BuildConclusion.NONE
+    )  # Final result: success/failure/etc
 
     # Timing
     created_at: Optional[datetime] = None

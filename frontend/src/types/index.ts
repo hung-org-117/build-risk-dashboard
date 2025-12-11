@@ -55,7 +55,6 @@ export interface DatasetMapping {
 }
 
 export interface DatasetStats {
-  coverage: number;
   missing_rate: number;
   duplicate_rate: number;
   build_coverage: number;

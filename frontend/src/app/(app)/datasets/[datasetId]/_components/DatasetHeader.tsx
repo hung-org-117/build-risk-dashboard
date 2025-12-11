@@ -46,7 +46,7 @@ export function DatasetHeader({ dataset, onRefresh, onDownload }: DatasetHeaderP
         }
         return (
             <Badge variant="outline" className="border-green-500 text-green-600">
-                Validated ✓
+                Validated
             </Badge>
         );
     };

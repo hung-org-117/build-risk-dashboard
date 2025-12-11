@@ -14,10 +14,20 @@ class DatasetMappingDto(BaseModel):
 
 
 class DatasetStatsDto(BaseModel):
-    coverage: float = 0.0
     missing_rate: float = 0.0
     duplicate_rate: float = 0.0
     build_coverage: float = 0.0
+
+
+class ValidationStatsDto(BaseModel):
+
+    repos_total: int = 0
+    repos_valid: int = 0
+    repos_invalid: int = 0
+    repos_not_found: int = 0
+    builds_total: int = 0
+    builds_found: int = 0
+    builds_not_found: int = 0
 
 
 class DatasetResponse(BaseModel):
@@ -38,6 +48,18 @@ class DatasetResponse(BaseModel):
     preview: List[Dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    # Validation status fields
+    validation_status: str = "pending"
+    validation_task_id: Optional[str] = None
+    validation_started_at: Optional[datetime] = None
+    validation_completed_at: Optional[datetime] = None
+    validation_progress: int = 0
+    validation_stats: ValidationStatsDto = Field(default_factory=ValidationStatsDto)
+    validation_error: Optional[str] = None
+
+    # Setup progress tracking (1=uploaded, 2=configured, 3=validated)
+    setup_step: int = 1
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 

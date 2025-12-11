@@ -231,27 +231,41 @@ class GitHubActionsProvider(CIProviderInterface):
 
         return logs
 
-    def normalize_status(self, raw_status: str) -> str:
+    def normalize_status(self, raw_status: str) -> BuildStatus:
         """Normalize GitHub Actions status to BuildStatus enum."""
         status_map = {
-            "queued": BuildStatus.PENDING,
+            "queued": BuildStatus.QUEUED,
+            "waiting": BuildStatus.PENDING,
+            "pending": BuildStatus.PENDING,
             "in_progress": BuildStatus.RUNNING,
-            "completed": BuildStatus.SUCCESS,
-            "success": BuildStatus.SUCCESS,
-            "failure": BuildStatus.FAILURE,
-            "cancelled": BuildStatus.CANCELLED,
-            "skipped": BuildStatus.SKIPPED,
-            "timed_out": BuildStatus.FAILURE,
-            "action_required": BuildStatus.PENDING,
+            "completed": BuildStatus.COMPLETED,
         }
-        return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN).value
+        return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN)
+
+    def normalize_conclusion(self, raw_conclusion: str) -> "BuildConclusion":
+        """Normalize GitHub Actions conclusion to BuildConclusion enum."""
+        from .models import BuildConclusion
+
+        conclusion_map = {
+            "success": BuildConclusion.SUCCESS,
+            "failure": BuildConclusion.FAILURE,
+            "cancelled": BuildConclusion.CANCELLED,
+            "skipped": BuildConclusion.SKIPPED,
+            "timed_out": BuildConclusion.TIMED_OUT,
+            "action_required": BuildConclusion.ACTION_REQUIRED,
+            "neutral": BuildConclusion.NEUTRAL,
+            "stale": BuildConclusion.STALE,
+        }
+        return (
+            conclusion_map.get(raw_conclusion.lower(), BuildConclusion.UNKNOWN)
+            if raw_conclusion
+            else BuildConclusion.NONE
+        )
 
     def _parse_workflow_run(self, run: dict, repo_name: str) -> BuildData:
         """Parse GitHub Actions workflow run to BuildData."""
-        status = run.get("status", "unknown")
-        if status == "completed":
-            conclusion = run.get("conclusion", "unknown")
-            status = conclusion
+        raw_status = run.get("status", "unknown")
+        raw_conclusion = run.get("conclusion")
 
         created_at = None
         if run.get("created_at"):
@@ -266,7 +280,7 @@ class GitHubActionsProvider(CIProviderInterface):
             )
 
         completed_at = None
-        if run.get("updated_at") and status not in ["queued", "in_progress"]:
+        if run.get("updated_at") and raw_status == "completed":
             completed_at = datetime.fromisoformat(
                 run["updated_at"].replace("Z", "+00:00")
             )
@@ -291,8 +305,8 @@ class GitHubActionsProvider(CIProviderInterface):
                 if run.get("head_commit")
                 else None
             ),
-            status=self.normalize_status(status),
-            conclusion=run.get("conclusion"),
+            status=self.normalize_status(raw_status),
+            conclusion=self.normalize_conclusion(raw_conclusion),
             created_at=created_at,
             started_at=started_at,
             completed_at=completed_at,
