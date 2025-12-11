@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 
 from bson import ObjectId
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, ConfigDict
 
 
 def validate_object_id(v: Any) -> ObjectId | None:
@@ -41,14 +41,16 @@ PyObjectIdStr = Annotated[str, BeforeValidator(validate_object_id_str)]
 class BaseEntity(BaseModel):
     """Base entity with common fields for all database entities"""
 
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={ObjectId: str},
+        exclude_none=True,  # avoid persisting fields with None (e.g., _id)
+    )
+
     id: Optional[PyObjectId] = Field(None, alias="_id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
-
-    class Config:
-        populate_by_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str}
 
     def to_mongo(self):
         """Convert to MongoDB document"""

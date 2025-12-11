@@ -17,6 +17,10 @@ from app.entities.workflow_run import WorkflowRunRaw
 from app.ci_providers.factory import get_ci_provider
 from app.database.mongo import get_database
 from app.core.redis import get_redis
+from app.repositories.dataset_repository import DatasetRepository
+from app.repositories.dataset_build_repository import DatasetBuildRepository
+from app.repositories.enrichment_repository import EnrichmentRepositoryRepository
+from app.repositories.workflow_run import WorkflowRunRepository
 
 logger = logging.getLogger(__name__)
 
@@ -54,34 +58,36 @@ def validate_dataset_task(self, dataset_id: str):
     async def _do_validate():
         db = get_database()
         redis = get_redis()
+        dataset_repo = DatasetRepository(db)
+        enrichment_repo_repo = EnrichmentRepositoryRepository(db)
+        workflow_run_repo = WorkflowRunRepository(db)
+        dataset_build_repo = DatasetBuildRepository(db)
 
         try:
-            dataset_doc = db.datasets.find_one({"_id": ObjectId(dataset_id)})
+            dataset_doc = dataset_repo.find_by_id(dataset_id)
             if not dataset_doc:
                 raise ValueError(f"Dataset {dataset_id} not found")
 
-            dataset = DatasetProject(**dataset_doc)
+            dataset = dataset_doc
 
-            db.datasets.update_one(
-                {"_id": ObjectId(dataset_id)},
+            dataset_repo.update_one(
+                dataset_id,
                 {
-                    "$set": {
-                        "validation_status": "validating",
-                        "validation_started_at": datetime.utcnow(),
-                        "validation_task_id": self.request.id,
-                        "validation_progress": 0,
-                        "validation_error": None,
-                    }
+                    "validation_status": "validating",
+                    "validation_started_at": datetime.utcnow(),
+                    "validation_task_id": self.request.id,
+                    "validation_progress": 0,
+                    "validation_error": None,
                 },
             )
 
-            saved_repos_cursor = db.enrichment_repositories.find(
+            saved_repos_list = enrichment_repo_repo.find_many(
                 {
                     "dataset_id": ObjectId(dataset_id),
                     "validation_status": "valid",
                 }
             )
-            saved_repos = {doc["full_name"]: doc for doc in saved_repos_cursor}
+            saved_repos = {repo.full_name: repo for repo in saved_repos_list}
 
             if not saved_repos:
                 raise ValueError(
@@ -130,13 +136,13 @@ def validate_dataset_task(self, dataset_id: str):
                     return {"status": "cancelled"}
 
                 repo_doc = saved_repos[repo_name]
-                repo_id = repo_doc["_id"]
-                ci_provider_value = repo_doc.get("ci_provider", dataset.ci_provider)
+                repo_id = repo_doc.id
+                ci_provider_value = repo_doc.ci_provider
 
                 ci_provider = get_ci_provider(ci_provider_value, db)
 
-                db.enrichment_repositories.update_one(
-                    {"_id": repo_id}, {"$set": {"builds_total": len(builds)}}
+                enrichment_repo_repo.update_one(
+                    repo_id, {"builds_total": len(builds)}
                 )
                 stats.repos_valid += 1
 
@@ -150,12 +156,8 @@ def validate_dataset_task(self, dataset_id: str):
                         return {"status": "cancelled"}
 
                     # Check if build already validated
-                    existing_build = db.dataset_builds.find_one(
-                        {
-                            "dataset_id": ObjectId(dataset_id),
-                            "build_id_from_csv": build_id,
-                            "repo_id": repo_id,
-                        }
+                    existing_build = dataset_build_repo.find_existing(
+                        dataset_id, build_id, repo_id
                     )
 
                     if existing_build and existing_build.get("status") in [
@@ -200,12 +202,9 @@ def validate_dataset_task(self, dataset_id: str):
                                 or datetime.utcnow(),
                                 raw_payload=workflow_data,
                             )
-                            wr_result = db.workflow_runs.insert_one(
-                                workflow_run.model_dump(by_alias=True)
-                            )
-
+                            workflow_run = workflow_run_repo.insert_one(workflow_run)
                             dataset_build.status = DatasetBuildStatus.FOUND
-                            dataset_build.workflow_run_id = wr_result.inserted_id
+                            dataset_build.workflow_run_id = workflow_run.id
                             dataset_build.validated_at = datetime.utcnow()
                             builds_found += 1
                             stats.builds_found += 1
@@ -226,19 +225,15 @@ def validate_dataset_task(self, dataset_id: str):
                         builds_not_found += 1
                         stats.builds_not_found += 1
 
-                    db.dataset_builds.insert_one(
-                        dataset_build.model_dump(by_alias=True)
-                    )
+                    dataset_build_repo.insert_one(dataset_build)
                     builds_processed += 1
 
                 # Update repo build statistics
-                db.enrichment_repositories.update_one(
-                    {"_id": repo_id},
+                enrichment_repo_repo.update_one(
+                    repo_id,
                     {
-                        "$set": {
-                            "builds_found": builds_found,
-                            "builds_not_found": builds_not_found,
-                        }
+                        "builds_found": builds_found,
+                        "builds_not_found": builds_not_found,
                     },
                 )
 
@@ -250,13 +245,11 @@ def validate_dataset_task(self, dataset_id: str):
                     if total_repos > 0
                     else 100
                 )
-                db.datasets.update_one(
-                    {"_id": ObjectId(dataset_id)},
+                dataset_repo.update_one(
+                    dataset_id,
                     {
-                        "$set": {
-                            "validation_progress": progress,
-                            "validation_stats": stats.model_dump(),
-                        }
+                        "validation_progress": progress,
+                        "validation_stats": stats.model_dump(),
                     },
                 )
 
@@ -278,15 +271,13 @@ def validate_dataset_task(self, dataset_id: str):
                     pass
 
             # Complete validation
-            db.datasets.update_one(
-                {"_id": ObjectId(dataset_id)},
+            dataset_repo.update_one(
+                dataset_id,
                 {
-                    "$set": {
-                        "validation_status": "completed",
-                        "validation_completed_at": datetime.utcnow(),
-                        "validation_progress": 100,
-                        "validation_stats": stats.model_dump(),
-                    }
+                    "validation_status": "completed",
+                    "validation_completed_at": datetime.utcnow(),
+                    "validation_progress": 100,
+                    "validation_stats": stats.model_dump(),
                 },
             )
 
@@ -294,14 +285,12 @@ def validate_dataset_task(self, dataset_id: str):
 
         except Exception as e:
             logger.exception(f"Dataset validation failed: {e}")
-            db.datasets.update_one(
-                {"_id": ObjectId(dataset_id)},
+            dataset_repo.update_one(
+                dataset_id,
                 {
-                    "$set": {
-                        "validation_status": "failed",
-                        "validation_completed_at": datetime.utcnow(),
-                        "validation_error": str(e),
-                    }
+                    "validation_status": "failed",
+                    "validation_completed_at": datetime.utcnow(),
+                    "validation_error": str(e),
                 },
             )
             # Re-raise to ensure celery marks it as failed (optional, but good for tracking)

@@ -54,7 +54,9 @@ class GitHubActionsProvider(CIProviderInterface):
     """
 
     def __init__(self, config: ProviderConfig, db: Database = None):
-        self._db = db
+        from app.database.mongo import get_database
+
+        self._db = db if db is not None else get_database()
         super().__init__(config)
 
     @property
@@ -65,11 +67,17 @@ class GitHubActionsProvider(CIProviderInterface):
     def name(self) -> str:
         return "GitHub Actions"
 
+    def _has_direct_token(self) -> bool:
+        """Return True only when a non-empty string token is provided."""
+        token = getattr(self.config, "token", None)
+        return isinstance(token, str) and token.strip() != ""
+
     def _validate_config(self) -> None:
-        if not self.config.token and not self._db:
-            logger.warning(
-                "GitHub token not provided and no DB for pool - API rate limits will apply"
-            )
+        if not self._has_direct_token():
+            if self._db is None:
+                logger.warning(
+                    "GitHub token not provided and no DB for pool - API rate limits will apply"
+                )
 
     def _get_github_client(self):
         """Get GitHubClient using token pool for rate limit tracking."""
@@ -83,7 +91,7 @@ class GitHubActionsProvider(CIProviderInterface):
             return get_public_github_client(self._db)
 
         # Otherwise use the config token directly
-        if self.config.token:
+        if self._has_direct_token():
             return GitHubClient(token=self.config.token)
 
         # Try to get from pool without DB (uses env vars fallback)
