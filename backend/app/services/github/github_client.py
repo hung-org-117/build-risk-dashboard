@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
-from threading import Lock
 from typing import Any, Dict, Iterator, List, Optional, Callable
 
 from bson import ObjectId
@@ -22,244 +22,36 @@ from app.services.github.github_app import (
     github_app_configured,
     get_installation_token,
 )
-from app.services.github.github_token_manager import (
-    hash_token,
-    update_token_rate_limit,
-    mark_token_rate_limited,
-    PublicTokenStatus,
-    get_raw_token_from_cache,
-)
-from app.utils.datetime import utc_now, ensure_naive_utc
+from app.services.github.github_token_manager import hash_token
 
 
 API_PREVIEW_HEADERS = {
     "Accept": "application/vnd.github+json",
 }
 
-
-class GitHubTokenPool:
-    """
-    Token pool that can work with either in-memory tokens or database-backed tokens.
-
-    For database-backed mode, tokens are loaded from MongoDB and rate limit info
-    is persisted after each request.
-    """
-
-    def __init__(
-        self,
-        tokens: List[str] | None = None,
-        db: Database | None = None,
-    ):
-        """
-        Initialize token pool.
-
-        Args:
-            tokens: List of raw token strings (legacy mode)
-            db: Database instance for MongoDB-backed mode
-        """
-        self._db = db
-        self._lock = Lock()
-        self._cooldowns: Dict[str, datetime] = {}
-
-        if tokens:
-            # Legacy mode - tokens from config
-            normalized = [token.strip() for token in tokens if token and token.strip()]
-            if not normalized:
-                raise GithubConfigurationError("No GitHub tokens configured for pool")
-            self._tokens = normalized
-            self._token_hashes = {hash_token(t): t for t in normalized}
-            self._db_mode = False
-        elif db is not None:
-            # Database mode - load tokens from MongoDB
-            self._tokens = []
-            self._token_hashes = {}
-            self._db_mode = True
-            self._load_tokens_from_db()
-        else:
-            raise GithubConfigurationError("Either tokens or db must be provided")
-
-    @property
-    def snapshot(self) -> tuple:
-        return tuple(self._tokens)
-
-    def _load_tokens_from_db(self) -> None:
-        """Load tokens from database. Should be called periodically to refresh."""
-        if self._db is None:
-            return
-
-        now = utc_now()
-        tokens = self._db.github_tokens.find(
-            {
-                "$or": [
-                    {"status": PublicTokenStatus.ACTIVE},
-                    {
-                        "status": PublicTokenStatus.RATE_LIMITED,
-                        "rate_limit_reset_at": {"$lte": now},
-                    },
-                ],
-            }
-        ).sort("rate_limit_remaining", -1)
-
-        self._tokens = []
-        for token_doc in tokens:
-            token_hash = token_doc.get("token_hash")
-            if token_hash:
-                self._tokens.append(token_hash)
-
-                # Check if token is on cooldown from rate limiting
-                reset_at = token_doc.get("rate_limit_reset_at")
-                if reset_at:
-                    # Ensure reset_at is naive UTC for comparison
-                    reset_at = ensure_naive_utc(reset_at)
-                    if reset_at and reset_at > now:
-                        self._cooldowns[token_hash] = reset_at
-
-    def acquire_token(self) -> str:
-        """
-        Acquire an available token from the pool.
-
-        Returns the token hash if in DB mode, or raw token if in legacy mode.
-        Raises GithubAllRateLimitError if all tokens are rate limited.
-        """
-        now = utc_now()
-
-        with self._lock:
-            if self._db_mode:
-                # Refresh from DB to get latest status
-                self._load_tokens_from_db()
-
-            if not self._tokens:
-                raise GithubAllRateLimitError(
-                    "No GitHub tokens available in pool.",
-                    retry_after=None,
-                )
-
-            total = len(self._tokens)
-            earliest_cooldown = None
-
-            for i in range(total):
-                token_key = self._tokens[i]
-                cooldown_until = self._cooldowns.get(token_key)
-
-                if cooldown_until:
-                    if cooldown_until <= now:
-                        # Cooldown expired, token is available
-                        del self._cooldowns[token_key]
-                    else:
-                        # Track earliest cooldown for error message
-                        if (
-                            earliest_cooldown is None
-                            or cooldown_until < earliest_cooldown
-                        ):
-                            earliest_cooldown = cooldown_until
-                        continue
-
-                # Move to end of list (round-robin)
-                self._tokens.append(self._tokens.pop(i))
-                return token_key
-
-            # All tokens are on cooldown
-            retry_after = earliest_cooldown
-            raise GithubAllRateLimitError(
-                "All GitHub tokens hit rate limits. Please wait before retrying.",
-                retry_after=retry_after,
-            )
-
-    def get_raw_token(self, token_key: str) -> str:
-        """Get the raw token value from a token key (hash or raw)."""
-        if self._db_mode:
-            # In DB mode, look up raw token from in-memory cache
-            # The cache is populated at startup from env vars
-            raw_token = get_raw_token_from_cache(token_key)
-            if raw_token:
-                return raw_token
-            # If not in cache, this token was added via UI without raw value
-            # This shouldn't happen in normal flow, raise error
-            raise GithubConfigurationError(
-                f"Raw token not found in cache for hash {token_key[:8]}... "
-                "Tokens added via UI require the raw value to be in GITHUB_TOKENS env var."
-            )
-        else:
-            # In legacy mode, token_key is the hash, look up raw token
-            return self._token_hashes.get(token_key, token_key)
-
-    def mark_rate_limited(self, token_key: str, reset_epoch: Optional[str]) -> None:
-        """Mark a token as rate limited."""
-        cooldown = _now() + timedelta(minutes=2)
-
-        if reset_epoch:
-            try:
-                cooldown = datetime.fromtimestamp(int(reset_epoch), tz=timezone.utc)
-            except (TypeError, ValueError):
-                pass
-
-        with self._lock:
-            self._cooldowns[token_key] = cooldown
-
-        # If in DB mode, update database
-        if self._db_mode and self._db:
-            mark_token_rate_limited(self._db, token_key, cooldown)
-
-    def update_rate_limit_from_headers(
-        self,
-        token_key: str,
-        headers: httpx.Headers,
-    ) -> None:
-        """Update rate limit info from response headers."""
-        if not self._db_mode or not self._db:
-            return
-
-        remaining = headers.get("X-RateLimit-Remaining")
-        limit = headers.get("X-RateLimit-Limit")
-        reset = headers.get("X-RateLimit-Reset")
-
-        if remaining is not None:
-            try:
-                remaining_int = int(remaining)
-                limit_int = int(limit) if limit else 5000
-                reset_dt = (
-                    datetime.fromtimestamp(int(reset), tz=timezone.utc)
-                    if reset
-                    else None
-                )
-
-                if reset_dt:
-                    update_token_rate_limit(
-                        self._db,
-                        token_key,
-                        remaining_int,
-                        limit_int,
-                        reset_dt,
-                    )
-
-                # If remaining is 0, add to cooldown
-                if remaining_int == 0 and reset_dt:
-                    with self._lock:
-                        self._cooldowns[token_key] = reset_dt
-            except (TypeError, ValueError):
-                pass
+logger = logging.getLogger(__name__)
 
 
 class GitHubClient:
     def __init__(
         self,
-        token: str | None = None,
-        token_pool: GitHubTokenPool | None = None,
+        token: str,
         api_url: str | None = None,
         redis_pool: RedisTokenPool | None = None,
         current_token_hash: str | None = None,
     ) -> None:
-        self._token_pool = token_pool
+        """
+        Initialize GitHubClient.
+
+        Args:
+            token: Raw GitHub token for authentication
+            api_url: GitHub API URL (defaults to api.github.com)
+            redis_pool: Redis pool for rate limit tracking
+            current_token_hash: Hash of current token for Redis tracking
+        """
+        self._token = token
         self._redis_pool = redis_pool
         self._current_token_key: str | None = current_token_hash
-
-        if token_pool:
-            self._current_token_key = token_pool.acquire_token()
-            self._token = token_pool.get_raw_token(self._current_token_key)
-        elif token:
-            self._token = token
-        else:
-            self._token = None
 
         if not self._token:
             raise GithubConfigurationError("GitHub token is required to call the API")
@@ -279,13 +71,6 @@ class GitHubClient:
         return headers
 
     def _handle_response(self, response: httpx.Response) -> httpx.Response:
-        # Update rate limit info from response headers
-        if self._token_pool and self._current_token_key:
-            self._token_pool.update_rate_limit_from_headers(
-                self._current_token_key,
-                response.headers,
-            )
-
         # Update Redis pool if available
         if self._redis_pool and self._current_token_key:
             remaining = response.headers.get("X-RateLimit-Remaining")
@@ -339,11 +124,6 @@ class GitHubClient:
             except ValueError:
                 pass
 
-        if self._token_pool and self._current_token_key:
-            self._token_pool.mark_rate_limited(
-                self._current_token_key, reset_epoch=reset_header
-            )
-
         # Mark rate limited in Redis pool
         if self._redis_pool and self._current_token_key:
             try:
@@ -387,12 +167,7 @@ class GitHubClient:
         # Mark token as rate limited with longer cooldown
         reset_at = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
 
-        if self._token_pool and self._current_token_key:
-            self._token_pool.mark_rate_limited(
-                self._current_token_key,
-                reset_epoch=str(reset_at.timestamp()),
-            )
-
+        # Mark rate limited in Redis pool
         if self._redis_pool and self._current_token_key:
             self._redis_pool.mark_rate_limited(self._current_token_key, reset_at)
 
@@ -404,17 +179,9 @@ class GitHubClient:
     def _retry_on_rate_limit(
         self, request_func: Callable[[], httpx.Response]
     ) -> httpx.Response:
-        """Execute request and rotate token if rate limited."""
-        while True:
-            try:
-                response = request_func()
-                return self._handle_response(response)
-            except GithubRateLimitError:
-                if not self._token_pool:
-                    raise
-
-                self._current_token_key = self._token_pool.acquire_token()
-                self._token = self._token_pool.get_raw_token(self._current_token_key)
+        """Execute request. Rate limit errors are raised to caller."""
+        response = request_func()
+        return self._handle_response(response)
 
     def _rest_request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
         def _do_request():
@@ -834,17 +601,16 @@ class GitHubClient:
         self.close()
 
 
-# Module-level token pool cache
-_token_pool: GitHubTokenPool | None = None
-_db_token_pool: GitHubTokenPool | None = None
+# Module-level cached client
 _public_client: GitHubClient | None = None
 
 
 def public_github_client() -> GitHubClient:
+    """Get or create a cached public GitHub client."""
     global _public_client
 
     if _public_client is None:
-        _public_client = get_public_github_client(db=get_database(), use_redis=False)
+        _public_client = get_public_github_client()
 
     return _public_client
 
@@ -882,81 +648,44 @@ def get_app_github_client(db: Database, installation_id: str) -> GitHubClient:
     return GitHubClient(token=token)
 
 
-def get_public_github_client(
-    db: Database | None = None, use_redis: bool = True
-) -> GitHubClient:
+def get_public_github_client() -> GitHubClient:
     """
     Get a GitHub client using public tokens.
 
     Token sources (in priority order):
-    1. Redis pool (if use_redis=True and tokens exist in Redis)
-    2. MongoDB database (if db is provided and tokens exist)
-    3. Environment variable GITHUB_TOKENS (fallback)
+    1. Redis pool (recommended - supports multi-worker coordination)
+    2. Environment variable GITHUB_TOKENS (fallback for single token)
 
     Used for public data or when no specific auth is needed.
-
-    Args:
-        db: MongoDB database instance for DB-backed pool
-        use_redis: Whether to try Redis pool first (recommended for concurrency)
     """
-    global _token_pool, _db_token_pool
-
     # Try Redis-backed pool first
-    if use_redis:
-        try:
-            from app.services.github.redis_token_pool import get_redis_token_pool
+    try:
+        from app.services.github.redis_token_pool import get_redis_token_pool
 
-            redis_pool = get_redis_token_pool(db)
-            token_hash, raw_token = redis_pool.acquire_token()
+        redis_pool = get_redis_token_pool()
+        token_hash, raw_token = redis_pool.acquire_token()
 
-            # Create client with Redis pool integration
-            return GitHubClient(
-                token=raw_token,
-                token_pool=None,  # We handle rotation externally
-                redis_pool=redis_pool,
-                current_token_hash=token_hash,
-            )
-        except GithubAllRateLimitError:
-            # Re-raise rate limit errors
-            raise
-        except Exception as e:
-            # Redis not available, fall back to other methods
-            import logging
-
-            logging.getLogger(__name__).warning(
-                f"Redis pool unavailable: {e}, falling back"
-            )
-
-    # Try database-backed tokens
-    if db is not None:
-        token_count = db.github_tokens.count_documents(
-            {
-                "status": {
-                    "$in": [PublicTokenStatus.ACTIVE, PublicTokenStatus.RATE_LIMITED]
-                }
-            }
+        # Create client with Redis pool for rate limit tracking
+        return GitHubClient(
+            token=raw_token,
+            redis_pool=redis_pool,
+            current_token_hash=token_hash,
         )
-
-        if token_count > 0:
-            # Use or create database-backed pool
-            if _db_token_pool is None:
-                _db_token_pool = GitHubTokenPool(db=db)
-            return GitHubClient(token_pool=_db_token_pool)
+    except GithubAllRateLimitError:
+        # Re-raise rate limit errors
+        raise
+    except Exception as e:
+        # Redis not available or no tokens in pool, fall back to env vars
+        logger.warning(f"Redis pool unavailable: {e}, falling back to env vars")
 
     # Fallback to environment variable tokens
     tokens = settings.GITHUB_TOKENS or []
-    tokens = [t for t in tokens if t and t.strip()]
+    tokens = [t.strip() for t in tokens if t and t.strip()]
 
     if not tokens:
         raise GithubConfigurationError(
-            "No GitHub tokens configured. Add tokens via the UI or set GITHUB_TOKENS environment variable."
+            "No GitHub tokens configured. Set GITHUB_TOKENS environment variable."
         )
 
-    if len(tokens) == 1:
-        return GitHubClient(token=tokens[0])
-
-    snapshot = tuple(tokens)
-    if _token_pool is None or _token_pool.snapshot != snapshot:
-        _token_pool = GitHubTokenPool(tokens=tokens)
-
-    return GitHubClient(token_pool=_token_pool)
+    # Use first available token (no rotation in fallback mode)
+    return GitHubClient(token=tokens[0])

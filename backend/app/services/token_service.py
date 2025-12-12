@@ -1,83 +1,69 @@
-"""Service for GitHub token management."""
+"""Service for GitHub token management using Redis pool."""
 
-from typing import List, Optional, Tuple
-from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import HTTPException, status
-from pymongo.database import Database
 
-from app.repositories.token_repository import TokenRepository
-from app.entities.github_token import GitHubTokenStatus
+from app.services.github.redis_token_pool import (
+    get_redis_token_pool,
+    TOKEN_STATUS_ACTIVE,
+    TOKEN_STATUS_DISABLED,
+)
 from app.services.github.github_token_manager import (
-    add_public_token,
-    remove_public_token,
-    update_public_token,
-    list_public_tokens,
-    get_public_token_by_id,
-    get_tokens_pool_status,
     verify_github_token,
     get_token_rate_limit,
-    get_raw_token_from_cache,
-    PublicTokenStatus,
+    hash_token,
 )
 
 
 class TokenService:
-    """Service for GitHub token management operations."""
+    """Service for GitHub token management operations using Redis."""
 
-    def __init__(self, db: Database):
-        self.db = db
-        self.token_repo = TokenRepository(db)
+    def __init__(self):
+        self._pool = get_redis_token_pool()
 
     async def refresh_all_tokens(self) -> dict:
         """
         Refresh rate limit info for all tokens by querying GitHub API.
-
-        Uses tokens from in-memory cache (seeded from GITHUB_TOKENS env var).
         """
-        tokens = self.token_repo.find_active()
+        tokens = self._pool.get_all_tokens()
         results = []
         refreshed = 0
         failed = 0
 
-        for token in tokens:
-            token_id = str(token.id)
-            token_hash = token.token_hash
+        for token_info in tokens:
+            token_hash = token_info["token_hash"]
 
-            if not token_hash:
-                results.append(
-                    {"id": token_id, "success": False, "error": "No token hash"}
-                )
-                failed += 1
-                continue
-
-            # Get raw token from cache
-            raw_token = get_raw_token_from_cache(token_hash)
+            # Get raw token from Redis
+            raw_token = self._pool._redis.hget("github_tokens:raw", token_hash)
             if not raw_token:
                 results.append(
                     {
-                        "id": token_id,
+                        "id": token_info["id"],
                         "success": False,
-                        "error": "Token not in cache (add to GITHUB_TOKENS env var)",
+                        "error": "Token not found in pool",
                     }
                 )
                 failed += 1
                 continue
 
+            if isinstance(raw_token, bytes):
+                raw_token = raw_token.decode()
+
             # Query GitHub API for rate limit
             rate_limit_info = await get_token_rate_limit(raw_token)
 
             if rate_limit_info:
-                self.token_repo.update_rate_limit(
-                    token_id,
-                    rate_limit_remaining=rate_limit_info["remaining"],
-                    rate_limit_limit=rate_limit_info["limit"],
-                    rate_limit_reset_at=rate_limit_info["reset_at"],
+                self._pool.update_rate_limit(
+                    token_hash,
+                    remaining=rate_limit_info["remaining"],
+                    limit=rate_limit_info["limit"],
+                    reset_at=rate_limit_info["reset_at"],
                 )
 
                 results.append(
                     {
-                        "id": token_id,
+                        "id": token_info["id"],
                         "success": True,
                         "remaining": rate_limit_info["remaining"],
                         "limit": rate_limit_info["limit"],
@@ -85,11 +71,9 @@ class TokenService:
                 )
                 refreshed += 1
             else:
-                # Token might be invalid
-                self.token_repo.mark_invalid(token_id, "Failed to get rate limit")
                 results.append(
                     {
-                        "id": token_id,
+                        "id": token_info["id"],
                         "success": False,
                         "error": "Failed to get rate limit from GitHub API",
                     }
@@ -100,51 +84,56 @@ class TokenService:
 
     def list_tokens(self, include_disabled: bool = False) -> dict:
         """List all GitHub tokens (masked, without actual token values)."""
-        tokens = list_public_tokens(self.db, include_disabled=include_disabled)
+        tokens = self._pool.get_all_tokens()
+
+        if not include_disabled:
+            tokens = [t for t in tokens if t.get("status") != TOKEN_STATUS_DISABLED]
+
         return {"items": tokens, "total": len(tokens)}
 
     def get_pool_status(self) -> dict:
         """Get overall status of the token pool."""
-        return get_tokens_pool_status(self.db)
+        return self._pool.get_pool_status()
 
     def create_token(self, token: str, label: str = "") -> dict:
         """Add a new GitHub token to the pool."""
-        success, result, error_type = add_public_token(
-            self.db,
-            token=token,
-            label=label,
-        )
+        token_hash = hash_token(token)
 
-        if not success:
-            if error_type == "duplicate_error":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=result,
-                )
+        # Check if already exists
+        if self._pool._redis.hexists("github_tokens:raw", token_hash):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=result,
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Token already exists in pool",
             )
 
-        # Get the created token info
-        token_info = get_public_token_by_id(self.db, result)
-        if not token_info:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve created token",
-            )
+        # Add to pool
+        self._pool.add_token(token, label)
 
-        return token_info
+        # Return token info
+        tokens = self._pool.get_all_tokens()
+        for t in tokens:
+            if t["token_hash"] == token_hash:
+                return t
+
+        # Fallback
+        return {
+            "id": token_hash[:16],
+            "token_hash": token_hash,
+            "label": label,
+            "status": TOKEN_STATUS_ACTIVE,
+        }
 
     def get_token(self, token_id: str) -> dict:
         """Get details of a specific token."""
-        token_info = get_public_token_by_id(self.db, token_id)
-        if not token_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Token not found",
-            )
-        return token_info
+        tokens = self._pool.get_all_tokens()
+        for t in tokens:
+            if t["id"] == token_id or t["token_hash"].startswith(token_id):
+                return t
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Token not found",
+        )
 
     def update_token(
         self,
@@ -153,44 +142,56 @@ class TokenService:
         token_status: Optional[str] = None,
     ) -> dict:
         """Update a token's label or status."""
-        # Check token exists
-        existing = get_public_token_by_id(self.db, token_id)
-        if not existing:
+        # Find token by ID
+        tokens = self._pool.get_all_tokens()
+        target = None
+        for t in tokens:
+            if t["id"] == token_id or t["token_hash"].startswith(token_id):
+                target = t
+                break
+
+        if not target:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Token not found",
             )
 
+        token_hash = target["token_hash"]
+
         # Validate status if provided
         if token_status is not None:
-            if token_status not in [
-                PublicTokenStatus.ACTIVE,
-                PublicTokenStatus.DISABLED,
-            ]:
+            if token_status not in [TOKEN_STATUS_ACTIVE, TOKEN_STATUS_DISABLED]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status. Must be '{PublicTokenStatus.ACTIVE}' or '{PublicTokenStatus.DISABLED}'",
+                    detail=f"Invalid status. Must be '{TOKEN_STATUS_ACTIVE}' or '{TOKEN_STATUS_DISABLED}'",
                 )
-
-        success = update_public_token(
-            self.db,
-            token_id=token_id,
-            label=label,
-            status=token_status,
-        )
-
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to update token",
+            self._pool._redis.hset(
+                f"github_tokens:stats:{token_hash}", "status", token_status
             )
 
+        if label is not None:
+            self._pool._redis.hset(f"github_tokens:stats:{token_hash}", "label", label)
+
         # Return updated token
-        return get_public_token_by_id(self.db, token_id)
+        return self.get_token(token_id)
 
     def delete_token(self, token_id: str) -> bool:
         """Remove a token from the pool."""
-        success = remove_public_token(self.db, token_id)
+        # Find token by ID
+        tokens = self._pool.get_all_tokens()
+        target = None
+        for t in tokens:
+            if t["id"] == token_id or t["token_hash"].startswith(token_id):
+                target = t
+                break
+
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Token not found",
+            )
+
+        success = self._pool.remove_token(target["token_hash"])
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -200,9 +201,15 @@ class TokenService:
 
     async def verify_token(self, token_id: str, raw_token: str) -> dict:
         """Verify a token is still valid by calling GitHub API."""
-        # Check token exists in database
-        existing = get_public_token_by_id(self.db, token_id)
-        if not existing:
+        # Find token
+        tokens = self._pool.get_all_tokens()
+        target = None
+        for t in tokens:
+            if t["id"] == token_id or t["token_hash"].startswith(token_id):
+                target = t
+                break
+
+        if not target:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Token not found",
@@ -218,16 +225,13 @@ class TokenService:
         is_valid, rate_limit_info = await verify_github_token(raw_token)
 
         if is_valid:
-            # Update token status in database
             if rate_limit_info:
-                self.token_repo.update_rate_limit(
-                    token_id,
-                    rate_limit_remaining=rate_limit_info["remaining"],
-                    rate_limit_limit=rate_limit_info["limit"],
-                    rate_limit_reset_at=rate_limit_info["reset_at"],
+                self._pool.update_rate_limit(
+                    target["token_hash"],
+                    remaining=rate_limit_info["remaining"],
+                    limit=rate_limit_info["limit"],
+                    reset_at=rate_limit_info["reset_at"],
                 )
-            else:
-                self.token_repo.set_status(token_id, GitHubTokenStatus.ACTIVE)
 
             return {
                 "valid": True,
@@ -239,9 +243,6 @@ class TokenService:
                 ),
             }
         else:
-            # Mark as invalid
-            self.token_repo.mark_invalid(token_id)
-
             return {
                 "valid": False,
                 "error": "Token is invalid or revoked",

@@ -1,10 +1,3 @@
-"""
-Datetime utilities for parsing and converting datetime values.
-Provides consistent datetime handling across the application.
-
-Convention: All datetime values in the application are naive UTC.
-"""
-
 import logging
 from datetime import datetime, timezone
 
@@ -12,15 +5,6 @@ logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
-    """
-    Get current UTC time as naive datetime.
-
-    Use this instead of datetime.utcnow() throughout the codebase
-    for consistency and easier future migration.
-
-    Returns:
-        Naive datetime representing current UTC time
-    """
     return datetime.utcnow()
 
 

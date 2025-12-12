@@ -6,34 +6,31 @@ for state management. Tokens are rotated using atomic Redis operations to ensure
 fair distribution across concurrent requests.
 
 Redis Keys:
-- github_tokens:raw:{hash} - Raw token value (encrypted or plain)
+- github_tokens:raw:{hash} - Raw token value
 - github_tokens:pool - Sorted set of token hashes by priority (remaining quota)
 - github_tokens:cooldown:{hash} - Cooldown expiry timestamp
 - github_tokens:stats:{hash} - Token usage statistics (hash map)
-- github_tokens:index - Current round-robin index (atomic counter)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import redis
-from pymongo.database import Database
 
 from app.config import settings
 from app.core.redis import get_redis
-from app.services.github.github_token_manager import (
-    hash_token,
-    mask_token,
-    PublicTokenStatus,
-    update_token_rate_limit as db_update_token_rate_limit,
-    mark_token_rate_limited as db_mark_token_rate_limited,
-)
+from app.services.github.github_token_manager import hash_token, mask_token
 
 logger = logging.getLogger(__name__)
+
+# Token status constants
+TOKEN_STATUS_ACTIVE = "active"
+TOKEN_STATUS_RATE_LIMITED = "rate_limited"
+TOKEN_STATUS_INVALID = "invalid"
+TOKEN_STATUS_DISABLED = "disabled"
 
 # Redis key prefixes
 KEY_PREFIX = "github_tokens"
@@ -41,7 +38,6 @@ KEY_RAW = f"{KEY_PREFIX}:raw"  # Hash -> Raw token
 KEY_POOL = f"{KEY_PREFIX}:pool"  # Sorted set by priority
 KEY_COOLDOWN = f"{KEY_PREFIX}:cooldown"  # Hash -> cooldown expiry
 KEY_STATS = f"{KEY_PREFIX}:stats"  # Hash -> usage stats
-KEY_INDEX = f"{KEY_PREFIX}:index"  # Round-robin counter
 
 
 def _now() -> datetime:
@@ -63,15 +59,9 @@ class RedisTokenPool:
     - Persistent across restarts (tokens stored in Redis)
     """
 
-    def __init__(self, db: Database | None = None):
-        """
-        Initialize Redis token pool.
-
-        Args:
-            db: MongoDB database for syncing stats back (optional)
-        """
+    def __init__(self):
+        """Initialize Redis token pool."""
         self._redis: redis.Redis = get_redis()
-        self._db = db
 
     def add_token(self, raw_token: str, label: str = "") -> str:
         """
@@ -99,7 +89,7 @@ class RedisTokenPool:
                 "label": label or f"Token {mask_token(raw_token)}",
                 "total_requests": 0,
                 "last_used_at": "",
-                "status": PublicTokenStatus.ACTIVE,
+                "status": TOKEN_STATUS_ACTIVE,
             },
         )
 
@@ -260,21 +250,10 @@ class RedisTokenPool:
                 str(reset_at.timestamp()),
             )
             self._redis.hset(
-                f"{KEY_STATS}:{token_hash}", "status", PublicTokenStatus.RATE_LIMITED
+                f"{KEY_STATS}:{token_hash}", "status", TOKEN_STATUS_RATE_LIMITED
             )
         else:
-            self._redis.hset(
-                f"{KEY_STATS}:{token_hash}", "status", PublicTokenStatus.ACTIVE
-            )
-
-        # Sync to MongoDB if available
-        if self._db is not None:
-            try:
-                db_update_token_rate_limit(
-                    self._db, token_hash, remaining, limit, reset_at
-                )
-            except Exception as e:
-                logger.warning(f"Failed to sync rate limit to MongoDB: {e}")
+            self._redis.hset(f"{KEY_STATS}:{token_hash}", "status", TOKEN_STATUS_ACTIVE)
 
     def mark_rate_limited(
         self,
@@ -300,18 +279,11 @@ class RedisTokenPool:
         self._redis.hset(
             f"{KEY_STATS}:{token_hash}",
             mapping={
-                "status": PublicTokenStatus.RATE_LIMITED,
+                "status": TOKEN_STATUS_RATE_LIMITED,
                 "rate_limit_remaining": 0,
                 "rate_limit_reset_at": reset_at.isoformat(),
             },
         )
-
-        # Sync to MongoDB
-        if self._db is not None:
-            try:
-                db_mark_token_rate_limited(self._db, token_hash, reset_at)
-            except Exception as e:
-                logger.warning(f"Failed to sync rate limit to MongoDB: {e}")
 
     def get_pool_status(self) -> Dict:
         """Get overall status of the token pool."""
@@ -356,50 +328,62 @@ class RedisTokenPool:
         }
 
     def get_all_tokens(self) -> List[Dict]:
-        """Get all tokens with their stats."""
+        """Get all tokens with their stats for UI display."""
         token_hashes = self._redis.zrevrange(KEY_POOL, 0, -1, withscores=True)
 
         result = []
         for token_hash, score in token_hashes:
+            # Handle bytes from Redis
+            if isinstance(token_hash, bytes):
+                token_hash = token_hash.decode()
+
             stats = self._redis.hgetall(f"{KEY_STATS}:{token_hash}")
+            # Handle bytes in stats
+            stats = {
+                k.decode() if isinstance(k, bytes) else k: (
+                    v.decode() if isinstance(v, bytes) else v
+                )
+                for k, v in stats.items()
+            }
+
             raw_token = self._redis.hget(KEY_RAW, token_hash)
+            if isinstance(raw_token, bytes):
+                raw_token = raw_token.decode()
 
             result.append(
                 {
+                    "id": token_hash[:16],  # Use first 16 chars as ID for UI
                     "token_hash": token_hash,
                     "masked_token": mask_token(raw_token) if raw_token else "****",
                     "label": stats.get("label", ""),
-                    "status": stats.get("status", PublicTokenStatus.ACTIVE),
+                    "status": stats.get("status", TOKEN_STATUS_ACTIVE),
                     "rate_limit_remaining": int(
-                        stats.get("rate_limit_remaining", score)
+                        stats.get("rate_limit_remaining", score) or 0
                     ),
-                    "rate_limit_limit": int(stats.get("rate_limit_limit", 5000)),
+                    "rate_limit_limit": int(
+                        stats.get("rate_limit_limit", 5000) or 5000
+                    ),
                     "rate_limit_reset_at": stats.get("rate_limit_reset_at"),
                     "last_used_at": stats.get("last_used_at"),
-                    "total_requests": int(stats.get("total_requests", 0)),
+                    "total_requests": int(stats.get("total_requests", 0) or 0),
                 }
             )
 
         return result
 
-    def sync_from_mongodb(self, db: Database) -> int:
+    def seed_from_env(self) -> int:
         """
-        Sync tokens from MongoDB to Redis.
+        Seed tokens from GITHUB_TOKENS environment variable to Redis pool.
 
-        This should be called at startup to load tokens from DB.
+        Should be called at application startup.
 
         Returns:
-            Number of tokens synced
+            Number of tokens added
         """
-        from app.services.github.github_token_manager import get_available_tokens
-
-        # We can't get raw tokens from MongoDB (security), so we need env vars
-        from app.config import settings
-
         tokens = settings.GITHUB_TOKENS or []
         tokens = [t.strip() for t in tokens if t and t.strip()]
 
-        synced = 0
+        added = 0
         for token in tokens:
             token_hash = hash_token(token)
 
@@ -408,9 +392,10 @@ class RedisTokenPool:
                 continue
 
             self.add_token(token)
-            synced += 1
+            added += 1
+            logger.info(f"Seeded token {mask_token(token)} to Redis pool")
 
-        return synced
+        return added
 
     def clear_pool(self) -> None:
         """Clear all tokens from Redis pool."""
@@ -433,24 +418,26 @@ class RedisTokenPool:
 _redis_pool: RedisTokenPool | None = None
 
 
-def get_redis_token_pool(db: Database | None = None) -> RedisTokenPool:
+def get_redis_token_pool() -> RedisTokenPool:
     """Get or create the Redis token pool singleton."""
     global _redis_pool
 
     if _redis_pool is None:
-        _redis_pool = RedisTokenPool(db=db)
+        _redis_pool = RedisTokenPool()
+        # Seed tokens from env on first access
+        _redis_pool.seed_from_env()
 
     return _redis_pool
 
 
-def seed_tokens_to_redis(db: Database | None = None) -> int:
+def seed_tokens_to_redis() -> int:
     """
-    Seed tokens from environment variables to Redis pool.
+    Seed tokens from GITHUB_TOKENS environment variable to Redis pool.
 
     Should be called at application startup.
 
     Returns:
         Number of tokens added
     """
-    pool = get_redis_token_pool(db)
-    return pool.sync_from_mongodb(db) if db else 0
+    pool = get_redis_token_pool()
+    return pool.seed_from_env()

@@ -34,7 +34,6 @@ from .dataset import (
     ValidationStats,
     DatasetValidationStatus,
 )
-from .github_token import GithubToken, GitHubTokenStatus
 from .pipeline_run import (
     PipelineRun,
     NodeExecutionResult,
@@ -71,8 +70,6 @@ __all__ = [
     "DatasetStats",
     "ValidationStats",
     "DatasetValidationStatus",
-    "GithubToken",
-    "GitHubTokenStatus",
     "DatasetTemplate",
     "PipelineRun",
     "NodeExecutionResult",
