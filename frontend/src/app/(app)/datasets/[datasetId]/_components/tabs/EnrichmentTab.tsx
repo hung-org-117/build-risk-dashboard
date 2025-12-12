@@ -117,6 +117,7 @@ export function EnrichmentTab({
 
             {/* Version History */}
             <VersionHistory
+                datasetId={datasetId}
                 versions={versions}
                 loading={loading}
                 onRefresh={refresh}

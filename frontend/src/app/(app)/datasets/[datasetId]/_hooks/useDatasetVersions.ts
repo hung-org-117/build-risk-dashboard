@@ -48,7 +48,7 @@ export interface UseDatasetVersionsReturn {
     createVersion: (request: CreateVersionRequest) => Promise<DatasetVersion | null>;
     cancelVersion: (versionId: string) => Promise<void>;
     deleteVersion: (versionId: string) => Promise<void>;
-    downloadVersion: (versionId: string) => void;
+    downloadVersion: (versionId: string, format?: "csv" | "json" | "parquet") => void;
 }
 
 export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn {
@@ -155,18 +155,18 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
         [datasetId]
     );
 
-    // Download a version
+    // Download a version in specified format
     const downloadVersion = useCallback(
-        async (versionId: string) => {
+        async (versionId: string, format: "csv" | "json" | "parquet" = "csv") => {
             try {
                 const response = await api.get(
-                    `/datasets/${datasetId}/versions/${versionId}/download`,
+                    `/datasets/${datasetId}/versions/${versionId}/export?format=${format}`,
                     { responseType: "blob" }
                 );
 
                 // Get filename from Content-Disposition header or use default
                 const contentDisposition = response.headers["content-disposition"];
-                let filename = `enriched_v${versionId}.csv`;
+                let filename = `enriched_v${versionId}.${format}`;
                 if (contentDisposition) {
                     const match = contentDisposition.match(/filename="?(.+?)"?$/);
                     if (match) {

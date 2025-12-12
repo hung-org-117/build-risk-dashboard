@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,12 +10,23 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import {
     AlertCircle,
     CheckCircle2,
+    ChevronDown,
     Clock,
     Download,
+    Eye,
+    FileJson,
+    FileSpreadsheet,
+    FileText,
     Loader2,
     RefreshCw,
     Trash2,
@@ -23,17 +34,22 @@ import {
     XCircle,
 } from "lucide-react";
 import type { DatasetVersion } from "../_hooks/useDatasetVersions";
+import { VersionDetailModal } from "./VersionDetailModal";
+
+type ExportFormat = "csv" | "json" | "parquet";
 
 interface VersionHistoryProps {
+    datasetId: string;
     versions: DatasetVersion[];
     loading: boolean;
     onRefresh: () => void;
-    onDownload: (versionId: string) => void;
+    onDownload: (versionId: string, format?: ExportFormat) => void;
     onDelete: (versionId: string) => void;
     onCancel: (versionId: string) => void;
 }
 
 export const VersionHistory = memo(function VersionHistory({
+    datasetId,
     versions,
     loading,
     onRefresh,
@@ -41,6 +57,9 @@ export const VersionHistory = memo(function VersionHistory({
     onDelete,
     onCancel,
 }: VersionHistoryProps) {
+    const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+    const [detailModalOpen, setDetailModalOpen] = useState(false);
+
     // Separate active version from completed ones
     const activeVersion = versions.find(
         (v) => v.status === "pending" || v.status === "processing"
@@ -98,7 +117,11 @@ export const VersionHistory = memo(function VersionHistory({
                                 <VersionCard
                                     key={version.id}
                                     version={version}
-                                    onDownload={() => onDownload(version.id)}
+                                    onView={() => {
+                                        setSelectedVersionId(version.id);
+                                        setDetailModalOpen(true);
+                                    }}
+                                    onDownload={(format) => onDownload(version.id, format)}
                                     onDelete={() => onDelete(version.id)}
                                 />
                             ))}
@@ -106,6 +129,14 @@ export const VersionHistory = memo(function VersionHistory({
                     )}
                 </CardContent>
             </Card>
+
+            {/* Version Detail Modal */}
+            <VersionDetailModal
+                datasetId={datasetId}
+                versionId={selectedVersionId}
+                open={detailModalOpen}
+                onOpenChange={setDetailModalOpen}
+            />
         </div>
     );
 });
@@ -156,11 +187,14 @@ function ActiveVersionCard({ version, onCancel }: ActiveVersionCardProps) {
 
 interface VersionCardProps {
     version: DatasetVersion;
-    onDownload: () => void;
+    onView: () => void;
+    onDownload: (format: ExportFormat) => void;
     onDelete: () => void;
 }
 
-function VersionCard({ version, onDownload, onDelete }: VersionCardProps) {
+function VersionCard({ version, onView, onDownload, onDelete }: VersionCardProps) {
+    const [downloading, setDownloading] = useState(false);
+
     const statusConfig: Record<
         string,
         { icon: typeof CheckCircle2; color: string; label: string }
@@ -185,14 +219,6 @@ function VersionCard({ version, onDownload, onDelete }: VersionCardProps) {
     const status = statusConfig[version.status] || statusConfig.failed;
     const StatusIcon = status.icon;
 
-    // Format file size
-    const formatSize = (bytes: number | null): string => {
-        if (!bytes) return "—";
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    };
-
     // Format relative time
     const formatTime = (dateStr: string | null): string => {
         if (!dateStr) return "—";
@@ -210,6 +236,21 @@ function VersionCard({ version, onDownload, onDelete }: VersionCardProps) {
         return date.toLocaleDateString();
     };
 
+    const handleDownload = async (format: ExportFormat) => {
+        setDownloading(true);
+        try {
+            await onDownload(format);
+        } finally {
+            setDownloading(false);
+        }
+    };
+
+    const formatOptions: { format: ExportFormat; label: string; icon: typeof FileText }[] = [
+        { format: "csv", label: "CSV", icon: FileSpreadsheet },
+        { format: "json", label: "JSON", icon: FileJson },
+        { format: "parquet", label: "Parquet", icon: FileText },
+    ];
+
     return (
         <div className="flex items-center justify-between rounded-lg border bg-white p-4 dark:bg-slate-900">
             <div className="flex items-center gap-4">
@@ -226,9 +267,6 @@ function VersionCard({ version, onDownload, onDelete }: VersionCardProps) {
                             {version.enriched_rows.toLocaleString()} /{" "}
                             {version.total_rows.toLocaleString()} rows
                         </span>
-                        {version.file_size_bytes && (
-                            <span>{formatSize(version.file_size_bytes)}</span>
-                        )}
                         <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
                             {formatTime(version.created_at)}
@@ -244,10 +282,40 @@ function VersionCard({ version, onDownload, onDelete }: VersionCardProps) {
 
             <div className="flex items-center gap-2">
                 {version.status === "completed" && (
-                    <Button variant="outline" size="sm" onClick={onDownload}>
-                        <Download className="mr-1 h-4 w-4" />
-                        Download
-                    </Button>
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={onView}
+                            className="text-muted-foreground hover:text-foreground"
+                        >
+                            <Eye className="h-4 w-4" />
+                        </Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" disabled={downloading}>
+                                    {downloading ? (
+                                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Download className="mr-1 h-4 w-4" />
+                                    )}
+                                    Download
+                                    <ChevronDown className="ml-1 h-3 w-3" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                {formatOptions.map(({ format, label, icon: Icon }) => (
+                                    <DropdownMenuItem
+                                        key={format}
+                                        onClick={() => handleDownload(format)}
+                                    >
+                                        <Icon className="mr-2 h-4 w-4" />
+                                        {label}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </>
                 )}
                 <Button
                     variant="ghost"

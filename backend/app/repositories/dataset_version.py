@@ -142,22 +142,13 @@ class DatasetVersionRepository:
         )
         return result.modified_count > 0
 
-    def mark_completed(
-        self,
-        version_id: str,
-        file_path: str,
-        file_name: str,
-        file_size_bytes: int,
-    ) -> bool:
+    def mark_completed(self, version_id: str) -> bool:
         """Mark version as completed."""
         result = self.collection.update_one(
             {"_id": ObjectId(version_id)},
             {
                 "$set": {
                     "status": VersionStatus.COMPLETED,
-                    "file_path": file_path,
-                    "file_name": file_name,
-                    "file_size_bytes": file_size_bytes,
                     "completed_at": datetime.now(timezone.utc),
                     "updated_at": datetime.now(timezone.utc),
                 }

@@ -5,21 +5,18 @@ Flow:
 1. Query dataset_builds (status=FOUND) to get validated builds
 2. For each build, run feature extraction pipeline
 3. Save features to enrichment_builds collection (DB)
-4. Export all features to Parquet file for download
 """
 
 from app.repositories.dataset_repository import DatasetRepository
 from pymongo.synchronous.database import Database
 from app.entities.dataset_build import DatasetBuild
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 
 from app.celery_app import celery_app
-from app.config import settings
 from app.database.mongo import get_database
 from app.entities.dataset_version import VersionStatus
 from app.entities.base_build import ExtractionStatus
@@ -27,7 +24,6 @@ from app.entities.enrichment_build import EnrichmentBuild
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.enrichment_build import EnrichmentBuildRepository
-from app.entities.enrichment_build import EnrichmentBuild
 from app.repositories.workflow_run import WorkflowRunRepository
 from app.repositories.enrichment_repository import EnrichmentRepositoryRepository
 from app.pipeline.runner import FeaturePipeline
@@ -80,25 +76,17 @@ def enrich_version_task(self, version_id: str):
         processed = 0
         enriched = 0
         failed = 0
-        enriched_data: List[Dict[str, Any]] = []
 
         for build in validated_builds:
             try:
                 features = _extract_features_for_build(
                     db=db,
                     build=build,
+                    version_id=version_id,
                     selected_features=version.selected_features,
                 )
 
-                enrichment_build = EnrichmentBuild(
-                    repo_id=build.repo_id,
-                    enrichment_repo_id=build.repo_id,
-                    dataset_id=ObjectId(version.dataset_id),
-                    build_id_from_csv=build.build_id_from_csv,
-                    extraction_status=ExtractionStatus.COMPLETED,
-                    features=features,
-                )
-
+                # Update enrichment_build with extracted features
                 existing = enrichment_build_repo.find_by_build_id_and_dataset(
                     build.build_id_from_csv, version.dataset_id
                 )
@@ -108,18 +96,20 @@ def enrich_version_task(self, version_id: str):
                         {
                             "features": features,
                             "extraction_status": ExtractionStatus.COMPLETED,
+                            "version_id": ObjectId(version_id),
                         },
                     )
                 else:
+                    enrichment_build = EnrichmentBuild(
+                        repo_id=build.repo_id,
+                        enrichment_repo_id=build.repo_id,
+                        dataset_id=ObjectId(version.dataset_id),
+                        version_id=ObjectId(version_id),
+                        build_id_from_csv=build.build_id_from_csv,
+                        extraction_status=ExtractionStatus.COMPLETED,
+                        features=features,
+                    )
                     enrichment_build_repo.insert_one(enrichment_build)
-
-                # Add to enriched data for Parquet export
-                row_data = {
-                    "build_id": build.build_id_from_csv,
-                    "repo_name": build.repo_name_from_csv,
-                    **features,
-                }
-                enriched_data.append(row_data)
 
                 processed += 1
                 enriched += 1
@@ -127,20 +117,20 @@ def enrich_version_task(self, version_id: str):
             except Exception as e:
                 logger.warning(f"Failed to enrich build {build.build_id_from_csv}: {e}")
 
-                enrichment_build = EnrichmentBuild(
-                    repo_id=build.repo_id,
-                    enrichment_repo_id=build.repo_id,
-                    dataset_id=ObjectId(version.dataset_id),
-                    build_id_from_csv=build.build_id_from_csv,
-                    extraction_status=ExtractionStatus.FAILED,
-                    error_message=str(e),
-                    features={},
-                )
-
                 existing = enrichment_build_repo.find_by_build_id_and_dataset(
                     build.build_id_from_csv, version.dataset_id
                 )
                 if not existing:
+                    enrichment_build = EnrichmentBuild(
+                        repo_id=build.repo_id,
+                        enrichment_repo_id=build.repo_id,
+                        dataset_id=ObjectId(version.dataset_id),
+                        version_id=ObjectId(version_id),
+                        build_id_from_csv=build.build_id_from_csv,
+                        extraction_status=ExtractionStatus.FAILED,
+                        error_message=str(e),
+                        features={},
+                    )
                     enrichment_build_repo.insert_one(enrichment_build)
 
                 processed += 1
@@ -154,6 +144,7 @@ def enrich_version_task(self, version_id: str):
                     failed_rows=failed,
                 )
 
+        # Final progress update
         version_repo.update_progress(
             version_id,
             processed_rows=processed,
@@ -161,25 +152,12 @@ def enrich_version_task(self, version_id: str):
             failed_rows=failed,
         )
 
-        output_path, file_size = _export_to_parquet(
-            enriched_data=enriched_data,
-            dataset_id=version.dataset_id,
-            version_number=version.version_number,
-        )
-
-        output_filename = os.path.basename(output_path)
-
-        version_repo.mark_completed(
-            version_id,
-            file_path=output_path,
-            file_name=output_filename,
-            file_size_bytes=file_size,
-        )
+        # Mark completed (no file to save)
+        version_repo.mark_completed(version_id)
 
         logger.info(
             f"Version enrichment completed: {version_id}, "
-            f"{enriched}/{total_rows} rows enriched, "
-            f"output: {output_path} ({file_size} bytes)"
+            f"{enriched}/{total_rows} rows enriched"
         )
 
         return {
@@ -187,8 +165,6 @@ def enrich_version_task(self, version_id: str):
             "version_id": version_id,
             "enriched_rows": enriched,
             "failed_rows": failed,
-            "output_file": output_path,
-            "file_size_bytes": file_size,
         }
 
     except Exception as e:
@@ -207,6 +183,7 @@ def enrich_version_task(self, version_id: str):
 def _extract_features_for_build(
     db: Database,
     build: DatasetBuild,
+    version_id: str,
     selected_features: List[str],
 ) -> Dict[str, Any]:
     if not build.workflow_run_id:
@@ -246,6 +223,7 @@ def _extract_features_for_build(
             build_created_at=workflow_run.ci_created_at,
             enrichment_repo_id=enrichment_repo.id,
             dataset_id=build.dataset_id,
+            version_id=ObjectId(version_id),
             build_id_from_csv=build.build_id_from_csv,
             extraction_status=ExtractionStatus.PENDING,
         )
@@ -282,30 +260,3 @@ def _extract_features_for_build(
             exc_info=True,
         )
         return {name: None for name in selected_features}
-
-
-def _export_to_parquet(
-    enriched_data: List[Dict[str, Any]],
-    dataset_id: str,
-    version_number: int,
-) -> tuple[str, int]:
-    import pandas as pd
-
-    output_dir = os.path.join(settings.DATA_DIR, "enriched", dataset_id)
-    os.makedirs(output_dir, exist_ok=True)
-
-    output_filename = f"enriched_v{version_number}.parquet"
-    output_path = os.path.join(output_dir, output_filename)
-
-    df = pd.DataFrame(enriched_data)
-
-    df.to_parquet(output_path, engine="pyarrow", compression="snappy", index=False)
-
-    file_size = os.path.getsize(output_path)
-
-    logger.info(
-        f"Exported {len(enriched_data)} rows to Parquet: {output_path} "
-        f"({file_size} bytes, compression=snappy)"
-    )
-
-    return output_path, file_size

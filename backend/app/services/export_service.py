@@ -4,8 +4,9 @@ Export Service - Business logic for data export.
 Supports:
 - Streaming export for small datasets (< 1000 rows)
 - Background job export for large datasets
-- CSV and JSON formats
+- CSV, JSON, and Parquet formats
 - Feature filtering, date range, and status filtering
+- Both model_builds (repo imports) and enrichment_builds (dataset versions)
 """
 
 import csv
@@ -13,8 +14,9 @@ import io
 import json
 import logging
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
-from typing import Generator, Optional, List, Dict, Any, Set
+from typing import Generator, Optional, List, Dict, Any, Set, Literal
 from bson import ObjectId
 from pymongo.database import Database
 
@@ -31,24 +33,53 @@ EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 STREAMING_THRESHOLD = 1000
 
 
+class ExportSource(str, Enum):
+    """Data source for export."""
+
+    MODEL_BUILDS = "model_builds"
+    ENRICHMENT_BUILDS = "enrichment_builds"
+
+
 class ExportService:
     """
     Service for exporting build data.
+
+    Supports both:
+    - model_builds: from repo imports (ML prediction workflow)
+    - enrichment_builds: from dataset enrichment (dataset versioning workflow)
     """
 
     def __init__(self, db: Database):
         self.db = db
         self.job_repo = ExportJobRepository(db)
 
+    def _get_collection(self, source: ExportSource):
+        """Get the MongoDB collection for the given source."""
+        if source == ExportSource.ENRICHMENT_BUILDS:
+            return self.db.enrichment_builds
+        return self.db.model_builds
+
     def _build_query(
         self,
-        repo_id: str,
+        source: ExportSource,
+        repo_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         build_status: Optional[str] = None,
     ) -> Dict:
         """Build MongoDB query for export."""
-        query: Dict[str, Any] = {"repo_id": ObjectId(repo_id)}
+        query: Dict[str, Any] = {}
+
+        if source == ExportSource.ENRICHMENT_BUILDS:
+            if dataset_id:
+                query["dataset_id"] = ObjectId(dataset_id)
+            if version_id:
+                query["version_id"] = ObjectId(version_id)
+        else:
+            if repo_id:
+                query["repo_id"] = ObjectId(repo_id)
 
         if start_date or end_date:
             query["created_at"] = {}
@@ -64,31 +95,45 @@ class ExportService:
 
     def estimate_row_count(
         self,
-        repo_id: str,
+        source: ExportSource = ExportSource.MODEL_BUILDS,
+        repo_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         build_status: Optional[str] = None,
     ) -> int:
         """Estimate number of rows for export."""
-        query = self._build_query(repo_id, start_date, end_date, build_status)
-        return self.db.model_builds.count_documents(query)
+        query = self._build_query(
+            source, repo_id, dataset_id, version_id, start_date, end_date, build_status
+        )
+        collection = self._get_collection(source)
+        return collection.count_documents(query)
 
     def should_use_background_job(
         self,
-        repo_id: str,
+        source: ExportSource = ExportSource.MODEL_BUILDS,
+        repo_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         build_status: Optional[str] = None,
     ) -> bool:
         """Determine if background job is needed based on count."""
-        count = self.estimate_row_count(repo_id, start_date, end_date, build_status)
+        count = self.estimate_row_count(
+            source, repo_id, dataset_id, version_id, start_date, end_date, build_status
+        )
         return count > STREAMING_THRESHOLD
 
     def create_export_job(
         self,
-        repo_id: str,
         user_id: str,
         format: str = "csv",
+        source: ExportSource = ExportSource.MODEL_BUILDS,
+        repo_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         features: Optional[List[str]] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
@@ -96,7 +141,7 @@ class ExportService:
     ) -> ExportJob:
         """Create a new export job for background processing."""
         job = ExportJob(
-            repo_id=ObjectId(repo_id),
+            repo_id=ObjectId(repo_id) if repo_id else None,
             user_id=ObjectId(user_id),
             format=format,
             features=features,
@@ -120,9 +165,20 @@ class ExportService:
         doc: dict,
         features: Optional[List[str]] = None,
         all_feature_keys: Optional[Set[str]] = None,
+        include_metadata: bool = True,
     ) -> dict:
+        """Format a document row for export."""
         feature_dict = doc.get("features", {})
         row = {}
+
+        # Add metadata columns for enrichment builds
+        if include_metadata:
+            if "build_id_from_csv" in doc:
+                row["build_id"] = doc.get("build_id_from_csv")
+            if "head_sha" in doc:
+                row["commit_sha"] = doc.get("head_sha")
+            if "build_number" in doc:
+                row["build_number"] = doc.get("build_number")
 
         if features:
             for f in features:
@@ -137,12 +193,19 @@ class ExportService:
 
     def _get_all_feature_keys(
         self,
-        repo_id: str,
+        source: ExportSource,
+        repo_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         build_status: Optional[str] = None,
     ) -> Set[str]:
-        query = self._build_query(repo_id, start_date, end_date, build_status)
+        """Get all unique feature keys from documents."""
+        query = self._build_query(
+            source, repo_id, dataset_id, version_id, start_date, end_date, build_status
+        )
+        collection = self._get_collection(source)
 
         pipeline = [
             {"$match": query},
@@ -151,15 +214,18 @@ class ExportService:
             {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
         ]
 
-        result = list(self.db.model_builds.aggregate(pipeline))
+        result = list(collection.aggregate(pipeline))
         if result:
             return set(result[0].get("keys", []))
         return set()
 
     def stream_export(
         self,
-        repo_id: str,
         format: str = "csv",
+        source: ExportSource = ExportSource.MODEL_BUILDS,
+        repo_id: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         features: Optional[List[str]] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
@@ -170,16 +236,25 @@ class ExportService:
 
         Yields chunks of CSV or JSON data.
         """
-        query = self._build_query(repo_id, start_date, end_date, build_status)
+        query = self._build_query(
+            source, repo_id, dataset_id, version_id, start_date, end_date, build_status
+        )
+        collection = self._get_collection(source)
 
         # For CSV, get all feature keys first for consistent columns
         all_feature_keys = None
         if format == "csv" and not features:
             all_feature_keys = self._get_all_feature_keys(
-                repo_id, start_date, end_date, build_status
+                source,
+                repo_id,
+                dataset_id,
+                version_id,
+                start_date,
+                end_date,
+                build_status,
             )
 
-        cursor = self.db.model_builds.find(query).sort("created_at", 1).batch_size(100)
+        cursor = collection.find(query).sort("created_at", 1).batch_size(100)
 
         if format == "csv":
             yield from self._stream_csv(cursor, features, all_feature_keys)
@@ -236,6 +311,9 @@ class ExportService:
     def write_export_file(
         self,
         job: ExportJob,
+        source: ExportSource = ExportSource.MODEL_BUILDS,
+        dataset_id: Optional[str] = None,
+        version_id: Optional[str] = None,
         progress_callback: Optional[callable] = None,
     ) -> Path:
         """
@@ -243,6 +321,9 @@ class ExportService:
 
         Args:
             job: Export job with filters
+            source: Data source (model_builds or enrichment_builds)
+            dataset_id: Dataset ID for enrichment exports
+            version_id: Version ID for enrichment exports
             progress_callback: Optional callback(processed_rows) for progress updates
 
         Returns:
@@ -252,23 +333,37 @@ class ExportService:
         file_path = EXPORT_DIR / file_name
 
         query = self._build_query(
-            str(job.repo_id), job.start_date, job.end_date, job.build_status
+            source,
+            str(job.repo_id) if job.repo_id else None,
+            dataset_id,
+            version_id,
+            job.start_date,
+            job.end_date,
+            job.build_status,
         )
+        collection = self._get_collection(source)
 
         # Get all feature keys for consistent columns
         all_feature_keys = None
         if job.format == "csv" and not job.features:
             all_feature_keys = self._get_all_feature_keys(
-                str(job.repo_id),
+                source,
+                str(job.repo_id) if job.repo_id else None,
+                dataset_id,
+                version_id,
                 job.start_date,
                 job.end_date,
                 job.build_status,
             )
 
-        cursor = self.db.model_builds.find(query).sort("created_at", 1).batch_size(100)
+        cursor = collection.find(query).sort("created_at", 1).batch_size(100)
 
         if job.format == "csv":
             self._write_csv_file(
+                file_path, cursor, job.features, all_feature_keys, progress_callback
+            )
+        elif job.format == "parquet":
+            self._write_parquet_file(
                 file_path, cursor, job.features, all_feature_keys, progress_callback
             )
         else:
@@ -334,3 +429,95 @@ class ExportService:
 
             if progress_callback:
                 progress_callback(count)
+
+    def _write_parquet_file(
+        self,
+        file_path: Path,
+        cursor,
+        features: Optional[List[str]],
+        all_feature_keys: Optional[Set[str]],
+        progress_callback: Optional[callable],
+    ) -> None:
+        """Write Parquet export file."""
+        import pandas as pd
+
+        rows = []
+        count = 0
+
+        for doc in cursor:
+            row = self._format_row(doc, features, all_feature_keys)
+            rows.append(row)
+            count += 1
+
+            if progress_callback and count % 100 == 0:
+                progress_callback(count)
+
+        df = pd.DataFrame(rows)
+        df.to_parquet(file_path, engine="pyarrow", compression="snappy", index=False)
+
+        if progress_callback:
+            progress_callback(count)
+
+    def export_enrichment_version(
+        self,
+        dataset_id: str,
+        version_id: str,
+        format: str = "csv",
+        features: Optional[List[str]] = None,
+    ) -> Generator[str, None, None]:
+        """
+        Stream export for a specific dataset version.
+
+        Args:
+            dataset_id: Dataset ID
+            version_id: Version ID
+            format: Export format (csv, json)
+            features: Optional list of features to include
+
+        Yields:
+            Chunks of export data
+        """
+        return self.stream_export(
+            format=format,
+            source=ExportSource.ENRICHMENT_BUILDS,
+            dataset_id=dataset_id,
+            version_id=version_id,
+            features=features,
+        )
+
+    def get_enrichment_preview(
+        self,
+        dataset_id: str,
+        version_id: str,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Get preview data for an enrichment version.
+
+        Returns:
+            Dict with total_rows, sample_rows, available_features
+        """
+        query = self._build_query(
+            ExportSource.ENRICHMENT_BUILDS,
+            dataset_id=dataset_id,
+            version_id=version_id,
+        )
+        collection = self._get_collection(ExportSource.ENRICHMENT_BUILDS)
+
+        total_rows = collection.count_documents(query)
+        cursor = collection.find(query).limit(limit)
+
+        sample_rows = []
+        all_features = set()
+
+        for doc in cursor:
+            row = self._format_row(doc)
+            sample_rows.append(row)
+            all_features.update(row.keys())
+
+        return {
+            "total_rows": total_rows,
+            "sample_rows": sample_rows,
+            "available_features": sorted(all_features),
+            "feature_count": len(all_features),
+        }

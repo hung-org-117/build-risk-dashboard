@@ -29,8 +29,6 @@ class VersionResponse(BaseModel):
     failed_rows: int
     skipped_rows: int
     progress_percent: float
-    file_name: Optional[str]
-    file_size_bytes: Optional[int]
     started_at: Optional[str]
     completed_at: Optional[str]
     error_message: Optional[str]

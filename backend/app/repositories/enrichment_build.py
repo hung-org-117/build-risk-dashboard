@@ -18,12 +18,12 @@ class EnrichmentBuildRepository(BaseRepository[EnrichmentBuild]):
         self.collection.create_index("enrichment_repo_id", background=True)
 
     def find_by_build_id_and_dataset(
-        self, build_id: str, dataset_id: str
+        self, build_id_from_csv: str, dataset_id: str
     ) -> Optional[EnrichmentBuild]:
-        """Find a build by build_id and dataset."""
+        """Find a build by build_id_from_csv and dataset."""
         return self.find_one(
             {
-                "build_id": build_id,
+                "build_id_from_csv": build_id_from_csv,
                 "dataset_id": self._to_object_id(dataset_id),
             }
         )
@@ -60,3 +60,17 @@ class EnrichmentBuildRepository(BaseRepository[EnrichmentBuild]):
             skip=skip,
             limit=limit,
         )
+
+    def delete_by_version(self, version_id: str) -> int:
+        """Delete all builds for a specific version."""
+        result = self.collection.delete_many(
+            {"version_id": self._to_object_id(version_id)}
+        )
+        return result.deleted_count
+
+    def delete_by_dataset(self, dataset_id: str) -> int:
+        """Delete all builds for a dataset."""
+        result = self.collection.delete_many(
+            {"dataset_id": self._to_object_id(dataset_id)}
+        )
+        return result.deleted_count

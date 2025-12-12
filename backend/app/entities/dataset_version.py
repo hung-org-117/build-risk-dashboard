@@ -63,10 +63,6 @@ class DatasetVersion(BaseEntity):
         default_factory=list, description="List of {row_index, error} for failed rows"
     )
 
-    file_path: Optional[str] = Field(None, description="Path to the enriched CSV file")
-    file_name: Optional[str] = Field(None, description="Original filename for download")
-    file_size_bytes: Optional[int] = Field(None, description="Size of output file")
-
     task_id: Optional[str] = None
 
     def mark_started(self) -> None:
@@ -74,12 +70,10 @@ class DatasetVersion(BaseEntity):
         self.status = VersionStatus.PROCESSING
         self.started_at = datetime.now(timezone.utc)
 
-    def mark_completed(self, file_path: str, file_size: int) -> None:
+    def mark_completed(self) -> None:
         """Mark version as completed."""
         self.status = VersionStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
-        self.file_path = file_path
-        self.file_size_bytes = file_size
 
     def mark_failed(self, error: str) -> None:
         """Mark version as failed."""

@@ -1,6 +1,8 @@
 import logging
+from enum import Enum
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.database.mongo import get_db
@@ -37,8 +39,6 @@ def _to_response(version: DatasetVersion) -> VersionResponse:
         failed_rows=version.failed_rows,
         skipped_rows=version.skipped_rows,
         progress_percent=version.progress_percent,
-        file_name=version.file_name,
-        file_size_bytes=version.file_size_bytes,
         started_at=version.started_at.isoformat() if version.started_at else None,
         completed_at=version.completed_at.isoformat() if version.completed_at else None,
         error_message=version.error_message,
@@ -91,19 +91,77 @@ async def get_version(
     return _to_response(version)
 
 
-@router.get("/{version_id}/download")
-async def download_version(
+@router.get("/{version_id}/export")
+async def export_version(
+    dataset_id: str,
+    version_id: str,
+    format: str = Query("csv", regex="^(csv|json|parquet)$"),
+    features: Optional[List[str]] = Query(None),
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Export version data in CSV, JSON, or Parquet format.
+
+    - **format**: Export format (csv, json, parquet)
+    - **features**: Optional list of features to include (defaults to all selected features)
+    """
+    service = DatasetVersionService(db)
+    result = service.export_version(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        format=format,
+        features=features,
+    )
+
+    return StreamingResponse(
+        result.content_generator,
+        media_type=result.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+    )
+
+
+@router.get("/{version_id}/preview")
+async def preview_version(
     dataset_id: str,
     version_id: str,
     db=Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    """Get preview of exportable data for a version."""
     service = DatasetVersionService(db)
-    result = service.download_as_csv(dataset_id, version_id, str(current_user["_id"]))
-    return StreamingResponse(
-        iter([result.content]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{result.filename}"'},
+    return service.get_export_preview(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+    )
+
+
+@router.get("/{version_id}/data")
+async def get_version_data(
+    dataset_id: str,
+    version_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get paginated version data with column statistics.
+
+    Returns:
+    - version: Metadata about the version
+    - data: Paginated rows with features
+    - column_stats: Statistics for each feature column (only on page 1)
+    """
+    service = DatasetVersionService(db)
+    return service.get_version_data(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        page=page,
+        page_size=page_size,
     )
 
 

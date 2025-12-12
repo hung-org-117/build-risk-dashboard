@@ -239,8 +239,8 @@ class GitHubClient:
             return cached_data
 
         # Update rate limit info from headers
-        if self._token_pool and self._current_token_key:
-            self._token_pool.update_rate_limit_from_headers(
+        if self._redis_pool and self._current_token_key:
+            self._redis_pool.update_rate_limit_from_headers(
                 self._current_token_key,
                 response.headers,
             )
@@ -570,10 +570,10 @@ class GitHubClient:
                         self._handle_rate_limit(response)
                     break
                 except GithubRateLimitError:
-                    if not self._token_pool:
+                    if not self._redis_pool:
                         raise
-                    self._current_token_key = self._token_pool.acquire_token()
-                    self._token = self._token_pool.get_raw_token(
+                    self._current_token_key = self._redis_pool.acquire_token()
+                    self._token = self._redis_pool.get_raw_token(
                         self._current_token_key
                     )
                     continue

@@ -58,8 +58,18 @@ def export_builds(
     feature_list = features.split(",") if features else None
 
     # Check if too large for streaming
-    if service.should_use_background_job(repo_id, start_date, end_date, build_status):
-        count = service.estimate_row_count(repo_id, start_date, end_date, build_status)
+    if service.should_use_background_job(
+        repo_id=repo_id,
+        start_date=start_date,
+        end_date=end_date,
+        build_status=build_status,
+    ):
+        count = service.estimate_row_count(
+            repo_id=repo_id,
+            start_date=start_date,
+            end_date=end_date,
+            build_status=build_status,
+        )
         raise HTTPException(
             status_code=413,
             detail={
@@ -75,8 +85,8 @@ def export_builds(
 
     return StreamingResponse(
         service.stream_export(
-            repo_id,
             format=format,
+            repo_id=repo_id,
             features=feature_list,
             start_date=start_date,
             end_date=end_date,
@@ -118,7 +128,12 @@ def create_async_export(
     feature_list = features.split(",") if features else None
 
     # Estimate row count
-    count = service.estimate_row_count(repo_id, start_date, end_date, build_status)
+    count = service.estimate_row_count(
+        repo_id=repo_id,
+        start_date=start_date,
+        end_date=end_date,
+        build_status=build_status,
+    )
 
     job = service.create_export_job(
         repo_id=repo_id,
@@ -283,13 +298,27 @@ def preview_export(
     """
     service = ExportService(db)
 
-    count = service.estimate_row_count(repo_id, start_date, end_date, build_status)
+    count = service.estimate_row_count(
+        repo_id=repo_id,
+        start_date=start_date,
+        end_date=end_date,
+        build_status=build_status,
+    )
     use_async = service.should_use_background_job(
-        repo_id, start_date, end_date, build_status
+        repo_id=repo_id,
+        start_date=start_date,
+        end_date=end_date,
+        build_status=build_status,
     )
 
     # Get sample rows (first 5)
-    query = service._build_query(repo_id, start_date, end_date, build_status)
+    query = service._build_query(
+        ExportSource.MODEL_BUILDS,
+        repo_id=repo_id,
+        start_date=start_date,
+        end_date=end_date,
+        build_status=build_status,
+    )
     sample_docs = list(
         service.db.model_builds.find(query).sort("created_at", 1).limit(5)
     )
@@ -298,8 +327,16 @@ def preview_export(
     sample_rows = [service._format_row(doc, feature_list) for doc in sample_docs]
 
     # Get available features
+    from app.services.export_service import ExportSource
+
     available_features = list(
-        service._get_all_feature_keys(repo_id, start_date, end_date, build_status)
+        service._get_all_feature_keys(
+            ExportSource.MODEL_BUILDS,
+            repo_id=repo_id,
+            start_date=start_date,
+            end_date=end_date,
+            build_status=build_status,
+        )
     )
 
     return {
