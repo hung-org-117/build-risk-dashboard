@@ -18,6 +18,7 @@ from .models import (
     LogFile,
     ProviderConfig,
 )
+from app.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -369,11 +370,24 @@ class GitHubActionsProvider(CIProviderInterface):
     async def get_workflow_run(
         self, repo_name: str, run_id: int, installation_id: Optional[str] = None
     ) -> Optional[dict]:
-        """Get a specific workflow run from GitHub API."""
+        """
+        Get a specific workflow run from GitHub API.
+        Datetime fields are normalized to naive UTC.
+        """
         with self._get_github_client(installation_id) as client:
             try:
                 run = client.get_workflow_run(repo_name, run_id)
                 if run:
+                    # Normalize datetime fields to naive UTC
+                    run["created_at"] = parse_datetime(
+                        run.get("created_at"), default_now=False
+                    )
+                    run["updated_at"] = parse_datetime(
+                        run.get("updated_at"), default_now=False
+                    )
+                    run["run_started_at"] = parse_datetime(
+                        run.get("run_started_at"), default_now=False
+                    )
                     return run
                 return None
             except Exception as e:

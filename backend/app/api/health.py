@@ -1,12 +1,14 @@
 """
 Health check endpoints
 """
+
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pymongo.database import Database
 
 from app.database.mongo import get_db
+from app.utils.datetime import utc_now
 
 router = APIRouter()
 
@@ -16,7 +18,7 @@ async def health_check():
     """Simple API health check."""
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now().isoformat(),
         "service": "Build Risk Assessment API",
     }
 
@@ -32,11 +34,11 @@ async def database_health(db: Database = Depends(get_db)):
             "status": "unhealthy",
             "database": "disconnected",
             "error": str(exc),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
         }
 
     return {
         "status": status,
         "database": "connected",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now().isoformat(),
     }

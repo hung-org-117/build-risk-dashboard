@@ -30,13 +30,16 @@ class EnrichmentRepository(BaseEntity):
     validation_error: Optional[str] = None
     validated_at: Optional[datetime] = None
     github_repo_id: Optional[int] = None
-    default_branch: Optional[str] = None
+    default_branch: Optional[str] = "main"
     is_private: bool = False
     builds_total: int = 0
     builds_found: int = 0
     builds_not_found: int = 0
     source_languages: List[str] = Field(default_factory=list)
     test_frameworks: List[str] = Field(default_factory=list)
+    main_lang: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+    installation_id: Optional[str] = None
 
     class Config:
         collection = "enrichment_repositories"

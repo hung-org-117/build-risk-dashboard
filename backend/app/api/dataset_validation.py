@@ -22,11 +22,6 @@ from app.services.dataset_validation_service import (
 router = APIRouter(prefix="/datasets", tags=["dataset-validation"])
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
-
-
 @router.post("/{dataset_id}/repos", response_model=SaveReposResponse)
 async def save_repos(
     dataset_id: str,

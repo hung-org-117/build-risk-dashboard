@@ -410,6 +410,8 @@ class TravisCIProvider(CIProviderInterface):
 
     async def get_workflow_run(self, repo_name: str, run_id: int) -> Optional[dict]:
         """Get a specific build from Travis CI."""
+        from app.utils.datetime import parse_datetime
+
         base_url = self._get_base_url()
         url = f"{base_url}/build/{run_id}"
 
@@ -423,7 +425,15 @@ class TravisCIProvider(CIProviderInterface):
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                return response.json()
+                data = response.json()
+                # Normalize datetime fields to naive UTC
+                data["created_at"] = parse_datetime(
+                    data.get("started_at"), default_now=False
+                )
+                data["updated_at"] = parse_datetime(
+                    data.get("finished_at"), default_now=False
+                )
+                return data
             except Exception as e:
                 logger.warning(f"Failed to get build {run_id}: {e}")
                 return None

@@ -326,6 +326,9 @@ class JenkinsProvider(CIProviderInterface):
 
     async def get_workflow_run(self, repo_name: str, run_id: int) -> Optional[dict]:
         """Get a specific build from Jenkins."""
+        from datetime import datetime as dt
+        from app.utils.datetime import parse_datetime
+
         base_url = self._get_base_url()
         job_path = repo_name.replace("/", "/job/")
         url = f"{base_url}/job/{job_path}/{run_id}/api/json"
@@ -340,7 +343,16 @@ class JenkinsProvider(CIProviderInterface):
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                return response.json()
+                data = response.json()
+                # Jenkins uses Unix timestamp in milliseconds
+                if data.get("timestamp"):
+                    data["created_at"] = dt.utcfromtimestamp(data["timestamp"] / 1000)
+                # Calculate updated_at from timestamp + duration
+                if data.get("timestamp") and data.get("duration"):
+                    data["updated_at"] = dt.utcfromtimestamp(
+                        (data["timestamp"] + data["duration"]) / 1000
+                    )
+                return data
             except Exception as e:
                 logger.warning(f"Failed to get build {run_id} for {repo_name}: {e}")
                 return None

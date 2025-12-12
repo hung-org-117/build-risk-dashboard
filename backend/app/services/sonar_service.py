@@ -16,6 +16,9 @@ from app.entities.failed_scan import FailedScan, ScanStatus
 from app.repositories.scan_result import ScanResultRepository
 from app.repositories.failed_scan import FailedScanRepository
 from app.repositories.model_repository import ModelRepositoryRepository
+from app.utils.datetime import utc_now
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +73,7 @@ class SonarService:
             {
                 "config_override": config_content,
                 "config_source": "text",
-                "updated_at": datetime.utcnow(),
+                "updated_at": utc_now(),
             },
         )
         return updated

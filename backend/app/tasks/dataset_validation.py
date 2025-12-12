@@ -1,5 +1,4 @@
 import logging
-import os
 from datetime import datetime
 from typing import Dict, Set
 
@@ -8,7 +7,6 @@ from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.entities import (
-    DatasetProject,
     DatasetBuild,
     DatasetBuildStatus,
     ValidationStats,
@@ -21,6 +19,7 @@ from app.repositories.dataset_repository import DatasetRepository
 from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.enrichment_repository import EnrichmentRepositoryRepository
 from app.repositories.workflow_run import WorkflowRunRepository
+from app.utils.datetime import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,7 @@ def validate_dataset_task(self, dataset_id: str):
                 dataset_id,
                 {
                     "validation_status": "validating",
-                    "validation_started_at": datetime.utcnow(),
+                    "validation_started_at": utc_now(),
                     "validation_task_id": self.request.id,
                     "validation_progress": 0,
                     "validation_error": None,
@@ -195,15 +194,15 @@ def validate_dataset_task(self, dataset_id: str):
                                 conclusion=workflow_data.get("conclusion", ""),
                                 branch=workflow_data.get("head_branch", ""),
                                 ci_created_at=workflow_data.get("created_at")
-                                or datetime.utcnow(),
+                                or utc_now(),
                                 ci_updated_at=workflow_data.get("updated_at")
-                                or datetime.utcnow(),
+                                or utc_now(),
                                 raw_payload=workflow_data,
                             )
                             workflow_run = workflow_run_repo.insert_one(workflow_run)
                             dataset_build.status = DatasetBuildStatus.FOUND
                             dataset_build.workflow_run_id = workflow_run.id
-                            dataset_build.validated_at = datetime.utcnow()
+                            dataset_build.validated_at = utc_now()
                             builds_found += 1
                             stats.builds_found += 1
                         else:
@@ -213,13 +212,18 @@ def validate_dataset_task(self, dataset_id: str):
                                 if workflow_data
                                 else "Build not found"
                             )
-                            dataset_build.validated_at = datetime.utcnow()
+                            dataset_build.validated_at = utc_now()
                             builds_not_found += 1
                             stats.builds_not_found += 1
                     except Exception as e:
+                        logger.error(
+                            f"Build validation error for repo={repo_name}, "
+                            f"build_id={build_id}: {e}",
+                            exc_info=True,
+                        )
                         dataset_build.status = DatasetBuildStatus.ERROR
                         dataset_build.validation_error = str(e)
-                        dataset_build.validated_at = datetime.utcnow()
+                        dataset_build.validated_at = utc_now()
                         builds_not_found += 1
                         stats.builds_not_found += 1
 
@@ -279,7 +283,7 @@ def validate_dataset_task(self, dataset_id: str):
                 dataset_id,
                 {
                     "validation_status": "completed",
-                    "validation_completed_at": datetime.utcnow(),
+                    "validation_completed_at": utc_now(),
                     "validation_progress": 100,
                     "validation_stats": stats.model_dump(),
                     "stats.build_coverage": build_coverage,
@@ -294,7 +298,7 @@ def validate_dataset_task(self, dataset_id: str):
                 dataset_id,
                 {
                     "validation_status": "failed",
-                    "validation_completed_at": datetime.utcnow(),
+                    "validation_completed_at": utc_now(),
                     "validation_error": str(e),
                 },
             )
@@ -310,7 +314,7 @@ def _update_status(db, dataset_id: str, status: str):
         {
             "$set": {
                 "validation_status": status,
-                "validation_completed_at": datetime.utcnow(),
+                "validation_completed_at": utc_now(),
             }
         },
     )

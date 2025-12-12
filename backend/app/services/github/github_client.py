@@ -29,15 +29,12 @@ from app.services.github.github_token_manager import (
     PublicTokenStatus,
     get_raw_token_from_cache,
 )
+from app.utils.datetime import utc_now, ensure_naive_utc
 
 
 API_PREVIEW_HEADERS = {
     "Accept": "application/vnd.github+json",
 }
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class GitHubTokenPool:
@@ -90,7 +87,7 @@ class GitHubTokenPool:
         if self._db is None:
             return
 
-        now = _now()
+        now = utc_now()
         tokens = self._db.github_tokens.find(
             {
                 "$or": [
@@ -111,8 +108,11 @@ class GitHubTokenPool:
 
                 # Check if token is on cooldown from rate limiting
                 reset_at = token_doc.get("rate_limit_reset_at")
-                if reset_at and reset_at > now:
-                    self._cooldowns[token_hash] = reset_at
+                if reset_at:
+                    # Ensure reset_at is naive UTC for comparison
+                    reset_at = ensure_naive_utc(reset_at)
+                    if reset_at and reset_at > now:
+                        self._cooldowns[token_hash] = reset_at
 
     def acquire_token(self) -> str:
         """
@@ -121,7 +121,7 @@ class GitHubTokenPool:
         Returns the token hash if in DB mode, or raw token if in legacy mode.
         Raises GithubAllRateLimitError if all tokens are rate limited.
         """
-        now = _now()
+        now = utc_now()
 
         with self._lock:
             if self._db_mode:
@@ -901,7 +901,7 @@ def get_public_github_client(
     """
     global _token_pool, _db_token_pool
 
-    # Try Redis-backed pool first (best for concurrency)
+    # Try Redis-backed pool first
     if use_redis:
         try:
             from app.services.github.redis_token_pool import get_redis_token_pool

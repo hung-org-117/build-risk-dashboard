@@ -443,6 +443,8 @@ class CircleCIProvider(CIProviderInterface):
 
     async def get_workflow_run(self, repo_name: str, run_id: int) -> Optional[dict]:
         """Get a specific pipeline from CircleCI."""
+        from app.utils.datetime import parse_datetime
+
         base_url = self._get_base_url()
         url = f"{base_url}/pipeline/{run_id}"
 
@@ -456,7 +458,15 @@ class CircleCIProvider(CIProviderInterface):
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                return response.json()
+                data = response.json()
+                # Normalize datetime fields to naive UTC
+                data["created_at"] = parse_datetime(
+                    data.get("created_at"), default_now=False
+                )
+                data["updated_at"] = parse_datetime(
+                    data.get("updated_at"), default_now=False
+                )
+                return data
             except Exception as e:
                 logger.warning(f"Failed to get pipeline {run_id}: {e}")
                 return None

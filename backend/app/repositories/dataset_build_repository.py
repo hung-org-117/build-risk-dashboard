@@ -24,14 +24,14 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
             }
         )
 
-    def delete_by_dataset(self, dataset_id) -> int:
+    def delete_by_dataset(self, dataset_id: str) -> int:
         """Delete all builds for a dataset."""
         oid = self._to_object_id(dataset_id)
         if not oid:
             return 0
         return self.delete_many({"dataset_id": oid})
 
-    def find_validated_builds(self, dataset_id) -> list[DatasetBuild]:
+    def find_validated_builds(self, dataset_id: str) -> list[DatasetBuild]:
         """Find all validated builds (status=FOUND) for a dataset."""
         oid = self._to_object_id(dataset_id)
         if not oid:

@@ -24,6 +24,7 @@ from app.services.github.github_token_manager import (
     GitHubTokenStatus,
     check_github_token_status,
 )
+from app.utils.datetime import utc_now
 
 
 class AuthService:
@@ -227,11 +228,11 @@ def create_access_token(
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    expire = datetime.utcnow() + expires_delta
+    expire = utc_now() + expires_delta
     payload: dict[str, Any] = {
         "sub": str(subject),
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": utc_now(),
         "type": "access",
     }
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -244,11 +245,11 @@ def create_refresh_token(
     if expires_delta is None:
         expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
-    expire = datetime.utcnow() + expires_delta
+    expire = utc_now() + expires_delta
     payload: dict[str, Any] = {
         "sub": str(subject),
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": utc_now(),
         "type": "refresh",
     }
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -269,7 +270,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
         # Check if token has expired
         exp = payload.get("exp")
-        if exp and datetime.utcnow() > datetime.fromtimestamp(exp):
+        if exp and utc_now() > datetime.fromtimestamp(exp):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
             )
@@ -297,7 +298,7 @@ def decode_refresh_token(token: str) -> dict[str, Any]:
 
         # Check if token has expired
         exp = payload.get("exp")
-        if exp and datetime.utcnow() > datetime.fromtimestamp(exp):
+        if exp and utc_now() > datetime.fromtimestamp(exp):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Refresh token has expired",

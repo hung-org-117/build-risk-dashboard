@@ -430,7 +430,6 @@ class FeaturePipeline:
                 extracted_features = {
                     k: v for k, v in extracted_features.items() if k in features_filter
                 }
-            # Note: All features from code registry are active by default
 
             final_status = context.get_final_status()
 

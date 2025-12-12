@@ -12,6 +12,7 @@ from app.entities.enrichment_repository import (
     RepoValidationStatus,
 )
 from app.entities import CIProvider
+from app.utils.datetime import utc_now
 
 
 class EnrichmentRepoRepository(BaseRepository[EnrichmentRepository]):
@@ -56,7 +57,7 @@ class EnrichmentRepoRepository(BaseRepository[EnrichmentRepository]):
         oid = self._to_object_id(dataset_id)
         existing = self.find_by_dataset_and_name(dataset_id, full_name)
 
-        now = datetime.utcnow()
+        now = utc_now()
 
         if existing:
             # Update existing
