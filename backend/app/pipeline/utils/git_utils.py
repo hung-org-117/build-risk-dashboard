@@ -1,8 +1,8 @@
 """
 Git Utilities using subprocess.
 
-Provides fallback implementations for GitPython operations that may fail
-on certain repositories with submodules or complex histories.
+Provides git operations using subprocess commands for reliable behavior
+across different repository configurations including submodules and complex histories.
 """
 
 import logging
@@ -158,3 +158,65 @@ def get_committer_email(repo_path: Path, sha: str) -> Optional[str]:
         return run_git(repo_path, ["log", "-1", "--format=%ce", sha])
     except Exception:
         return None
+
+
+def get_committed_date(repo_path: Path, sha: str) -> Optional[int]:
+    """Get committed date (unix timestamp) for a commit."""
+    try:
+        ts = run_git(repo_path, ["log", "-1", "--format=%ct", sha])
+        return int(ts) if ts else None
+    except Exception:
+        return None
+
+
+def get_author_name(repo_path: Path, sha: str) -> Optional[str]:
+    """Get author name for a commit."""
+    try:
+        return run_git(repo_path, ["log", "-1", "--format=%an", sha])
+    except Exception:
+        return None
+
+
+def get_committer_name(repo_path: Path, sha: str) -> Optional[str]:
+    """Get committer name for a commit."""
+    try:
+        return run_git(repo_path, ["log", "-1", "--format=%cn", sha])
+    except Exception:
+        return None
+
+
+def git_log_files(
+    repo_path: Path,
+    sha: str,
+    since_iso: str,
+    file_paths: List[str],
+    chunk_size: int = 50,
+) -> set:
+    """
+    Get commit SHAs that touched the given files since a date.
+
+    Args:
+        repo_path: Path to the git repository
+        sha: Starting commit SHA
+        since_iso: ISO format date string for --since
+        file_paths: List of file paths to check
+        chunk_size: Process files in chunks to avoid arg limits
+
+    Returns:
+        Set of commit SHAs that modified the given files
+    """
+    all_shas: set = set()
+
+    for i in range(0, len(file_paths), chunk_size):
+        chunk = file_paths[i : i + chunk_size]
+        try:
+            output = run_git(
+                repo_path,
+                ["log", sha, "--since", since_iso, "--format=%H", "--"] + chunk,
+            )
+            if output:
+                all_shas.update(output.splitlines())
+        except Exception:
+            continue
+
+    return all_shas

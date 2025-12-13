@@ -45,8 +45,8 @@ class GitHubClientProvider(ResourceProvider):
         return ResourceNames.GITHUB_CLIENT
 
     def initialize(self, context: ExecutionContext) -> GitHubClientHandle:
-        repo = context.repo
-        db = context.db
+        repo = context._init_repo
+        db = context._init_db
 
         installation_id = repo.installation_id
 

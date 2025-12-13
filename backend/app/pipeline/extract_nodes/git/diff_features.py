@@ -1,12 +1,3 @@
-"""
-Git Diff Features Node.
-
-Extracts diff-related metrics:
-- Source/test churn
-- File counts by type
-- Test case changes
-"""
-
 import logging
 import subprocess
 from pathlib import Path
@@ -16,7 +7,7 @@ from app.pipeline.extract_nodes import FeatureNode
 from app.pipeline.core.registry import register_feature
 from app.pipeline.core.context import ExecutionContext
 from app.pipeline.resources import ResourceNames
-from app.pipeline.resources.git_repo import GitRepoHandle
+from app.pipeline.resources.git_history import GitHistoryHandle
 from app.pipeline.analyzers import (
     _count_test_cases,
     _is_doc_file,
@@ -30,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @register_feature(
     name="git_diff_features",
-    requires_resources={ResourceNames.GIT_REPO},
+    requires_resources={ResourceNames.GIT_HISTORY, ResourceNames.REPO_ENTITY},
     requires_features={"git_all_built_commits", "git_prev_built_commit"},
     provides={
         "git_diff_src_churn",
@@ -59,8 +50,8 @@ class GitDiffFeaturesNode(FeatureNode):
     """
 
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
-        git_handle: GitRepoHandle = context.get_resource(ResourceNames.GIT_REPO)
-        repo = context.repo
+        git_handle: GitHistoryHandle = context.get_resource(ResourceNames.GIT_HISTORY)
+        repo = context.get_resource(ResourceNames.REPO_ENTITY)
 
         if not git_handle.is_commit_available:
             return self._empty_result()
@@ -82,7 +73,7 @@ class GitDiffFeaturesNode(FeatureNode):
             git_handle.path,
             built_commits,
             prev_built_commit,
-            git_handle.effective_sha,
+            git_handle.effective_sha or "",
             languages,
         )
 
@@ -100,7 +91,7 @@ class GitDiffFeaturesNode(FeatureNode):
         stats = self._empty_result()
 
         # Normalize languages
-        langs = [(l or "").lower() for l in (languages or [])]
+        langs = [(ln or "").lower() for ln in (languages or [])]
         if not langs:
             langs = [""]
 

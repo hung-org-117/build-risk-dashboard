@@ -17,7 +17,7 @@ from app.database.mongo import get_database
 from app.entities.dataset_scan import DatasetScanStatus
 from app.repositories.dataset_scan import DatasetScanRepository
 from app.repositories.dataset_scan_result import DatasetScanResultRepository
-from app.repositories.model_repository import ModelRepositoryRepository
+from app.repositories.enrichment_repository import EnrichmentRepositoryRepository
 from app.integrations import get_tool, ToolType, ScanMode
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def run_dataset_scan(self, scan_id: str):
     db = get_database()
     scan_repo = DatasetScanRepository(db)
     result_repo = DatasetScanResultRepository(db)
-    repo_repo = ModelRepositoryRepository(db)
+    repo_repo = EnrichmentRepositoryRepository(db)
 
     # Load scan
     scan = scan_repo.find_by_id(scan_id)
@@ -142,7 +142,7 @@ def _run_trivy_scan(
     result,
     tool,
     result_repo: DatasetScanResultRepository,
-    repo_repo: ModelRepositoryRepository,
+    repo_repo: EnrichmentRepositoryRepository,
 ):
     """Run Trivy scan on a commit (sync)."""
     from app.integrations.tools.trivy import TrivyTool
@@ -154,8 +154,8 @@ def _run_trivy_scan(
     result_repo.mark_scanning(str(result.id))
 
     # Get or create worktree for the commit
-    worktree_path = _ensure_worktree(
-        result.repo_full_name, result.commit_sha, repo_repo
+    worktree_path, is_temp_clone = _ensure_worktree(
+        str(result.dataset_id), result.repo_full_name, result.commit_sha, repo_repo
     )
 
     if not worktree_path:
@@ -183,15 +183,15 @@ def _run_trivy_scan(
         )
 
     finally:
-        # Cleanup worktree
-        _cleanup_worktree(worktree_path)
+        # Cleanup worktree (only if we created a temp clone)
+        _cleanup_worktree(worktree_path, is_temp_clone)
 
 
 def _start_sonar_scan(
     result,
     tool,
     result_repo: DatasetScanResultRepository,
-    repo_repo: ModelRepositoryRepository,
+    repo_repo: EnrichmentRepositoryRepository,
 ):
     """Start SonarQube scan on a commit (async)."""
     logger.info(
@@ -205,10 +205,13 @@ def _start_sonar_scan(
     result_repo.mark_scanning(str(result.id), component_key)
 
     # Get repo URL
-    repo = repo_repo.find_by_full_name(result.repo_full_name)
+    repo = repo_repo.find_by_dataset_and_full_name(
+        str(result.dataset_id), result.repo_full_name
+    )
     if not repo:
         result_repo.mark_failed(
-            str(result.id), f"Repository not found: {result.repo_full_name}"
+            str(result.id),
+            f"Repository not found: {result.repo_full_name} for dataset {result.dataset_id}",
         )
         raise Exception(f"Repository not found: {result.repo_full_name}")
 
@@ -229,24 +232,51 @@ def _start_sonar_scan(
 
 
 def _ensure_worktree(
+    dataset_id: str,
     repo_full_name: str,
     commit_sha: str,
-    repo_repo: ModelRepositoryRepository,
-) -> Optional[Path]:
+    repo_repo: EnrichmentRepositoryRepository,
+) -> tuple[Optional[Path], bool]:
     """
     Ensure a git worktree exists for the commit.
 
-    Creates a temporary directory with the repo checked out at the specific commit.
+    First checks if a shared worktree exists at repo-data/worktrees/{repo_id}/{commit_sha}.
+    If not, creates a temporary directory with the repo checked out.
+
+    Returns:
+        Tuple of (worktree_path, is_temp_clone)
+        - is_temp_clone: True if we created a temp clone that needs cleanup
     """
     import subprocess
     import tempfile
 
     try:
         # Get repo from DB to check if it exists
-        repo = repo_repo.find_by_full_name(repo_full_name)
+        repo = repo_repo.find_by_dataset_and_full_name(dataset_id, repo_full_name)
         if not repo:
-            logger.error(f"Repository not found in DB: {repo_full_name}")
-            return None
+            logger.error(
+                f"Repository not found in DB: {repo_full_name} for dataset {dataset_id}"
+            )
+            return None, False
+
+        # Check for existing shared worktree first
+        # Path: repo-data/worktrees/{repo_id}/{commit_sha}
+        shared_worktree_base = Path("../repo-data/worktrees") / str(repo.id)
+        shared_worktree_path = shared_worktree_base / commit_sha
+
+        if shared_worktree_path.exists():
+            git_marker = shared_worktree_path / ".git"
+            if git_marker.exists():
+                logger.info(
+                    f"Using existing shared worktree at {shared_worktree_path} "
+                    f"for {commit_sha[:8]}"
+                )
+                return shared_worktree_path, False  # Not a temp clone, don't cleanup
+
+        # No existing worktree found, create a temp clone
+        logger.info(
+            f"No shared worktree found for {commit_sha[:8]}, creating temp clone"
+        )
 
         repo_url = f"https://github.com/{repo_full_name}.git"
 
@@ -302,26 +332,35 @@ def _ensure_worktree(
                 check=True,
             )
 
-        logger.info(f"Created worktree at {worktree_dir} for {commit_sha[:8]}")
-        return worktree_dir
+        logger.info(f"Created temp worktree at {worktree_dir} for {commit_sha[:8]}")
+        return worktree_dir, True  # Is a temp clone, needs cleanup
 
     except subprocess.TimeoutExpired:
         logger.error(f"Timeout cloning {repo_full_name}@{commit_sha}")
-        return None
+        return None, False
     except Exception as e:
         logger.error(
             f"Failed to create worktree for {repo_full_name}@{commit_sha}: {e}"
         )
-        return None
+        return None, False
 
 
-def _cleanup_worktree(worktree_path: Optional[Path]):
-    """Clean up a git worktree."""
+def _cleanup_worktree(worktree_path: Optional[Path], is_temp: bool):
+    """
+    Clean up a git worktree.
+
+    Only cleans up if is_temp is True (we created a temp clone).
+    Shared worktrees are kept for reuse by other tasks.
+    """
     import shutil
+
+    if not is_temp:
+        logger.debug(f"Keeping shared worktree: {worktree_path}")
+        return
 
     try:
         if worktree_path and worktree_path.exists():
             shutil.rmtree(worktree_path, ignore_errors=True)
-            logger.debug(f"Cleaned up worktree: {worktree_path}")
+            logger.debug(f"Cleaned up temp worktree: {worktree_path}")
     except Exception as e:
         logger.warning(f"Failed to cleanup worktree {worktree_path}: {e}")

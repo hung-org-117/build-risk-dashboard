@@ -18,7 +18,8 @@ from app.pipeline.extract_nodes import FeatureNode
 from app.pipeline.core.registry import register_feature
 from app.pipeline.core.context import ExecutionContext
 from app.pipeline.resources import ResourceNames
-from app.pipeline.resources.git_repo import GitRepoHandle
+from app.pipeline.resources.git_history import GitHistoryHandle
+from app.pipeline.resources.git_worktree import GitWorktreeHandle
 from app.pipeline.languages import LanguageRegistry
 from app.pipeline.feature_metadata.repo import REPO_METADATA
 
@@ -27,7 +28,12 @@ logger = logging.getLogger(__name__)
 
 @register_feature(
     name="repo_snapshot_features",
-    requires_resources={ResourceNames.GIT_REPO},
+    requires_resources={
+        ResourceNames.GIT_HISTORY,
+        ResourceNames.GIT_WORKTREE,
+        ResourceNames.REPO_ENTITY,
+        ResourceNames.WORKFLOW_RUN,
+    },
     provides={
         "gh_repo_age",
         "gh_repo_num_commits",
@@ -59,9 +65,12 @@ class RepoSnapshotNode(FeatureNode):
     """
 
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
-        git_handle: GitRepoHandle = context.get_resource(ResourceNames.GIT_REPO)
-        workflow_run = context.workflow_run
-        repo = context.repo
+        git_history: GitHistoryHandle = context.get_resource(ResourceNames.GIT_HISTORY)
+        git_worktree: GitWorktreeHandle = context.get_resource(
+            ResourceNames.GIT_WORKTREE
+        )
+        workflow_run = context.get_resource(ResourceNames.WORKFLOW_RUN)
+        repo = context.get_resource(ResourceNames.REPO_ENTITY)
 
         # Extract metadata from workflow run
         payload = workflow_run.raw_payload if workflow_run else {}
@@ -76,16 +85,21 @@ class RepoSnapshotNode(FeatureNode):
             pr_number = pr_data.get("number")
             pr_created_at = pr_data.get("created_at")
 
-        if not git_handle.is_commit_available:
+        if not git_history.is_commit_available:
             return self._metadata_only(
                 repo, workflow_run, head_branch, is_pr, pr_number, pr_created_at
             )
 
-        effective_sha = git_handle.effective_sha
-        repo_path = git_handle.path
+        effective_sha = git_history.effective_sha
+        repo_path = git_history.path
 
         # History metrics
-        age, num_commits = self._get_history_metrics(context, repo_path, effective_sha)
+        if effective_sha:
+            age, num_commits = self._get_history_metrics(
+                context, repo_path, effective_sha
+            )
+        else:
+            age, num_commits = 0.0, 0
 
         # Collect languages
         languages = []
@@ -96,9 +110,9 @@ class RepoSnapshotNode(FeatureNode):
                 )
                 languages.append(val)
 
-        if git_handle.has_worktree:
+        if git_worktree and git_worktree.is_ready and git_worktree.worktree_path:
             snapshot_metrics = self._analyze_worktree(
-                git_handle.worktree_path, languages
+                git_worktree.worktree_path, languages
             )
         else:
             logger.warning("No shared worktree available for snapshot analysis")

@@ -9,6 +9,7 @@ Resources are shared dependencies that feature nodes need:
 
 Supports LAZY LOADING: Resources are only initialized when first accessed.
 """
+
 from __future__ import annotations
 
 import logging
@@ -219,8 +220,17 @@ class ResourceInitializationError(Exception):
 class ResourceNames:
     """Standard resource names used across the pipeline."""
 
-    GIT_REPO = "git_repo"
+    # Git resources (history-only, no filesystem)
+    GIT_HISTORY = "git_history"
+    # Git resources (filesystem operations on commit)
+    GIT_WORKTREE = "git_worktree"
+
     GITHUB_CLIENT = "github_client"
-    LOG_STORAGE = "log_storage"
+
+    # Entity resources
+    REPO_ENTITY = "repo_entity"
     WORKFLOW_RUN = "workflow_run"
-    BUILD_SAMPLE_REPO = "build_sample_repo"
+    DATABASE = "database"
+
+    # Other resources
+    LOG_STORAGE = "log_storage"

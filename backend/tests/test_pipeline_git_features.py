@@ -7,14 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import sys
 
-# Mocking modules that might not be easily importable or initialized in test env
-sys.modules["app.pipeline.resources"] = MagicMock()
-sys.modules["app.pipeline.resources.git_repo"] = MagicMock()
-sys.modules["app.pipeline.resources.log_storage"] = MagicMock()
-sys.modules["app.pipeline.resources.github_client"] = MagicMock()
-sys.modules["app.pipeline.resources.sonar"] = MagicMock()
 from app.pipeline.resources import ResourceNames
-from app.pipeline.resources.git_repo import GitRepoHandle
 
 # Import the nodes under test
 from app.pipeline.extract_nodes.git.commit_info import GitCommitInfoNode
@@ -36,18 +29,13 @@ class TestGitPipelineFeatures(unittest.TestCase):
         self.git_handle = MagicMock()
         self.git_handle.path = self.test_dir
         self.git_handle.is_commit_available = True
-
-        # Use real git repo object for handle
-        from git import Repo
-
-        self.repo = Repo(self.test_dir)
-        self.git_handle.repo = self.repo
+        self.git_handle.effective_sha = None  # Will be set per test
 
         self.context = MagicMock(spec=ExecutionContext)
         self.context.db = self.db
         self.context.build_sample = self.build_sample
         self.context.get_resource.side_effect = lambda name: (
-            self.git_handle if name == ResourceNames.GIT_REPO else None
+            self.git_handle if name == ResourceNames.GIT_HISTORY else None
         )
 
         # Feature dictionary for context

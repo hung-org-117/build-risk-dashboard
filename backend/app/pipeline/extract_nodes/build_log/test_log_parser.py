@@ -21,7 +21,7 @@ from app.pipeline.feature_metadata.build_log import TEST_LOG_PARSER
 
 @register_feature(
     name="test_log_parser",
-    requires_resources={ResourceNames.LOG_STORAGE},
+    requires_resources={ResourceNames.LOG_STORAGE, ResourceNames.REPO_ENTITY},
     provides={
         "tr_log_frameworks_all",
         "tr_log_tests_run_sum",
@@ -47,7 +47,7 @@ class TestLogParserNode(FeatureNode):
 
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
         log_storage: LogStorageHandle = context.get_resource(ResourceNames.LOG_STORAGE)
-        repo = context.repo
+        repo = context.get_resource(ResourceNames.REPO_ENTITY)
 
         if not log_storage.has_logs:
             return self._empty_result()

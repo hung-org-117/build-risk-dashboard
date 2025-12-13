@@ -13,11 +13,12 @@ from app.pipeline.extract_nodes import FeatureNode
 from app.pipeline.core.registry import register_feature
 from app.pipeline.core.context import ExecutionContext
 from app.pipeline.resources import ResourceNames
-from app.pipeline.resources.git_repo import GitRepoHandle
+from app.pipeline.resources.git_history import GitHistoryHandle
 from app.pipeline.utils.git_utils import (
-    get_commit_info,
+    get_committed_date,
     get_commit_parents,
     get_diff_files,
+    git_log_files,
 )
 from app.pipeline.feature_metadata.git import FILE_TOUCH_HISTORY
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 @register_feature(
     name="file_touch_history",
-    requires_resources={ResourceNames.GIT_REPO},
+    requires_resources={ResourceNames.GIT_HISTORY, ResourceNames.WORKFLOW_RUN},
     requires_features={"git_all_built_commits"},
     provides={
         "gh_num_commits_on_files_touched",
@@ -41,12 +42,11 @@ class FileTouchHistoryNode(FeatureNode):
     CHUNK_SIZE = 50
 
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
-        git_handle: GitRepoHandle = context.get_resource(ResourceNames.GIT_REPO)
+        git_handle: GitHistoryHandle = context.get_resource(ResourceNames.GIT_HISTORY)
 
         if not git_handle.is_commit_available:
             return {"gh_num_commits_on_files_touched": 0}
 
-        repo = git_handle.repo
         repo_path = git_handle.path
         effective_sha = git_handle.effective_sha
         built_commits = context.get_feature("git_all_built_commits", [])
@@ -54,22 +54,14 @@ class FileTouchHistoryNode(FeatureNode):
         if not built_commits:
             return {"gh_num_commits_on_files_touched": 0}
 
-        workflow_run = context.workflow_run
+        workflow_run = context.get_resource(ResourceNames.WORKFLOW_RUN)
         ref_date = getattr(workflow_run, "created_at", None) if workflow_run else None
         if not ref_date:
-            try:
-                current_commit = repo.commit(effective_sha)
-                ref_date = datetime.fromtimestamp(
-                    current_commit.committed_date, tz=timezone.utc
-                )
-            except Exception:
-                commit_info = get_commit_info(repo_path, effective_sha)
-                if commit_info["committed_date"]:
-                    ref_date = datetime.fromtimestamp(
-                        commit_info["committed_date"], tz=timezone.utc
-                    )
-                else:
-                    return {"gh_num_commits_on_files_touched": 0}
+            committed_date = get_committed_date(repo_path, effective_sha)
+            if committed_date:
+                ref_date = datetime.fromtimestamp(committed_date, tz=timezone.utc)
+            else:
+                return {"gh_num_commits_on_files_touched": 0}
 
         if ref_date.tzinfo is None:
             ref_date = ref_date.replace(tzinfo=timezone.utc)
@@ -77,7 +69,7 @@ class FileTouchHistoryNode(FeatureNode):
         start_date = ref_date - timedelta(days=self.LOOKBACK_DAYS)
 
         num_commits = self._calculate_file_history(
-            context, repo, repo_path, built_commits, effective_sha, start_date
+            context, repo_path, built_commits, effective_sha, start_date
         )
 
         return {"gh_num_commits_on_files_touched": num_commits}
@@ -85,7 +77,6 @@ class FileTouchHistoryNode(FeatureNode):
     def _calculate_file_history(
         self,
         context,
-        repo,
         repo_path,
         built_commits: List[str],
         head_sha: str,
@@ -96,57 +87,34 @@ class FileTouchHistoryNode(FeatureNode):
         files_touched: Set[str] = set()
 
         for sha in built_commits:
-            # Try GitPython first
-            try:
-                commit = repo.commit(sha)
-                if commit.parents:
-                    diffs = commit.diff(commit.parents[0])
-                    for d in diffs:
-                        if d.b_path:
-                            files_touched.add(d.b_path)
-                        if d.a_path:
-                            files_touched.add(d.a_path)
-            except Exception as e:
-                # Fallback to subprocess
-                logger.debug(f"GitPython diff failed for {sha}, using subprocess: {e}")
-                parents = get_commit_parents(repo_path, sha)
-                if parents:
-                    diff_files = get_diff_files(repo_path, parents[0], sha)
-                    for f in diff_files:
-                        if f.get("b_path"):
-                            files_touched.add(f["b_path"])
-                        if f.get("a_path"):
-                            files_touched.add(f["a_path"])
+            parents = get_commit_parents(repo_path, sha)
+            if parents:
+                diff_files = get_diff_files(repo_path, parents[0], sha)
+                for f in diff_files:
+                    if f.get("b_path"):
+                        files_touched.add(f["b_path"])
+                    if f.get("a_path"):
+                        files_touched.add(f["a_path"])
 
         if not files_touched:
             return 0
 
-        # Count commits on these files in chunks
-        all_shas: Set[str] = set()
+        # Count commits on these files
         paths = list(files_touched)
         start_iso = start_date.isoformat()
         trigger_sha = built_commits[0] if built_commits else head_sha
 
         try:
-            for i in range(0, len(paths), self.CHUNK_SIZE):
-                chunk = paths[i : i + self.CHUNK_SIZE]
-                commits_on_files = repo.git.log(
-                    trigger_sha,
-                    "--since",
-                    start_iso,
-                    "--format=%H",
-                    "--",
-                    *chunk,
-                ).splitlines()
-                all_shas.update(set(commits_on_files))
+            all_shas = git_log_files(
+                repo_path, trigger_sha, start_iso, paths, self.CHUNK_SIZE
+            )
 
             # Exclude commits that are part of this build
             for sha in built_commits:
                 all_shas.discard(sha)
 
+            return len(all_shas)
         except Exception as e:
             logger.warning(f"Failed to count commits on files: {e}")
             context.add_warning(f"Failed to count commits on files: {e}")
             return 0
-
-        return len(all_shas)

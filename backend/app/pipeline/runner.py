@@ -11,40 +11,26 @@ This module provides:
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
-from bson import ObjectId
 from pymongo.database import Database
 
 from app.pipeline.core.context import ExecutionContext, FeatureStatus
 from app.pipeline.core.executor import PipelineExecutor
 from app.pipeline.core.registry import feature_registry
 from app.pipeline.resources import ResourceManager, ResourceNames
+from app.pipeline.resources.git_history import GitHistoryProvider
+from app.pipeline.resources.git_worktree import GitWorktreeProvider
+from app.pipeline.resources.log_storage import LogStorageProvider
 from app.pipeline.resources.git_repo import GitRepoProvider
 from app.pipeline.resources.github_client import GitHubClientProvider
-from app.pipeline.resources.log_storage import LogStorageProvider
+from app.pipeline.resources.repo_entity import RepoEntityProvider
+from app.pipeline.resources.workflow_run_entity import WorkflowRunProvider
+from app.pipeline.resources.database import DatabaseProvider
 from app.pipeline.constants import DEFAULT_FEATURES
-from app.pipeline.extract_nodes.build_log import (
-    job_metadata,
-    workflow_metadata,
-    test_log_parser,
-)
-from app.pipeline.extract_nodes.git import (
-    commit_info,
-    diff_features,
-    file_touch_history,
-    team_membership,
-)
-from app.pipeline.extract_nodes.github import discussion
-from app.pipeline.extract_nodes.repo import snapshot
 
-from typing import Any
 from app.entities.workflow_run import WorkflowRunRaw
 from app.entities.pipeline_run import PipelineRun, NodeExecutionResult
-from app.repositories.model_build import ModelBuildRepository
-from app.repositories.model_repository import ModelRepositoryRepository
-from app.repositories.workflow_run import WorkflowRunRepository
 from app.repositories.pipeline_run import PipelineRunRepository
 from app.services.notifications import NotificationService, get_notification_service
 
@@ -95,11 +81,17 @@ class FeaturePipeline:
         )
 
         self.resource_manager = ResourceManager()
-        self.resource_manager.register(GitRepoProvider())
+
+        # Entity providers (provide access to repo, workflow_run, db)
+        self.resource_manager.register(RepoEntityProvider())
+        self.resource_manager.register(WorkflowRunProvider())
+        self.resource_manager.register(DatabaseProvider())
+
+        # Git and GitHub providers
+        self.resource_manager.register(GitHistoryProvider())
+        self.resource_manager.register(GitWorktreeProvider())
         self.resource_manager.register(GitHubClientProvider())
         self.resource_manager.register(LogStorageProvider())
-
-        # NOTE: SonarQube and Trivy tools moved to app.integrations module
 
         # Repository for history tracking
         self.pipeline_run_repo = PipelineRunRepository(db) if track_history else None
@@ -155,6 +147,7 @@ class FeaturePipeline:
             return None
 
         pipeline_run = PipelineRun(
+            _id=None,
             build_sample_id=build_sample.id,
             repo_id=repo.id,
             workflow_run_id=workflow_run.workflow_run_id if workflow_run else 0,
@@ -186,6 +179,7 @@ class FeaturePipeline:
             # Convert context results to NodeExecutionResult
             for result in context.results:
                 node_result = NodeExecutionResult(
+                    _id=None,
                     node_name=result.node_name,
                     status=result.status.value,
                     duration_ms=result.duration_ms,
@@ -281,12 +275,11 @@ class FeaturePipeline:
         Returns:
             Dict with status, features, errors, and warnings
         """
-        # Create execution context
+        # Create execution context with internal init values
         context = ExecutionContext(
-            build_sample=build_sample,
-            repo=repo,
-            workflow_run=workflow_run,
-            db=self.db,
+            _init_repo=repo,
+            _init_workflow_run=workflow_run,
+            _init_db=self.db,
         )
 
         # Set workflow_run as a resource for nodes that need it
@@ -444,11 +437,10 @@ class FeaturePipeline:
                     pipeline_run_id=str(pipeline_run.id) if pipeline_run else None,
                     context=context,
                 )
-
             # Check if commit was missing (fork commit that couldn't be replayed)
             is_missing_commit = False
-            if context.has_resource(ResourceNames.GIT_REPO):
-                git_handle = context.get_resource(ResourceNames.GIT_REPO)
+            if context.has_resource(ResourceNames.GIT_HISTORY):
+                git_handle = context.get_resource(ResourceNames.GIT_HISTORY)
                 if (
                     hasattr(git_handle, "is_missing_commit")
                     and git_handle.is_missing_commit

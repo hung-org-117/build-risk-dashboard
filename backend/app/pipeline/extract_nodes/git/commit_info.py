@@ -14,11 +14,8 @@ from app.pipeline.extract_nodes import FeatureNode
 from app.pipeline.core.registry import register_feature, OutputFormat
 from app.pipeline.core.context import ExecutionContext
 from app.pipeline.resources import ResourceNames
-from app.pipeline.resources.git_repo import GitRepoHandle
-from app.pipeline.utils.git_utils import (
-    get_commit_parents,
-    iter_commit_history,
-)
+from app.pipeline.resources.git_history import GitHistoryHandle
+from app.pipeline.utils.git_utils import iter_commit_history
 from app.pipeline.feature_metadata.git import COMMIT_INFO
 
 logger = logging.getLogger(__name__)
@@ -26,7 +23,11 @@ logger = logging.getLogger(__name__)
 
 @register_feature(
     name="git_commit_info",
-    requires_resources={ResourceNames.GIT_REPO},
+    requires_resources={
+        ResourceNames.GIT_HISTORY,
+        ResourceNames.REPO_ENTITY,
+        ResourceNames.WORKFLOW_RUN,
+    },
     provides={
         "git_all_built_commits",
         "git_num_all_built_commits",
@@ -48,9 +49,7 @@ class GitCommitInfoNode(FeatureNode):
     """
 
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
-        git_handle: GitRepoHandle = context.get_resource(ResourceNames.GIT_REPO)
-        build_sample = context.build_sample
-        db = context.db
+        git_handle: GitHistoryHandle = context.get_resource(ResourceNames.GIT_HISTORY)
 
         if not git_handle.is_commit_available:
             return {
@@ -62,131 +61,25 @@ class GitCommitInfoNode(FeatureNode):
             }
 
         effective_sha = git_handle.effective_sha
-        repo = git_handle.repo
         repo_path = git_handle.path
 
-        # We need to find the previous *built* commit in the history of THIS commit
-        # This requires walking back from effective_sha until we find a commit that constitutes a completed build
+        if not effective_sha:
+            return self._empty_result()
 
-        build_stats = self._calculate_build_stats(
-            context, db, build_sample, repo, repo_path, effective_sha
-        )
+        build_stats = self._calculate_build_stats(context, repo_path, effective_sha)
 
         return build_stats
 
     def _calculate_build_stats(
-        self, context, db, build_sample, repo, repo_path, commit_sha: str
+        self, context: ExecutionContext, repo_path, commit_sha: str
     ) -> Dict[str, Any]:
+        """Calculate build stats using subprocess git commands."""
         commits_hex: List[str] = [commit_sha]
         status = "no_previous_build"
         last_commit_sha: Optional[str] = None
         prev_build_id = None
 
-        build_coll = db["model_builds"]
-
-        from bson import ObjectId
-
-        repo_id_query = build_sample.repo_id
-        try:
-            if isinstance(repo_id_query, str):
-                repo_id_query = ObjectId(repo_id_query)
-        except Exception:
-            pass
-
-        walker = None
-        use_subprocess = False
-
-        try:
-            walker = repo.iter_commits(commit_sha, max_count=1000)
-        except Exception as e:
-            logger.info(
-                f"GitPython iter_commits failed, using subprocess fallback: {e}"
-            )
-            use_subprocess = True
-
-        if use_subprocess:
-            # Subprocess fallback
-            return self._calculate_build_stats_subprocess(
-                context, build_coll, build_sample, repo_path, commit_sha, repo_id_query
-            )
-
-        # Use GitPython walker
-        first = True
-        for commit in walker:
-            try:
-                hexsha = commit.hexsha
-
-                if first:
-                    # Check if merge - try GitPython first, then subprocess
-                    try:
-                        parents = commit.parents
-                        if len(parents) > 1:
-                            status = "merge_found"
-                            break
-                    except Exception:
-                        # Fallback to subprocess for parents
-                        parents = get_commit_parents(repo_path, hexsha)
-                        if len(parents) > 1:
-                            status = "merge_found"
-                            break
-                    first = False
-                    continue
-
-                last_commit_sha = hexsha
-
-                # Check if this commit triggered a build
-                existing_build = build_coll.find_one(
-                    {
-                        "repo_id": repo_id_query,
-                        "head_sha": hexsha,
-                        "workflow_run_id": {"$ne": build_sample.workflow_run_id},
-                    }
-                )
-
-                if existing_build:
-                    status = "build_found"
-                    prev_build_id = existing_build.get("workflow_run_id")
-                    break
-
-                commits_hex.append(hexsha)
-
-                # Check merge - try GitPython first, then subprocess
-                try:
-                    if len(commit.parents) > 1:
-                        status = "merge_found"
-                        break
-                except Exception:
-                    parents = get_commit_parents(repo_path, hexsha)
-                    if len(parents) > 1:
-                        status = "merge_found"
-                        break
-            except Exception as e:
-                logger.warning(f"Error processing commit in history: {e}")
-                context.add_warning(f"Git commit walking error: {e}")
-                break  # Stop iteration on error
-
-        return {
-            "git_prev_commit_resolution_status": status,
-            "git_prev_built_commit": last_commit_sha,
-            "tr_prev_build": prev_build_id,
-            "git_all_built_commits": commits_hex,
-            "git_num_all_built_commits": len(commits_hex),
-        }
-
-    def _calculate_build_stats_subprocess(
-        self,
-        context,
-        build_coll,
-        build_sample,
-        repo_path,
-        commit_sha: str,
-        repo_id_query,
-    ) -> Dict[str, Any]:
-        """Calculate build stats using subprocess when GitPython fails."""
-        commits_hex: List[str] = [commit_sha]
-        status = "no_previous_build"
-        last_commit_sha: Optional[str] = None
-        prev_build_id = None
+        repo_id = context.get_resource(ResourceNames.REPO_ENTITY).id
 
         first = True
         for commit_info in iter_commit_history(repo_path, commit_sha, max_count=1000):
@@ -202,13 +95,11 @@ class GitCommitInfoNode(FeatureNode):
 
             last_commit_sha = hexsha
 
-            # Check if this commit triggered a build
-            existing_build = build_coll.find_one(
-                {
-                    "repo_id": repo_id_query,
-                    "head_sha": hexsha,
-                    "workflow_run_id": {"$ne": build_sample.workflow_run_id},
-                }
+            workflow_run_resource = context.get_resource(ResourceNames.WORKFLOW_RUN)
+            existing_build = (
+                workflow_run_resource.find_one({"head_sha": hexsha, "repo_id": repo_id})
+                if hasattr(workflow_run_resource, "find_one")
+                else None
             )
 
             if existing_build:
@@ -228,4 +119,13 @@ class GitCommitInfoNode(FeatureNode):
             "tr_prev_build": prev_build_id,
             "git_all_built_commits": commits_hex,
             "git_num_all_built_commits": len(commits_hex),
+        }
+
+    def _empty_result(self) -> Dict[str, Any]:
+        return {
+            "git_all_built_commits": [],
+            "git_num_all_built_commits": 0,
+            "git_prev_built_commit": None,
+            "git_prev_commit_resolution_status": "commit_not_found",
+            "tr_prev_build": None,
         }

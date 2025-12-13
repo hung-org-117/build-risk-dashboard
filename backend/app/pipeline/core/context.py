@@ -9,17 +9,14 @@ The context flows through all feature nodes and accumulates:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union
 from enum import Enum
 
-from app.entities.model_build import ModelBuild
-from app.entities.enrichment_build import EnrichmentBuild
 from app.entities.model_repository import ModelRepository
 from app.entities.enrichment_repository import EnrichmentRepository
 from app.entities.workflow_run import WorkflowRunRaw
 
-BuildType = ModelBuild | EnrichmentBuild
-RepoType = ModelRepository | EnrichmentRepository
+RepoType = Union[ModelRepository, EnrichmentRepository]
 
 
 class FeatureStatus(str, Enum):
@@ -54,23 +51,11 @@ class FeatureResult:
 
 @dataclass
 class ExecutionContext:
-    """
-    Runtime context for pipeline execution.
-
-    This context is passed to every feature node and contains:
-    - Entity references (build_sample, repo, workflow_run)
-    - Initialized resources (git repo handle, github client, etc.)
-    - Accumulated features from previously executed nodes
-    - Tracking of execution results
-    """
-
-    # Core entities (supports both Model and Enrichment flows)
-    build_sample: BuildType
-    repo: RepoType
-    workflow_run: Optional[WorkflowRunRaw] = None
-
-    # Database reference (for accessing repositories if needed)
-    db: Any = None
+    # Internal init values (used by resource providers only)
+    # These are set during context creation and accessed via resources
+    _init_repo: Optional[RepoType] = None
+    _init_workflow_run: Optional[WorkflowRunRaw] = None
+    _init_db: Any = None
 
     # Initialized resources (populated by ResourceProviders)
     # Keys: resource names like "git_repo", "github_client"

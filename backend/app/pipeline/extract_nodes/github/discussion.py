@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 
 @register_feature(
     name="github_discussion_features",
-    requires_resources={ResourceNames.GITHUB_CLIENT},
+    requires_resources={
+        ResourceNames.GITHUB_CLIENT,
+        ResourceNames.REPO_ENTITY,
+        ResourceNames.WORKFLOW_RUN,
+    },
     requires_features={"git_all_built_commits"},
     provides={
         "gh_num_issue_comments",
@@ -31,9 +35,8 @@ class GitHubDiscussionNode(FeatureNode):
         gh_handle: GitHubClientHandle = context.get_resource(
             ResourceNames.GITHUB_CLIENT
         )
-        workflow_run = context.workflow_run
-        repo = context.repo
-        build_sample = context.build_sample
+        workflow_run = context.get_resource(ResourceNames.WORKFLOW_RUN)
+        repo = context.get_resource(ResourceNames.REPO_ENTITY)
 
         client = gh_handle.client
         full_name = repo.full_name

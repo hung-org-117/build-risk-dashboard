@@ -64,11 +64,9 @@ class LogStorageProvider(ResourceProvider):
     def name(self) -> str:
         return ResourceNames.LOG_STORAGE
 
-    def initialize(self, context: "ExecutionContext") -> LogStorageHandle:
-        build_sample = context.build_sample
-
-        repo_id = str(build_sample.repo_id)
-        run_id = build_sample.workflow_run_id
+    def initialize(self, context: ExecutionContext) -> LogStorageHandle:
+        repo_id = str(context._init_repo.id)
+        run_id = context._init_workflow_run.id
 
         run_log_dir = self.log_dir / repo_id / str(run_id)
 

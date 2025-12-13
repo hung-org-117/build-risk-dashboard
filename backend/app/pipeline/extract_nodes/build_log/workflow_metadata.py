@@ -19,7 +19,11 @@ from app.pipeline.feature_metadata.build_log import WORKFLOW_METADATA
 
 @register_feature(
     name="workflow_metadata",
-    requires_resources={ResourceNames.GITHUB_CLIENT},
+    requires_resources={
+        ResourceNames.GITHUB_CLIENT,
+        ResourceNames.REPO_ENTITY,
+        ResourceNames.WORKFLOW_RUN,
+    },
     provides={
         "tr_build_id",
         "tr_build_number",
@@ -40,8 +44,8 @@ class WorkflowMetadataNode(FeatureNode):
     """Extracts cheap metadata from workflow run (no log parsing)."""
 
     def extract(self, context: ExecutionContext) -> Dict[str, Any]:
-        workflow_run = context.workflow_run
-        repo = context.repo
+        workflow_run = context.get_resource(ResourceNames.WORKFLOW_RUN)
+        repo = context.get_resource(ResourceNames.REPO_ENTITY)
 
         return {
             "tr_build_id": workflow_run.workflow_run_id if workflow_run else None,
