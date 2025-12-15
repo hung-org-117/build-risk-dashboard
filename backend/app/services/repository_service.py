@@ -359,7 +359,7 @@ class RepositoryService:
             - by_language: Frameworks grouped by language
             - languages: List of languages with test framework support
         """
-        from app.pipeline.feature_dag.log_parsers import LogParserRegistry
+        from app.tasks.pipeline.feature_dag.log_parsers import LogParserRegistry
 
         registry = LogParserRegistry()
 

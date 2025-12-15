@@ -21,14 +21,10 @@ from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
-from app.pipeline.hamilton_runner import HamiltonPipeline
-from app.pipeline.feature_dag._inputs import (
-    build_hamilton_inputs,
-    HamiltonInputs,
-)
+from app.tasks.shared import extract_features_for_build
 from app.config import settings
 from app.paths import REPOS_DIR
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     format_features_for_storage,
 )
 from app.repositories.dataset_template_repository import DatasetTemplateRepository
@@ -122,56 +118,19 @@ def process_workflow_run(
             logger.error(f"RawRepository {repo_id} not found")
             return {"status": "error", "message": "RawRepository not found"}
 
-        # Build paths for git operations
-        repo_path = REPOS_DIR / repo_id
-
-        # Build all Hamilton inputs using helper function
-        inputs = build_hamilton_inputs(
-            raw_repo=raw_repo,
-            repo_config=repo,
-            build_run=build_run,
-            repo_path=repo_path,
-        )
-
-        # Initialize Hamilton pipeline
-        pipeline = HamiltonPipeline(db=self.db)
-
         # Get feature names from template
         template_repo = DatasetTemplateRepository(self.db)
         template = template_repo.find_by_name("TravisTorrent Full")
-        if template:
-            feature_names = template.feature_names
-        else:
-            logger.warning(
-                "TravisTorrent Full template not found, using empty feature list"
-            )
-            feature_names = []
+        feature_names = template.feature_names if template else []
 
-        # Execute Hamilton pipeline
-        features = pipeline.run(
-            git_history=inputs.git_history,
-            git_worktree=inputs.git_worktree,
-            repo=inputs.repo,
-            workflow_run=inputs.workflow_run,
-            repo_config=inputs.repo_config,
-            github_client=None,
-            features_filter=set(feature_names) if feature_names else None,
+        # Use shared helper for feature extraction with status
+        result = extract_features_for_build(
+            db=self.db,
+            raw_repo=raw_repo,
+            repo_config=repo,
+            build_run=build_run,
+            selected_features=feature_names,
         )
-
-        # Build result similar to old wrapper format
-        result = {
-            "status": "completed",
-            "features": features,
-            "feature_count": len(features),
-            "errors": [],
-            "warnings": [],
-            "is_missing_commit": not inputs.is_commit_available,
-        }
-
-        if not inputs.is_commit_available:
-            result["warnings"].append(
-                f"Commit {workflow_run.head_sha} not found in repo"
-            )
 
         updates = {}
         raw_features = result.get("features", {})

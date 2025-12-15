@@ -3,22 +3,22 @@ Model Ingestion Tasks - Chain-based workflow for importing repositories.
 
 This module implements a clean, chain-based Celery workflow:
 1. import_repo - Orchestrator that starts the chain
-2. clone_repo - Clone/update the git repository
+2. clone_repo (from shared) - Clone/update the git repository
 3. fetch_and_save_builds - Fetch builds from CI provider and save to DB
-4. dispatch_processing - Schedule feature extraction in batches
+4. download_build_logs (from shared) - Download build logs
+5. create_worktrees_batch (from shared) - Create git worktrees
+6. dispatch_processing - Schedule feature extraction in batches
 """
 
 from app.repositories.raw_repository import RawRepositoryRepository
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
-from pathlib import Path
 
 from bson import ObjectId
 from celery import chain, group
 import redis
 import json
-import subprocess
 
 from app.celery_app import celery_app
 from app.config import settings
@@ -32,13 +32,16 @@ from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.ci_providers import CIProvider, get_provider_config, get_ci_provider
 from app.ci_providers.models import BuildStatus, BuildConclusion
 from app.services.github.exceptions import GithubRateLimitError
-from app.paths import REPOS_DIR, LOGS_DIR, WORKTREES_DIR
-from app.pipeline.feature_dag._metadata import (
+from app.paths import REPOS_DIR
+from app.tasks.pipeline.feature_dag._metadata import (
     get_required_resources_for_features,
-    get_ingestion_tasks_for_resources,
     FeatureResource,
 )
+from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.repositories.dataset_template_repository import DatasetTemplateRepository
+
+# Import shared ingestion tasks and helpers
+from app.tasks.shared import build_ingestion_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +84,6 @@ def get_required_resources_for_template(
 
 
 # Task 1: import_repo - Orchestrator
-
-
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -136,49 +137,46 @@ def import_repo(
         # Determine required resources based on template
         required_resources = get_required_resources_for_template(self.db)
 
-        # Get ordered ingestion tasks for required resources
-        ingestion_tasks = get_ingestion_tasks_for_resources(required_resources)
+        # Get tasks grouped by level from resource_dag
+        tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
 
         logger.info(
             f"Required resources for {full_name}: {required_resources}. "
-            f"Ingestion tasks: {ingestion_tasks}"
+            f"Tasks by level: {tasks_by_level}"
         )
 
-        # Build chain dynamically
-        # Always: fetch_builds (mandatory for getting build info)
-        tasks = [
-            fetch_and_save_builds.s(
-                repo_id=repo_id,
-                full_name=full_name,
-                installation_id=installation_id,
-                ci_provider=ci_provider,
-                max_builds=max_builds,
-                since_days=since_days,
-                only_with_logs=only_with_logs,
-            ),
-        ]
+        # Add fetch_and_save_builds to level 0 (always needed for model pipeline)
+        if 0 not in tasks_by_level:
+            tasks_by_level[0] = []
+        if "fetch_and_save_builds" not in tasks_by_level.get(0, []):
+            tasks_by_level[0].append("fetch_and_save_builds")
 
-        # Add ingestion tasks in dependency order
-        for task_name in ingestion_tasks:
-            if task_name == "clone_repo":
-                # Insert clone_repo at beginning (before fetch_builds needs it for GIT_HISTORY)
-                tasks.insert(0, clone_repo.s(repo_id, full_name, installation_id))
-            elif task_name == "download_build_logs":
-                tasks.append(
-                    download_build_logs.s(
-                        repo_id=repo_id,
-                        full_name=full_name,
-                        installation_id=installation_id,
-                        ci_provider=ci_provider,
-                    )
-                )
-            elif task_name == "create_worktrees_batch":
-                tasks.append(create_worktrees_batch.s(repo_id=repo_id))
+        # Build workflow using shared helper
+        workflow = build_ingestion_workflow(
+            tasks_by_level=tasks_by_level,
+            repo_id=repo_id,
+            full_name=full_name,
+            ci_provider=ci_provider,
+            installation_id=installation_id,
+            publish_status=True,
+            enable_fork_replay=True,
+            final_task=dispatch_processing.s(repo_id=repo_id),
+            # Custom task factory for fetch_and_save_builds
+            custom_tasks={
+                "fetch_and_save_builds": fetch_and_save_builds.s(
+                    repo_id=repo_id,
+                    full_name=full_name,
+                    installation_id=installation_id,
+                    ci_provider=ci_provider,
+                    max_builds=max_builds,
+                    since_days=since_days,
+                    only_with_logs=only_with_logs,
+                ),
+            },
+        )
 
-        tasks.append(dispatch_processing.s(repo_id=repo_id))
-
-        workflow = chain(*tasks)
-        workflow.apply_async()
+        if workflow:
+            workflow.apply_async()
 
         return {
             "status": "queued",
@@ -200,74 +198,7 @@ def import_repo(
         raise
 
 
-# Task 2: clone_repo - Clone/update git repository
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.model_ingestion.clone_repo",
-    queue="import_repo",
-    autoretry_for=(subprocess.CalledProcessError,),
-    retry_kwargs={"max_retries": 3, "countdown": 360},
-)
-def clone_repo(
-    self: PipelineTask,
-    repo_id: str,
-    full_name: str,
-    installation_id: str,
-) -> Dict[str, Any]:
-    """
-    Clone or update the git repository.
-
-    Returns repo_id for chaining.
-    """
-    publish_status(repo_id, "importing", "Cloning repository...")
-
-    repo_path = REPOS_DIR / repo_id
-
-    try:
-        if repo_path.exists():
-            # Update existing clone
-            logger.info(f"Updating existing clone for {full_name}")
-            subprocess.run(
-                ["git", "fetch", "--all", "--prune"],
-                cwd=str(repo_path),
-                check=True,
-                capture_output=True,
-                timeout=300,
-            )
-        else:
-            # Clone new repo
-            logger.info(f"Cloning {full_name} to {repo_path}")
-            clone_url = f"https://github.com/{full_name}.git"
-
-            # For private repos, we need to use the installation token
-            if installation_id:
-                from app.services.github.github_app import get_installation_token
-
-                token = get_installation_token(installation_id, self.db)
-                clone_url = f"https://x-access-token:{token}@github.com/{full_name}.git"
-
-            subprocess.run(
-                ["git", "clone", "--bare", clone_url, str(repo_path)],
-                check=True,
-                capture_output=True,
-                timeout=600,
-            )
-
-        publish_status(repo_id, "importing", "Repository cloned successfully")
-        return {"repo_id": repo_id, "status": "cloned"}
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Git operation failed for {full_name}: {e.stderr}")
-        raise
-    except Exception as e:
-        logger.error(f"Failed to clone {full_name}: {e}")
-        raise
-
-
-# Task 3: fetch_and_save_builds - Fetch from CI and save to DB
-
-
+# Task 2: fetch_and_save_builds - Fetch from CI and save to DB
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -440,373 +371,7 @@ def fetch_and_save_builds(
         raise
 
 
-# Task 4: download_build_logs - Download logs for builds (conditional)
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.model_ingestion.download_build_logs",
-    queue="import_repo",
-    autoretry_for=(GithubRateLimitError,),
-    retry_kwargs={"max_retries": 3},
-)
-def download_build_logs(
-    self: PipelineTask,
-    prev_result: Dict[str, Any],  # Result from previous task
-    repo_id: str,
-    full_name: str,
-    installation_id: str,
-    ci_provider: str,
-) -> Dict[str, Any]:
-    """
-    Download build job logs from CI provider.
-
-    Downloads all available logs, handling expired logs gracefully.
-    GitHub Actions retains logs for 90 days by default.
-    """
-    import asyncio
-    from app.services.github.exceptions import GithubLogsUnavailableError
-
-    build_ids = prev_result.get("build_ids", [])
-
-    if not build_ids:
-        return {**prev_result, "logs_downloaded": 0, "logs_expired": 0}
-
-    publish_status(
-        repo_id, "importing", f"Downloading logs for {len(build_ids)} builds..."
-    )
-
-    build_run_repo = RawBuildRunRepository(self.db)
-
-    # Get CI provider instance
-    ci_provider_enum = CIProvider(ci_provider)
-    provider_config = get_provider_config(ci_provider_enum)
-    ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=self.db)
-
-    logs_downloaded = 0
-    logs_expired = 0
-    logs_skipped = 0
-    max_log_size = settings.MAX_LOG_SIZE_MB * 1024 * 1024  # Convert to bytes
-
-    async def download_logs_for_build(build_id: str) -> str:
-        """
-        Download logs for a single build.
-
-        Returns:
-            "downloaded" - logs saved successfully
-            "expired" - logs no longer available (retention expired)
-            "skipped" - logs already downloaded
-            "failed" - other error
-        """
-        nonlocal logs_downloaded, logs_expired, logs_skipped
-
-        # Check if logs already downloaded
-        build_run = build_run_repo.find_by_repo_and_build_id(repo_id, build_id)
-        if build_run and build_run.logs_available:
-            logs_skipped += 1
-            return "skipped"
-
-        try:
-            # Create build-specific logs directory
-            build_logs_dir = LOGS_DIR / repo_id / build_id
-            build_logs_dir.mkdir(parents=True, exist_ok=True)
-
-            # Compose build_id in format expected by provider (repo_name:build_id)
-            composite_id = f"{full_name}:{build_id}"
-
-            # Pass installation_id for GitHub
-            fetch_kwargs = {"build_id": composite_id}
-            if ci_provider_enum == CIProvider.GITHUB_ACTIONS and installation_id:
-                fetch_kwargs["installation_id"] = installation_id
-
-            log_files = await ci_instance.fetch_build_logs(**fetch_kwargs)
-
-            # No logs returned - likely expired
-            if not log_files:
-                if build_run:
-                    build_run_repo.update_one(
-                        str(build_run.id),
-                        {"logs_available": False, "logs_expired": True},
-                    )
-                logs_expired += 1
-                return "expired"
-
-            saved_files = []
-            for log_file in log_files:
-                # Skip logs that are too large
-                if log_file.size_bytes > max_log_size:
-                    logger.warning(
-                        f"Skipping log {log_file.path} ({log_file.size_bytes} bytes) - exceeds limit"
-                    )
-                    continue
-
-                # Save log to file
-                log_path = build_logs_dir / f"{log_file.job_name}.log"
-                log_path.write_text(log_file.content)
-                saved_files.append(str(log_path))
-
-            if saved_files:
-                # Update RawBuildRun with logs info
-                if build_run:
-                    build_run_repo.update_one(
-                        str(build_run.id),
-                        {
-                            "logs_path": str(build_logs_dir),
-                            "logs_available": True,
-                            "logs_expired": False,
-                        },
-                    )
-                logs_downloaded += 1
-                return "downloaded"
-            else:
-                logs_expired += 1
-                return "expired"
-
-        except GithubLogsUnavailableError as e:
-            # Logs expired or unavailable
-            logger.info(f"Logs unavailable for build {build_id}: {e.reason}")
-            if build_run:
-                build_run_repo.update_one(
-                    str(build_run.id),
-                    {"logs_available": False, "logs_expired": True},
-                )
-            logs_expired += 1
-            return "expired"
-        except Exception as e:
-            logger.warning(f"Failed to download logs for build {build_id}: {e}")
-            return "failed"
-
-    # Run async downloads for ALL builds
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        # Process all builds, but stop if all remaining are expired
-        consecutive_expired = 0
-        MAX_CONSECUTIVE_EXPIRED = 10  # Stop if 10 consecutive builds have expired logs
-        batch_size = settings.DOWNLOAD_LOGS_BATCH_SIZE
-
-        for i, build_id in enumerate(build_ids):
-            result = loop.run_until_complete(download_logs_for_build(build_id))
-
-            if result == "expired":
-                consecutive_expired += 1
-                # If many consecutive builds have expired logs, older builds likely expired too
-                if consecutive_expired >= MAX_CONSECUTIVE_EXPIRED:
-                    logger.info(
-                        f"Stopping log download: {consecutive_expired} consecutive expired logs. "
-                        f"Remaining {len(build_ids) - i - 1} builds likely expired too."
-                    )
-                    logs_expired += len(build_ids) - i - 1
-                    break
-            else:
-                consecutive_expired = 0
-
-            # Progress update every batch_size builds
-            if (i + 1) % batch_size == 0:
-                publish_status(
-                    repo_id,
-                    "importing",
-                    f"Downloaded logs: {logs_downloaded}/{i+1} ({logs_expired} expired)",
-                )
-    finally:
-        loop.close()
-
-    publish_status(
-        repo_id,
-        "importing",
-        f"Logs: {logs_downloaded} downloaded, {logs_expired} expired, {logs_skipped} skipped",
-    )
-
-    return {
-        **prev_result,
-        "logs_downloaded": logs_downloaded,
-        "logs_expired": logs_expired,
-        "logs_skipped": logs_skipped,
-    }
-
-
-# Task 5: create_worktrees_batch - Pre-create git worktrees for all builds
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.model_ingestion.create_worktrees_batch",
-    queue="import_repo",
-)
-def create_worktrees_batch(
-    self: PipelineTask,
-    prev_result: Dict[str, Any],  # Result from previous task
-    repo_id: str,
-) -> Dict[str, Any]:
-    """
-    Pre-create git worktrees for all builds that need them.
-
-    This batches the worktree creation during ingestion instead of
-    creating them one-by-one during processing.
-
-    Also handles fork commits by replaying them and saving effective_sha to DB.
-    """
-    build_ids = prev_result.get("build_ids", [])
-
-    if not build_ids:
-        return {**prev_result, "worktrees_created": 0}
-
-    publish_status(
-        repo_id, "importing", f"Creating worktrees for {len(build_ids)} builds..."
-    )
-
-    build_run_repo = RawBuildRunRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
-    raw_repo = raw_repo_repo.find_by_id(repo_id)
-
-    repo_path = REPOS_DIR / repo_id
-    worktrees_dir = WORKTREES_DIR / repo_id
-    worktrees_dir.mkdir(parents=True, exist_ok=True)
-
-    # Get GitHub client for fork commit replay
-    github_client = None
-    try:
-        from app.services.github.github_client import get_public_github_client
-
-        github_client = get_public_github_client()
-    except Exception as e:
-        logger.warning(f"Failed to get GitHub client for fork replay: {e}")
-
-    # Prune stale worktrees first
-    try:
-        subprocess.run(
-            ["git", "worktree", "prune"],
-            cwd=str(repo_path),
-            capture_output=True,
-            check=False,
-            timeout=60,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to prune worktrees: {e}")
-
-    worktrees_created = 0
-    worktrees_skipped = 0
-    worktrees_failed = 0
-    fork_commits_replayed = 0
-
-    # Track unique commit SHAs to avoid duplicating worktrees
-    commit_shas_seen = set()
-
-    for i, build_id in enumerate(build_ids):
-        build_run = build_run_repo.find_by_repo_and_build_id(repo_id, str(build_id))
-        if not build_run:
-            continue
-
-        commit_sha = build_run.commit_sha
-        if not commit_sha:
-            continue
-
-        # Use effective_sha if already set (previously replayed)
-        effective_sha = build_run.effective_sha or commit_sha
-
-        # Skip if we already created worktree for this commit
-        if effective_sha in commit_shas_seen:
-            worktrees_skipped += 1
-            continue
-        commit_shas_seen.add(effective_sha)
-
-        # Check if worktree already exists
-        worktree_path = worktrees_dir / effective_sha[:12]
-        if worktree_path.exists():
-            worktrees_skipped += 1
-            continue
-
-        try:
-            # Check if commit exists in repo
-            result = subprocess.run(
-                ["git", "cat-file", "-e", effective_sha],
-                cwd=str(repo_path),
-                capture_output=True,
-                timeout=10,
-            )
-
-            if result.returncode != 0:
-                # Commit not available - attempt to replay fork commit
-                if github_client and raw_repo:
-                    try:
-                        from app.services.commit_replay import ensure_commit_exists
-
-                        synthetic_sha = ensure_commit_exists(
-                            repo_path=repo_path,
-                            commit_sha=commit_sha,
-                            repo_slug=raw_repo.full_name,
-                            github_client=github_client,
-                        )
-                        if synthetic_sha:
-                            # Save effective_sha to DB
-                            build_run_repo.update_effective_sha(
-                                build_run.id, synthetic_sha
-                            )
-                            effective_sha = synthetic_sha
-                            fork_commits_replayed += 1
-                            logger.info(
-                                f"Replayed fork commit {commit_sha[:8]} -> {synthetic_sha[:8]}"
-                            )
-                        else:
-                            worktrees_skipped += 1
-                            continue
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to replay fork commit {commit_sha[:8]}: {e}"
-                        )
-                        worktrees_skipped += 1
-                        continue
-                else:
-                    worktrees_skipped += 1
-                    continue
-
-            # Create worktree
-            worktree_path = worktrees_dir / effective_sha[:12]
-            subprocess.run(
-                [
-                    "git",
-                    "worktree",
-                    "add",
-                    "--detach",
-                    str(worktree_path),
-                    effective_sha,
-                ],
-                cwd=str(repo_path),
-                check=True,
-                capture_output=True,
-                timeout=60,
-            )
-            worktrees_created += 1
-
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to create worktree for {effective_sha[:8]}: {e}")
-            worktrees_failed += 1
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout creating worktree for {effective_sha[:8]}")
-            worktrees_failed += 1
-
-        # Progress update every 50 builds
-        if (i + 1) % 50 == 0:
-            publish_status(
-                repo_id,
-                "importing",
-                f"Worktrees: {worktrees_created} created, {worktrees_skipped} skipped",
-            )
-
-    publish_status(
-        repo_id,
-        "importing",
-        f"Worktrees: {worktrees_created} created, {fork_commits_replayed} replayed, {worktrees_failed} failed",
-    )
-
-    return {
-        **prev_result,
-        "worktrees_created": worktrees_created,
-        "worktrees_skipped": worktrees_skipped,
-        "worktrees_failed": worktrees_failed,
-        "fork_commits_replayed": fork_commits_replayed,
-    }
-
-
-# Task 6: dispatch_processing - Schedule feature extraction in batches
+# Task 3: dispatch_processing - Schedule feature extraction in batches
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -815,7 +380,7 @@ def create_worktrees_batch(
 )
 def dispatch_processing(
     self: PipelineTask,
-    fetch_result: Dict[str, Any],  # Result from fetch_and_save_builds
+    fetch_result: Dict[str, Any],  # Result from previous task
     repo_id: str,
     batch_size: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -834,7 +399,6 @@ def dispatch_processing(
     if not build_ids:
         logger.info(f"No builds to process for repo {repo_id}")
 
-        # Mark as imported anyway
         model_repo_repo = ModelRepoConfigRepository(self.db)
         model_repo_repo.update_repository(
             repo_id,

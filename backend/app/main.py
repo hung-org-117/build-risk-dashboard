@@ -97,7 +97,7 @@ async def startup_event():
 
     # Import pipeline to trigger feature module loading
     try:
-        from app.pipeline.hamilton_runner import HamiltonPipeline
+        from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
         from app.database.mongo import get_database
 
         db = get_database()

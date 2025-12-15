@@ -10,12 +10,12 @@ from typing import List, Optional
 
 from hamilton.function_modifiers import tag
 
-from app.pipeline.feature_dag._inputs import (
+from app.tasks.pipeline.feature_dag._inputs import (
     RepoInput,
     BuildRunInput,
     RepoConfigInput,
 )
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,
     FeatureCategory,
     FeatureDataType,

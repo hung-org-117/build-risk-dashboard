@@ -15,13 +15,13 @@ from typing import Any, Dict, List, Optional, Set
 
 from hamilton import driver
 
-from app.pipeline.feature_dag import (
+from app.tasks.pipeline.feature_dag import (
     build_features,
     git_features,
     github_features,
     repo_features,
 )
-from app.pipeline.feature_dag._inputs import (
+from app.tasks.pipeline.feature_dag._inputs import (
     GitHistoryInput,
     GitHubClientInput,
     GitWorktreeInput,
@@ -30,8 +30,8 @@ from app.pipeline.feature_dag._inputs import (
     BuildRunInput,
     BuildLogsInput,
 )
-from app.pipeline.constants import DEFAULT_FEATURES
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.constants import DEFAULT_FEATURES
+from app.tasks.pipeline.feature_dag._metadata import (
     get_required_resources_for_features,
     FeatureResource,
 )

@@ -1,5 +1,5 @@
 import unittest
-from app.pipeline.analyzers import (
+from app.tasks.pipeline.analyzers import (
     _is_test_file,
     _matches_test_definition,
     _matches_assertion,

@@ -1,4 +1,4 @@
-from app.pipeline.feature_dag import (
+from app.tasks.pipeline.feature_dag import (
     build_features,
     git_features,
     github_features,

@@ -1,11 +1,11 @@
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     OutputFormat,
     format_features_for_storage,
 )
 
 # Hamilton pipeline
-from app.pipeline.hamilton_runner import HamiltonPipeline
-from app.pipeline.feature_dag._inputs import (
+from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
+from app.tasks.pipeline.feature_dag._inputs import (
     GitHistoryInput,
     GitWorktreeInput,
     RepoInput,

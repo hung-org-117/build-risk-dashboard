@@ -1,6 +1,6 @@
 """Pipeline utility modules."""
 
-from app.pipeline.utils.git_utils import (
+from app.tasks.pipeline.utils.git_utils import (
     get_commit_info,
     get_commit_parents,
     get_diff_files,

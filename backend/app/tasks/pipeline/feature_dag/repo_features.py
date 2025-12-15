@@ -15,18 +15,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from hamilton.function_modifiers import extract_fields, tag
 
-from app.pipeline.feature_dag._inputs import (
+from app.tasks.pipeline.feature_dag._inputs import (
     GitHistoryInput,
     GitWorktreeInput,
     RepoInput,
 )
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,
     FeatureCategory,
     FeatureDataType,
     FeatureResource,
 )
-from app.pipeline.feature_dag.languages import LanguageRegistry
+from app.tasks.pipeline.feature_dag.languages import LanguageRegistry
 
 logger = logging.getLogger(__name__)
 

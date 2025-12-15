@@ -75,21 +75,6 @@ class FeatureResource(str, Enum):
     BUILD_LOGS = "build_logs"  # CI job logs (download_build_logs task)
 
 
-# Note: Resource DAG is now defined in app.pipeline.resource_dag using Hamilton
-# See resource_dag.py for the full DAG with dependencies
-
-
-def get_ingestion_tasks_for_resources(required_resources: Set[str]) -> List[str]:
-    """
-    Get ordered list of ingestion tasks for required resources.
-
-    Delegates to Hamilton-based resource_dag for automatic dependency resolution.
-    """
-    from app.pipeline.resource_dag import get_ingestion_tasks
-
-    return get_ingestion_tasks(list(required_resources))
-
-
 class OutputFormat(str, Enum):
     """Output format for list features when saving to DB."""
 
@@ -242,7 +227,7 @@ def get_required_resources_for_features(
     """
     # Lazy load to avoid circular import
     if modules is None:
-        from app.pipeline.constants import HAMILTON_MODULES
+        from app.tasks.pipeline.constants import HAMILTON_MODULES
 
         modules = HAMILTON_MODULES
 
@@ -251,7 +236,7 @@ def get_required_resources_for_features(
 
     # Include default features that are always extracted
     # Lazy load DEFAULT_FEATURES to avoid circular import
-    from app.pipeline.constants import DEFAULT_FEATURES
+    from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
     features = feature_names | DEFAULT_FEATURES
 
@@ -275,7 +260,7 @@ def format_features_for_storage(
         Dictionary with formatted values ready for DB storage
     """
     # Lazy load to avoid circular import
-    from app.pipeline.constants import HAMILTON_MODULES
+    from app.tasks.pipeline.constants import HAMILTON_MODULES
 
     registry = build_metadata_registry(HAMILTON_MODULES)
     result = {}

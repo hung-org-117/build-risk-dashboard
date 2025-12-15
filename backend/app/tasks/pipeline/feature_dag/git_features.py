@@ -16,25 +16,25 @@ from typing import Any, Dict, List, Optional, Set
 
 from hamilton.function_modifiers import extract_fields, tag
 
-from app.pipeline.feature_dag.analyzers import (
+from app.tasks.pipeline.feature_dag.analyzers import (
     _count_test_cases,
     _is_doc_file,
     _is_source_file,
     _is_test_file,
 )
-from app.pipeline.feature_dag._inputs import (
+from app.tasks.pipeline.feature_dag._inputs import (
     GitHistoryInput,
     RepoInput,
     BuildRunInput,
 )
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,
     FeatureCategory,
     FeatureDataType,
     FeatureResource,
     OutputFormat,
 )
-from app.pipeline.utils.git_utils import (
+from app.tasks.pipeline.utils.git_utils import (
     get_author_name,
     get_commit_info,
     get_commit_parents,

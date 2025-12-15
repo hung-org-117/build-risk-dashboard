@@ -96,7 +96,7 @@ FEATURES_REPO = {
 ALL_FEATURES = FEATURES_BUILD_LOG | FEATURES_GIT | FEATURES_GITHUB | FEATURES_REPO
 
 # Import DEFAULT_FEATURES from constants (always extracted, not user-selectable)
-from app.pipeline.constants import DEFAULT_FEATURES
+from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
 
 def seed_travistorrent_template():

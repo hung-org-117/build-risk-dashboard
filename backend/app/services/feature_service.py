@@ -7,13 +7,13 @@ import logging
 
 from fastapi import HTTPException
 
-from app.pipeline.feature_dag import (
+from app.tasks.pipeline.feature_dag import (
     build_features,
     git_features,
     github_features,
     repo_features,
 )
-from app.pipeline.constants import DEFAULT_FEATURES
+from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
 logger = logging.getLogger(__name__)
 

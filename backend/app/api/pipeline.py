@@ -16,7 +16,7 @@ from pymongo.database import Database
 from app.database.mongo import get_db
 from app.middleware.auth import get_current_user
 from app.repositories.pipeline_run import PipelineRunRepository
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     build_metadata_registry,
     HAMILTON_MODULES,
 )

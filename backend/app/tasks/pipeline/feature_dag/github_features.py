@@ -7,24 +7,24 @@ Features extracted from GitHub API:
 - Description complexity
 """
 
-from app.pipeline.feature_dag._inputs import BuildRunInput
+from app.tasks.pipeline.feature_dag._inputs import BuildRunInput
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from hamilton.function_modifiers import extract_fields, tag
 
-from app.pipeline.feature_dag._inputs import (
+from app.tasks.pipeline.feature_dag._inputs import (
     GitHubClientInput,
     RepoInput,
 )
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,
     FeatureCategory,
     FeatureDataType,
     FeatureResource,
 )
-from app.pipeline.feature_dag._retry import with_retry
+from app.tasks.pipeline.feature_dag._retry import with_retry
 
 logger = logging.getLogger(__name__)
 

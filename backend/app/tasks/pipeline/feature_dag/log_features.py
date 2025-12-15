@@ -14,15 +14,15 @@ from typing import Any, Dict, List, Optional, Set
 
 from hamilton.function_modifiers import extract_fields, tag
 
-from app.pipeline.feature_dag._inputs import BuildLogsInput, RepoConfigInput
-from app.pipeline.feature_dag._metadata import (
+from app.tasks.pipeline.feature_dag._inputs import BuildLogsInput, RepoConfigInput
+from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,
     FeatureCategory,
     FeatureDataType,
     FeatureResource,
     OutputFormat,
 )
-from app.pipeline.feature_dag.log_parsers.registry import TestLogParser
+from app.tasks.pipeline.feature_dag.log_parsers.registry import TestLogParser
 
 logger = logging.getLogger(__name__)
 

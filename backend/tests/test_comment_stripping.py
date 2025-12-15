@@ -1,5 +1,5 @@
 import unittest
-from app.pipeline.analyzers import (
+from app.tasks.pipeline.analyzers import (
     _strip_comments,
     _strip_shell_comments,
     _strip_c_comments,

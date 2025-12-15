@@ -6,7 +6,7 @@ are expressed through function parameters. Hamilton automatically
 resolves the DAG and determines execution order.
 
 Usage:
-    from app.pipeline.resource_dag import ResourceDAGRunner
+    from app.tasks.pipeline.resource_dag import ResourceDAGRunner
 
     runner = ResourceDAGRunner()
 
@@ -14,6 +14,10 @@ Usage:
     tasks = runner.get_ingestion_tasks(["git_worktree", "build_logs"])
     # Returns: ["clone_repo", "fetch_and_save_builds",
     #           "download_build_logs", "create_worktrees_batch"]
+
+    # Get tasks grouped by level (for parallel execution)
+    levels = runner.get_ingestion_tasks_by_level(["git_worktree", "build_logs"])
+    # Returns: {0: ["clone_repo"], 1: ["create_worktrees_batch"]}
 """
 
 import logging
@@ -69,6 +73,64 @@ def github_api() -> List[str]:
 
 
 # =============================================================================
+# Task dependency definitions for level calculation
+# =============================================================================
+
+# Define which tasks depend on which other tasks
+TASK_DEPENDENCIES: Dict[str, List[str]] = {
+    "clone_repo": [],
+    "fetch_and_save_builds": [],
+    "create_worktrees_batch": ["clone_repo"],
+    "download_build_logs": ["fetch_and_save_builds"],
+}
+
+
+def _calculate_task_levels(tasks: List[str]) -> Dict[int, List[str]]:
+    """
+    Calculate execution levels for a list of tasks based on dependencies.
+
+    Level 0: Tasks with no dependencies (or dependencies not in the list)
+    Level 1: Tasks that depend only on level 0 tasks
+    etc.
+
+    Returns:
+        Dict mapping level number to list of tasks at that level
+    """
+    if not tasks:
+        return {}
+
+    task_set = set(tasks)
+    levels: Dict[int, List[str]] = {}
+    assigned: Set[str] = set()
+    max_iterations = len(tasks) + 1
+
+    for iteration in range(max_iterations):
+        current_level_tasks = []
+
+        for task in tasks:
+            if task in assigned:
+                continue
+
+            deps = TASK_DEPENDENCIES.get(task, [])
+            # Check if all deps are either not in our task list OR already assigned
+            deps_satisfied = all(dep not in task_set or dep in assigned for dep in deps)
+
+            if deps_satisfied:
+                current_level_tasks.append(task)
+
+        if not current_level_tasks:
+            break
+
+        levels[iteration] = current_level_tasks
+        assigned.update(current_level_tasks)
+
+        if len(assigned) == len(task_set):
+            break
+
+    return levels
+
+
+# =============================================================================
 # Resource DAG Runner
 # =============================================================================
 
@@ -88,7 +150,7 @@ class ResourceDAGRunner:
     def _ensure_initialized(self):
         """Lazy initialize Hamilton driver."""
         if self._driver is None:
-            import app.pipeline.resource_dag.dag as resource_module
+            import app.tasks.pipeline.resource_dag.dag as resource_module
 
             self._driver = driver.Builder().with_modules(resource_module).build()
             self._all_resources = self._get_all_resource_names()
@@ -103,6 +165,11 @@ class ResourceDAGRunner:
         return self._all_resources.copy()
 
     def get_ingestion_tasks(self, required_resources: List[str]) -> List[str]:
+        """
+        Get flat list of ingestion tasks for required resources.
+
+        Returns tasks in dependency order (but not grouped by level).
+        """
         if not required_resources:
             return []
 
@@ -133,6 +200,27 @@ class ResourceDAGRunner:
             logger.error(f"Failed to resolve resource DAG: {e}")
             return []
 
+    def get_ingestion_tasks_by_level(
+        self, required_resources: List[str]
+    ) -> Dict[int, List[str]]:
+        """
+        Get ingestion tasks grouped by execution level.
+
+        Level 0: Tasks with no dependencies (can run immediately)
+        Level 1: Tasks that depend on level 0 tasks (run after level 0)
+        etc.
+
+        This allows building Celery workflows with proper chain/group structure:
+        - Tasks at the same level can run in parallel (group)
+        - Tasks at different levels run sequentially (chain)
+
+        Example:
+            {0: ["clone_repo"], 1: ["create_worktrees_batch", "download_build_logs"]}
+            -> chain(clone_repo, group(create_worktrees, download_logs))
+        """
+        tasks = self.get_ingestion_tasks(required_resources)
+        return _calculate_task_levels(tasks)
+
     def visualize(self) -> str:
         """Get DAG visualization (graphviz DOT format)."""
         try:
@@ -156,3 +244,8 @@ def get_resource_dag_runner() -> ResourceDAGRunner:
 def get_ingestion_tasks(required_resources: List[str]) -> List[str]:
     """Convenience function to get ingestion tasks."""
     return get_resource_dag_runner().get_ingestion_tasks(required_resources)
+
+
+def get_ingestion_tasks_by_level(required_resources: List[str]) -> Dict[int, List[str]]:
+    """Convenience function to get ingestion tasks grouped by level."""
+    return get_resource_dag_runner().get_ingestion_tasks_by_level(required_resources)

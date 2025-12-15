@@ -27,8 +27,10 @@ from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepo
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
 from app.repositories.raw_repository import RawRepositoryRepository
+from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
+from app.tasks.pipeline.hamilton_features._inputs import build_hamilton_inputs
+from app.tasks.pipeline.hamilton_features._metadata import format_features_for_storage
 from app.tasks.base import PipelineTask
-from app.tasks.shared import extract_features_for_build
 
 logger = logging.getLogger(__name__)
 
@@ -165,25 +167,16 @@ def process_enrichment_batch(
             continue
 
         try:
-            result = _extract_features_for_enrichment(
+            features = _extract_features_for_build(
                 db=self.db,
                 build=build,
+                version_id=version_id,
                 selected_features=selected_features,
                 build_run_repo=build_run_repo,
                 enrichment_repo_repo=enrichment_repo_repo,
+                enrichment_build_repo=enrichment_build_repo,
                 raw_repo_repo=raw_repo_repo,
             )
-
-            # Determine extraction status from result
-            if result["status"] == "completed":
-                extraction_status = ExtractionStatus.COMPLETED
-            elif result["status"] == "failed":
-                extraction_status = ExtractionStatus.FAILED
-            else:
-                extraction_status = ExtractionStatus.PENDING
-
-            features = result["features"]
-            extraction_error = result["errors"][0] if result["errors"] else None
 
             # Update or create enrichment_build
             existing = enrichment_build_repo.find_by_csv_build_id(
@@ -193,11 +186,6 @@ def process_enrichment_batch(
                 enrichment_build_repo.save_features(
                     existing.id,
                     features,
-                )
-                enrichment_build_repo.update_extraction_status(
-                    existing.id,
-                    extraction_status,
-                    error=extraction_error,
                 )
             else:
                 enrichment_build = DatasetEnrichmentBuild(
@@ -214,17 +202,14 @@ def process_enrichment_batch(
                     build_number=None,
                     build_conclusion=None,
                     build_created_at=None,
-                    extraction_status=extraction_status,
-                    extraction_error=extraction_error,
+                    extraction_status=ExtractionStatus.COMPLETED,
+                    extraction_error=None,
                     features=features,
                     enriched_at=None,
                 )
                 enrichment_build_repo.insert_one(enrichment_build)
 
-            if result["status"] == "completed":
-                enriched += 1
-            else:
-                failed += 1
+            enriched += 1
 
         except Exception as e:
             logger.warning(f"Failed to enrich build {build.build_id_from_csv}: {e}")
@@ -328,63 +313,103 @@ def finalize_enrichment(
     }
 
 
-def _extract_features_for_enrichment(
+def _extract_features_for_build(
     db,
     build: DatasetBuild,
+    version_id: str,
     selected_features: List[str],
     build_run_repo: RawBuildRunRepository,
     enrichment_repo_repo: DatasetRepoConfigRepository,
+    enrichment_build_repo: DatasetEnrichmentBuildRepository,
     raw_repo_repo: RawRepositoryRepository,
 ) -> Dict[str, Any]:
-    """
-    Extract features for a single build using shared helper.
-
-    Returns result dict with status, features, errors, warnings.
-    """
+    """Extract features for a single build using HamiltonPipeline."""
     if not build.workflow_run_id:
         logger.warning(f"Build {build.build_id_from_csv} has no workflow_run_id")
-        return {
-            "status": "failed",
-            "features": {},
-            "errors": ["No workflow_run_id"],
-            "warnings": [],
-        }
+        return {name: None for name in selected_features}
 
     build_run = build_run_repo.find_by_id(str(build.workflow_run_id))
+
     if not build_run:
         logger.warning(f"BuildRun {build.workflow_run_id} not found")
-        return {
-            "status": "failed",
-            "features": {},
-            "errors": ["BuildRun not found"],
-            "warnings": [],
-        }
+        return {name: None for name in selected_features}
 
     enrichment_repo = enrichment_repo_repo.find_by_id(str(build.repo_id))
+
     if not enrichment_repo:
         logger.warning(f"EnrichmentRepo {build.repo_id} not found")
-        return {
-            "status": "failed",
-            "features": {},
-            "errors": ["EnrichmentRepo not found"],
-            "warnings": [],
-        }
+        return {name: None for name in selected_features}
 
+    # Fetch RawRepository
     raw_repo = raw_repo_repo.find_by_id(str(build.repo_id))
     if not raw_repo:
         logger.warning(f"RawRepository {build.repo_id} not found")
-        return {
-            "status": "failed",
-            "features": {},
-            "errors": ["RawRepository not found"],
-            "warnings": [],
-        }
+        return {name: None for name in selected_features}
 
-    # Use shared helper for feature extraction (returns full result with status)
-    return extract_features_for_build(
-        db=db,
-        raw_repo=raw_repo,
-        repo_config=enrichment_repo,
-        build_run=build_run,
-        selected_features=selected_features,
+    # Check if already exists
+    existing_build = enrichment_build_repo.find_by_csv_build_id(
+        ObjectId(build.dataset_id), build.build_id_from_csv
     )
+
+    if existing_build:
+        enrichment_build = existing_build
+    else:
+        enrichment_build = DatasetEnrichmentBuild(
+            _id=None,
+            raw_repo_id=ObjectId(build.repo_id),
+            raw_workflow_run_id=ObjectId(build.workflow_run_id),
+            dataset_id=ObjectId(build.dataset_id),
+            dataset_version_id=ObjectId(version_id),
+            dataset_repo_config_id=None,
+            head_sha=build_run.commit_sha,
+            build_number=build_run.build_number,
+            build_created_at=build_run.created_at,
+            build_id_from_csv=build.build_id_from_csv,
+            csv_row_index=0,
+            csv_row_data=None,
+            build_conclusion=None,
+            extraction_status=ExtractionStatus.PENDING,
+            extraction_error=None,
+            enriched_at=None,
+        )
+        enrichment_build = enrichment_build_repo.insert_one(enrichment_build)
+
+    try:
+        # Build paths for git operations
+        repo_path = REPOS_DIR / str(build.repo_id)
+
+        # Build all Hamilton inputs using helper function
+        inputs = build_hamilton_inputs(
+            raw_repo=raw_repo,
+            repo_config=enrichment_repo,
+            build_run=build_run,
+            repo_path=repo_path,
+        )
+
+        # Execute Hamilton pipeline
+        pipeline = HamiltonPipeline(db=db)
+
+        features = pipeline.run(
+            git_history=inputs.git_history,
+            git_worktree=inputs.git_worktree,
+            repo=inputs.repo,
+            build_run=inputs.build_run,
+            repo_config=inputs.repo_config,
+            github_client=None,
+            features_filter=set(selected_features) if selected_features else None,
+        )
+
+        formatted_features = format_features_for_storage(features)
+
+        logger.debug(
+            f"Extracted {len(formatted_features)} features for build {build.build_id_from_csv}"
+        )
+
+        return formatted_features
+
+    except Exception as e:
+        logger.error(
+            f"Pipeline failed for build {build.build_id_from_csv}: {e}",
+            exc_info=True,
+        )
+        return {name: None for name in selected_features}
