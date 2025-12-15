@@ -18,7 +18,7 @@ celery_app = Celery(
         "app.tasks.model_ingestion",  # New chain-based ingestion
         "app.tasks.processing",
         "app.tasks.maintenance",
-        "app.tasks.version_enrichment",
+        "app.tasks.enrichment_processing",
         "app.tasks.export",
         "app.tasks.sonar",
         "app.tasks.trivy",

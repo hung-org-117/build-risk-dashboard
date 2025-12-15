@@ -106,7 +106,7 @@ class DatasetVersionService:
 
         version = self._repo.create(version)
 
-        from app.tasks.version_enrichment import start_enrichment
+        from app.tasks.enrichment_processing import start_enrichment
 
         task = start_enrichment.delay(str(version.id))
         self._repo.update_one(str(version.id), {"task_id": task.id})

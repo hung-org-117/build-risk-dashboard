@@ -1,41 +1,42 @@
 @startuml functional_overview_use_case
 left to right direction
-actor "System Administrator" as Admin
-actor "Authenticated User\n(Repository Member)" as User
+actor admin as Admin
+actor User as User
 
 rectangle "Risk Evaluation System" {
-  usecase "Manage Repositories\n(add / remove / config)" as UC1
-  usecase "Manage Users & Roles" as UC2
-  usecase "Configure Sonar & Model" as UC3
-  usecase "Monitor System & View Logs" as UC8
-  usecase "Trigger Rescan / Re-evaluate Build" as UC9
+  usecase "Settings" as UC_Settings
+  usecase "Manage Dashboard" as UC_ManageDashboard
+  usecase "Manage User & Access" as UC_ManageUser
+  usecase "Dataset Enrichment" as UC_Enrichment
+  usecase "Monitor System & View Logs" as UC_Monitor
+  usecase "Manage Repositories" as UC_Repos
+  usecase "Manage GitHub Tokens" as UC_Tokens
 
-  usecase "View Dashboard\n(repository builds, risk)" as UC4
-  usecase "View Build Details\n(logs, annotations)" as UC5
-  usecase "Filter & Search Builds / Analytics" as UC10
-  usecase "Upload Dataset & Create\nEnriched Versions" as UC11
-  usecase "Download Enriched Dataset" as UC6
-  usecase "Receive Alerts / Notifications" as UC7
+  usecase "View Dashboard" as UC_ViewDashboard
+  usecase "View Build Details" as UC_ViewBuild
+  usecase "Filter & Search Builds / Analytics" as UC_FilterSearch
+  usecase "Receive Notifications" as UC_Notifications
 }
 
-Admin --> UC1
-Admin --> UC2
-Admin --> UC3
-Admin --> UC8
-Admin --> UC9
-Admin --> UC11
-User --> UC4
-User --> UC5
-User --> UC6
-User --> UC7
-User --> UC10
+Admin --> UC_Settings
+Admin --> UC_ManageDashboard
+Admin --> UC_ManageUser
+Admin --> UC_Enrichment
+Admin --> UC_Monitor
+Admin --> UC_Repos
+Admin --> UC_Tokens
+User --> UC_ViewDashboard
+User --> UC_ViewBuild
+User --> UC_FilterSearch
+User --> UC_Notifications
 
-note right of UC1 : <<admin-only>>
-note right of UC2 : <<admin-only>>
-note right of UC3 : <<admin-only>>
-note right of UC8 : <<admin-only>>
-note right of UC9 : <<admin-only>>
-note right of UC11 : <<admin-only>>
+note right of UC_Settings : <<admin-only>>
+note right of UC_ManageDashboard : <<admin-only>>
+note right of UC_ManageUser : <<admin-only>>
+note right of UC_Enrichment : <<admin-only>>
+note right of UC_Monitor : <<admin-only>>
+note right of UC_Repos : <<admin-only>>
+note right of UC_Tokens : <<admin-only>>
 
 note bottom
   Status legend:
