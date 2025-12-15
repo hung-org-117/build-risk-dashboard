@@ -97,10 +97,10 @@ def _publish_status(repo_id: str, status: str, message: str = ""):
 def clone_repo(
     self: PipelineTask,
     prev_result: Any = None,  # Allow chaining from previous task
-    repo_id: str = "",
+    raw_repo_id: str = "",
     full_name: str = "",
-    installation_id: Optional[str] = None,
     publish_status: bool = False,
+    installation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Clone or update git repository.
@@ -108,12 +108,12 @@ def clone_repo(
     Works for both model and dataset pipelines.
     Supports installation token for private repos.
     """
-    if publish_status and repo_id:
-        _publish_status(repo_id, "importing", "Cloning repository...")
+    if publish_status and raw_repo_id:
+        _publish_status(raw_repo_id, "importing", "Cloning repository...")
 
-    repo_path = REPOS_DIR / repo_id
+    repo_path = REPOS_DIR / raw_repo_id
 
-    with RedisLock(f"clone:{repo_id}", timeout=700, blocking_timeout=60):
+    with RedisLock(f"clone:{raw_repo_id}", timeout=700, blocking_timeout=60):
         try:
             if repo_path.exists():
                 logger.info(f"Updating existing clone for {full_name}")
@@ -144,10 +144,16 @@ def clone_repo(
                     timeout=600,
                 )
 
-            if publish_status and repo_id:
-                _publish_status(repo_id, "importing", "Repository cloned successfully")
+            if publish_status and raw_repo_id:
+                _publish_status(
+                    raw_repo_id, "importing", "Repository cloned successfully"
+                )
 
-            result = {"repo_id": repo_id, "status": "cloned", "path": str(repo_path)}
+            result = {
+                "raw_repo_id": raw_repo_id,
+                "status": "cloned",
+                "path": str(repo_path),
+            }
 
             # Preserve previous result data for chaining
             if isinstance(prev_result, dict):
@@ -169,10 +175,8 @@ def clone_repo(
 )
 def create_worktrees(
     self: PipelineTask,
-    prev_result: Dict[str, Any] = None,
-    repo_id: str = "",
-    commit_shas: Optional[List[str]] = None,
-    enable_fork_replay: bool = True,
+    raw_repo_id: str = "",
+    commit_shas: List[str] = [],
     publish_status: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -180,29 +184,16 @@ def create_worktrees(
 
     Each chunk runs as a separate task for better fault tolerance.
     """
-    prev_result = prev_result or {}
-    build_ids = prev_result.get("build_ids", [])
-
-    build_run_repo = RawBuildRunRepository(self.db)
-
-    # Get commit SHAs from build_ids if not provided
-    if not commit_shas and build_ids:
-        commit_shas = []
-        for build_id in build_ids:
-            build_run = build_run_repo.find_by_repo_and_build_id(repo_id, str(build_id))
-            if build_run and build_run.commit_sha:
-                sha = build_run.effective_sha or build_run.commit_sha
-                commit_shas.append(sha)
 
     if not commit_shas:
-        return {**prev_result, "worktrees_created": 0, "worktrees_skipped": 0}
+        return {"worktrees_created": 0, "worktrees_skipped": 0}
 
     # Deduplicate
     unique_shas = list(dict.fromkeys(commit_shas))
 
-    if publish_status and repo_id:
+    if publish_status and raw_repo_id:
         _publish_status(
-            repo_id,
+            raw_repo_id,
             "importing",
             f"Creating worktrees for {len(unique_shas)} commits...",
         )
@@ -214,19 +205,19 @@ def create_worktrees(
     for i in range(0, len(unique_shas), chunk_size):
         chunk = unique_shas[i : i + chunk_size]
         create_worktree_chunk.delay(
-            repo_id=repo_id,
+            raw_repo_id=raw_repo_id,
             commit_shas=chunk,
-            enable_fork_replay=enable_fork_replay,
             publish_status=publish_status,
             chunk_index=i // chunk_size,
             total_chunks=(len(unique_shas) + chunk_size - 1) // chunk_size,
         )
         chunks_dispatched += 1
 
-    logger.info(f"Dispatched {chunks_dispatched} worktree chunks for repo {repo_id}")
+    logger.info(
+        f"Dispatched {chunks_dispatched} worktree chunks for repo {raw_repo_id}"
+    )
 
     return {
-        **prev_result,
         "worktree_chunks_dispatched": chunks_dispatched,
         "total_commits": len(unique_shas),
     }
@@ -244,24 +235,21 @@ def create_worktrees(
 )
 def create_worktree_chunk(
     self: PipelineTask,
-    repo_id: str,
+    raw_repo_id: str,
     commit_shas: List[str],
-    enable_fork_replay: bool = True,
     publish_status: bool = False,
     chunk_index: int = 0,
     total_chunks: int = 1,
 ) -> Dict[str, Any]:
     """
     Worker: Create worktrees for a chunk of commits.
-
-    Small, retriable task for better fault tolerance.
     """
     build_run_repo = RawBuildRunRepository(self.db)
     raw_repo_repo = RawRepositoryRepository(self.db)
-    raw_repo = raw_repo_repo.find_by_id(repo_id)
+    raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
 
-    repo_path = REPOS_DIR / repo_id
-    worktrees_dir = WORKTREES_DIR / repo_id
+    repo_path = REPOS_DIR / raw_repo_id
+    worktrees_dir = WORKTREES_DIR / raw_repo_id
     worktrees_dir.mkdir(parents=True, exist_ok=True)
 
     if not repo_path.exists():
@@ -269,13 +257,12 @@ def create_worktree_chunk(
 
     # Get GitHub client for fork commit replay
     github_client = None
-    if enable_fork_replay:
-        try:
-            from app.services.github.github_client import get_public_github_client
+    try:
+        from app.services.github.github_client import get_public_github_client
 
-            github_client = get_public_github_client()
-        except Exception as e:
-            logger.warning(f"Failed to get GitHub client for fork replay: {e}")
+        github_client = get_public_github_client()
+    except Exception as e:
+        logger.warning(f"Failed to get GitHub client for fork replay: {e}")
 
     worktrees_created = 0
     worktrees_skipped = 0
@@ -288,8 +275,7 @@ def create_worktree_chunk(
             worktrees_skipped += 1
             continue
 
-        original_sha = sha
-        build_run = build_run_repo.find_by_commit_sha(repo_id, sha)
+        build_run = build_run_repo.find_by_commit_or_effective_sha(raw_repo_id, sha)
 
         try:
             # Check if commit exists
@@ -302,13 +288,13 @@ def create_worktree_chunk(
 
             if result.returncode != 0:
                 # Attempt fork replay
-                if enable_fork_replay and github_client and raw_repo:
+                if github_client and raw_repo:
                     try:
                         from app.services.commit_replay import ensure_commit_exists
 
                         synthetic_sha = ensure_commit_exists(
                             repo_path=repo_path,
-                            commit_sha=original_sha,
+                            commit_sha=sha,
                             repo_slug=raw_repo.full_name,
                             github_client=github_client,
                         )
@@ -323,9 +309,7 @@ def create_worktree_chunk(
                             worktrees_skipped += 1
                             continue
                     except Exception as e:
-                        logger.warning(
-                            f"Fork replay failed for {original_sha[:8]}: {e}"
-                        )
+                        logger.warning(f"Fork replay failed for {sha[:8]}: {e}")
                         worktrees_skipped += 1
                         continue
                 else:
@@ -350,9 +334,9 @@ def create_worktree_chunk(
             logger.warning(f"Timeout creating worktree for {sha[:8]}")
             worktrees_failed += 1
 
-    if publish_status and repo_id:
+    if publish_status and raw_repo_id:
         _publish_status(
-            repo_id,
+            raw_repo_id,
             "importing",
             f"Chunk {chunk_index + 1}/{total_chunks}: {worktrees_created} created, {worktrees_skipped} skipped",
         )
@@ -377,9 +361,9 @@ def create_worktree_chunk(
 def download_build_logs(
     self: PipelineTask,
     prev_result: Dict[str, Any] = None,
-    repo_id: str = "",
+    raw_repo_id: str = "",
     full_name: str = "",
-    build_ids: Optional[List[str]] = None,
+    build_ids: List[str] = [],
     ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
     installation_id: Optional[str] = None,
     max_consecutive_expired: int = 10,
@@ -401,16 +385,16 @@ def download_build_logs(
     # Deduplicate
     unique_build_ids = list(dict.fromkeys(build_ids))
 
-    if publish_status and repo_id:
+    if publish_status and raw_repo_id:
         _publish_status(
-            repo_id,
+            raw_repo_id,
             "importing",
             f"Downloading logs for {len(unique_build_ids)} builds...",
         )
 
     # Initialize Redis state for this download session
     redis_client = redis.from_url(settings.REDIS_URL)
-    session_key = f"logs_session:{repo_id}"
+    session_key = f"logs_session:{raw_repo_id}"
     redis_client.delete(f"{session_key}:consecutive")
     redis_client.delete(f"{session_key}:stop")
     redis_client.set(f"{session_key}:max_expired", max_consecutive_expired, ex=3600)
@@ -422,7 +406,7 @@ def download_build_logs(
     for i in range(0, len(unique_build_ids), chunk_size):
         chunk = unique_build_ids[i : i + chunk_size]
         download_logs_chunk.delay(
-            repo_id=repo_id,
+            raw_repo_id=raw_repo_id,
             full_name=full_name,
             build_ids=chunk,
             ci_provider=ci_provider,
@@ -434,7 +418,7 @@ def download_build_logs(
         chunks_dispatched += 1
 
     logger.info(
-        f"Dispatched {chunks_dispatched} log download chunks for repo {repo_id}"
+        f"Dispatched {chunks_dispatched} log download chunks for repo {raw_repo_id}"
     )
 
     return {
@@ -456,7 +440,7 @@ def download_build_logs(
 )
 def download_logs_chunk(
     self: PipelineTask,
-    repo_id: str,
+    raw_repo_id: str,
     full_name: str,
     build_ids: List[str],
     ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
@@ -476,7 +460,7 @@ def download_logs_chunk(
 
     # Check if we should stop (other chunk hit max expired)
     redis_client = redis.from_url(settings.REDIS_URL)
-    session_key = f"logs_session:{repo_id}"
+    session_key = f"logs_session:{raw_repo_id}"
 
     if redis_client.get(f"{session_key}:stop"):
         logger.info(f"Chunk {chunk_index} skipped: stop flag set by another chunk")
@@ -493,7 +477,9 @@ def download_logs_chunk(
     max_log_size = settings.MAX_LOG_SIZE_MB * 1024 * 1024
 
     rate_limit = getattr(settings, "API_RATE_LIMIT_PER_SECOND", 5.0)
-    github_limiter = RateLimiter(f"github_logs:{repo_id}", calls_per_second=rate_limit)
+    github_limiter = RateLimiter(
+        f"github_logs:{raw_repo_id}", calls_per_second=rate_limit
+    )
 
     max_consecutive = int(redis_client.get(f"{session_key}:max_expired") or 10)
 
@@ -504,13 +490,13 @@ def download_logs_chunk(
         if redis_client.get(f"{session_key}:stop"):
             return "stopped"
 
-        build_run = build_run_repo.find_by_repo_and_build_id(repo_id, build_id)
+        build_run = build_run_repo.find_by_repo_and_build_id(raw_repo_id, build_id)
         if build_run and build_run.logs_available:
             logs_skipped += 1
             return "skipped"
 
         try:
-            build_logs_dir = LOGS_DIR / repo_id / build_id
+            build_logs_dir = LOGS_DIR / raw_repo_id / build_id
             build_logs_dir.mkdir(parents=True, exist_ok=True)
 
             composite_id = f"{full_name}:{build_id}"
@@ -584,9 +570,9 @@ def download_logs_chunk(
     finally:
         loop.close()
 
-    if publish_status and repo_id:
+    if publish_status and raw_repo_id:
         _publish_status(
-            repo_id,
+            raw_repo_id,
             "importing",
             f"Logs chunk {chunk_index + 1}/{total_chunks}: {logs_downloaded} downloaded, {logs_expired} expired",
         )

@@ -130,6 +130,8 @@ def process_workflow_run(
             repo_config=repo,
             build_run=build_run,
             selected_features=feature_names,
+            pipeline_category=PipelineCategory.MODEL_TRAINING,
+            build_sample_id=build_id,
         )
 
         updates = {}

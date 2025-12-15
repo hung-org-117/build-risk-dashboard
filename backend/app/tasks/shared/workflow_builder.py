@@ -5,6 +5,7 @@ This module provides helpers to build Celery chain/group workflows
 based on task levels from resource_dag.
 """
 
+from app.ci_providers.models import CIProvider
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -17,14 +18,12 @@ logger = logging.getLogger(__name__)
 
 def build_ingestion_workflow(
     tasks_by_level: Dict[int, List[str]],
-    repo_id: str,
+    raw_repo_id: str,
     full_name: str,
-    build_ids: Optional[List[str]] = None,
-    commit_shas: Optional[List[str]] = None,
-    ci_provider: Optional[str] = None,
+    build_ids: List[str],
+    commit_shas: List[str],
+    ci_provider: CIProvider,
     installation_id: Optional[str] = None,
-    publish_status: bool = False,
-    enable_fork_replay: bool = True,
     final_task: Optional[Signature] = None,
     custom_tasks: Optional[Dict[str, Signature]] = None,
 ) -> Optional[Union[chain, group, Signature]]:
@@ -36,14 +35,12 @@ def build_ingestion_workflow(
 
     Args:
         tasks_by_level: Dict mapping level number to list of task names
-        repo_id: Repository ID
+        raw_repo_id: Repository ID of raw repo
         full_name: Repository full name (owner/repo)
-        build_ids: Optional list of build IDs for log download
+        build_ids: List of build IDs for log download
         commit_shas: Optional list of commit SHAs for worktree creation
         ci_provider: CI provider string
         installation_id: Optional GitHub installation ID for private repos
-        publish_status: Whether to publish status updates to Redis
-        enable_fork_replay: Whether to enable fork commit replay
         final_task: Optional final task to append to the workflow
         custom_tasks: Optional dict of task_name -> Signature for custom tasks
 
@@ -68,14 +65,12 @@ def build_ingestion_workflow(
 
             task_sig = _create_task_signature(
                 task_name=task_name,
-                repo_id=repo_id,
+                raw_repo_id=raw_repo_id,
                 full_name=full_name,
                 build_ids=build_ids,
                 commit_shas=commit_shas,
                 ci_provider=ci_provider,
                 installation_id=installation_id,
-                publish_status=publish_status,
-                enable_fork_replay=enable_fork_replay,
             )
             if task_sig:
                 level_tasks.append(task_sig)
@@ -104,14 +99,13 @@ def build_ingestion_workflow(
 
 def _create_task_signature(
     task_name: str,
-    repo_id: str,
+    raw_repo_id: str,
     full_name: str,
-    build_ids: Optional[List[str]] = None,
-    commit_shas: Optional[List[str]] = None,
-    ci_provider: Optional[str] = None,
+    build_ids: List[str],
+    commit_shas: List[str],
+    ci_provider: CIProvider,
     installation_id: Optional[str] = None,
     publish_status: bool = False,
-    enable_fork_replay: bool = True,
 ) -> Optional[Signature]:
     """
     Create a Celery task signature for a given task name.
@@ -121,33 +115,25 @@ def _create_task_signature(
     """
     if task_name == "clone_repo":
         return clone_repo.s(
-            repo_id=repo_id,
+            raw_repo_id=raw_repo_id,
             full_name=full_name,
-            installation_id=installation_id,
             publish_status=publish_status,
+            installation_id=installation_id,
         )
 
     elif task_name == "create_worktrees":
-        if not commit_shas:
-            # Will get commit_shas from prev_result["build_ids"]
-            return create_worktrees.s(
-                repo_id=repo_id,
-                enable_fork_replay=enable_fork_replay,
-                publish_status=publish_status,
-            )
         return create_worktrees.s(
-            repo_id=repo_id,
+            raw_repo_id=raw_repo_id,
             commit_shas=commit_shas,
-            enable_fork_replay=enable_fork_replay,
             publish_status=publish_status,
         )
 
     elif task_name == "download_build_logs":
         return download_build_logs.s(
-            repo_id=repo_id,
+            raw_repo_id=raw_repo_id,
             full_name=full_name,
             build_ids=build_ids,
-            ci_provider=ci_provider,
+            ci_provider=ci_provider.value,
             installation_id=installation_id,
             publish_status=publish_status,
         )

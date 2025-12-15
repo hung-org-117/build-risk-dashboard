@@ -55,6 +55,10 @@ class DatasetEnrichmentBuild(BaseEntity):
         None,
         description="Reference to dataset_repo_configs table",
     )
+    dataset_build_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to dataset_builds table",
+    )
 
     # Extraction status
     extraction_status: ExtractionStatus = Field(
@@ -83,4 +87,9 @@ class DatasetEnrichmentBuild(BaseEntity):
     feature_count: int = Field(
         default=0,
         description="Number of features extracted",
+    )
+
+    enriched_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp when features were extracted",
     )

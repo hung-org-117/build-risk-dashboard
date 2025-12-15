@@ -6,11 +6,19 @@ to extract features using the Hamilton pipeline.
 """
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository
+from app.entities.pipeline_run import (
+    PipelineRun,
+    PipelineCategory,
+    NodeExecutionResult,
+    NodeExecutionStatus,
+)
+from app.repositories.pipeline_run import PipelineRunRepository
 from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
 from app.tasks.pipeline.feature_dag._inputs import build_hamilton_inputs
 from app.tasks.pipeline.feature_dag._metadata import format_features_for_storage
@@ -24,6 +32,8 @@ def extract_features_for_build(
     raw_repo: RawRepository,
     repo_config,  # Can be ModelRepoConfig or DatasetRepoConfig
     build_run: RawBuildRun,
+    pipeline_category: PipelineCategory,
+    build_sample_id: str,
     selected_features: Optional[List[str]] = None,
     github_client=None,
 ) -> Dict[str, Any]:
@@ -45,6 +55,7 @@ def extract_features_for_build(
         build_run: RawBuildRun entity
         selected_features: Optional list of features to extract
         github_client: Optional GitHub client for API calls
+        pipeline_category: Category (model_training or dataset_enrichment)
 
     Returns:
         Dictionary with status, features, errors, warnings, etc.

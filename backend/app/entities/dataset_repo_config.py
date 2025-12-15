@@ -39,8 +39,8 @@ class DatasetRepoConfig(RepoConfigBase):
     )
 
     # Reference to raw repository (None if not found/validated yet)
-    raw_repo_id: Optional[PyObjectId] = Field(
-        None,
+    raw_repo_id: PyObjectId = Field(
+        ...,
         description="Reference to raw_repositories._id",
     )
 
@@ -49,8 +49,8 @@ class DatasetRepoConfig(RepoConfigBase):
         ...,
         description="Repository name as it appears in the CSV",
     )
-    normalized_full_name: Optional[str] = Field(
-        None,
+    normalized_full_name: str = Field(
+        ...,
         description="Normalized to owner/repo format",
     )
 

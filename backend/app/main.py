@@ -24,6 +24,7 @@ from app.api import (
     dataset_versions,
     templates,
     settings,
+    monitoring,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api import model_repos
@@ -70,6 +71,7 @@ app.include_router(
 app.include_router(dataset_versions.router, prefix="/api", tags=["Dataset Versions"])
 app.include_router(templates.router, prefix="/api", tags=["Templates"])
 app.include_router(settings.router, prefix="/api", tags=["Settings"])
+app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
 
 
 @app.get("/")

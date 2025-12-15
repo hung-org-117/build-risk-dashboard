@@ -59,16 +59,19 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         """Convenience method - accepts string repo_id for compatibility."""
         return self.find_by_build_id(ObjectId(repo_id), build_id)
 
-    def find_by_commit_sha(
+    def find_by_commit_or_effective_sha(
         self,
         raw_repo_id: ObjectId,
         commit_sha: str,
     ) -> Optional[RawBuildRun]:
-        """Find a build run by repo and commit SHA."""
+        """Find a build run by repo and commit SHA or effective SHA."""
         doc = self.collection.find_one(
             {
                 "raw_repo_id": raw_repo_id,
-                "commit_sha": commit_sha,
+                "$or": [
+                    {"commit_sha": commit_sha},
+                    {"effective_sha": commit_sha},
+                ],
             }
         )
         return RawBuildRun(**doc) if doc else None

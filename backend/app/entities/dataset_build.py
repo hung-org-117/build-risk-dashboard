@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+from pydantic import Field
 
 from .base import BaseEntity, PyObjectId
 
@@ -25,7 +26,9 @@ class DatasetBuild(BaseEntity):
     validation_error: Optional[str] = None
     validated_at: Optional[datetime] = None
 
-    repo_id: Optional[PyObjectId] = None
+    raw_repo_id: Optional[PyObjectId] = Field(
+        None, description="Reference to raw_repositories table"
+    )
     workflow_run_id: Optional[PyObjectId] = None
 
     class Config:

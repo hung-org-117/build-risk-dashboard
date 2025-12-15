@@ -1,3 +1,5 @@
+from bson.objectid import ObjectId
+from app.repositories.dataset_build_repository import DatasetBuildRepository
 import logging
 from dataclasses import dataclass
 from typing import Generator, List, Optional
@@ -29,7 +31,6 @@ class DatasetVersionService:
     """Service for managing dataset versions."""
 
     def __init__(self, db: Database):
-        self._db = db
         self._repo = DatasetVersionRepository(db)
         self._dataset_service = DatasetService(db)
         self._export_service = ExportService(db)
@@ -150,6 +151,9 @@ class DatasetVersionService:
         features: Optional[List[str]] = None,
     ) -> ExportResult:
         """Export version data from DB in specified format."""
+        import tempfile
+        import os
+
         dataset = self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
 
@@ -182,17 +186,44 @@ class DatasetVersionService:
         filename = f"enriched_{dataset.name}_v{version.version_number}.{format}"
 
         if format == "parquet":
-            # Parquet requires writing to file first
+            # Parquet requires random access for writing metadata.
+            # For large datasets (>50k rows), we write to a temp file and stream it back
+            # to avoid OOM issues with keeping the whole file in RAM.
+            PARQUET_MEMORY_LIMIT = 50000
+
+            if count > PARQUET_MEMORY_LIMIT:
+                fd, path = tempfile.mkstemp(suffix=".parquet")
+                os.close(fd)
+
+                try:
+                    self._generate_parquet_content(
+                        dataset_id,
+                        version_id,
+                        features or version.selected_features,
+                        output_path=path,
+                    )
+                    return ExportResult(
+                        content_generator=self._file_iterator(path, delete_after=True),
+                        filename=filename,
+                        media_type="application/octet-stream",
+                    )
+                except Exception:
+                    # Cleanup if generation failed
+                    if os.path.exists(path):
+                        os.unlink(path)
+                    raise
+
+            # Small enough for memory
             content = self._generate_parquet_content(
                 dataset_id, version_id, features or version.selected_features
             )
             return ExportResult(
-                content_generator=iter([content]),
+                content_generator=iter([content]),  # type: ignore
                 filename=filename,
                 media_type="application/octet-stream",
             )
 
-        # CSV/JSON can be streamed
+        # CSV/JSON can be streamed directly
         content_generator = self._export_service.export_enrichment_version(
             dataset_id=dataset_id,
             version_id=version_id,
@@ -208,62 +239,130 @@ class DatasetVersionService:
             media_type=media_type,
         )
 
+    def _file_iterator(
+        self, file_path: str, chunk_size: int = 64 * 1024, delete_after: bool = False
+    ) -> Generator[bytes, None, None]:
+        """Yield file content in chunks and optionally delete file when done."""
+        import os
+
+        try:
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            if delete_after and os.path.exists(file_path):
+                os.unlink(file_path)
+
     def _generate_parquet_content(
         self,
         dataset_id: str,
         version_id: str,
         features: List[str],
-    ) -> bytes:
-        """Generate Parquet content as bytes."""
+        output_path: Optional[str] = None,
+    ) -> Optional[bytes]:
+        """
+        Generate Parquet content.
+
+        If output_path is provided, writes to file and returns None.
+        If output_path is None, writes to memory and returns bytes.
+        """
         import io
-        import pandas as pd
-
-        query = {
-            "dataset_id": self._db.enrichment_builds.database.client.ObjectId(
-                dataset_id
-            ),
-            "version_id": self._db.enrichment_builds.database.client.ObjectId(
-                version_id
-            ),
-        }
-
+        import pyarrow as pa
+        import pyarrow.parquet as pq
         from bson import ObjectId
 
-        query = {
-            "dataset_id": ObjectId(dataset_id),
-            "version_id": ObjectId(version_id),
-        }
+        # Get enriched builds from repository (iterator)
+        builds = self._enrichment_build_repo.get_enriched_for_export(
+            dataset_id=ObjectId(dataset_id),
+            version_id=ObjectId(version_id),
+        )
 
-        cursor = self._db.enrichment_builds.find(query)
+        # Use file path if provided, otherwise memory buffer
+        sink = output_path if output_path else io.BytesIO()
 
-        rows = []
-        for doc in cursor:
-            row = {"build_id": doc.get("build_id_from_csv")}
-            feature_dict = doc.get("features", {})
-            for f in features:
-                row[f] = feature_dict.get(f)
-            rows.append(row)
+        writer = None
+        batch_size = 10000
+        current_batch = []
 
-        df = pd.DataFrame(rows)
+        for build in builds:
+            # Create dict for current row
+            row = {f: build.features.get(f) for f in features}
+            current_batch.append(row)
 
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, engine="pyarrow", compression="snappy", index=False)
-        buffer.seek(0)
+            if len(current_batch) >= batch_size:
+                table = pa.Table.from_pylist(current_batch)
 
-        return buffer.getvalue()
+                # Initialize writer with schema from first batch
+                if writer is None:
+                    writer = pq.ParquetWriter(sink, table.schema, compression="snappy")
+
+                # Ensure subsequent batches match the schema
+                if table.schema != writer.schema:
+                    # Attempt to cast to original schema (handles null -> type transitions)
+                    # Note: This might fail if types are completely incompatible,
+                    # but it's better than crashing on schema mismatch.
+                    try:
+                        table = table.cast(writer.schema)
+                    except Exception:
+                        # Fallback: let specific write fail if incompatible
+                        pass
+
+                writer.write_table(table)
+                current_batch = []
+
+        # Write remaining items
+        if current_batch:
+            table = pa.Table.from_pylist(current_batch)
+            if writer is None:
+                writer = pq.ParquetWriter(sink, table.schema, compression="snappy")
+            else:
+                if table.schema != writer.schema:
+                    try:
+                        table = table.cast(writer.schema)
+                    except Exception:
+                        pass
+            writer.write_table(table)
+
+        if writer:
+            writer.close()
+
+        if output_path is None:
+            # If memory buffer, return bytes
+            sink.seek(0)  # type: ignore
+            return sink.getvalue()  # type: ignore
+
+        return None
 
     def get_export_preview(
         self, dataset_id: str, version_id: str, user_id: str
     ) -> dict:
         """Get preview of exportable data."""
         self._verify_dataset_access(dataset_id, user_id)
-        version = self._get_version(dataset_id, version_id)
 
-        return self._export_service.get_enrichment_preview(
-            dataset_id=dataset_id,
-            version_id=version_id,
+        builds = self._enrichment_build_repo.get_enriched_for_export(
+            dataset_id=ObjectId(dataset_id),
+            version_id=ObjectId(version_id),
             limit=10,
         )
+
+        total_rows = 0
+        sample_rows = []
+        all_features = set()
+
+        for doc in builds:
+            row = self._format_row(doc)
+            sample_rows.append(row)
+            all_features.update(row.keys())
+
+        return {
+            "total_rows": total_rows,
+            "sample_rows": sample_rows,
+            "available_features": sorted(all_features),
+            "feature_count": len(all_features),
+        }
 
     def delete_version(self, dataset_id: str, version_id: str, user_id: str) -> None:
         """Delete a version and its enrichment builds."""
@@ -322,6 +421,7 @@ class DatasetVersionService:
         user_id: str,
         page: int = 1,
         page_size: int = 20,
+        include_stats: bool = True,
     ) -> dict:
         """Get paginated version data with column statistics."""
         from bson import ObjectId
@@ -335,38 +435,21 @@ class DatasetVersionService:
                 detail=f"Version is not completed. Status: {version.status}",
             )
 
-        query = {
-            "dataset_id": ObjectId(dataset_id),
-            "version_id": ObjectId(version_id),
-        }
-
-        # Get total count
-        total_count = self._db.enrichment_builds.count_documents(query)
-
         # Get paginated data
         skip = (page - 1) * page_size
-        cursor = (
-            self._db.enrichment_builds.find(query)
-            .sort("created_at", 1)
-            .skip(skip)
-            .limit(page_size)
+
+        items, total_count = self._enrichment_build_repo.list_by_version(
+            dataset_version_id=ObjectId(version_id), skip=skip, limit=page_size
         )
 
-        # Format rows
         rows = []
-        for doc in cursor:
-            row = {
-                "build_id": doc.get("build_id_from_csv"),
-                "extraction_status": doc.get("extraction_status"),
-            }
-            feature_dict = doc.get("features", {})
-            for f in version.selected_features:
-                row[f] = feature_dict.get(f)
+        for build in items:
+            feature_dict = build.features
+            row = {f: feature_dict.get(f) for f in version.selected_features}
             rows.append(row)
 
-        # Calculate column statistics (only on first page for performance)
         column_stats = {}
-        if page == 1:
+        if include_stats:
             column_stats = self._calculate_column_stats(
                 dataset_id, version_id, version.selected_features
             )
@@ -411,79 +494,11 @@ class DatasetVersionService:
         """Calculate statistics for each column."""
         from bson import ObjectId
 
-        query = {
-            "dataset_id": ObjectId(dataset_id),
-            "version_id": ObjectId(version_id),
-        }
-
-        # Build aggregation pipeline for stats
-        stats = {}
-        total_docs = self._db.enrichment_builds.count_documents(query)
-
-        if total_docs == 0:
-            return stats
-
-        for feature in features:
-            feature_path = f"features.{feature}"
-
-            # Count non-null values
-            non_null_count = self._db.enrichment_builds.count_documents(
-                {
-                    **query,
-                    feature_path: {"$ne": None},
-                }
-            )
-
-            missing_count = total_docs - non_null_count
-            missing_rate = (missing_count / total_docs) * 100 if total_docs > 0 else 0
-
-            # Get sample values for type detection
-            sample = self._db.enrichment_builds.find_one(
-                {**query, feature_path: {"$ne": None}}, {feature_path: 1}
-            )
-
-            value_type = "unknown"
-            if sample:
-                value = sample.get("features", {}).get(feature)
-                if isinstance(value, bool):
-                    value_type = "boolean"
-                elif isinstance(value, (int, float)):
-                    value_type = "numeric"
-                elif isinstance(value, str):
-                    value_type = "string"
-                elif isinstance(value, list):
-                    value_type = "array"
-
-            stats[feature] = {
-                "non_null": non_null_count,
-                "missing": missing_count,
-                "missing_rate": round(missing_rate, 1),
-                "type": value_type,
-            }
-
-            # For numeric types, calculate min/max/avg
-            if value_type == "numeric":
-                agg_result = list(
-                    self._db.enrichment_builds.aggregate(
-                        [
-                            {"$match": {**query, feature_path: {"$type": "number"}}},
-                            {
-                                "$group": {
-                                    "_id": None,
-                                    "min": {"$min": f"${feature_path}"},
-                                    "max": {"$max": f"${feature_path}"},
-                                    "avg": {"$avg": f"${feature_path}"},
-                                }
-                            },
-                        ]
-                    )
-                )
-                if agg_result:
-                    stats[feature]["min"] = agg_result[0].get("min")
-                    stats[feature]["max"] = agg_result[0].get("max")
-                    stats[feature]["avg"] = round(agg_result[0].get("avg", 0), 2)
-
-        return stats
+        return self._enrichment_build_repo.get_feature_stats(
+            dataset_id=ObjectId(dataset_id),
+            version_id=ObjectId(version_id),
+            features=features,
+        )
 
     def _revoke_task(self, task_id: Optional[str]) -> None:
         """Revoke a Celery task if it exists."""

@@ -4,9 +4,6 @@ Dataset Ingestion Tasks - Resource preparation for dataset builds.
 This module uses shared ingestion infrastructure to prepare resources
 (clone, worktree, logs) for dataset builds. It leverages resource_dag
 to automatically determine which tasks are needed based on selected features.
-
-Note: This module is called from enrichment_processing.py during version enrichment.
-Ingestion is now triggered as part of version creation, not automatically after validation.
 """
 
 import logging
@@ -31,7 +28,6 @@ logger = logging.getLogger(__name__)
 )
 def ingest_dataset_builds(
     self: PipelineTask,
-    dataset_id: str,
     repo_id: str,
     build_ids: List[str],
     features: Optional[List[str]] = None,
@@ -71,15 +67,18 @@ def ingest_dataset_builds(
     # Get commit SHAs for worktree creation
     commit_shas = []
     for build_id in build_ids:
-        build = build_run_repo.find_by_repo_and_build_id(repo_id, build_id)
+        # Use existing raw_repo_id from config to find the build run
+        target_repo_id = str(repo_config.raw_repo_id)
+        build = build_run_repo.find_by_repo_and_build_id(target_repo_id, build_id)
         if build and build.commit_sha:
             commit_shas.append(build.effective_sha or build.commit_sha)
     commit_shas = list(set(commit_shas))
+    build_ids = list(set(build_ids))
 
     # Build workflow using shared helper
     workflow = build_ingestion_workflow(
         tasks_by_level=tasks_by_level,
-        repo_id=repo_id,
+        raw_repo_id=repo_config.raw_repo_id,
         full_name=full_name,
         build_ids=build_ids,
         commit_shas=commit_shas,

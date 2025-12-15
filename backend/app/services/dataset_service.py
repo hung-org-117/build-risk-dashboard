@@ -99,7 +99,7 @@ class DatasetService:
                 DatasetRepoSummary(
                     _id=c.id,
                     raw_repo_id=c.raw_repo_id,
-                    repo_name=c.normalized_full_name or c.repo_name_from_csv,
+                    repo_name=c.normalized_full_name,
                     repo_name_from_csv=c.repo_name_from_csv,
                     validation_status=(
                         c.validation_status.value

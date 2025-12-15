@@ -13,14 +13,14 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
         super().__init__(db, "dataset_builds", DatasetBuild)
 
     def find_existing(
-        self, dataset_id, build_id_from_csv: str, repo_id
+        self, dataset_id, build_id_from_csv: str, raw_repo_id
     ) -> Optional[DatasetBuild]:
-        """Find a build by dataset, CSV build id, and repo."""
+        """Find a build by dataset, CSV build id, and raw repo id."""
         return self.find_one(
             {
                 "dataset_id": self._to_object_id(dataset_id),
                 "build_id_from_csv": build_id_from_csv,
-                "repo_id": self._to_object_id(repo_id),
+                "raw_repo_id": self._to_object_id(raw_repo_id),
             }
         )
 
@@ -37,3 +37,15 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
         if not oid:
             return []
         return self.find_many({"dataset_id": oid, "status": "found"})
+
+    def find_found_builds_by_repo(
+        self, dataset_id: str, raw_repo_id: str
+    ) -> list[DatasetBuild]:
+        """Find found builds for a specific raw repo in a dataset."""
+        oid_ds = self._to_object_id(dataset_id)
+        oid_repo = self._to_object_id(raw_repo_id)
+        if not oid_ds or not oid_repo:
+            return []
+        return self.find_many(
+            {"dataset_id": oid_ds, "raw_repo_id": oid_repo, "status": "found"}
+        )

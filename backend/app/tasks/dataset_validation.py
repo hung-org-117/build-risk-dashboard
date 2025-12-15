@@ -7,6 +7,8 @@ Flow:
 3. finalize_validation - Aggregate results, update dataset status
 """
 
+from typing import Optional
+from app.entities.dataset import DatasetValidationStatus
 import logging
 from typing import Any, Dict, List
 
@@ -66,7 +68,7 @@ def parse_csv_with_pandas(
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.start_validation",
-    queue="processing",
+    queue="validation",
     soft_time_limit=300,  # 5 min
     time_limit=360,
 )
@@ -78,7 +80,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
     """
     db = get_database()
     dataset_repo = DatasetRepository(db)
-    enrichment_repo_repo = DatasetRepoConfigRepository(db)
+    repo_config_repo = DatasetRepoConfigRepository(db)
 
     try:
         dataset_doc = dataset_repo.find_by_id(dataset_id)
@@ -91,7 +93,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
         dataset_repo.update_one(
             dataset_id,
             {
-                "validation_status": "validating",
+                "validation_status": DatasetValidationStatus.VALIDATING,
                 "validation_started_at": utc_now(),
                 "validation_task_id": self.request.id,
                 "validation_progress": 0,
@@ -100,7 +102,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
         )
 
         # Get validated repos from Step 2
-        saved_repos_list = enrichment_repo_repo.find_many(
+        saved_repos_list = repo_config_repo.find_many(
             {
                 "dataset_id": ObjectId(dataset_id),
                 "validation_status": DatasetRepoValidationStatus.VALID,
@@ -162,7 +164,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
             dataset_repo.update_one(
                 dataset_id,
                 {
-                    "validation_status": "completed",
+                    "validation_status": DatasetValidationStatus.COMPLETED,
                     "validation_completed_at": utc_now(),
                     "validation_progress": 100,
                 },
@@ -176,7 +178,8 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
             repo_tasks.append(
                 validate_repo_builds.s(
                     dataset_id=dataset_id,
-                    repo_id=str(repo_doc.id),
+                    repo_config_id=str(repo_doc.id),
+                    raw_repo_id=str(repo_doc.raw_repo_id),
                     repo_name=repo_name,
                     build_ids=build_ids,
                     ci_provider=repo_doc.ci_provider,
@@ -185,9 +188,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
 
         # Use chord to run all repo validations in parallel,
         # then finalize when all complete
-        workflow = chord(group(repo_tasks))(
-            finalize_validation.s(dataset_id=dataset_id)
-        )
+        chord(group(repo_tasks))(finalize_validation.s(dataset_id=dataset_id))
 
         logger.info(
             f"Dispatched validation for {total_repos} repos, {total_builds} builds"
@@ -204,7 +205,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
         dataset_repo.update_one(
             dataset_id,
             {
-                "validation_status": "failed",
+                "validation_status": DatasetValidationStatus.FAILED,
                 "validation_completed_at": utc_now(),
                 "validation_error": str(e),
             },
@@ -216,14 +217,15 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.validate_repo_builds",
-    queue="processing",
+    queue="validation",
     soft_time_limit=300,  # 5 min (just dispatches chunks)
     time_limit=360,
 )
 def validate_repo_builds(
     self,
     dataset_id: str,
-    repo_id: str,
+    repo_config_id: str,
+    raw_repo_id: str,
     repo_name: str,
     build_ids: List[str],
     ci_provider: str,
@@ -245,13 +247,13 @@ def validate_repo_builds(
         }
 
     db = get_database()
-    enrichment_repo_repo = DatasetRepoConfigRepository(db)
+    repo_config_repo = DatasetRepoConfigRepository(db)
 
     # Update repo with total builds count
-    enrichment_repo_repo.update_one(repo_id, {"builds_total": len(build_ids)})
+    repo_config_repo.update_one(repo_config_id, {"builds_total": len(build_ids)})
 
     # Initialize Redis state for this repo's validation
-    session_key = f"validate_repo:{dataset_id}:{repo_id}"
+    session_key = f"validate_repo:{dataset_id}:{repo_config_id}"
     redis.delete(f"{session_key}:found")
     redis.delete(f"{session_key}:not_found")
     redis.set(f"{session_key}:found", 0, ex=3600)
@@ -265,7 +267,8 @@ def validate_repo_builds(
         chunk = build_ids[i : i + chunk_size]
         validate_builds_chunk.delay(
             dataset_id=dataset_id,
-            repo_id=repo_id,
+            repo_config_id=repo_config_id,
+            raw_repo_id=raw_repo_id,
             repo_name=repo_name,
             build_ids=chunk,
             ci_provider=ci_provider,
@@ -291,7 +294,7 @@ def validate_repo_builds(
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.validate_builds_chunk",
-    queue="processing",
+    queue="validation",
     soft_time_limit=300,  # 5 min per chunk
     time_limit=360,
     autoretry_for=(Exception,),
@@ -301,7 +304,8 @@ def validate_repo_builds(
 def validate_builds_chunk(
     self,
     dataset_id: str,
-    repo_id: str,
+    repo_config_id: str,
+    raw_repo_id: str,
     repo_name: str,
     build_ids: List[str],
     ci_provider: str,
@@ -320,7 +324,7 @@ def validate_builds_chunk(
         db = get_database()
         redis = get_redis()
         dataset_build_repo = DatasetBuildRepository(db)
-        enrichment_repo_repo = DatasetRepoConfigRepository(db)
+        repo_config_repo = DatasetRepoConfigRepository(db)
         build_run_repo = RawBuildRunRepository(db)
 
         # Check for cancellation
@@ -336,7 +340,7 @@ def validate_builds_chunk(
 
         rate_limit = getattr(settings, "API_RATE_LIMIT_PER_SECOND", 5.0)
         min_interval = 1.0 / rate_limit
-        session_key = f"validate_repo:{dataset_id}:{repo_id}"
+        session_key = f"validate_repo:{dataset_id}:{repo_config_id}"
 
         builds_found = 0
         builds_not_found = 0
@@ -348,7 +352,7 @@ def validate_builds_chunk(
 
             # Check if build already validated (idempotency)
             existing_build = dataset_build_repo.find_existing(
-                dataset_id, build_id, repo_id
+                dataset_id, build_id, raw_repo_id
             )
 
             if existing_build and existing_build.status in ["found", "not_found"]:
@@ -363,16 +367,16 @@ def validate_builds_chunk(
                 dataset_id=ObjectId(dataset_id),
                 build_id_from_csv=build_id,
                 repo_name_from_csv=repo_name,
-                repo_id=ObjectId(repo_id),
+                raw_repo_id=ObjectId(raw_repo_id),
             )
 
             try:
-                time.sleep(min_interval)
+                await asyncio.sleep(min_interval)
                 workflow_data = await ci.get_workflow_run(repo_name, int(build_id))
 
                 if workflow_data and ci.is_run_completed(workflow_data):
                     build_run = build_run_repo.upsert_by_business_key(
-                        raw_repo_id=ObjectId(repo_id),
+                        raw_repo_id=ObjectId(raw_repo_id),
                         build_id=str(build_id),
                         provider=ci_provider,
                         build_number=workflow_data.get("run_number"),
@@ -429,8 +433,8 @@ def validate_builds_chunk(
         total_found = int(redis.get(f"{session_key}:found") or 0)
         total_not_found = int(redis.get(f"{session_key}:not_found") or 0)
 
-        enrichment_repo_repo.update_one(
-            repo_id,
+        repo_config_repo.update_one(
+            repo_config_id,
             {
                 "builds_found": total_found,
                 "builds_not_found": total_not_found,
@@ -453,7 +457,7 @@ def validate_builds_chunk(
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.finalize_validation",
-    queue="processing",
+    queue="validation",
     soft_time_limit=120,  # 2 min
     time_limit=180,
 )
@@ -519,16 +523,3 @@ def finalize_validation(
         "stats": stats.model_dump(),
         "build_coverage": build_coverage,
     }
-
-
-# Legacy function for status updates (used by service)
-def _update_status(db, dataset_id: str, status: str):
-    db.datasets.update_one(
-        {"_id": ObjectId(dataset_id)},
-        {
-            "$set": {
-                "validation_status": status,
-                "validation_completed_at": utc_now(),
-            }
-        },
-    )

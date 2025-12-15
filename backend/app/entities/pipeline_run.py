@@ -13,6 +13,13 @@ from pydantic import Field
 from .base import BaseEntity, PyObjectId
 
 
+class PipelineCategory(str, Enum):
+    """Pipeline category."""
+
+    MODEL_TRAINING = "model_training"
+    DATASET_ENRICHMENT = "dataset_enrichment"
+
+
 class PipelineRunStatus(str, Enum):
     """Pipeline run status."""
 

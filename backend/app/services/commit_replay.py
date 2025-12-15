@@ -92,12 +92,16 @@ def build_replay_plan(
     target_sha: str,
     commit_exists: callable,
     github_client: GitHubClient,
-    max_depth: int = 50,
+    max_depth: int = -1,
 ) -> ReplayPlan:
     """
     Constructs a plan to replay missing commits by traversing up ancestry
     until a locally existing commit is found.
     """
+    if max_depth == -1:
+        from app.config import settings
+
+        max_depth = settings.COMMIT_REPLAY_MAX_DEPTH
     if commit_exists(target_sha):
         raise ValueError(f"Commit {target_sha} already exists")
 
