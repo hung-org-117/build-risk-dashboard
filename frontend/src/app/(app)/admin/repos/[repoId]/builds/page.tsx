@@ -16,7 +16,7 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { BuildDrawer } from "@/components/build-drawer";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,11 +30,29 @@ import { useWebSocket } from "@/contexts/websocket-context";
 import { buildApi, reposApi } from "@/lib/api";
 import { formatDurationFromSeconds, formatTimestamp } from "@/lib/utils";
 import type { Build, RepoDetail } from "@/types";
-import { BuildStatus, ExtractionStatus } from "@/components/build-drawer";
+
 import { ExportPanel } from "./_components/ExportPanel";
-import { BuildLogsDialog, LogsCell } from "./_components/BuildLogsDialog";
 
 const PAGE_SIZE = 20;
+
+enum BuildStatus {
+    SUCCESS = "success",
+    PASSED = "passed",
+    FAILURE = "failure",
+    CANCELLED = "cancelled",
+    SKIPPED = "skipped",
+    TIMED_OUT = "timed_out",
+    NEUTRAL = "neutral",
+    UNKNOWN = "unknown",
+}
+
+enum ExtractionStatus {
+    PENDING = "pending",
+    COMPLETED = "completed",
+    PARTIAL = "partial",
+    FAILED = "failed",
+}
+
 
 function StatusBadge({ status }: { status: string }) {
     const normalizedStatus = status.toLowerCase();
@@ -130,8 +148,17 @@ function StatusBadge({ status }: { status: string }) {
     return <Badge variant="secondary">{status}</Badge>;
 }
 
-function ExtractionStatusBadge({ status }: { status: string }) {
-    const normalizedStatus = status.toLowerCase();
+function ExtractionStatusBadge({ status, hasTrainingData }: { status?: string; hasTrainingData: boolean }) {
+    // No training data yet = not started
+    if (!hasTrainingData) {
+        return (
+            <Badge variant="outline" className="border-slate-400 text-slate-500 gap-1">
+                <Clock className="h-3 w-3" /> Not Started
+            </Badge>
+        );
+    }
+
+    const normalizedStatus = (status || "").toLowerCase();
 
     if (normalizedStatus === ExtractionStatus.COMPLETED) {
         return (
@@ -160,12 +187,12 @@ function ExtractionStatusBadge({ status }: { status: string }) {
     if (normalizedStatus === ExtractionStatus.PENDING) {
         return (
             <Badge variant="secondary" className="gap-1">
-                <Clock className="h-3 w-3" /> Pending
+                <Loader2 className="h-3 w-3 animate-spin" /> Processing
             </Badge>
         );
     }
 
-    return <Badge variant="secondary" className="text-xs">{status}</Badge>;
+    return <Badge variant="secondary" className="text-xs">{status || "Unknown"}</Badge>;
 }
 
 
@@ -181,7 +208,7 @@ export default function RepoBuildsPage() {
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
-    const [selectedBuildId, setSelectedBuildId] = useState<string | null>(null);
+
 
     // Search state
     const [searchQuery, setSearchQuery] = useState("");
@@ -191,7 +218,6 @@ export default function RepoBuildsPage() {
     const [syncing, setSyncing] = useState(false);
 
     const [reprocessingBuilds, setReprocessingBuilds] = useState<Record<string, boolean>>({});
-    const [logsDialogBuild, setLogsDialogBuild] = useState<Build | null>(null);
 
     const { subscribe } = useWebSocket();
 
@@ -373,19 +399,16 @@ export default function RepoBuildsPage() {
                                         Commit
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Duration
+                                        Branch
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Tests
+                                        Jobs
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Date
                                     </th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Extraction
-                                    </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Logs
                                     </th>
                                     <th className="px-6 py-3" />
                                 </tr>
@@ -405,19 +428,19 @@ export default function RepoBuildsPage() {
                                         <tr
                                             key={build.id}
                                             className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                                            onClick={() => setSelectedBuildId(build.id)}
+                                            onClick={() => router.push(`/admin/repos/${repoId}/builds/${build.id}`)}
                                         >
                                             <td className="px-6 py-4 font-medium">
-                                                #{build.build_number}
+                                                #{build.build_number || "—"}
                                             </td>
                                             <td className="px-6 py-4 font-mono text-xs text-muted-foreground">
-                                                {build.workflow_run_id}
+                                                {build.build_id}
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
-                                                    <StatusBadge status={build.build_conclusion} />
-                                                    {(build.is_missing_commit || (build.error_message && build.error_message.startsWith("Warning:"))) && (
-                                                        <div title={build.error_message || "Missing commit"} className="text-yellow-500">
+                                                    <StatusBadge status={build.conclusion} />
+                                                    {build.extraction_error && (
+                                                        <div title={build.extraction_error} className="text-yellow-500">
                                                             <AlertCircle className="h-4 w-4" />
                                                         </div>
                                                     )}
@@ -429,20 +452,17 @@ export default function RepoBuildsPage() {
                                                     {build.commit_sha.substring(0, 7)}
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-muted-foreground">
-                                                {formatDurationFromSeconds(build.duration)}
+                                            <td className="px-6 py-4 text-muted-foreground text-xs">
+                                                {build.branch}
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
-                                                {build.num_tests !== null ? build.num_tests : "—"}
+                                                {build.jobs_count}
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
                                                 {formatTimestamp(build.created_at)}
                                             </td>
                                             <td className="px-6 py-4">
-                                                <ExtractionStatusBadge status={build.extraction_status} />
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <LogsCell build={build} onViewLogs={(b) => setLogsDialogBuild(b)} />
+                                                <ExtractionStatusBadge status={build.extraction_status} hasTrainingData={build.has_training_data} />
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-1">
@@ -476,7 +496,7 @@ export default function RepoBuildsPage() {
                                                         variant="ghost"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            setSelectedBuildId(build.id);
+                                                            router.push(`/admin/repos/${repoId}/builds/${build.id}`);
                                                         }}
                                                     >
                                                         View
@@ -528,18 +548,8 @@ export default function RepoBuildsPage() {
                 </div>
             </Card>
 
-            <BuildDrawer
-                repoId={repoId}
-                buildId={selectedBuildId}
-                onClose={() => setSelectedBuildId(null)}
-            />
 
-            <BuildLogsDialog
-                repoId={repoId}
-                build={logsDialogBuild}
-                open={!!logsDialogBuild}
-                onOpenChange={(open) => !open && setLogsDialogBuild(null)}
-            />
+
         </div >
     );
 }

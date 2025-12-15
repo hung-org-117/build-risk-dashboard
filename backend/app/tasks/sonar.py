@@ -116,7 +116,7 @@ def start_sonar_scan(
 @celery_app.task(
     bind=True,
     name="app.tasks.sonar.export_metrics_from_webhook",
-    queue="data_processing",
+    queue="processing",
 )
 def export_metrics_from_webhook(self, component_key: str, build_id: str = None):
     """

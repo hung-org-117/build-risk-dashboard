@@ -72,6 +72,19 @@ from .dataset_version import (
     VersionResponse,
     VersionListResponse,
 )
+from .dataset_repo import (
+    DatasetRepoSummary,
+    DatasetRepoListResponse,
+)
+from .settings import (
+    ApplicationSettingsResponse,
+    ApplicationSettingsUpdateRequest,
+    CircleCISettingsDto,
+    TravisCISettingsDto,
+    SonarQubeSettingsDto,
+    TrivySettingsDto,
+    NotificationSettingsDto,
+)
 
 __all__ = [
     # Auth
@@ -135,4 +148,15 @@ __all__ = [
     "CreateVersionRequest",
     "VersionResponse",
     "VersionListResponse",
+    # Dataset Repo
+    "DatasetRepoSummary",
+    "DatasetRepoListResponse",
+    # Settings
+    "ApplicationSettingsResponse",
+    "ApplicationSettingsUpdateRequest",
+    "CircleCISettingsDto",
+    "TravisCISettingsDto",
+    "SonarQubeSettingsDto",
+    "TrivySettingsDto",
+    "NotificationSettingsDto",
 ]

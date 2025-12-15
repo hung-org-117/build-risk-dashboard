@@ -453,25 +453,22 @@ class GitHubClient:
         return response.text
 
     def list_commit_comments(self, full_name: str, sha: str) -> List[Dict[str, Any]]:
-        comments = self._rest_request(
-            "GET", f"/repos/{full_name}/commits/{sha}/comments"
-        )
-        return comments or []
+        """List comments on a commit with pagination."""
+        return list(self._paginate(f"/repos/{full_name}/commits/{sha}/comments"))
 
     def list_issue_comments(
         self, full_name: str, issue_number: int
     ) -> List[Dict[str, Any]]:
-        return self._rest_request(
-            "GET", f"/repos/{full_name}/issues/{issue_number}/comments"
+        """List issue/PR discussion comments with pagination."""
+        return list(
+            self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments")
         )
 
     def list_review_comments(
         self, full_name: str, pr_number: int
     ) -> List[Dict[str, Any]]:
-        reviews = self._rest_request(
-            "GET", f"/repos/{full_name}/pulls/{pr_number}/comments"
-        )
-        return reviews or []
+        """List PR code review comments with pagination."""
+        return list(self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments"))
 
     def compare_commits(self, full_name: str, base: str, head: str) -> Dict[str, Any]:
         return self._rest_request("GET", f"/repos/{full_name}/compare/{base}...{head}")

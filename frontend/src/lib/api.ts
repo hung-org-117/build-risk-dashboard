@@ -40,6 +40,8 @@ import type {
   PipelineRunListResponse,
   PipelineStats,
   DAGInfo,
+  // Settings types
+  ApplicationSettings,
 } from "@/types";
 import axios from "axios";
 
@@ -795,6 +797,20 @@ export const datasetValidationApi = {
       `/datasets/${datasetId}/repos`,
       { repos }
     );
+    return response.data;
+  },
+};
+
+export const settingsApi = {
+  // Get current settings
+  get: async (): Promise<ApplicationSettings> => {
+    const response = await api.get<ApplicationSettings>("/settings");
+    return response.data;
+  },
+
+  // Update settings
+  update: async (settings: Partial<ApplicationSettings>): Promise<ApplicationSettings> => {
+    const response = await api.patch<ApplicationSettings>("/settings", settings);
     return response.data;
   },
 };

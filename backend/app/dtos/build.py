@@ -1,44 +1,93 @@
-from datetime import datetime
-from typing import List, Optional
-from pydantic import BaseModel, Field
+"""DTOs for Build API - RawBuildRun as primary source with optional training enrichment."""
 
-from app.entities.base import PyObjectId
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class BuildSummary(BaseModel):
+    """
+    Summary of a CI build from RawBuildRun with optional ModelTrainingBuild enrichment.
+
+    Primary data comes from RawBuildRun (available immediately after ingestion).
+    Training data (extraction_status, features) comes from ModelTrainingBuild (after processing).
+    """
+
+    # Identity - using RawBuildRun._id as primary key
     id: str = Field(..., alias="_id")
-    build_number: int
-    build_conclusion: str  # GitHub workflow conclusion: "success", "failure", etc.
-    extraction_status: (
-        str  # Feature extraction process status: "pending", "completed", "failed"
-    )
-    commit_sha: str
+
+    # From RawBuildRun - always available after ingestion
+    build_number: Optional[int] = None
+    build_id: str = ""  # CI provider's build ID (e.g., GitHub run ID)
+    conclusion: str = "unknown"  # success, failure, cancelled, etc.
+    commit_sha: str = ""
+    branch: str = ""
     created_at: Optional[datetime] = None
-    duration: Optional[float] = None
-    num_jobs: Optional[int] = None
-    num_tests: Optional[int] = None
-    error_message: Optional[str] = None
-    is_missing_commit: bool = False
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    jobs_count: int = 0
+    web_url: Optional[str] = None
 
-    # Workflow info
-    workflow_run_id: int
-
-    # Logs fields
+    # Logs info from RawBuildRun
     logs_available: Optional[bool] = None
-    logs_expired: Optional[bool] = None
+    logs_expired: bool = False
+
+    # Training enrichment from ModelTrainingBuild (optional - may not exist yet)
+    has_training_data: bool = False
+    training_build_id: Optional[str] = None
+    extraction_status: Optional[str] = None  # pending, completed, failed, partial
+    feature_count: int = 0
+    extraction_error: Optional[str] = None
 
     class Config:
         populate_by_name = True
 
 
-class BuildDetail(BuildSummary):
-    features: dict = {}
+class BuildDetail(BaseModel):
+    """
+    Detailed view of a build with full RawBuildRun data and training features.
+    """
+
+    # Identity
+    id: str = Field(..., alias="_id")
+
+    # From RawBuildRun
+    build_number: Optional[int] = None
+    build_id: str = ""
+    conclusion: str = "unknown"
+    commit_sha: str = ""
+    branch: str = ""
+    commit_message: Optional[str] = None
+    commit_author: Optional[str] = None
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    jobs_count: int = 0
+    jobs_metadata: List[Dict[str, Any]] = []
+    web_url: Optional[str] = None
+    provider: str = "github_actions"
 
     # Logs
-    error_message: Optional[str] = None
+    logs_available: Optional[bool] = None
+    logs_expired: bool = False
+
+    # Training enrichment
+    has_training_data: bool = False
+    training_build_id: Optional[str] = None
+    extraction_status: Optional[str] = None
+    feature_count: int = 0
+    extraction_error: Optional[str] = None
+    features: Dict[str, Any] = {}
+
+    class Config:
+        populate_by_name = True
 
 
 class BuildListResponse(BaseModel):
+    """Paginated list of builds."""
+
     items: List[BuildSummary]
     total: int
     page: int

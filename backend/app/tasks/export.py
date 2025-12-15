@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     base=PipelineTask,
     name="app.tasks.export.run_export_job",
-    queue="export",
+    queue="processing",
 )
 def run_export_job(self, job_id: str):
     """
@@ -102,7 +102,7 @@ def run_export_job(self, job_id: str):
     bind=True,
     base=PipelineTask,
     name="app.tasks.export.cleanup_old_exports",
-    queue="maintenance",
+    queue="processing",
 )
 def cleanup_old_exports(self, days: int = 7):
     """

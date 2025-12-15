@@ -28,7 +28,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Input } from "@/components/ui/input";
-import { FeatureDAGVisualization, type FeatureDAGData } from "./FeatureDAGVisualization";
+import { FeatureDAGVisualization, type FeatureDAGData } from "@/components/features";
 import { SelectedFeaturesPanel } from "./SelectedFeaturesPanel";
 import { ExtractionPlanTimeline } from "./ExtractionPlanTimeline";
 
@@ -1154,7 +1154,6 @@ function RepoConfigItem({
                 >
                     <option value={CIProvider.GITHUB_ACTIONS}>GitHub Actions</option>
                     <option value={CIProvider.GITLAB_CI}>GitLab CI</option>
-                    <option value={CIProvider.JENKINS}>Jenkins</option>
                     <option value={CIProvider.CIRCLECI}>CircleCI</option>
                     <option value={CIProvider.TRAVIS_CI}>Travis CI</option>
                 </select>

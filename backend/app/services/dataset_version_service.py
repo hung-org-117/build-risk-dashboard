@@ -72,6 +72,9 @@ class DatasetVersionService:
         description: Optional[str] = None,
     ) -> DatasetVersion:
         """Create a new version and start enrichment task."""
+        from datetime import datetime, timezone
+        from app.core.redis import get_redis, RedisLock
+
         dataset = self._verify_dataset_access(dataset_id, user_id)
 
         if dataset.validation_status != "completed":
@@ -80,43 +83,63 @@ class DatasetVersionService:
                 detail="Dataset validation must be completed before creating versions",
             )
 
-        active_version = self._repo.find_active_by_dataset(dataset_id)
-        if active_version:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Version v{active_version.version_number} is still processing. "
-                "Wait for it to complete or cancel it.",
+        # Use Redis lock to prevent race conditions when creating versions
+        lock_key = f"version_create:{dataset_id}"
+        with RedisLock(lock_key, timeout=30, blocking_timeout=5):
+            active_version = self._repo.find_active_by_dataset(dataset_id)
+            if active_version:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Version v{active_version.version_number} is still processing. "
+                    "Wait for it to complete or cancel it.",
+                )
+
+            redis = get_redis()
+            cooldown_key = f"version_cancelled:{dataset_id}"
+            cooldown_until = redis.get(cooldown_key)
+            if cooldown_until:
+                try:
+                    cooldown_ts = float(cooldown_until)
+                    now_ts = datetime.now(timezone.utc).timestamp()
+                    if now_ts < cooldown_ts:
+                        remaining = int(cooldown_ts - now_ts)
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Please wait {remaining} seconds before creating a new version. "
+                            "Previous version is cleaning up.",
+                        )
+                except (ValueError, TypeError):
+                    pass  # Invalid cooldown value, ignore
+
+            version_number = self._repo.get_next_version_number(dataset_id)
+
+            version = DatasetVersion(
+                dataset_id=dataset_id,
+                user_id=user_id,
+                version_number=version_number,
+                name=name or "",
+                description=description,
+                selected_features=selected_features,
+                total_rows=dataset.rows or 0,
+                status=VersionStatus.PENDING,
             )
 
-        version_number = self._repo.get_next_version_number(dataset_id)
+            if not version.name:
+                version.name = version.generate_default_name()
 
-        version = DatasetVersion(
-            dataset_id=dataset_id,
-            user_id=user_id,
-            version_number=version_number,
-            name=name or "",
-            description=description,
-            selected_features=selected_features,
-            total_rows=dataset.rows or 0,
-            status=VersionStatus.PENDING,
-        )
+            version = self._repo.create(version)
 
-        if not version.name:
-            version.name = version.generate_default_name()
+            from app.tasks.enrichment_processing import start_enrichment
 
-        version = self._repo.create(version)
+            task = start_enrichment.delay(str(version.id))
+            self._repo.update_one(str(version.id), {"task_id": task.id})
 
-        from app.tasks.enrichment_processing import start_enrichment
+            logger.info(
+                f"Created version {version_number} for dataset {dataset_id} "
+                f"with {len(selected_features)} features"
+            )
 
-        task = start_enrichment.delay(str(version.id))
-        self._repo.update_one(str(version.id), {"task_id": task.id})
-
-        logger.info(
-            f"Created version {version_number} for dataset {dataset_id} "
-            f"with {len(selected_features)} features"
-        )
-
-        return version
+            return version
 
     def export_version(
         self,
@@ -260,7 +283,14 @@ class DatasetVersionService:
     def cancel_version(
         self, dataset_id: str, version_id: str, user_id: str
     ) -> DatasetVersion:
-        """Cancel a processing version."""
+        """Cancel a processing version.
+
+        Sets a cooldown period to allow ingestion tasks to cleanup before
+        a new version can be created.
+        """
+        from datetime import datetime, timezone
+        from app.core.redis import get_redis
+
         self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
 
@@ -274,7 +304,15 @@ class DatasetVersionService:
         self._repo.mark_cancelled(version_id)
         version.status = VersionStatus.CANCELLED
 
-        logger.info(f"Cancelled version {version_id}")
+        cooldown_seconds = 10
+        redis = get_redis()
+        cooldown_key = f"version_cancelled:{dataset_id}"
+        cooldown_until = datetime.now(timezone.utc).timestamp() + cooldown_seconds
+        redis.set(cooldown_key, str(cooldown_until), ex=cooldown_seconds + 5)
+
+        logger.info(
+            f"Cancelled version {version_id}, cooldown set for {cooldown_seconds}s"
+        )
         return version
 
     def get_version_data(

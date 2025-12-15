@@ -49,7 +49,7 @@ class RepositoryService:
         1. Verify repo exists on GitHub (synchronous)
         2. Create/update RawRepository
         3. Create/update ModelRepoConfig with raw_repo_id
-        4. Queue async import task
+        4. Queue async import task (if not already importing)
         """
         from app.services.github.github_client import get_app_github_client
 
@@ -60,6 +60,18 @@ class RepositoryService:
             installation_id = payload.installation_id
 
             try:
+                # Check if repo is already being imported
+                existing_repo = self.repo_config.find_by_full_name(payload.full_name)
+                if (
+                    existing_repo
+                    and existing_repo.import_status == ModelImportStatus.IMPORTING
+                ):
+                    logger.info(
+                        f"Repository {payload.full_name} is already importing, skipping"
+                    )
+                    results.append(existing_repo)
+                    continue
+
                 with get_app_github_client(self.db, installation_id) as gh:
                     repo_data = gh.get_repository(payload.full_name)
 
@@ -266,6 +278,13 @@ class RepositoryService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
             )
 
+        # Check if already importing
+        if repo_doc.import_status == ModelImportStatus.IMPORTING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Repository is already being imported. Please wait for completion.",
+            )
+
         # Update status to queued/importing
         self.repo_config.update_repository(
             repo_id, {"import_status": ModelImportStatus.QUEUED.value}
@@ -276,8 +295,6 @@ class RepositoryService:
             user_id=user_id,
             full_name=repo_doc.full_name,
             installation_id=repo_doc.installation_id,
-            test_frameworks=repo_doc.test_frameworks,
-            source_languages=repo_doc.source_languages,
             ci_provider=(
                 repo_doc.ci_provider.value
                 if hasattr(repo_doc.ci_provider, "value")

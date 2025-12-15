@@ -38,7 +38,7 @@ class ModelTrainingBuild(BaseEntity):
     )
     raw_workflow_run_id: PyObjectId = Field(
         ...,
-        description="Reference to raw_workflow_runs table",
+        description="Reference to raw_build_run table",
     )
 
     # Config reference
@@ -56,10 +56,7 @@ class ModelTrainingBuild(BaseEntity):
         None,
         description="Build number (denormalized)",
     )
-    build_conclusion: Optional[str] = Field(
-        None,
-        description="Build conclusion: success, failure, etc (denormalized)",
-    )
+
     build_created_at: Optional[datetime] = Field(
         None,
         description="Build creation time (denormalized)",
@@ -86,25 +83,6 @@ class ModelTrainingBuild(BaseEntity):
         Extracted features as key-value pairs.
         This is the main data payload for ML training.
         """,
-        example={
-            # Git features
-            "files_changed": 5,
-            "lines_added": 120,
-            "lines_deleted": 45,
-            "commits_count": 1,
-            # Test features
-            "test_cases_total": 150,
-            "test_cases_passed": 148,
-            "test_cases_failed": 2,
-            "test_cases_skipped": 0,
-            "test_duration_seconds": 45.2,
-            # Code quality
-            "complexity_avg": 3.5,
-            "complexity_max": 12,
-            "code_churn": 165,
-            # Build metadata
-            "build_duration_seconds": 180,
-        },
     )
 
     # Feature metadata

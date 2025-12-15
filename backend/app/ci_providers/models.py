@@ -9,7 +9,6 @@ class CIProvider(str, Enum):
     """Supported CI/CD providers."""
 
     GITHUB_ACTIONS = "github_actions"
-    JENKINS = "jenkins"
     CIRCLECI = "circleci"
     TRAVIS_CI = "travis_ci"
 

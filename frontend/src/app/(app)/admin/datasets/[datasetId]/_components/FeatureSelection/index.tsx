@@ -11,12 +11,14 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Loader2, Sparkles, Zap } from "lucide-react";
-import { ViewToggle } from "./ViewToggle";
-import { GraphView } from "./GraphView";
-import { ListView } from "./ListView";
-import { SelectedFeaturesPanel } from "./SelectedFeaturesPanel";
-import { TemplateSelector } from "./TemplateSelector";
-import { useFeatureSelector } from "../../_hooks/useFeatureSelector";
+import { useFeatureSelector } from "@/components/features";
+import {
+    GraphView,
+    ListView,
+    SelectedFeaturesPanel,
+    ViewToggle,
+    TemplateSelector,
+} from "@/components/features/FeatureSelection";
 
 interface FeatureSelectionCardProps {
     datasetId: string;

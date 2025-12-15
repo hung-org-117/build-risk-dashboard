@@ -110,11 +110,6 @@ export default function DatasetDetailPage() {
                     <TabsTrigger value="data" className="gap-2">
                         <FolderGit2 className="h-4 w-4" />
                         Data
-                        {dataset.ingestion_status === "ingesting" && (
-                            <Badge variant="secondary" className="ml-1 text-xs animate-pulse">
-                                Collecting
-                            </Badge>
-                        )}
                     </TabsTrigger>
                     <TabsTrigger value="enrichment" className="gap-2">
                         <Zap className="h-4 w-4" />

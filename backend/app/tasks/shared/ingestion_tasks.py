@@ -30,43 +30,7 @@ from app.paths import REPOS_DIR, WORKTREES_DIR, LOGS_DIR
 
 logger = logging.getLogger(__name__)
 
-
-class RedisLock:
-    """
-    Redis-based distributed lock for preventing concurrent operations.
-
-    Usage:
-        with RedisLock("clone:repo_id", timeout=600):
-            # critical section
-    """
-
-    def __init__(self, key: str, timeout: int = 600, blocking_timeout: int = 30):
-        self.key = f"lock:{key}"
-        self.timeout = timeout
-        self.blocking_timeout = blocking_timeout
-        self._lock = None
-
-    def __enter__(self):
-        import redis
-
-        redis_client = redis.from_url(settings.REDIS_URL)
-        self._lock = redis_client.lock(
-            self.key,
-            timeout=self.timeout,
-            blocking_timeout=self.blocking_timeout,
-        )
-        acquired = self._lock.acquire(blocking=True)
-        if not acquired:
-            raise TimeoutError(f"Could not acquire lock: {self.key}")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._lock:
-            try:
-                self._lock.release()
-            except Exception:
-                pass  # Lock may have expired
-        return False
+from app.core.redis import RedisLock
 
 
 class RateLimiter:

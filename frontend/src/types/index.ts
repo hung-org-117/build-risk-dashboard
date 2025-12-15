@@ -30,26 +30,43 @@ export interface FailedScan {
 }
 
 export interface Build {
+  // Identity - using RawBuildRun._id
   id: string;
-  build_number: number;
-  build_conclusion: string; // GitHub workflow conclusion: "success", "failure", etc.
-  extraction_status: string; // Feature extraction process status: "pending", "completed", "failed"
+
+  // From RawBuildRun - always available after ingestion
+  build_number?: number;
+  build_id: string; // CI provider's build ID
+  conclusion: string; // success, failure, cancelled, etc.
   commit_sha: string;
+  branch: string;
   created_at?: string;
-  duration?: number;
-  num_jobs?: number;
-  num_tests?: number;
-  workflow_run_id: number;
-  error_message?: string;
-  is_missing_commit?: boolean;
-  // Logs fields
+  completed_at?: string;
+  duration_seconds?: number;
+  jobs_count: number;
+  web_url?: string;
+
+  // Logs info
   logs_available?: boolean;
-  logs_expired?: boolean;
-  logs_path?: string;
+  logs_expired: boolean;
+
+  // Training enrichment from ModelTrainingBuild (optional)
+  has_training_data: boolean;
+  training_build_id?: string;
+  extraction_status?: string; // pending, completed, failed, partial
+  feature_count: number;
+  extraction_error?: string;
 }
 
 export interface BuildDetail extends Build {
-  features?: Record<string, unknown>;
+  // Additional RawBuildRun fields
+  commit_message?: string;
+  commit_author?: string;
+  started_at?: string;
+  jobs_metadata: Array<Record<string, unknown>>;
+  provider: string;
+
+  // Training features
+  features: Record<string, unknown>;
 }
 
 export interface DatasetMapping {
@@ -92,15 +109,7 @@ export interface DatasetRecord {
   validation_progress?: number;
   validation_error?: string;
   validation_stats?: ValidationStats;
-  // Ingestion fields (resource collection)
-  ingestion_status?: "pending" | "ingesting" | "completed" | "failed";
-  ingestion_task_id?: string;
-  ingestion_started_at?: string;
-  ingestion_completed_at?: string;
-  ingestion_progress?: number;
-  ingestion_error?: string;
-  ingestion_stats?: IngestionStats;
-  // Setup progress tracking (1=uploaded, 2=configured, 3=validated, 4=ingested)
+  // Setup progress tracking (1=uploaded, 2=configured, 3=validated)
   setup_step?: number;
   // Aggregated enrichment info (computed from enrichment_jobs)
   enrichment_jobs_count?: number;
@@ -274,7 +283,6 @@ export const SOURCE_LANGUAGE_PRESETS: SourceLanguage[] = [
 export enum CIProvider {
   GITHUB_ACTIONS = "github_actions",
   GITLAB_CI = "gitlab_ci",
-  JENKINS = "jenkins",
   CIRCLECI = "circleci",
   TRAVIS_CI = "travis_ci",
 }
@@ -283,7 +291,6 @@ export enum CIProvider {
 export const CIProviderLabels: Record<CIProvider, string> = {
   [CIProvider.GITHUB_ACTIONS]: "GitHub Actions",
   [CIProvider.GITLAB_CI]: "GitLab CI",
-  [CIProvider.JENKINS]: "Jenkins",
   [CIProvider.CIRCLECI]: "CircleCI",
   [CIProvider.TRAVIS_CI]: "Travis CI",
 };
@@ -752,3 +759,47 @@ export interface StartValidationResponse {
   message: string;
 }
 
+// Settings types
+export interface CircleCISettings {
+  enabled: boolean;
+  base_url: string;
+  token?: string | null;
+}
+
+export interface TravisCISettings {
+  enabled: boolean;
+  base_url: string;
+  token?: string | null;
+}
+
+export interface SonarQubeSettings {
+  enabled: boolean;
+  host_url: string;
+  token?: string | null;
+  default_project_key: string;
+  webhook_secret?: string | null;
+  webhook_public_url?: string | null;
+}
+
+export interface TrivySettings {
+  enabled: boolean;
+  severity: string;
+  timeout: number;
+  skip_dirs: string;
+  async_threshold: number;
+}
+
+export interface NotificationSettings {
+  email_enabled: boolean;
+  email_recipients: string;
+  slack_enabled: boolean;
+  slack_webhook_url?: string | null;
+}
+
+export interface ApplicationSettings {
+  circleci: CircleCISettings;
+  travis: TravisCISettings;
+  sonarqube: SonarQubeSettings;
+  trivy: TrivySettings;
+  notifications: NotificationSettings;
+}

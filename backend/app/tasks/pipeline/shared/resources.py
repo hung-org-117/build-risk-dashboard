@@ -30,16 +30,16 @@ class FeatureResource(str, Enum):
 # Used to determine parallel execution order in Celery workflows
 TASK_DEPENDENCIES: Dict[str, List[str]] = {
     "clone_repo": [],
-    "fetch_and_save_builds": [],
+    # "fetch_and_save_builds": [],
     "create_worktrees": ["clone_repo"],
-    "download_build_logs": ["fetch_and_save_builds"],
+    "download_build_logs": [],
 }
 
 # Resource → Leaf tasks only (dependencies resolved via TASK_DEPENDENCIES)
 RESOURCE_LEAF_TASKS: Dict[FeatureResource, List[str]] = {
     FeatureResource.REPO: [],
     FeatureResource.REPO_CONFIG: [],
-    FeatureResource.BUILD_RUN: ["fetch_and_save_builds"],
+    # FeatureResource.BUILD_RUN: ["fetch_and_save_builds"],
     FeatureResource.RAW_BUILD_RUNS: [],
     FeatureResource.GIT_HISTORY: ["clone_repo"],
     FeatureResource.GIT_WORKTREE: ["create_worktrees"],

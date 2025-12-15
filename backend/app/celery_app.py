@@ -39,48 +39,35 @@ celery_app.conf.update(
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
     broker_heartbeat=settings.CELERY_BROKER_HEARTBEAT,
     task_queues=[
+        # Default queue for unassigned tasks
         Queue(
             settings.CELERY_DEFAULT_QUEUE,
             Exchange("buildguard"),
             routing_key="pipeline.default",
         ),
+        # Ingestion: clone repos, create worktrees, download logs, fetch builds
         Queue(
-            "import_repo", Exchange("buildguard"), routing_key="pipeline.import_repo"
-        ),
-        Queue(
-            "collect_workflow_logs",
+            "ingestion",
             Exchange("buildguard"),
-            routing_key="pipeline.collect_workflow_logs",
+            routing_key="pipeline.ingestion",
         ),
+        # Processing: feature extraction, validation, enrichment, export, maintenance
         Queue(
-            "data_processing",
+            "processing",
             Exchange("buildguard"),
-            routing_key="pipeline.data_processing",
+            routing_key="pipeline.processing",
         ),
-        Queue(
-            "export",
-            Exchange("buildguard"),
-            routing_key="pipeline.export",
-        ),
+        # Sonar: CPU-intensive external tool, long-running
         Queue(
             "sonar_scan",
             Exchange("buildguard"),
             routing_key="pipeline.sonar_scan",
         ),
+        # Trivy: Security scanning, external tool
         Queue(
             "trivy_scan",
             Exchange("buildguard"),
             routing_key="pipeline.trivy_scan",
-        ),
-        Queue(
-            "validation",
-            Exchange("buildguard"),
-            routing_key="pipeline.validation",
-        ),
-        Queue(
-            "enrichment",
-            Exchange("buildguard"),
-            routing_key="pipeline.enrichment",
         ),
     ],
     broker_connection_retry_on_startup=True,

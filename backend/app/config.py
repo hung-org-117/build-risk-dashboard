@@ -32,11 +32,6 @@ class Settings(BaseSettings):
     ]
     FRONTEND_BASE_URL: str = "http://localhost:3000"
 
-    # Jenkins
-    JENKINS_URL: Optional[str] = None
-    JENKINS_USERNAME: Optional[str] = None
-    JENKINS_TOKEN: Optional[str] = None
-
     # CircleCI
     CIRCLECI_TOKEN: Optional[str] = None
     CIRCLECI_BASE_URL: str = "https://circleci.com/api/v2"
@@ -67,9 +62,6 @@ class Settings(BaseSettings):
     WORKTREE_BATCH_SIZE: int = 50  # Worktrees to create per chunk
     API_RATE_LIMIT_PER_SECOND: float = 5.0  # GitHub API calls per second
 
-    # Repository mirrors / schedulers
-    REPO_MIRROR_ROOT: str = "../repo-data/repo-mirrors"
-    ARTIFACTS_ROOT: str = "../repo-data/artifacts"
     DATA_DIR: str = "../repo-data/data"
     WORKFLOW_POLL_INTERVAL_MINUTES: int = 15
 

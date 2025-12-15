@@ -118,6 +118,23 @@ def delete_dataset(
     return None
 
 
+@router.get("/{dataset_id}/repos")
+def list_dataset_repos(
+    dataset_id: str = PathParam(..., description="Dataset id"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    List repositories configured for this dataset.
+
+    Returns repos from dataset_repo_configs with their raw_repo_id
+    for drill-down to RawBuildRun via /repos/{raw_repo_id}/builds.
+    """
+    user_id = str(current_user["_id"])
+    service = DatasetService(db)
+    return service.list_repos(dataset_id, user_id)
+
+
 @router.get("/{dataset_id}/builds")
 def list_dataset_builds(
     dataset_id: str = PathParam(..., description="Dataset id"),
@@ -304,87 +321,4 @@ def get_dataset_builds_stats(
         "logs_stats": logs_stats,
         "total_builds": sum(status_breakdown.values()),
         "found_builds": status_breakdown.get("found", 0),
-    }
-
-
-@router.get("/{dataset_id}/builds/{build_id}/logs")
-def get_build_logs(
-    dataset_id: str = PathParam(..., description="Dataset id"),
-    build_id: str = PathParam(..., description="Build id (from dataset_builds)"),
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Get build log files for a specific build."""
-    from bson import ObjectId
-    from pathlib import Path
-
-    # Find dataset build
-    dataset_build = db.dataset_builds.find_one({"_id": ObjectId(build_id)})
-    if not dataset_build:
-        raise HTTPException(status_code=404, detail="Build not found")
-
-    # Get workflow_run
-    workflow_run_id = dataset_build.get("workflow_run_id")
-    if not workflow_run_id:
-        return {"logs": [], "logs_available": False, "logs_expired": False}
-
-    raw_build = db.raw_build_runs.find_one({"_id": workflow_run_id})
-    if not raw_build:
-        return {"logs": [], "logs_available": False, "logs_expired": False}
-
-    logs_available = raw_build.get("logs_available", False)
-    logs_expired = raw_build.get("logs_expired", False)
-    logs_path = raw_build.get("logs_path")
-
-    if not logs_available or not logs_path:
-        return {
-            "logs": [],
-            "logs_available": logs_available,
-            "logs_expired": logs_expired,
-        }
-
-    # Read log files from directory
-    logs_dir = Path(logs_path)
-    if not logs_dir.exists():
-        return {
-            "logs": [],
-            "logs_available": False,
-            "logs_expired": True,
-            "error": "Log directory not found",
-        }
-
-    log_files = []
-    for log_file in sorted(logs_dir.glob("*.log")):
-        try:
-            content = log_file.read_text(errors="replace")
-            # Truncate very large logs
-            max_size = 500000  # 500KB
-            if len(content) > max_size:
-                content = (
-                    content[:max_size]
-                    + f"\n\n... (truncated, {len(content) - max_size} more characters)"
-                )
-            log_files.append(
-                {
-                    "job_name": log_file.stem,
-                    "filename": log_file.name,
-                    "content": content,
-                    "size_bytes": log_file.stat().st_size,
-                }
-            )
-        except Exception as e:
-            log_files.append(
-                {
-                    "job_name": log_file.stem,
-                    "filename": log_file.name,
-                    "error": str(e),
-                }
-            )
-
-    return {
-        "logs": log_files,
-        "logs_available": True,
-        "logs_expired": False,
-        "build_id": raw_build.get("build_id"),
-        "repo_name": raw_build.get("repo_name"),
     }

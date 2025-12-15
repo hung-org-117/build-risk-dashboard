@@ -56,7 +56,7 @@ def publish_build_update(repo_id: str, build_id: str, status: str):
     bind=True,
     base=PipelineTask,
     name="app.tasks.processing.process_workflow_run",
-    queue="data_processing",
+    queue="processing",
 )
 def process_workflow_run(
     self: PipelineTask, repo_id: str, workflow_run_id: int
@@ -194,7 +194,7 @@ def process_workflow_run(
     bind=True,
     base=PipelineTask,
     name="app.tasks.processing.reprocess_build",
-    queue="data_processing",
+    queue="processing",
 )
 def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     """
@@ -227,7 +227,7 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     bind=True,
     base=PipelineTask,
     name="app.tasks.processing.reprocess_repo_builds",
-    queue="data_processing",
+    queue="processing",
 )
 def reprocess_repo_builds(self: PipelineTask, repo_id: str) -> Dict[str, Any]:
     """

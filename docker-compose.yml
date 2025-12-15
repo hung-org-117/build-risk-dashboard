@@ -103,7 +103,6 @@ services:
       SONAR_TOKEN: ${SONAR_TOKEN:-}
       SONAR_DEFAULT_PROJECT_KEY: build-risk-ui
       SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-change-me}
-      REPO_MIRROR_ROOT: /app/data/repo-mirrors
     volumes:
       - ./backend:/app
       - shared_data:/app/data

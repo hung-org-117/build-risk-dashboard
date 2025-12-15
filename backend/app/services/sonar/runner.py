@@ -10,6 +10,7 @@ import requests
 import fcntl
 
 from app.config import settings
+from app.services.sonar.config import get_sonar_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +18,14 @@ logger = logging.getLogger(__name__)
 class SonarCommitRunner:
     def __init__(self, project_key: str):
         self.project_key = project_key
-        self.host = settings.SONAR_HOST_URL.rstrip("/")
-        self.token = settings.SONAR_TOKEN
+        # Prefer DB-configured settings if available (merged ENV + DB)
+        cfg = get_sonar_runtime_config()
+        self.host = cfg.host_url
+        # If token is empty (masked or not set in DB), fall back to ENV
+        self.token = cfg.token or settings.SONAR_TOKEN
 
         # Use a dedicated work directory
-        base_dir = Path(settings.REPO_MIRROR_ROOT) / "sonar-work"
+        base_dir = Path(settings.DATA_DIR) / "sonar-work"
         self.work_dir = base_dir / project_key
         self.repo_dir = self.work_dir / "repo"
         self.worktrees_dir = self.work_dir / "worktrees"

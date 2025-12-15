@@ -107,10 +107,6 @@ TRIVY_SKIP_DIRS=node_modules,vendor,.git
    SONAR_HOST_URL=http://localhost:9000
    SONAR_TOKEN=your_sonarqube_token
    SONAR_DEFAULT_PROJECT_KEY=build-risk-ui
-   
-   # Repository Mirror (for SonarQube scanning)
-   REPO_MIRROR_ROOT=/tmp/build-risk-repos
-   ```
 
 3. Install dependencies:
    ```bash

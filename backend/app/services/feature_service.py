@@ -7,13 +7,8 @@ import logging
 
 from fastapi import HTTPException
 
-from app.tasks.pipeline.feature_dag import (
-    build_features,
-    git_features,
-    github_features,
-    repo_features,
-)
-from app.tasks.pipeline.constants import DEFAULT_FEATURES
+from app.tasks.pipeline.constants import DEFAULT_FEATURES, HAMILTON_MODULES
+from app.tasks.pipeline.feature_dag._metadata import build_metadata_registry
 
 logger = logging.getLogger(__name__)
 
@@ -23,36 +18,25 @@ class FeatureService:
 
     def __init__(self):
         """Initialize the service."""
-        self._feature_modules = [
-            build_features,
-            git_features,
-            github_features,
-            repo_features,
-        ]
+        self._feature_modules = HAMILTON_MODULES
         self._feature_info_cache: Optional[Dict[str, Dict[str, Any]]] = None
+        self._metadata_registry_cache: Optional[Dict[str, Dict[str, Any]]] = None
 
     def _build_pipeline_for_dag_only(self) -> Any:
         """Build Hamilton driver without requiring db parameter."""
         from hamilton import driver
 
-        return (
-            driver.Builder()
-            .with_modules(*self._feature_modules)
-            .build()
-        )
+        return driver.Builder().with_modules(*self._feature_modules).build()
 
     def _build_feature_to_module_mapping(self) -> Dict[str, str]:
         """Build mapping from feature name to module name by introspection."""
         mapping: Dict[str, str] = {}
-        
-        module_mapping = {
-            build_features: "build",
-            git_features: "git",
-            github_features: "github",
-            repo_features: "repo",
-        }
-        
-        for module, extractor_name in module_mapping.items():
+
+        for module in self._feature_modules:
+            # Extract extractor name from module name (e.g., git_features -> git)
+            module_name = module.__name__.split(".")[-1]  # e.g., "git_features"
+            extractor_name = module_name.replace("_features", "")  # e.g., "git"
+
             # Get all functions defined in this module
             for name, obj in inspect.getmembers(module):
                 if inspect.isfunction(obj) and not name.startswith("_"):
@@ -62,7 +46,7 @@ class FeatureService:
                             mapping[name] = extractor_name
                     except Exception:
                         pass
-        
+
         return mapping
 
     def _extract_feature_info(self) -> Dict[str, Dict[str, Any]]:
@@ -71,13 +55,13 @@ class FeatureService:
             return self._feature_info_cache
 
         driver = self._build_pipeline_for_dag_only()
-        
+
         # Build feature -> module mapping
         feature_to_module = self._build_feature_to_module_mapping()
 
         # Get all available variables (features) and their upstream dependencies
         all_variables = {v.name for v in driver.list_available_variables()}
-        
+
         feature_info: Dict[str, Dict[str, Any]] = {}
 
         for var_name in all_variables:
@@ -85,7 +69,15 @@ class FeatureService:
                 continue
 
             # Skip input resources (not actual features)
-            if var_name in ["db", "repo", "workflow_run", "git_history", "git_worktree", "github_client", "ci_provider"]:
+            if var_name in [
+                "db",
+                "repo",
+                "workflow_run",
+                "git_history",
+                "git_worktree",
+                "github_client",
+                "ci_provider",
+            ]:
                 continue
 
             # Determine extractor node from module mapping
@@ -100,6 +92,8 @@ class FeatureService:
                     extractor = "git"
                 elif var_name.startswith("repo_"):
                     extractor = "repo"
+                elif var_name.startswith("log_"):
+                    extractor = "log"
                 else:
                     extractor = "unknown"
 
@@ -107,21 +101,23 @@ class FeatureService:
                 # Get upstream dependencies for this variable
                 upstream_nodes = driver.what_is_upstream_of(var_name)
                 # Convert HamiltonNode objects to names
-                depends_on = [n.name if hasattr(n, 'name') else str(n) 
-                             for n in upstream_nodes if (n.name if hasattr(n, 'name') else str(n)) != var_name]
+                depends_on = [
+                    n.name if hasattr(n, "name") else str(n)
+                    for n in upstream_nodes
+                    if (n.name if hasattr(n, "name") else str(n)) != var_name
+                ]
 
                 # Try to get docstring
                 doc = ""
                 if var_name in feature_to_module:
                     # Find the function in the module
-                    for module, ext_name in [(build_features, "build"), (git_features, "git"), 
-                                             (github_features, "github"), (repo_features, "repo")]:
+                    for module in self._feature_modules:
                         if hasattr(module, var_name):
                             obj = getattr(module, var_name)
                             if inspect.isfunction(obj) or callable(obj):
                                 doc = (obj.__doc__ or "").strip()
                                 break
-                
+
                 description = doc.split("\n")[0] if doc else var_name
 
                 feature_info[var_name] = {
@@ -160,7 +156,9 @@ class FeatureService:
         # Get all available features from Hamilton
         all_variables = {v.name for v in driver.list_available_variables()}
         all_features = {
-            f for f in all_variables if not f.startswith("_") and f not in DEFAULT_FEATURES
+            f
+            for f in all_variables
+            if not f.startswith("_") and f not in DEFAULT_FEATURES
         }
 
         # Get feature info
@@ -292,7 +290,9 @@ class FeatureService:
                     "label": node_name.replace("_", " ").title(),
                     "features": sorted(features),
                     "feature_count": len(features),
-                    "requires_resources": sorted(node_depends_on_resources.get(node_name, set())),
+                    "requires_resources": sorted(
+                        node_depends_on_resources.get(node_name, set())
+                    ),
                     "requires_features": sorted(node_feature_deps),
                     "level": levels_map.get(node_name, 0),
                 }
@@ -423,9 +423,7 @@ class FeatureService:
         """List all feature definitions with optional filters."""
         feature_info = self._extract_feature_info()
         features = [
-            info
-            for name, info in feature_info.items()
-            if name not in DEFAULT_FEATURES
+            info for name, info in feature_info.items() if name not in DEFAULT_FEATURES
         ]
 
         if category:
@@ -452,9 +450,7 @@ class FeatureService:
         """Get summary statistics about available features."""
         feature_info = self._extract_feature_info()
         features = [
-            info
-            for name, info in feature_info.items()
-            if name not in DEFAULT_FEATURES
+            info for name, info in feature_info.items() if name not in DEFAULT_FEATURES
         ]
 
         by_category: dict = {}

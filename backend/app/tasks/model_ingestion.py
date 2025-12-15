@@ -24,7 +24,6 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.tasks.base import PipelineTask
 from app.entities.enums import ExtractionStatus, ModelImportStatus
-from app.entities.raw_build_run import RawBuildRun
 from app.entities.model_training_build import ModelTrainingBuild
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
@@ -88,7 +87,7 @@ def get_required_resources_for_template(
     bind=True,
     base=PipelineTask,
     name="app.tasks.model_ingestion.import_repo",
-    queue="import_repo",
+    queue="ingestion",
 )
 def import_repo(
     self: PipelineTask,
@@ -104,96 +103,117 @@ def import_repo(
     Orchestrator task - kicks off the import chain.
 
     Chain: clone_repo -> fetch_and_save_builds -> dispatch_processing
+
+    Uses RedisLock to prevent concurrent imports of the same repo.
     """
+    from app.core.redis import RedisLock
+
     model_repo_repo = ModelRepoConfigRepository(self.db)
 
+    # Use lock to prevent concurrent imports of the same repo
+    lock_key = f"import:{full_name}"
     try:
-        # Find existing repo config
-        repo = model_repo_repo.find_one(
-            {
-                "user_id": ObjectId(user_id),
-                "provider": "github",
-                "full_name": full_name,
-            }
-        )
-
-        if not repo:
-            raise ValueError(
-                "ModelRepoConfig not found. Create it via RepositoryService first."
+        with RedisLock(lock_key, timeout=1800, blocking_timeout=5):
+            # Find existing repo config
+            repo = model_repo_repo.find_one(
+                {
+                    "user_id": ObjectId(user_id),
+                    "provider": "github",
+                    "full_name": full_name,
+                }
             )
 
-        repo_id = str(repo.id)
-        model_repo_repo.update_repository(
-            repo_id,
-            {
-                "import_status": ModelImportStatus.IMPORTING.value,
-                "installation_id": installation_id,
-                "ci_provider": ci_provider,
-            },
-        )
+            if not repo:
+                raise ValueError(
+                    "ModelRepoConfig not found. Create it via RepositoryService first."
+                )
 
-        publish_status(repo_id, "importing", "Starting import workflow...")
-
-        # Determine required resources based on template
-        required_resources = get_required_resources_for_template(self.db)
-
-        # Get tasks grouped by level from resource_dag
-        tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
-
-        logger.info(
-            f"Required resources for {full_name}: {required_resources}. "
-            f"Tasks by level: {tasks_by_level}"
-        )
-
-        # Add fetch_and_save_builds to level 0 (always needed for model pipeline)
-        if 0 not in tasks_by_level:
-            tasks_by_level[0] = []
-        if "fetch_and_save_builds" not in tasks_by_level.get(0, []):
-            tasks_by_level[0].append("fetch_and_save_builds")
-
-        # Build workflow
-        workflow = build_ingestion_workflow(
-            tasks_by_level=tasks_by_level,
-            repo_id=repo_id,
-            full_name=full_name,
-            ci_provider=ci_provider,
-            installation_id=installation_id,
-            publish_status=True,
-            enable_fork_replay=True,
-            final_task=dispatch_processing.s(repo_id=repo_id),
-            custom_tasks={
-                "fetch_and_save_builds": fetch_and_save_builds.s(
-                    repo_id=repo_id,
-                    full_name=full_name,
-                    installation_id=installation_id,
-                    ci_provider=ci_provider,
-                    max_builds=max_builds,
-                    since_days=since_days,
-                    only_with_logs=only_with_logs,
-                ),
-            },
-        )
-
-        if workflow:
-            workflow.apply_async()
-
-        return {
-            "status": "queued",
-            "repo_id": repo_id,
-            "message": "Import workflow started",
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to start import for {full_name}: {e}")
-        if "repo_id" in locals():
+            repo_id = str(repo.id)
             model_repo_repo.update_repository(
                 repo_id,
                 {
-                    "import_status": ModelImportStatus.FAILED.value,
-                    "last_sync_error": str(e),
+                    "import_status": ModelImportStatus.IMPORTING.value,
+                    "installation_id": installation_id,
+                    "ci_provider": ci_provider,
                 },
             )
-            publish_status(repo_id, "failed", str(e))
+
+            publish_status(repo_id, "importing", "Starting import workflow...")
+
+            # Determine required resources based on template
+            required_resources = get_required_resources_for_template(self.db)
+
+            # Get tasks grouped by level from resource_dag
+            tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
+
+            logger.info(
+                f"Required resources for {full_name}: {required_resources}. "
+                f"Tasks by level: {tasks_by_level}"
+            )
+
+            # Add fetch_and_save_builds to level 0 (always needed for model pipeline)
+            if 0 not in tasks_by_level:
+                tasks_by_level[0] = []
+            if "fetch_and_save_builds" not in tasks_by_level.get(0, []):
+                tasks_by_level[0].append("fetch_and_save_builds")
+
+            # Build workflow
+            workflow = build_ingestion_workflow(
+                tasks_by_level=tasks_by_level,
+                repo_id=repo_id,
+                full_name=full_name,
+                ci_provider=ci_provider,
+                installation_id=installation_id,
+                publish_status=True,
+                enable_fork_replay=True,
+                final_task=dispatch_processing.s(repo_id=repo_id),
+                custom_tasks={
+                    "fetch_and_save_builds": fetch_and_save_builds.s(
+                        repo_id=repo_id,
+                        full_name=full_name,
+                        installation_id=installation_id,
+                        ci_provider=ci_provider,
+                        max_builds=max_builds,
+                        since_days=since_days,
+                        only_with_logs=only_with_logs,
+                    ),
+                },
+            )
+
+            if workflow:
+                workflow.apply_async()
+
+            return {
+                "status": "queued",
+                "repo_id": repo_id,
+                "message": "Import workflow started",
+            }
+
+    except TimeoutError:
+        logger.warning(
+            f"Could not acquire lock for {full_name}, import already in progress"
+        )
+        return {
+            "status": "skipped",
+            "message": f"Import for {full_name} is already in progress",
+        }
+    except Exception as e:
+        logger.error(f"Failed to start import for {full_name}: {e}")
+        # Try to update status if we have repo_id
+        try:
+            repo = model_repo_repo.find_one({"full_name": full_name})
+            if repo:
+                repo_id = str(repo.id)
+                model_repo_repo.update_repository(
+                    repo_id,
+                    {
+                        "import_status": ModelImportStatus.FAILED.value,
+                        "last_sync_error": str(e),
+                    },
+                )
+                publish_status(repo_id, "failed", str(e))
+        except Exception:
+            pass
         raise
 
 
@@ -202,7 +222,7 @@ def import_repo(
     bind=True,
     base=PipelineTask,
     name="app.tasks.model_ingestion.fetch_and_save_builds",
-    queue="import_repo",
+    queue="ingestion",
     autoretry_for=(GithubRateLimitError,),
     retry_kwargs={"max_retries": 5},
 )
@@ -282,36 +302,30 @@ def fetch_and_save_builds(
 
                 run_id = build.build_id
 
-                # Check if already exists
-                build_run = build_run_repo.find_by_repo_and_build_id(repo_id, run_id)
-
-                if not build_run:
-                    build_run = RawBuildRun(
-                        _id=None,
-                        raw_repo_id=ObjectId(repo_id),
-                        build_id=run_id,
-                        build_number=build.build_number,
-                        repo_name=full_name,
-                        branch=build.branch or "",
-                        commit_sha=build.commit_sha,
-                        commit_message=None,
-                        commit_author=None,
-                        status=build.status,
-                        conclusion=build.conclusion,
-                        created_at=build.created_at or datetime.now(timezone.utc),
-                        started_at=None,
-                        completed_at=build.created_at or datetime.now(timezone.utc),
-                        duration_seconds=build.duration_seconds,
-                        web_url=build.web_url,
-                        logs_url=None,
-                        logs_available=False,
-                        logs_path=None,
-                        provider=ci_provider_enum,
-                        raw_data=build.raw_data or {},
-                        is_bot_commit=False,
-                    )
-                    build_run = build_run_repo.insert_one(build_run)
-                    batch_saved += 1
+                # Atomic upsert to prevent duplicates in race conditions
+                build_run = build_run_repo.upsert_by_business_key(
+                    raw_repo_id=ObjectId(repo_id),
+                    build_id=run_id,
+                    provider=ci_provider_enum.value,
+                    build_number=build.build_number,
+                    repo_name=full_name,
+                    branch=build.branch or "",
+                    commit_sha=build.commit_sha,
+                    commit_message=None,
+                    commit_author=None,
+                    status=build.status,
+                    conclusion=build.conclusion,
+                    created_at=build.created_at or datetime.now(timezone.utc),
+                    started_at=None,
+                    completed_at=build.created_at or datetime.now(timezone.utc),
+                    duration_seconds=build.duration_seconds,
+                    web_url=build.web_url,
+                    logs_url=None,
+                    logs_available=False,
+                    logs_path=None,
+                    raw_data=build.raw_data or {},
+                    is_bot_commit=False,
+                )
 
                 # Check if ModelTrainingBuild already exists
                 existing_model_build = model_build_repo.find_by_workflow_run(
@@ -375,7 +389,7 @@ def fetch_and_save_builds(
     bind=True,
     base=PipelineTask,
     name="app.tasks.model_ingestion.dispatch_processing",
-    queue="import_repo",
+    queue="ingestion",
 )
 def dispatch_processing(
     self: PipelineTask,

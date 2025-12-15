@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @shared_task(
     name="app.tasks.maintenance.cleanup_pipeline_runs",
     bind=True,
-    queue="data_processing",
+    queue="processing",
 )
 def cleanup_pipeline_runs(self, days: int = 30) -> Dict[str, Any]:
     """
@@ -39,7 +39,7 @@ def cleanup_pipeline_runs(self, days: int = 30) -> Dict[str, Any]:
 
     try:
         deleted_count = repo.cleanup_old_runs(days=days)
-        
+
         logger.info(
             f"Pipeline runs cleanup completed: deleted {deleted_count} runs older than {days} days"
         )
@@ -58,56 +58,3 @@ def cleanup_pipeline_runs(self, days: int = 30) -> Dict[str, Any]:
             "error": str(e),
             "executed_at": datetime.now(timezone.utc).isoformat(),
         }
-
-
-@shared_task(
-    name="app.tasks.maintenance.cleanup_failed_scans",
-    bind=True,
-    queue="data_processing",
-)
-def cleanup_failed_scans(self, days: int = 90) -> Dict[str, Any]:
-    """
-    Clean up old failed scan records that have been resolved.
-
-    Args:
-        days: Number of days to keep resolved failed scans.
-
-    Returns:
-        Dict with deleted count and timestamp.
-    """
-    from app.repositories.failed_scan import FailedScanRepository
-    from datetime import timedelta
-
-    db = get_database()
-    repo = FailedScanRepository(db)
-
-    try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        
-        # Only delete resolved failed scans older than threshold
-        result = repo.collection.delete_many({
-            "resolved_at": {"$lt": cutoff},
-            "status": "resolved",
-        })
-        
-        deleted_count = result.deleted_count
-        
-        logger.info(
-            f"Failed scans cleanup completed: deleted {deleted_count} resolved scans older than {days} days"
-        )
-
-        return {
-            "status": "success",
-            "deleted_count": deleted_count,
-            "days_threshold": days,
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed scans cleanup failed: {e}", exc_info=True)
-        return {
-            "status": "failed",
-            "error": str(e),
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        }
-

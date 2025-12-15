@@ -16,8 +16,10 @@ from app.dtos import (
     DatasetResponse,
     DatasetUpdateRequest,
 )
+from app.dtos.dataset_repo import DatasetRepoListResponse, DatasetRepoSummary
 from app.entities.dataset import DatasetProject, DatasetMapping, DatasetStats
 from app.repositories.dataset_repository import DatasetRepository
+from app.repositories.dataset_repo_config_repository import DatasetRepoConfigRepository
 
 logger = logging.getLogger(__name__)
 DATASET_DIR = Path("../repo-data/datasets")
@@ -29,6 +31,7 @@ class DatasetService:
     def __init__(self, db: Database):
         self.db = db
         self.repo = DatasetRepository(db)
+        self.repo_config_repo = DatasetRepoConfigRepository(db)
 
     def _serialize(self, dataset) -> DatasetResponse:
         payload = (
@@ -75,6 +78,42 @@ class DatasetService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
             )
         return self._serialize(dataset)
+
+    def list_repos(self, dataset_id: str, user_id: str) -> DatasetRepoListResponse:
+        """
+        List repos for a dataset.
+
+        Uses DatasetRepoConfigRepository to get repos, converts to DTOs.
+        """
+        dataset = self.repo.find_by_id(dataset_id)
+        if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
+            )
+
+        configs = self.repo_config_repo.list_by_dataset(ObjectId(dataset_id))
+
+        items = []
+        for c in configs:
+            items.append(
+                DatasetRepoSummary(
+                    _id=c.id,
+                    raw_repo_id=c.raw_repo_id,
+                    repo_name=c.normalized_full_name or c.repo_name_from_csv,
+                    repo_name_from_csv=c.repo_name_from_csv,
+                    validation_status=(
+                        c.validation_status.value
+                        if hasattr(c.validation_status, "value")
+                        else c.validation_status
+                    ),
+                    validation_error=c.validation_error,
+                    builds_in_csv=c.builds_in_csv,
+                    builds_found=c.builds_found,
+                    builds_processed=c.builds_processed,
+                )
+            )
+
+        return DatasetRepoListResponse(items=items, total=len(items))
 
     def create_dataset(
         self, user_id: str, payload: DatasetCreateRequest

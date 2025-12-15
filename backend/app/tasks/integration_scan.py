@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     name="app.tasks.integration_scan.run_dataset_scan",
-    queue="data_processing",
+    queue="processing",
     soft_time_limit=3600,  # 1 hour soft limit
     time_limit=3900,  # 1 hour 5 min hard limit
 )

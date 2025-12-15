@@ -23,7 +23,6 @@ from app.entities import (
     DatasetBuildStatus,
     ValidationStats,
 )
-from app.entities.raw_build_run import RawBuildRun
 from app.ci_providers.factory import get_ci_provider
 from app.repositories.dataset_repository import DatasetRepository
 from app.repositories.dataset_build_repository import DatasetBuildRepository
@@ -67,7 +66,7 @@ def parse_csv_with_pandas(
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.start_validation",
-    queue="validation",
+    queue="processing",
     soft_time_limit=300,  # 5 min
     time_limit=360,
 )
@@ -217,7 +216,7 @@ def start_validation(self, dataset_id: str) -> Dict[str, Any]:
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.validate_repo_builds",
-    queue="validation",
+    queue="processing",
     soft_time_limit=300,  # 5 min (just dispatches chunks)
     time_limit=360,
 )
@@ -292,7 +291,7 @@ def validate_repo_builds(
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.validate_builds_chunk",
-    queue="validation",
+    queue="processing",
     soft_time_limit=300,  # 5 min per chunk
     time_limit=360,
     autoretry_for=(Exception,),
@@ -372,10 +371,10 @@ def validate_builds_chunk(
                 workflow_data = await ci.get_workflow_run(repo_name, int(build_id))
 
                 if workflow_data and ci.is_run_completed(workflow_data):
-                    build_run = RawBuildRun(
-                        _id=None,
+                    build_run = build_run_repo.upsert_by_business_key(
                         raw_repo_id=ObjectId(repo_id),
                         build_id=str(build_id),
+                        provider=ci_provider,
                         build_number=workflow_data.get("run_number"),
                         repo_name=repo_name,
                         branch=workflow_data.get("head_branch", ""),
@@ -392,11 +391,10 @@ def validate_builds_chunk(
                         logs_url=None,
                         logs_available=False,
                         logs_path=None,
-                        provider=ci_provider,
                         raw_data=workflow_data,
                         is_bot_commit=workflow_data.get("is_bot", False),
                     )
-                    build_run = build_run_repo.create(build_run)
+
                     dataset_build.status = DatasetBuildStatus.FOUND
                     dataset_build.workflow_run_id = build_run.id
                     dataset_build.validated_at = utc_now()
@@ -455,7 +453,7 @@ def validate_builds_chunk(
 @celery_app.task(
     bind=True,
     name="app.tasks.dataset_validation.finalize_validation",
-    queue="validation",
+    queue="processing",
     soft_time_limit=120,  # 2 min
     time_limit=180,
 )
@@ -515,13 +513,6 @@ def finalize_validation(
         f"Dataset validation {final_status}: {dataset_id}, "
         f"{total_builds_found}/{total_builds} builds found"
     )
-
-    # Auto-trigger ingestion if validation completed successfully
-    if final_status == "completed" and total_builds_found > 0:
-        from app.tasks.dataset_ingestion import start_ingestion
-
-        start_ingestion.delay(dataset_id)
-        logger.info(f"Auto-triggered ingestion for dataset {dataset_id}")
 
     return {
         "status": final_status,

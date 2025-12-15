@@ -2,9 +2,11 @@
 Version Enrichment Tasks - Chain+Group pattern for parallel feature extraction.
 
 Flow:
-1. start_enrichment - Orchestrator: Query builds, dispatch batches
-2. process_enrichment_batch - Process a batch of builds for feature extraction
-3. finalize_enrichment - Mark version as completed
+1. start_enrichment - Orchestrator: Dispatch ingestion then enrichment
+2. start_ingestion_for_version - Run ingestion for repos with selected features
+3. dispatch_enrichment_batches - After ingestion, dispatch batch processing
+4. process_enrichment_batch - Process a batch of builds for feature extraction
+5. finalize_enrichment - Mark version as completed
 """
 
 import logging
@@ -12,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from bson import ObjectId
-from celery import chord, group
+from celery import chain, chord, group
 
 from app.celery_app import celery_app
 from app.config import settings
@@ -33,22 +35,24 @@ from app.tasks.shared import extract_features_for_build
 logger = logging.getLogger(__name__)
 
 
-# Task 1: Orchestrator
+# Task 1: Orchestrator - starts ingestion then enrichment
 @celery_app.task(
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.start_enrichment",
-    queue="enrichment",
+    queue="processing",
 )
 def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
     """
-    Orchestrator: Query validated builds and dispatch enrichment batches.
+    Orchestrator: Start ingestion for version, then dispatch enrichment.
 
-    Flow: start_enrichment -> chord(group([process_enrichment_batch x N]), finalize_enrichment)
+    Flow: start_enrichment -> start_ingestion_for_version -> dispatch_enrichment_batches
+          -> chord([process_enrichment_batch x N]) -> finalize_enrichment
     """
     version_repo = DatasetVersionRepository(self.db)
     dataset_build_repo = DatasetBuildRepository(self.db)
     dataset_repo = DatasetRepository(self.db)
+    repo_config_repo = DatasetRepoConfigRepository(self.db)
 
     # Load version
     version = version_repo.find_by_id(version_id)
@@ -72,42 +76,33 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         if total_rows == 0:
             raise ValueError("No validated builds found. Please run validation first.")
 
-        version_repo.update_one(version_id, {"total_rows": total_rows})
-        logger.info(f"Found {total_rows} validated builds to process")
+        # Get repos for this dataset
+        repos = repo_config_repo.find_by_dataset(version.dataset_id)
 
-        # Get build IDs to process
-        build_ids = [str(build.id) for build in validated_builds]
-
-        # Split into batches
-        batch_size = settings.ENRICHMENT_BATCH_SIZE
-        batches = [
-            build_ids[i : i + batch_size] for i in range(0, len(build_ids), batch_size)
-        ]
-
+        version_repo.update_one(
+            version_id,
+            {
+                "total_rows": total_rows,
+                "repos_total": len(repos),
+                "ingestion_status": "ingesting",
+            },
+        )
         logger.info(
-            f"Dispatching {len(batches)} batches of {batch_size} builds for enrichment"
+            f"Found {total_rows} validated builds, {len(repos)} repos to ingest"
         )
 
-        # Create tasks for each batch
-        batch_tasks = [
-            process_enrichment_batch.s(
-                version_id=version_id,
-                build_ids=batch,
-                selected_features=version.selected_features,
-                batch_index=i,
-                total_batches=len(batches),
-            )
-            for i, batch in enumerate(batches)
-        ]
-
-        # Use chord to run all batches in parallel,
-        # then finalize when all complete
-        chord(group(batch_tasks))(finalize_enrichment.s(version_id=version_id))
+        # Dispatch ingestion first, then enrichment
+        # Chain: ingestion -> dispatch_enrichment_batches
+        workflow = chain(
+            start_ingestion_for_version.s(version_id=version_id),
+            dispatch_enrichment_batches.s(version_id=version_id),
+        )
+        workflow.apply_async()
 
         return {
             "status": "dispatched",
             "total_builds": total_rows,
-            "batches": len(batches),
+            "repos": len(repos),
         }
 
     except Exception as e:
@@ -117,12 +112,170 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         raise
 
 
+# Task 1b: Run ingestion for version repos
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.version_enrichment.start_ingestion_for_version",
+    queue="ingestion",
+    soft_time_limit=600,
+    time_limit=900,
+)
+def start_ingestion_for_version(self: PipelineTask, version_id: str) -> Dict[str, Any]:
+    """
+    Run ingestion for all repos in a version with selected features.
+
+    This is a synchronous task that dispatches per-repo ingestion tasks
+    and waits for them to complete before returning.
+    """
+    from app.tasks.dataset_ingestion import ingest_dataset_builds
+
+    version_repo = DatasetVersionRepository(self.db)
+    repo_config_repo = DatasetRepoConfigRepository(self.db)
+    build_repo = DatasetBuildRepository(self.db)
+
+    version = version_repo.find_by_id(version_id)
+    if not version:
+        raise ValueError(f"Version {version_id} not found")
+
+    # Get repos
+    repos = repo_config_repo.find_by_dataset(version.dataset_id)
+    if not repos:
+        version_repo.update_one(
+            version_id,
+            {"ingestion_status": "completed", "ingestion_progress": 100},
+        )
+        return {"status": "completed", "message": "No repos to ingest"}
+
+    repos_ingested = 0
+    repos_failed = 0
+
+    for i, repo in enumerate(repos):
+        repo_id = str(repo.id)
+
+        # Get validated builds for this repo
+        builds = build_repo.find_by_repo(version.dataset_id, repo_id)
+        build_ids = [str(b.build_id_from_csv) for b in builds if b.status == "found"]
+
+        if not build_ids:
+            continue
+
+        try:
+            # Run ingestion synchronously for this repo
+            result = ingest_dataset_builds.apply(
+                kwargs={
+                    "dataset_id": version.dataset_id,
+                    "repo_id": repo_id,
+                    "build_ids": build_ids,
+                    "features": version.selected_features,
+                }
+            )
+
+            if result.successful():
+                repos_ingested += 1
+            else:
+                repos_failed += 1
+                logger.error(f"Ingestion failed for repo {repo.normalized_full_name}")
+
+        except Exception as e:
+            repos_failed += 1
+            logger.error(f"Ingestion error for repo {repo.normalized_full_name}: {e}")
+
+        # Update progress
+        progress = int(((i + 1) / len(repos)) * 100)
+        version_repo.update_one(
+            version_id,
+            {
+                "ingestion_progress": progress,
+                "repos_ingested": repos_ingested,
+                "repos_failed": repos_failed,
+            },
+        )
+
+    # Mark ingestion complete
+    version_repo.update_one(
+        version_id,
+        {"ingestion_status": "completed", "ingestion_progress": 100},
+    )
+
+    logger.info(
+        f"Ingestion completed for version {version_id}: "
+        f"{repos_ingested} succeeded, {repos_failed} failed"
+    )
+
+    return {
+        "status": "completed",
+        "repos_ingested": repos_ingested,
+        "repos_failed": repos_failed,
+    }
+
+
+# Task 1c: Dispatch enrichment batches after ingestion
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.version_enrichment.dispatch_enrichment_batches",
+    queue="processing",
+)
+def dispatch_enrichment_batches(
+    self: PipelineTask, ingestion_result: Dict[str, Any], version_id: str
+) -> Dict[str, Any]:
+    """
+    After ingestion completes, dispatch enrichment batches.
+    """
+    version_repo = DatasetVersionRepository(self.db)
+    dataset_build_repo = DatasetBuildRepository(self.db)
+
+    version = version_repo.find_by_id(version_id)
+    if not version:
+        raise ValueError(f"Version {version_id} not found")
+
+    # Get validated builds
+    validated_builds = dataset_build_repo.find_validated_builds(version.dataset_id)
+    build_ids = [str(build.id) for build in validated_builds]
+
+    if not build_ids:
+        version_repo.mark_completed(version_id)
+        return {"status": "completed", "message": "No builds to process"}
+
+    # Split into batches
+    batch_size = settings.ENRICHMENT_BATCH_SIZE
+    batches = [
+        build_ids[i : i + batch_size] for i in range(0, len(build_ids), batch_size)
+    ]
+
+    logger.info(
+        f"Dispatching {len(batches)} batches of {batch_size} builds for enrichment"
+    )
+
+    # Create tasks for each batch
+    batch_tasks = [
+        process_enrichment_batch.s(
+            version_id=version_id,
+            build_ids=batch,
+            selected_features=version.selected_features,
+            batch_index=i,
+            total_batches=len(batches),
+        )
+        for i, batch in enumerate(batches)
+    ]
+
+    # Use chord to run all batches in parallel, then finalize
+    chord(group(batch_tasks))(finalize_enrichment.s(version_id=version_id))
+
+    return {
+        "status": "dispatched",
+        "batches": len(batches),
+        "total_builds": len(build_ids),
+    }
+
+
 # Task 2: Process batch
 @celery_app.task(
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.process_enrichment_batch",
-    queue="enrichment",
+    queue="processing",
     autoretry_for=(Exception,),
     retry_kwargs={"max_retries": settings.ENRICHMENT_MAX_RETRIES},
     retry_backoff=True,
@@ -281,7 +434,7 @@ def process_enrichment_batch(
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.finalize_enrichment",
-    queue="enrichment",
+    queue="processing",
 )
 def finalize_enrichment(
     self: PipelineTask,

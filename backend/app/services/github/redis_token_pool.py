@@ -410,7 +410,6 @@ class RedisTokenPool:
             pipe.delete(f"{KEY_STATS}:{token_hash}")
             pipe.delete(f"{KEY_COOLDOWN}:{token_hash}")
 
-        pipe.delete(KEY_INDEX)
         pipe.execute()
 
 

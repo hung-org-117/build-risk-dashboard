@@ -22,14 +22,6 @@ def get_provider_config(provider_type: CIProvider) -> ProviderConfig:
             base_url=settings.GITHUB_API_URL,
         )
 
-    elif provider_type == CIProvider.JENKINS:
-        return ProviderConfig(
-            provider=provider_type,
-            base_url=settings.JENKINS_URL,
-            username=settings.JENKINS_USERNAME,
-            token=settings.JENKINS_TOKEN,
-        )
-
     elif provider_type == CIProvider.CIRCLECI:
         return ProviderConfig(
             provider=provider_type,

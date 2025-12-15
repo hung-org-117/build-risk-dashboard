@@ -55,6 +55,18 @@ class DatasetVersion(BaseEntity):
         default_factory=list, description="Repositories that failed to import"
     )
 
+    # Ingestion tracking (runs before enrichment)
+    ingestion_status: str = Field(
+        default="pending",
+        description="Status of ingestion phase: pending, ingesting, completed, failed",
+    )
+    ingestion_progress: int = Field(
+        default=0, description="Ingestion progress percentage (0-100)"
+    )
+    repos_total: int = Field(default=0, description="Total repos to ingest")
+    repos_ingested: int = Field(default=0, description="Repos successfully ingested")
+    repos_failed: int = Field(default=0, description="Repos that failed ingestion")
+
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 

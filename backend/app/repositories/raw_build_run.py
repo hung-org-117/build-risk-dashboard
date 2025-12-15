@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
+from pymongo import ReturnDocument
 
 from app.entities.raw_build_run import RawBuildRun
 from app.repositories.base import BaseRepository
@@ -15,12 +16,33 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
     def __init__(self, db) -> None:
         super().__init__(db, "raw_build_runs", RawBuildRun)
 
+    def find_by_business_key(
+        self,
+        raw_repo_id: ObjectId,
+        build_id: str,
+        provider: str,
+    ) -> Optional[RawBuildRun]:
+        """
+        Find by business key (raw_repo_id + build_id + provider).
+
+        This is the preferred lookup method for deduplication and sharing
+        RawBuildRun data between model flow and dataset flow.
+        """
+        doc = self.collection.find_one(
+            {
+                "raw_repo_id": raw_repo_id,
+                "build_id": build_id,
+                "provider": provider,
+            }
+        )
+        return RawBuildRun(**doc) if doc else None
+
     def find_by_build_id(
         self,
         raw_repo_id: ObjectId,
         build_id: str,
     ) -> Optional[RawBuildRun]:
-        """Find a build run by repo and build_id."""
+        """Find a build run by repo and build_id (legacy - prefer find_by_business_key)."""
         doc = self.collection.find_one(
             {
                 "raw_repo_id": raw_repo_id,
@@ -70,25 +92,68 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         items = [RawBuildRun(**doc) for doc in cursor]
         return items, total
 
+    def upsert_by_business_key(
+        self,
+        raw_repo_id: ObjectId,
+        build_id: str,
+        provider: str,
+        **kwargs,
+    ) -> RawBuildRun:
+        """
+        Upsert by business key (raw_repo_id + build_id + provider).
+
+        Uses atomic find_one_and_update for thread safety.
+        This method ensures deduplication when the same build is
+        fetched from both model flow and dataset flow.
+        """
+        update_data = {
+            "raw_repo_id": raw_repo_id,
+            "build_id": build_id,
+            "provider": provider,
+            **{k: v for k, v in kwargs.items() if v is not None},
+        }
+
+        doc = self.collection.find_one_and_update(
+            {"raw_repo_id": raw_repo_id, "build_id": build_id, "provider": provider},
+            {"$set": update_data},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return RawBuildRun(**doc)
+
     def upsert_build_run(
         self,
         raw_repo_id: ObjectId,
         build_id: str,
         **kwargs,
     ) -> RawBuildRun:
-        """Upsert a build run by repo and build_id."""
-        existing = self.find_by_build_id(raw_repo_id, build_id)
-        if existing and existing.id:
-            # Update existing
-            update_data = {k: v for k, v in kwargs.items() if v is not None}
-            if update_data:
-                self.collection.update_one({"_id": existing.id}, {"$set": update_data})
-            result = self.find_by_id(existing.id)
-            return result if result else existing
-        else:
-            # Create new
-            run = RawBuildRun(raw_repo_id=raw_repo_id, build_id=build_id, **kwargs)
-            return self.insert_one(run)
+        """
+        Upsert a build run by repo and build_id.
+
+        Note: This method doesn't include provider in the unique key.
+        Consider using upsert_by_business_key for better deduplication.
+        """
+        # Extract provider from kwargs if available
+        provider = kwargs.get("provider")
+        if provider:
+            return self.upsert_by_business_key(
+                raw_repo_id, build_id, provider, **kwargs
+            )
+
+        # Legacy behavior: upsert by (raw_repo_id, build_id) only
+        update_data = {
+            "raw_repo_id": raw_repo_id,
+            "build_id": build_id,
+            **{k: v for k, v in kwargs.items() if v is not None},
+        }
+
+        doc = self.collection.find_one_and_update(
+            {"raw_repo_id": raw_repo_id, "build_id": build_id},
+            {"$set": update_data},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return RawBuildRun(**doc)
 
     def get_latest_run(
         self,

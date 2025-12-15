@@ -23,6 +23,7 @@ from app.api import (
     dataset_validation,
     dataset_versions,
     templates,
+    settings,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api import model_repos
@@ -68,6 +69,7 @@ app.include_router(
 )
 app.include_router(dataset_versions.router, prefix="/api", tags=["Dataset Versions"])
 app.include_router(templates.router, prefix="/api", tags=["Templates"])
+app.include_router(settings.router, prefix="/api", tags=["Settings"])
 
 
 @app.get("/")
@@ -83,6 +85,17 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     """Application startup tasks."""
+    # Ensure MongoDB indexes exist
+    try:
+        from app.database.mongo import get_database
+        from app.database.ensure_indexes import ensure_indexes
+
+        db = get_database()
+        ensure_indexes(db)
+    except Exception as e:
+        logger.warning(f"Failed to ensure database indexes: {e}")
+
+    # Initialize GitHub token pool
     try:
         from app.services.github.redis_token_pool import get_redis_token_pool
 
