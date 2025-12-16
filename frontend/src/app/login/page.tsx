@@ -25,7 +25,7 @@ export default function LoginPage() {
       return;
     }
     if (authenticated) {
-      router.replace("/dashboard");
+      router.replace("/overview");
     }
   }, [authenticated, authLoading, router]);
 

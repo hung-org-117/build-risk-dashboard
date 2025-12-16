@@ -34,7 +34,7 @@ from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
 from app.tasks.shared import extract_features_for_build
-from backend.app.entities.base import PyObjectId
+from app.entities.base import PyObjectId
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,6 @@ from typing import List
 from app.ci_providers.models import CIProvider
 from app.entities.model_training_build import ModelTrainingBuild
 from app.entities.enums import ExtractionStatus, ModelBuildConclusion
-from app.entities.pipeline_run import PipelineCategory
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional

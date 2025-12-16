@@ -45,6 +45,7 @@ from .pipeline_run import (
     NodeExecutionStatus,
 )
 from .export_job import ExportJob, ExportStatus, ExportFormat
+from .notification import Notification, NotificationType
 
 # CI Provider
 from app.ci_providers.models import CIProvider
@@ -89,4 +90,7 @@ __all__ = [
     "ExportJob",
     "ExportStatus",
     "ExportFormat",
+    # Notifications
+    "Notification",
+    "NotificationType",
 ]

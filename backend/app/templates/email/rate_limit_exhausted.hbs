@@ -1,0 +1,36 @@
+<h2>🚨 Critical: All GitHub Tokens Exhausted</h2>
+
+<div class="alert-critical">
+    <strong>All {{exhausted_tokens}}/{{total_tokens}} GitHub API tokens are rate limited!</strong>
+    <p>GitHub API calls are blocked until rate limits reset.</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{exhausted_tokens}}/{{total_tokens}}</div>
+        <div class="stat-label">Tokens Exhausted</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{next_reset_at}}</div>
+        <div class="stat-label">Next Reset</div>
+    </div>
+</div>
+
+<h3>⚠️ Impact</h3>
+<p>This blocks all GitHub data ingestion operations including:</p>
+<ul>
+    <li>Repository imports</li>
+    <li>Build data fetching</li>
+    <li>Feature extraction pipelines</li>
+</ul>
+
+<h3>💡 Actions Needed</h3>
+<ul>
+    <li>Add more GitHub tokens at the Settings page</li>
+    <li>Wait for rate limits to reset at {{next_reset_at}}</li>
+    <li>Consider reducing concurrent operations</li>
+</ul>
+
+<p style="text-align: center; margin-top: 20px;">
+    <a href="{{app_url}}/admin/settings" class="button">Manage Tokens</a>
+</p>

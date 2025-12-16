@@ -36,19 +36,17 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         user_id: ObjectId,
         skip: int = 0,
         limit: int = 100,
+        query: Optional[dict] = None,
         include_deleted: bool = False,
     ) -> tuple[List[ModelRepoConfig], int]:
         """List all configs for a user with pagination."""
-        query = {"user_id": user_id}
+        if query is None:
+            query = {}
+        query["user_id"] = user_id
         if not include_deleted:
             query["is_deleted"] = {"$ne": True}
 
-        total = self.collection.count_documents(query)
-        cursor = (
-            self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
-        )
-        items = [ModelRepoConfig(**doc) for doc in cursor]
-        return items, total
+        return self.paginate(query, sort=[("created_at", -1)], skip=skip, limit=limit)
 
     def update_repository(
         self,

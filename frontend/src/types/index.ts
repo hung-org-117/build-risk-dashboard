@@ -803,3 +803,69 @@ export interface ApplicationSettings {
   trivy: TrivySettings;
   notifications: NotificationSettings;
 }
+
+// Dashboard Layout Types
+export interface WidgetConfig {
+  widget_id: string;
+  widget_type: string;
+  title: string;
+  enabled: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface DashboardLayoutResponse {
+  widgets: WidgetConfig[];
+}
+
+export interface DashboardLayoutUpdateRequest {
+  widgets: WidgetConfig[];
+}
+
+export interface WidgetDefinition {
+  widget_id: string;
+  widget_type: string;
+  title: string;
+  description: string;
+  default_w: number;
+  default_h: number;
+}
+
+// ============================================================================
+// Notification Types
+// ============================================================================
+
+export type NotificationType =
+  | "pipeline_completed"
+  | "pipeline_failed"
+  | "dataset_import_completed"
+  | "dataset_validation_completed"
+  | "dataset_enrichment_completed"
+  | "scan_completed"
+  | "scan_vulnerabilities_found"
+  | "rate_limit_warning"
+  | "rate_limit_exhausted"
+  | "system";
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  is_read: boolean;
+  link?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  items: Notification[];
+  total: number;
+  unread_count: number;
+}
+
+export interface UnreadCountResponse {
+  count: number;
+}

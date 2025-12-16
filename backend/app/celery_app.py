@@ -14,15 +14,14 @@ celery_app = Celery(
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
-        "app.tasks.ingestion",
-        "app.tasks.model_ingestion",  # New chain-based ingestion
-        "app.tasks.processing",
-        "app.tasks.maintenance",
+        "app.tasks.model_ingestion",
+        "app.tasks.model_processing",
+        "app.tasks.dataset_ingestion",
+        "app.tasks.dataset_validation",
         "app.tasks.enrichment_processing",
         "app.tasks.export",
         "app.tasks.sonar",
         "app.tasks.trivy",
-        "app.tasks.dataset_validation",
     ],
 )
 
@@ -73,16 +72,6 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     # Celery Beat Schedule for periodic tasks
     beat_schedule={
-        "cleanup-pipeline-runs-daily": {
-            "task": "app.tasks.maintenance.cleanup_pipeline_runs",
-            "schedule": crontab(hour=3, minute=0),  # Daily at 3 AM
-            "args": (30,),  # Keep 30 days of pipeline runs
-        },
-        "cleanup-failed-scans-weekly": {
-            "task": "app.tasks.maintenance.cleanup_failed_scans",
-            "schedule": crontab(hour=4, minute=0, day_of_week=0),  # Sunday 4 AM
-            "args": (90,),  # Keep 90 days of resolved failed scans
-        },
         "cleanup-old-exports-weekly": {
             "task": "app.tasks.export.cleanup_old_exports",
             "schedule": crontab(hour=5, minute=0, day_of_week=0),  # Sunday 5 AM

@@ -16,8 +16,9 @@ import { CheckCircle, XCircle, Clock, Loader2 } from "lucide-react";
 
 interface PipelineRun {
     id: string;
-    repo_id: string;
-    workflow_run_id: number;
+    category: "model_training" | "dataset_enrichment";
+    raw_repo_id: string;
+    raw_build_run_id: string;
     status: string;
     started_at: string | null;
     completed_at: string | null;
@@ -92,7 +93,7 @@ export function PipelineRunsTable({
                     <TableHeader>
                         <TableRow>
                             <TableHead>Status</TableHead>
-                            <TableHead>Workflow Run</TableHead>
+                            <TableHead>Category</TableHead>
                             <TableHead>Features</TableHead>
                             <TableHead>Nodes</TableHead>
                             <TableHead>Duration</TableHead>
@@ -118,7 +119,9 @@ export function PipelineRunsTable({
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="font-mono text-xs">
-                                            {run.workflow_run_id}
+                                            <Badge variant="outline" className="text-xs">
+                                                {run.category === "model_training" ? "🔧 Model" : "📊 Dataset"}
+                                            </Badge>
                                         </TableCell>
                                         <TableCell>{run.feature_count}</TableCell>
                                         <TableCell>

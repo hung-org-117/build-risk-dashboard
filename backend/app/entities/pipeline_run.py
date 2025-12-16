@@ -67,12 +67,39 @@ class PipelineRun(BaseEntity):
     - Which nodes succeeded/failed
     - Performance metrics (duration, retry counts)
     - Feature extraction results
+
+    References:
+    - raw_repo_id -> RawRepository
+    - raw_build_run_id -> RawBuildRun
+    - training_build_id -> ModelTrainingBuild (for MODEL_TRAINING category)
+    - enrichment_build_id -> DatasetEnrichmentBuild (for DATASET_ENRICHMENT category)
     """
 
-    # References
-    build_sample_id: PyObjectId
-    repo_id: PyObjectId
-    workflow_run_id: int
+    # Pipeline category
+    category: PipelineCategory = Field(
+        default=PipelineCategory.MODEL_TRAINING,
+        description="Type of pipeline: model_training or dataset_enrichment",
+    )
+
+    # References to raw data
+    raw_repo_id: PyObjectId = Field(
+        ...,
+        description="Reference to raw_repositories table",
+    )
+    raw_build_run_id: PyObjectId = Field(
+        ...,
+        description="Reference to raw_build_runs table",
+    )
+
+    # Output entity reference (one of these will be populated based on category)
+    training_build_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to model_training_builds (for MODEL_TRAINING)",
+    )
+    enrichment_build_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to dataset_enrichment_builds (for DATASET_ENRICHMENT)",
+    )
 
     # Execution metadata
     status: PipelineRunStatus = PipelineRunStatus.PENDING
@@ -91,9 +118,7 @@ class PipelineRun(BaseEntity):
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
-    # DAG metadata
-    dag_version: Optional[str] = None  # Hash of DAG structure for versioning
-    nodes_requested: int = 0
+    # Node execution counts
     nodes_executed: int = 0
     nodes_succeeded: int = 0
     nodes_failed: int = 0

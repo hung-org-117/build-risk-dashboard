@@ -1,0 +1,38 @@
+<h2>🔴 Pipeline Failed</h2>
+
+<div class="alert-critical">
+    <strong>Feature extraction pipeline failed for {{repo_name}}</strong>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{repo_name}}</div>
+        <div class="stat-label">Repository</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{build_id}}</div>
+        <div class="stat-label">Build ID</div>
+    </div>
+</div>
+
+<h3>Error Details</h3>
+<div class="alert-info">
+    <code style="word-break: break-all;">{{error}}</code>
+</div>
+
+{{#if node_failures}}
+<h3>Failed Nodes</h3>
+<ul>
+    {{#each node_failures}}
+    <li>{{this}}</li>
+    {{/each}}
+</ul>
+{{/if}}
+
+{{#if retry_count}}
+<p>🔄 This pipeline was retried {{retry_count}} time(s).</p>
+{{/if}}
+
+<p style="text-align: center; margin-top: 20px;">
+    <a href="{{app_url}}/admin/repos" class="button">View Repositories</a>
+</p>

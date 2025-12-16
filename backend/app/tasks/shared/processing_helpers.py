@@ -15,6 +15,7 @@ from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository
 from app.entities.pipeline_run import (
     PipelineRun,
+    PipelineRunStatus,
     PipelineCategory,
     NodeExecutionResult,
     NodeExecutionStatus,
@@ -28,6 +29,102 @@ from app.paths import REPOS_DIR
 logger = logging.getLogger(__name__)
 
 
+def _save_pipeline_run(
+    db,
+    raw_repo: RawRepository,
+    raw_build_run: RawBuildRun,
+    pipeline: HamiltonPipeline,
+    status: str,
+    features: List[str],
+    errors: List[str],
+    category: PipelineCategory,
+    output_build_id: Optional[str] = None,
+) -> None:
+    """
+    Save pipeline execution results to database.
+
+    Args:
+        db: Database session
+        raw_repo: RawRepository entity
+        raw_build_run: RawBuildRun entity
+        pipeline: HamiltonPipeline instance (with execution results)
+        status: Execution status ("completed" or "failed")
+        features: List of extracted feature names
+        errors: List of error messages
+        category: Pipeline category (model_training or dataset_enrichment)
+        output_build_id: ID of the output entity (ModelTrainingBuild or DatasetEnrichmentBuild)
+    """
+    try:
+        execution_result = pipeline.get_execution_results()
+
+        # Create PipelineRun entity
+        pipeline_run = PipelineRun(
+            category=category,
+            raw_repo_id=raw_repo.id,
+            raw_build_run_id=raw_build_run.id,
+            status=(
+                PipelineRunStatus.COMPLETED
+                if status == "completed"
+                else PipelineRunStatus.FAILED
+            ),
+            feature_count=len(features),
+            features_extracted=features,
+            errors=errors,
+        )
+
+        # Set output entity reference based on category
+        if output_build_id:
+            from bson import ObjectId
+
+            if category == PipelineCategory.MODEL_TRAINING:
+                pipeline_run.training_build_id = ObjectId(output_build_id)
+            else:
+                pipeline_run.enrichment_build_id = ObjectId(output_build_id)
+
+        if execution_result:
+            pipeline_run.started_at = execution_result.started_at
+            pipeline_run.completed_at = execution_result.completed_at
+            pipeline_run.duration_ms = execution_result.duration_ms
+            pipeline_run.nodes_executed = execution_result.nodes_executed
+            pipeline_run.nodes_succeeded = execution_result.nodes_succeeded
+            pipeline_run.nodes_failed = execution_result.nodes_failed
+            pipeline_run.nodes_skipped = execution_result.nodes_skipped
+            pipeline_run.errors.extend(execution_result.errors)
+
+            # Add node-level results
+            for node_info in execution_result.node_results:
+                node_result = NodeExecutionResult(
+                    node_name=node_info.node_name,
+                    status=(
+                        NodeExecutionStatus.SUCCESS
+                        if node_info.success
+                        else NodeExecutionStatus.FAILED
+                    ),
+                    started_at=node_info.started_at,
+                    completed_at=node_info.completed_at,
+                    duration_ms=node_info.duration_ms,
+                    error=node_info.error,
+                )
+                pipeline_run.add_node_result(node_result)
+        else:
+            # If no tracking, just set timestamps
+            now = datetime.now(timezone.utc)
+            pipeline_run.started_at = now
+            pipeline_run.completed_at = now
+
+        # Save to database
+        pipeline_run_repo = PipelineRunRepository(db)
+        pipeline_run_repo.insert_one(pipeline_run)
+
+        logger.debug(
+            f"Saved pipeline run ({category.value}) for build {raw_build_run.build_id}: "
+            f"{pipeline_run.nodes_succeeded}/{pipeline_run.nodes_executed} nodes succeeded"
+        )
+
+    except Exception as e:
+        logger.warning(f"Failed to save pipeline run: {e}")
+
+
 def extract_features_for_build(
     db,
     raw_repo: RawRepository,
@@ -35,6 +132,9 @@ def extract_features_for_build(
     raw_build_run: RawBuildRun,
     selected_features: List[str] = [],
     github_client=None,
+    save_run: bool = True,
+    category: PipelineCategory = PipelineCategory.MODEL_TRAINING,
+    output_build_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Extract features for a single build using HamiltonPipeline.
@@ -54,11 +154,15 @@ def extract_features_for_build(
         raw_build_run: RawBuildRun entity
         selected_features: Optional list of features to extract
         github_client: Optional GitHub client for API calls
+        save_run: Whether to save pipeline run to database (default: True)
+        category: Pipeline category for tracking (default: MODEL_TRAINING)
+        output_build_id: ID of the output entity (ModelTrainingBuild or DatasetEnrichmentBuild)
 
     Returns:
         Dictionary with status, features, errors, warnings, etc.
     """
     repo_path = REPOS_DIR / str(raw_repo.id)
+    pipeline = None
 
     try:
         # Build all Hamilton inputs using helper function
@@ -69,8 +173,8 @@ def extract_features_for_build(
             repo_path=repo_path,
         )
 
-        # Execute Hamilton pipeline
-        pipeline = HamiltonPipeline(db=db)
+        # Execute Hamilton pipeline with tracking enabled
+        pipeline = HamiltonPipeline(db=db, enable_tracking=True)
 
         features = pipeline.run(
             git_history=inputs.git_history,
@@ -98,6 +202,20 @@ def extract_features_for_build(
                 f"Commit {raw_build_run.commit_sha} not found in repo"
             )
 
+        # Save pipeline run to database
+        if save_run and pipeline:
+            _save_pipeline_run(
+                db=db,
+                raw_repo=raw_repo,
+                raw_build_run=raw_build_run,
+                pipeline=pipeline,
+                status="completed",
+                features=list(formatted_features.keys()),
+                errors=[],
+                category=category,
+                output_build_id=output_build_id,
+            )
+
         return result
 
     except Exception as e:
@@ -105,6 +223,21 @@ def extract_features_for_build(
             f"Pipeline failed for build {raw_build_run.build_id}: {e}",
             exc_info=True,
         )
+
+        # Save failed pipeline run
+        if save_run and pipeline:
+            _save_pipeline_run(
+                db=db,
+                raw_repo=raw_repo,
+                raw_build_run=raw_build_run,
+                pipeline=pipeline,
+                status="failed",
+                features=[],
+                errors=[str(e)],
+                category=category,
+                output_build_id=output_build_id,
+            )
+
         return {
             "status": "failed",
             "features": {},

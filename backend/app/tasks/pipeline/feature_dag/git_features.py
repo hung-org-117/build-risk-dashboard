@@ -7,6 +7,7 @@ Features extracted from git history and repository operations:
 - File touch history
 - Team membership
 """
+
 import re
 import logging
 import subprocess
@@ -173,7 +174,7 @@ def git_commit_info(
 @tag(group="git")
 def git_diff_features(
     git_history: GitHistoryInput,
-    repo: RepoConfigInput,
+    repo_config: RepoConfigInput,
     git_all_built_commits: List[str],
     git_prev_built_commit: Optional[str],
 ) -> Dict[str, Any]:
@@ -185,7 +186,7 @@ def git_diff_features(
     effective_sha = git_history.effective_sha
 
     # Normalize languages
-    languages = [lang.lower() for lang in repo.source_languages] or [""]
+    languages = [lang.lower() for lang in repo_config.source_languages] or [""]
 
     stats = _empty_diff_result()
 
@@ -378,6 +379,7 @@ def gh_num_commits_on_files_touched(
     except Exception as e:
         logger.warning(f"Failed to count commits on files: {e}")
         return 0
+
 
 @feature_metadata(
     display_name="Team Size",

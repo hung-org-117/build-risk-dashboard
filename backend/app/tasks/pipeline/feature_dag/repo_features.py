@@ -18,6 +18,7 @@ from hamilton.function_modifiers import extract_fields, tag
 from app.tasks.pipeline.feature_dag._inputs import (
     GitHistoryInput,
     GitWorktreeInput,
+    RepoConfigInput,
     RepoInput,
 )
 from app.tasks.pipeline.feature_dag._metadata import (
@@ -137,7 +138,7 @@ def gh_repo_num_commits(git_history: GitHistoryInput) -> Optional[int]:
 @tag(group="repo")
 def repo_code_metrics(
     git_worktree: GitWorktreeInput,
-    repo: RepoConfigInput,
+    repo_config: RepoConfigInput,
 ) -> Dict[str, Any]:
     """
     SLOC and test density metrics.
@@ -153,7 +154,7 @@ def repo_code_metrics(
         }
 
     worktree_path = git_worktree.worktree_path
-    languages = [lang.lower() for lang in repo.source_languages] or [""]
+    languages = [lang.lower() for lang in repo_config.source_languages] or [""]
 
     src_lines, test_lines, test_cases, asserts = _count_code_metrics(
         worktree_path, languages

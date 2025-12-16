@@ -51,7 +51,7 @@ def get_pipeline_runs(
     """
     Get recent pipeline runs with pagination.
 
-    Shows pipeline execution history with status and metrics.
+    Shows Hamilton pipeline execution history with timing and status.
     """
     service = MonitoringService(db)
     return service.get_pipeline_runs(limit=limit, skip=skip, status=status)

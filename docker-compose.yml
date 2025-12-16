@@ -87,7 +87,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: build-risk-celery-worker
-    command: uv run celery -A app.celery_app worker -Q import_repo,collect_workflow_logs,data_processing,pipeline.default --loglevel=info -c 4
+    command: uv run celery -A app.celery_app worker -Q pipeline.default,ingestion,processing,sonar_scan,trivy_scan --loglevel=info -c 4
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     restart: unless-stopped
     environment:

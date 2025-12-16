@@ -158,28 +158,24 @@ class MonitoringService:
         skip: int = 0,
         status: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get recent pipeline runs."""
+        """Get recent Hamilton pipeline execution runs."""
         from app.repositories.pipeline_run import PipelineRunRepository
 
         repo = PipelineRunRepository(self.db)
 
-        query = {}
-        if status:
-            query["status"] = status
-
-        runs, total = repo.paginate(
-            query,
-            sort=[("created_at", -1)],
-            skip=skip,
+        runs, total = repo.find_recent(
             limit=limit,
+            skip=skip,
+            status=status,
         )
 
         return {
             "runs": [
                 {
                     "id": str(run.id),
-                    "repo_id": str(run.repo_id),
-                    "workflow_run_id": run.workflow_run_id,
+                    "category": run.category,
+                    "raw_repo_id": str(run.raw_repo_id),
+                    "raw_build_run_id": str(run.raw_build_run_id),
                     "status": run.status,
                     "started_at": (
                         run.started_at.isoformat() if run.started_at else None
@@ -192,7 +188,7 @@ class MonitoringService:
                     "nodes_executed": run.nodes_executed,
                     "nodes_succeeded": run.nodes_succeeded,
                     "nodes_failed": run.nodes_failed,
-                    "errors": run.errors[:3] if run.errors else [],  # Limit to 3
+                    "errors": run.errors[:3] if run.errors else [],
                 }
                 for run in runs
             ],

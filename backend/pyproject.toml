@@ -26,6 +26,7 @@ dependencies = [
   "redis>=5.0,<6.0",
   "pyarrow>=22.0.0",
   "sf-hamilton>=1.62",
+  "pybars3>=0.9.7",
 ]
 
 [project.optional-dependencies]

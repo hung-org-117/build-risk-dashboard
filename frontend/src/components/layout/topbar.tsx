@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, LogOut, Menu, Settings } from 'lucide-react'
+import { LogOut, Menu, Settings } from 'lucide-react'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 
+import { NotificationDropdown } from '@/components/notifications/NotificationDropdown'
 import { integrationApi, usersApi } from '@/lib/api'
 import type { UserAccount } from '@/types'
 import { useAuth } from '@/contexts/auth-context'
@@ -55,8 +56,9 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
   const pageTitle = useMemo(() => {
     if (pathname?.startsWith('/admin/datasets')) return 'Projects / Datasets'
     if (pathname?.startsWith('/admin/repos')) return 'Repositories'
-    if (pathname?.startsWith('/dashboard')) return 'Overview'
-    if (pathname?.startsWith('/admin/pipeline')) return 'Pipeline'
+    if (pathname?.startsWith('/overview')) return 'Overview'
+    if (pathname?.startsWith('/admin/monitoring')) return 'Monitoring'
+    if (pathname?.startsWith('/admin/settings')) return 'Settings'
     return 'Workspace'
   }, [pathname])
 
@@ -92,17 +94,12 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
 
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-3">
-          <button
-            className="rounded-full p-2 text-muted-foreground transition hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800"
-            aria-label="Notifications"
-            type="button"
-          >
-            <Bell className="h-5 w-5" />
-          </button>
+          <NotificationDropdown />
           <button
             className="rounded-full p-2 text-muted-foreground transition hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800"
             aria-label="Settings"
             type="button"
+            onClick={() => router.push('/admin/settings')}
           >
             <Settings className="h-5 w-5" />
           </button>

@@ -8,7 +8,7 @@ from pymongo import ReturnDocument
 
 from app.entities.raw_build_run import RawBuildRun
 from app.repositories.base import BaseRepository
-from backend.app.entities.base import validate_object_id
+from app.entities.base import validate_object_id
 
 
 class RawBuildRunRepository(BaseRepository[RawBuildRun]):
@@ -89,12 +89,7 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         if since:
             query["created_at"] = {"$gte": since}
 
-        total = self.collection.count_documents(query)
-        cursor = (
-            self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
-        )
-        items = [RawBuildRun(**doc) for doc in cursor]
-        return items, total
+        return self.paginate(query, sort=[("created_at", -1)], skip=skip, limit=limit)
 
     def find_ids_by_build_ids(
         self,

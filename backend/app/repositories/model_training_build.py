@@ -84,15 +84,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
     ) -> tuple[List[ModelTrainingBuild], int]:
         """List builds for a model repo config with pagination."""
         query = {"model_repo_config_id": model_repo_config_id}
-        total = self.collection.count_documents(query)
-        cursor = (
-            self.collection.find(query)
-            .sort("build_created_at", -1)
-            .skip(skip)
-            .limit(limit)
+        return self.paginate(
+            query, sort=[("build_created_at", -1)], skip=skip, limit=limit
         )
-        items = [ModelTrainingBuild(**doc) for doc in cursor]
-        return items, total
 
     def find_by_repo(
         self,
@@ -102,15 +96,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
     ) -> tuple[List[ModelTrainingBuild], int]:
         """List builds for a raw repository with pagination."""
         query = {"raw_repo_id": raw_repo_id}
-        total = self.collection.count_documents(query)
-        cursor = (
-            self.collection.find(query)
-            .sort("build_created_at", -1)
-            .skip(skip)
-            .limit(limit)
+        return self.paginate(
+            query, sort=[("build_created_at", -1)], skip=skip, limit=limit
         )
-        items = [ModelTrainingBuild(**doc) for doc in cursor]
-        return items, total
 
     def update_extraction_status(
         self,

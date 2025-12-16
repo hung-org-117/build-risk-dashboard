@@ -441,68 +441,6 @@ export const tokensApi = {
   },
 };
 
-export const pipelineApi = {
-  // List pipeline runs with pagination
-  listRuns: async (params?: {
-    skip?: number;
-    limit?: number;
-    repo_id?: string;
-  }) => {
-    const response = await api.get<PipelineRunListResponse>("/pipeline/runs", { params });
-    return response.data;
-  },
-
-  // Get single run details
-  getRun: async (runId: string) => {
-    const response = await api.get<PipelineRunDetail>(`/pipeline/runs/${runId}`);
-    return response.data;
-  },
-
-  // Get pipeline statistics
-  getStats: async (params?: { days?: number; repo_id?: string }) => {
-    const response = await api.get<PipelineStats>("/pipeline/stats", { params });
-    return response.data;
-  },
-
-  // Get DAG info (version, nodes, features)
-  getDAGInfo: async () => {
-    const response = await api.get<DAGInfo>("/pipeline/dag");
-    return response.data;
-  },
-
-  // Get DAG visualization data
-  getDAGVisualization: async () => {
-    const response = await api.get<{
-      nodes: Array<{
-        id: string;
-        type: string;
-        label: string;
-        features: string[];
-        feature_count: number;
-        level: number;
-        group: string;
-      }>;
-      edges: Array<{
-        id: string;
-        source: string;
-        target: string;
-        type: string;
-      }>;
-      execution_levels: Array<{ level: number; nodes: string[] }>;
-      dag_version: string;
-    }>("/pipeline/dag/visualize");
-    return response.data;
-  },
-
-  cleanupRuns: async (days: number = 30) => {
-    const response = await api.delete<{ message: string; deleted_count: number }>(
-      "/pipeline/runs/cleanup",
-      { params: { days } }
-    );
-    return response.data;
-  },
-};
-
 import type {
   EnrichmentValidateResponse,
   EnrichmentStartRequest,
@@ -801,6 +739,12 @@ export const datasetValidationApi = {
   },
 };
 
+import type {
+  DashboardLayoutResponse,
+  DashboardLayoutUpdateRequest,
+  WidgetDefinition,
+} from "@/types";
+
 export const settingsApi = {
   // Get current settings
   get: async (): Promise<ApplicationSettings> => {
@@ -812,5 +756,57 @@ export const settingsApi = {
   update: async (settings: Partial<ApplicationSettings>): Promise<ApplicationSettings> => {
     const response = await api.patch<ApplicationSettings>("/settings", settings);
     return response.data;
+  },
+
+  // Get dashboard layout for current user
+  getDashboardLayout: async (): Promise<DashboardLayoutResponse> => {
+    const response = await api.get<DashboardLayoutResponse>("/settings/dashboard-layout");
+    return response.data;
+  },
+
+  // Save dashboard layout for current user
+  saveDashboardLayout: async (layout: DashboardLayoutUpdateRequest): Promise<DashboardLayoutResponse> => {
+    const response = await api.put<DashboardLayoutResponse>("/settings/dashboard-layout", layout);
+    return response.data;
+  },
+
+  // Get available widgets
+  getAvailableWidgets: async (): Promise<WidgetDefinition[]> => {
+    const response = await api.get<WidgetDefinition[]>("/settings/available-widgets");
+    return response.data;
+  },
+};
+
+import type {
+  Notification,
+  NotificationListResponse,
+  UnreadCountResponse,
+} from "@/types";
+
+export const notificationsApi = {
+  // List notifications for current user
+  list: async (params?: {
+    skip?: number;
+    limit?: number;
+    unread_only?: boolean;
+  }): Promise<NotificationListResponse> => {
+    const response = await api.get<NotificationListResponse>("/notifications", { params });
+    return response.data;
+  },
+
+  // Get unread count
+  getUnreadCount: async (): Promise<number> => {
+    const response = await api.get<UnreadCountResponse>("/notifications/unread-count");
+    return response.data.count;
+  },
+
+  // Mark single notification as read
+  markAsRead: async (notificationId: string): Promise<void> => {
+    await api.put(`/notifications/${notificationId}/read`);
+  },
+
+  // Mark all notifications as read
+  markAllAsRead: async (): Promise<void> => {
+    await api.put("/notifications/read-all");
   },
 };

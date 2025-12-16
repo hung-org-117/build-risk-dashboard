@@ -58,10 +58,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
                 status.value if hasattr(status, "value") else status
             )
 
-        total = self.collection.count_documents(query)
-        cursor = self.collection.find(query).sort("_id", 1).skip(skip).limit(limit)
-        items = [DatasetEnrichmentBuild(**doc) for doc in cursor]
-        return items, total
+        return self.paginate(query, sort=[("_id", 1)], skip=skip, limit=limit)
 
     def list_by_version(
         self,
@@ -71,10 +68,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
     ) -> tuple[List[DatasetEnrichmentBuild], int]:
         """List builds for a dataset version with pagination."""
         query = {"dataset_version_id": dataset_version_id}
-        total = self.collection.count_documents(query)
-        cursor = self.collection.find(query).sort("_id", 1).skip(skip).limit(limit)
-        items = [DatasetEnrichmentBuild(**doc) for doc in cursor]
-        return items, total
+        return self.paginate(query, sort=[("_id", 1)], skip=skip, limit=limit)
 
     def update_extraction_status(
         self,

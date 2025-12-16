@@ -35,6 +35,7 @@ from app.tasks.pipeline.feature_dag._metadata import (
     get_required_resources_for_features,
     FeatureResource,
 )
+from app.tasks.pipeline.execution_tracker import ExecutionTracker, ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -59,29 +60,34 @@ class HamiltonPipeline:
         - Output contains only the requested features (+ defaults)
     """
 
-    def __init__(self, db: Any):
+    def __init__(self, db: Any, enable_tracking: bool = True):
         """
         Initialize the Hamilton pipeline.
 
         Args:
             db: MongoDB database instance
+            enable_tracking: Whether to enable execution tracking (default: True)
         """
         self.db = db
+        self._enable_tracking = enable_tracking
+        self._tracker: Optional[ExecutionTracker] = None
         self._driver = self._build_driver()
         self._all_features = self._get_all_feature_names()
 
     def _build_driver(self) -> driver.Driver:
         """Build Hamilton driver with all feature modules."""
-        return (
-            driver.Builder()
-            .with_modules(
-                git_features,
-                build_features,
-                github_features,
-                repo_features,
-            )
-            .build()
+        builder = driver.Builder().with_modules(
+            git_features,
+            build_features,
+            github_features,
+            repo_features,
         )
+
+        if self._enable_tracking:
+            self._tracker = ExecutionTracker()
+            builder = builder.with_adapters(self._tracker)
+
+        return builder.build()
 
     def _get_all_feature_names(self) -> Set[str]:
         """Get all available feature names."""
@@ -252,3 +258,19 @@ class HamiltonPipeline:
         except Exception as e:
             logger.error(f"Hamilton pipeline failed: {e}")
             raise
+
+    def get_execution_results(self) -> Optional[ExecutionResult]:
+        """
+        Get execution tracking results after running the pipeline.
+
+        Returns:
+            ExecutionResult with timing and status info, or None if tracking disabled.
+        """
+        if self._tracker:
+            return self._tracker.get_results()
+        return None
+
+    def reset_tracker(self) -> None:
+        """Reset tracker state for reuse with another execution."""
+        if self._tracker:
+            self._tracker.reset()

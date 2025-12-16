@@ -57,12 +57,7 @@ class DatasetRepoConfigRepository(BaseRepository[DatasetRepoConfig]):
             status_value = status.value if hasattr(status, "value") else status
             query["validation_status"] = status_value
 
-        total = self.collection.count_documents(query)
-        cursor = (
-            self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
-        )
-        items = [DatasetRepoConfig(**doc) for doc in cursor]
-        return items, total
+        return self.paginate(query, sort=[("created_at", -1)], skip=skip, limit=limit)
 
     def update_validation_status(
         self,

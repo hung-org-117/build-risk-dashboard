@@ -24,6 +24,7 @@ from .oauth_identity import OAuthIdentityRepository
 from .user import UserRepository
 from .dataset_template_repository import DatasetTemplateRepository
 from .pipeline_run import PipelineRunRepository
+from .notification import NotificationRepository
 
 __all__ = [
     "BaseRepository",
@@ -45,4 +46,5 @@ __all__ = [
     "UserRepository",
     "DatasetTemplateRepository",
     "PipelineRunRepository",
+    "NotificationRepository",
 ]

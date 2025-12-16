@@ -1,13 +1,13 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { Activity, BadgeCheck, Database, Home, Settings } from "lucide-react";
+import { Activity, BadgeCheck, Database, Home } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 const navigation = [
   {
     label: "Overview",
-    href: "/dashboard",
+    href: "/overview",
     icon: Home,
   },
   {
@@ -21,15 +21,10 @@ const navigation = [
     icon: BadgeCheck,
   },
   {
-    label: "Pipeline Runs",
-    href: "/admin/pipeline",
+    label: "Monitoring",
+    href: "/admin/monitoring",
     icon: Activity,
-  },
-  {
-    label: "Settings",
-    href: "/admin/settings",
-    icon: Settings,
-  },
+  }
 ];
 
 export function Sidebar() {

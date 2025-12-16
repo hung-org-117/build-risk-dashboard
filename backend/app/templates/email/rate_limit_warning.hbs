@@ -1,0 +1,22 @@
+<h2>⚠️ GitHub Rate Limit Warning</h2>
+
+<div class="alert-warning">
+    <strong>Token "{{token_label}}" is running low on API requests.</strong>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{remaining}}</div>
+        <div class="stat-label">Requests Remaining</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{reset_at}}</div>
+        <div class="stat-label">Reset Time (UTC)</div>
+    </div>
+</div>
+
+<p>Consider adding more tokens or reducing concurrent operations to avoid service disruption.</p>
+
+<p style="text-align: center; margin-top: 20px;">
+    <a href="{{app_url}}/admin/settings" class="button">Manage Tokens</a>
+</p>

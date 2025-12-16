@@ -18,13 +18,13 @@ from app.api import (
     features,
     datasets,
     tokens,
-    pipeline,
     export,
     dataset_validation,
     dataset_versions,
     templates,
     settings,
     monitoring,
+    notifications,
 )
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.api import model_repos
@@ -63,7 +63,6 @@ app.include_router(sonar.router, prefix="/api/sonar", tags=["SonarQube"])
 app.include_router(features.router, prefix="/api", tags=["Feature Definitions"])
 app.include_router(datasets.router, prefix="/api", tags=["Datasets"])
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
-app.include_router(pipeline.router, prefix="/api", tags=["Pipeline"])
 app.include_router(export.router, prefix="/api", tags=["Export"])
 app.include_router(
     dataset_validation.router, prefix="/api", tags=["Dataset Validation"]
@@ -72,6 +71,7 @@ app.include_router(dataset_versions.router, prefix="/api", tags=["Dataset Versio
 app.include_router(templates.router, prefix="/api", tags=["Templates"])
 app.include_router(settings.router, prefix="/api", tags=["Settings"])
 app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
+app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 
 
 @app.get("/")

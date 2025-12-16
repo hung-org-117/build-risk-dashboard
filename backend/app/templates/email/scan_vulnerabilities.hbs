@@ -1,0 +1,22 @@
+<h2>⚠️ Security Scan: Issues Found</h2>
+
+<div class="alert-warning">
+    <strong>{{scan_type}} scan found {{issues_count}} issues in {{repo_name}}</strong>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{repo_name}}</div>
+        <div class="stat-label">Repository</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{issues_count}}</div>
+        <div class="stat-label">Issues Found</div>
+    </div>
+</div>
+
+<p>Please review the scan results and address any security vulnerabilities.</p>
+
+<p style="text-align: center; margin-top: 20px;">
+    <a href="{{app_url}}/admin/repos" class="button">View Scan Results</a>
+</p>

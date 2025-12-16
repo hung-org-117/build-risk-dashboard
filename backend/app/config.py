@@ -87,6 +87,15 @@ class Settings(BaseSettings):
     TRIVY_SKIP_DIRS: str = "node_modules,vendor,.git"
     TRIVY_ASYNC_THRESHOLD: int = 1000
 
+    # Notifications - Slack
+    SLACK_WEBHOOK_URL: Optional[str] = None
+
+    # Notifications - Gmail (requires App Password, NOT regular password)
+    GMAIL_NOTIFICATIONS_ENABLED: bool = False
+    GMAIL_USER: Optional[str] = None
+    GMAIL_APP_PASSWORD: Optional[str] = None  # 16-char app password from Google
+    GMAIL_RECIPIENTS: List[str] = []  # Comma-separated in .env, e.g. "a@x.com,b@x.com"
+
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -1,5 +1,5 @@
-from app.repositories.raw_repository import RawRepositoryRepository
 from __future__ import annotations
+from app.repositories.raw_repository import RawRepositoryRepository
 
 import hashlib
 import hmac

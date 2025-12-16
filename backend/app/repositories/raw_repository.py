@@ -48,7 +48,4 @@ class RawRepositoryRepository(BaseRepository[RawRepository]):
         limit: int = 100,
     ) -> tuple[List[RawRepository], int]:
         """List all raw repositories with pagination."""
-        total = self.collection.count_documents({})
-        cursor = self.collection.find().skip(skip).limit(limit)
-        items = [RawRepository(**doc) for doc in cursor]
-        return items, total
+        return self.paginate({}, skip=skip, limit=limit)

@@ -29,7 +29,7 @@ from app.tasks.pipeline.feature_dag._metadata import (
 )
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.shared import build_ingestion_workflow
-from backend.app.ci_providers.models import BuildStatus
+from app.ci_providers.models import BuildStatus
 
 logger = logging.getLogger(__name__)
 

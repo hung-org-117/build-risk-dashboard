@@ -15,7 +15,7 @@ export default function RootRedirect() {
       return;
     }
 
-    router.replace(authenticated ? "/dashboard" : "/login");
+    router.replace(authenticated ? "/overview" : "/login");
   }, [authenticated, loading, router]);
 
   return (
