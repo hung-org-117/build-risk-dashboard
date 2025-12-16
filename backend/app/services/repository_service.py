@@ -15,13 +15,12 @@ from app.dtos import (
     RepoUpdateRequest,
     RepoSearchResponse,
 )
-from datetime import datetime, timezone
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.services.github.github_client import (
     get_user_github_client,
 )
-from app.tasks.model_ingestion import import_repo
+from app.tasks.model_processing import start_model_processing
 
 
 logger = logging.getLogger(__name__)
@@ -60,56 +59,69 @@ class RepositoryService:
             installation_id = payload.installation_id
 
             try:
-                # Check if repo is already being imported
-                existing_repo = self.repo_config.find_by_full_name(payload.full_name)
-                if (
-                    existing_repo
-                    and existing_repo.import_status == ModelImportStatus.IMPORTING
-                ):
-                    logger.info(
-                        f"Repository {payload.full_name} is already importing, skipping"
+                # Check if RawRepository already exists to avoid GitHub API call
+                raw_repo = self.raw_repo.find_by_full_name(payload.full_name)
+
+                if not raw_repo:
+                    # Need to fetch from GitHub
+                    if installation_id:
+                        client_ctx = get_app_github_client(self.db, installation_id)
+                    else:
+                        client_ctx = get_user_github_client(self.db, user_id)
+
+                    with client_ctx as gh:
+                        repo_data = gh.get_repository(payload.full_name)
+
+                    if not repo_data:
+                        logger.warning(
+                            f"Repository {payload.full_name} not found on GitHub"
+                        )
+                        continue
+
+                    raw_repo = self.raw_repo.upsert_by_full_name(
+                        full_name=payload.full_name,
+                        github_repo_id=repo_data.get("id"),
+                        default_branch=repo_data.get("default_branch", "main"),
+                        is_private=bool(repo_data.get("private")),
+                        main_lang=repo_data.get("language"),
+                        github_metadata=repo_data,
                     )
-                    results.append(existing_repo)
-                    continue
 
-                with get_app_github_client(self.db, installation_id) as gh:
-                    repo_data = gh.get_repository(payload.full_name)
+                from app.entities.model_repo_config import ModelRepoConfig
 
-                if not repo_data:
-                    logger.warning(
-                        f"Repository {payload.full_name} not found on GitHub"
-                    )
-                    continue
-
-                raw_repo = self.raw_repo.upsert_by_full_name(
-                    full_name=payload.full_name,
-                    github_repo_id=repo_data.get("id"),
-                    default_branch=repo_data.get("default_branch", "main"),
-                    is_private=bool(repo_data.get("private")),
-                    main_lang=repo_data.get("language"),
-                    github_metadata=repo_data,
+                # Get max import_version for this raw_repo (across all users/imports)
+                all_configs = list(
+                    self.repo_config.collection.find({"raw_repo_id": raw_repo.id})
                 )
 
-                repo_doc = self.repo_config.upsert_repository(
-                    user_id=target_user_id,
-                    full_name=payload.full_name,
-                    data={
-                        "provider": "github",
-                        "raw_repo_id": raw_repo.id,  # Link to RawRepository
-                        "installation_id": installation_id,
-                        "test_frameworks": payload.test_frameworks,
-                        "source_languages": payload.source_languages,
-                        "ci_provider": payload.ci_provider,
-                        "import_status": ModelImportStatus.QUEUED.value,
-                        "max_builds_to_ingest": payload.max_builds,
-                        "since_days": payload.since_days,
-                        "only_with_logs": payload.only_with_logs,
-                    },
+                # Calculate next version based on raw_repo_id
+                if all_configs:
+                    max_version = max(c.get("import_version", 1) for c in all_configs)
+                    next_version = max_version + 1
+                else:
+                    next_version = 1
+
+                # Always create new config with incremented version
+                repo_doc = self.repo_config.insert_one(
+                    ModelRepoConfig(
+                        _id=None,
+                        user_id=ObjectId(target_user_id),
+                        full_name=payload.full_name,
+                        raw_repo_id=raw_repo.id,
+                        import_version=next_version,
+                        installation_id=installation_id,
+                        test_frameworks=payload.test_frameworks or [],
+                        source_languages=payload.source_languages or [],
+                        ci_provider=payload.ci_provider,
+                        import_status=ModelImportStatus.QUEUED,
+                        max_builds_to_ingest=payload.max_builds,
+                        since_days=payload.since_days,
+                        only_with_logs=payload.only_with_logs or False,
+                    )
                 )
 
-                import_repo.delay(
-                    user_id=target_user_id,
-                    full_name=payload.full_name,
+                start_model_processing.delay(
+                    repo_config_id=str(repo_doc.id),
                     installation_id=installation_id,
                     ci_provider=payload.ci_provider.value,
                     max_builds=payload.max_builds,
@@ -291,9 +303,9 @@ class RepositoryService:
         )
 
         # Trigger import task
-        import_repo.delay(
+        start_model_processing.delay(
+            repo_id=repo_id,
             user_id=user_id,
-            full_name=repo_doc.full_name,
             installation_id=repo_doc.installation_id,
             ci_provider=(
                 repo_doc.ci_provider.value

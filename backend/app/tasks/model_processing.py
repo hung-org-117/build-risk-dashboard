@@ -4,11 +4,14 @@ Build Processing Tasks using the new DAG-based Feature Pipeline.
 This module uses the Hamilton-based pipeline directly for feature extraction.
 """
 
+from typing import List
+from app.ci_providers.models import CIProvider
 from app.entities.model_training_build import ModelTrainingBuild
 from app.entities.enums import ExtractionStatus, ModelBuildConclusion
+from app.entities.pipeline_run import PipelineCategory
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from bson import ObjectId
 import redis
@@ -52,6 +55,237 @@ def publish_build_update(repo_id: str, build_id: str, status: str):
         logger.error(f"Failed to publish build update: {e}")
 
 
+def publish_status(repo_id: str, status: str, message: str = ""):
+    """Publish status update to Redis for real-time UI updates."""
+    try:
+        redis_client = redis.from_url(settings.REDIS_URL)
+        redis_client.publish(
+            "events",
+            json.dumps(
+                {
+                    "type": "REPO_UPDATE",
+                    "payload": {
+                        "repo_id": repo_id,
+                        "status": status,
+                        "message": message,
+                    },
+                }
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Failed to publish status update: {e}")
+
+
+# Task 1: Orchestrator - starts ingestion then processing
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.model_processing.start_model_processing",
+    queue="processing",
+)
+def start_model_processing(
+    self: PipelineTask,
+    repo_config_id: str,
+    installation_id: str,
+    ci_provider: str,
+    max_builds: Optional[int] = None,
+    since_days: Optional[int] = None,
+    only_with_logs: bool = False,
+) -> Dict[str, Any]:
+    """
+    Orchestrator: Start ingestion for repo, then dispatch processing.
+
+    Flow: start_model_processing -> ingest_model_builds -> dispatch_build_processing
+    """
+    from celery import chain
+    from app.tasks.model_ingestion import ingest_model_builds
+    from app.repositories.model_repo_config import ModelRepoConfigRepository
+    from app.entities.enums import ModelImportStatus
+
+    model_repo_config_repo = ModelRepoConfigRepository(self.db)
+
+    # Validate repo exists
+    repo = model_repo_config_repo.find_by_id(repo_config_id)
+    if not repo:
+        logger.error(f"Repository {repo_config_id} not found")
+        return {"status": "error", "error": "Repository not found"}
+
+    # Mark as started
+    model_repo_config_repo.update_repository(
+        repo_config_id,
+        {"import_status": ModelImportStatus.IMPORTING.value},
+    )
+    publish_status(repo_config_id, "importing", "Starting import workflow...")
+
+    try:
+        ingest_model_builds.delay(
+            repo_config_id=repo_config_id,
+            installation_id=installation_id,
+            ci_provider=ci_provider,
+            max_builds=max_builds,
+            since_days=since_days,
+            only_with_logs=only_with_logs,
+        )
+
+        logger.info(f"Dispatched model processing workflow for {repo.full_name}")
+
+        return {
+            "status": "dispatched",
+            "repo_config_id": repo_config_id,
+            "full_name": repo.full_name,
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Model processing start failed: {error_msg}")
+        model_repo_config_repo.update_repository(
+            repo_config_id,
+            {
+                "import_status": ModelImportStatus.FAILED.value,
+                "last_sync_error": error_msg,
+            },
+        )
+        publish_status(repo_config_id, "failed", error_msg)
+        raise
+
+
+# Task 2: Dispatch processing for all pending builds
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.model_processing.dispatch_build_processing",
+    queue="processing",
+)
+def dispatch_build_processing(
+    self: PipelineTask,
+    repo_config_id: str,
+    raw_repo_id: str,
+    raw_build_run_ids: List[str],
+    batch_size: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Create ModelTrainingBuild docs and dispatch feature extraction tasks.
+
+    Called by finalize_ingestion with the list of raw_build_run IDs.
+
+    Flow:
+    1. Create ModelTrainingBuild for each raw_build_run (with PENDING status)
+    2. Dispatch process_workflow_run tasks in batches
+    """
+    import time
+    from celery import group
+    from app.repositories.model_training_build import ModelTrainingBuildRepository
+    from app.repositories.model_repo_config import ModelRepoConfigRepository
+    from app.repositories.raw_build_run import RawBuildRunRepository
+    from app.entities.model_training_build import ModelTrainingBuild
+    from app.entities.enums import ExtractionStatus, ModelImportStatus
+
+    if batch_size is None:
+        batch_size = settings.PROCESSING_BATCH_SIZE
+
+    model_build_repo = ModelTrainingBuildRepository(self.db)
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+    build_run_repo = RawBuildRunRepository(self.db)
+
+    if not raw_build_run_ids:
+        logger.info(f"No builds to process for repo config {repo_config_id}")
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"import_status": ModelImportStatus.IMPORTED.value},
+        )
+        publish_status(repo_config_id, "imported", "No new builds to process")
+        return {"repo_config_id": repo_config_id, "dispatched": 0}
+
+    # Step 1: Create ModelTrainingBuild for each raw_build_run
+    created_count = 0
+    model_build_ids = []
+
+    for run_id_str in raw_build_run_ids:
+        run_id = ObjectId(run_id_str)
+
+        # Get the build run details
+        build_run = build_run_repo.find_by_id(run_id)
+        if not build_run:
+            logger.warning(f"RawBuildRun {run_id_str} not found, skipping")
+            continue
+
+        # Check if ModelTrainingBuild already exists
+        existing = model_build_repo.find_by_workflow_run(ObjectId(raw_repo_id), run_id)
+        if existing:
+            logger.debug(f"ModelTrainingBuild already exists for {run_id_str}")
+            model_build_ids.append(existing.id)
+            continue
+
+        # Create new ModelTrainingBuild with PENDING status
+        model_build = ModelTrainingBuild(
+            raw_repo_id=ObjectId(raw_repo_id),
+            raw_build_run_id=run_id,
+            model_repo_config_id=ObjectId(repo_config_id),
+            head_sha=build_run.commit_sha,
+            build_number=build_run.build_number,
+            build_created_at=build_run.created_at,
+            extraction_status=ExtractionStatus.PENDING,
+        )
+        inserted = model_build_repo.insert_one(model_build)
+        model_build_ids.append(inserted.id)
+        created_count += 1
+
+    logger.info(
+        f"Created {created_count} ModelTrainingBuild documents for repo {repo_config_id}"
+    )
+
+    publish_status(
+        repo_config_id,
+        "importing",
+        f"Scheduling {len(model_build_ids)} builds for processing...",
+    )
+
+    # Step 2: Dispatch processing tasks in batches
+    dispatched = 0
+
+    for i in range(0, len(model_build_ids), batch_size):
+        batch = model_build_ids[i : i + batch_size]
+
+        # Create a group of tasks for this batch
+        tasks = group(
+            [
+                process_workflow_run.s(
+                    repo_config_id=repo_config_id,
+                    model_build_id=str(build_id),
+                )
+                for build_id in batch
+            ]
+        )
+        tasks.apply_async()
+
+        dispatched += len(batch)
+        logger.info(f"Dispatched batch {i // batch_size + 1}: {len(batch)} tasks")
+
+        # Delay between batches to prevent queue flooding
+        if i + batch_size < len(model_build_ids):
+            time.sleep(1.0)
+
+    # Mark import as complete
+    repo_config_repo.update_repository(
+        repo_config_id,
+        {
+            "import_status": ModelImportStatus.IMPORTED.value,
+            "last_sync_status": "success",
+        },
+    )
+
+    publish_status(
+        repo_config_id, "imported", f"Dispatched {dispatched} builds for processing"
+    )
+
+    return {
+        "repo_config_id": repo_config_id,
+        "created": created_count,
+        "dispatched": dispatched,
+        "status": "completed",
+    }
+
+
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -59,63 +293,60 @@ def publish_build_update(repo_id: str, build_id: str, status: str):
     queue="processing",
 )
 def process_workflow_run(
-    self: PipelineTask, repo_id: str, workflow_run_id: int
+    self: PipelineTask, repo_config_id: str, model_build_id: str
 ) -> Dict[str, Any]:
-    build_run_repo = RawBuildRunRepository(self.db)
-    model_build_repo = ModelTrainingBuildRepository(self.db)
-    model_repo_repo = ModelRepoConfigRepository(self.db)
+    """
+    Process a single build for feature extraction.
 
-    # Validate build run exists
-    build_run = build_run_repo.find_by_repo_and_build_id(repo_id, str(workflow_run_id))
+    Args:
+        repo_config_id: The model_repo_config_id
+        model_build_id: The ModelTrainingBuild ObjectId string (already created with PENDING status)
+    """
+    model_build_repo = ModelTrainingBuildRepository(self.db)
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+    build_run_repo = RawBuildRunRepository(self.db)
+
+    # Find the ModelTrainingBuild (already created with PENDING status)
+    model_build = model_build_repo.find_one(
+        {
+            "_id": ObjectId(model_build_id),
+            "extraction_status": ExtractionStatus.PENDING.value,
+        }
+    )
+    if not model_build:
+        logger.error(f"ModelTrainingBuild not found for id {model_build_id}")
+        return {"status": "error", "message": "ModelTrainingBuild not found"}
+
+    # Get the RawBuildRun
+    build_run = build_run_repo.find_by_id(model_build.raw_build_run_id)
     if not build_run:
-        logger.error(f"RawBuildRun not found for {repo_id} / {workflow_run_id}")
+        logger.error(f"RawBuildRun not found for id {model_build.raw_build_run_id}")
+        model_build_repo.update_one(
+            model_build_id,
+            {
+                "extraction_status": ExtractionStatus.FAILED,
+                "extraction_error": "RawBuildRun not found",
+            },
+        )
         return {"status": "error", "message": "RawBuildRun not found"}
 
     # Validate repository exists
-    repo = model_repo_repo.find_by_id(repo_id)
-    if not repo:
-        logger.error(f"Repository {repo_id} not found")
-        return {"status": "error", "message": "Repository not found"}
-
-    model_build = model_build_repo.find_by_repo_and_run_id(repo_id, workflow_run_id)
-    if not model_build:
-        logger.info(f"Creating ModelBuild during processing (not pre-created)")
-        conclusion = build_run.conclusion
-        status_map = {
-            "success": ModelBuildConclusion.SUCCESS,
-            "failure": ModelBuildConclusion.FAILURE,
-            "cancelled": ModelBuildConclusion.CANCELLED,
-            "skipped": ModelBuildConclusion.SKIPPED,
-            "timed_out": ModelBuildConclusion.TIMED_OUT,
-            "neutral": ModelBuildConclusion.NEUTRAL,
-        }
-        build_status = status_map.get(
-            str(conclusion.value) if conclusion else "", ModelBuildConclusion.UNKNOWN
-        )
-
-        model_build = ModelTrainingBuild(
-            raw_repo_id=ObjectId(repo_id),
-            raw_workflow_run_id=build_run.id,
-            model_repo_config_id=ObjectId(repo_id),
-            head_sha=build_run.commit_sha,
-            build_number=build_run.build_number,
-            build_created_at=build_run.created_at,
-            build_conclusion=build_status,
-            extraction_status=ExtractionStatus.PENDING,
-        )
-        model_build = model_build_repo.insert_one(model_build)
+    repo_config = repo_config_repo.find_by_id(repo_config_id)
+    if not repo_config:
+        logger.error(f"Repository Config {repo_config_id} not found")
+        return {"status": "error", "message": "Repository Config not found"}
 
     build_id = str(model_build.id)
 
     # Notify clients that processing started
-    publish_build_update(repo_id, build_id, "in_progress")
+    publish_build_update(repo_config_id, build_id, "in_progress")
 
     try:
         # Fetch RawRepository for RepoInput
         raw_repo_repo = RawRepositoryRepository(self.db)
-        raw_repo = raw_repo_repo.find_by_id(repo_id)
+        raw_repo = raw_repo_repo.find_by_id(repo_config.raw_repo_id)
         if not raw_repo:
-            logger.error(f"RawRepository {repo_id} not found")
+            logger.error(f"RawRepository {repo_config.raw_repo_id} not found")
             return {"status": "error", "message": "RawRepository not found"}
 
         # Get feature names from template
@@ -127,11 +358,9 @@ def process_workflow_run(
         result = extract_features_for_build(
             db=self.db,
             raw_repo=raw_repo,
-            repo_config=repo,
+            repo_config=repo_config,
             build_run=build_run,
             selected_features=feature_names,
-            pipeline_category=PipelineCategory.MODEL_TRAINING,
-            build_sample_id=build_id,
         )
 
         updates = {}
@@ -156,7 +385,7 @@ def process_workflow_run(
 
         model_build_repo.update_one(build_id, updates)
 
-        publish_build_update(repo_id, build_id, updates["extraction_status"])
+        publish_build_update(repo_config_id, build_id, updates["extraction_status"])
 
         logger.info(
             f"Pipeline completed for build {build_id}: "
@@ -183,7 +412,7 @@ def process_workflow_run(
             },
         )
 
-        publish_build_update(repo_id, build_id, "failed")
+        publish_build_update(repo_config_id, build_id, "failed")
 
         return {
             "status": "failed",
@@ -213,10 +442,17 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
         logger.error(f"ModelTrainingBuild {build_id} not found")
         return {"status": "error", "message": "ModelTrainingBuild not found"}
 
-    repo_id = str(model_build.repo_id)
-    workflow_run_id = model_build.workflow_run_id
+    # Reset to PENDING so process_workflow_run can pick it up
+    model_build_repo.update_one(
+        build_id,
+        {
+            "extraction_status": ExtractionStatus.PENDING.value,
+            "extraction_error": None,
+        },
+    )
 
-    process_workflow_run.delay(repo_id, workflow_run_id)
+    repo_config_id = str(model_build.model_repo_config_id)
+    process_workflow_run.delay(repo_config_id, build_id)
 
     return {
         "status": "queued",
@@ -231,7 +467,7 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     name="app.tasks.processing.reprocess_repo_builds",
     queue="processing",
 )
-def reprocess_repo_builds(self: PipelineTask, repo_id: str) -> Dict[str, Any]:
+def reprocess_repo_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, Any]:
     """
     Reprocess ALL builds for a repository to re-extract features.
 
@@ -244,35 +480,45 @@ def reprocess_repo_builds(self: PipelineTask, repo_id: str) -> Dict[str, Any]:
     this task only reprocesses existing builds in the database.
     """
     model_build_repo = ModelTrainingBuildRepository(self.db)
-    model_repo_repo = ModelRepoConfigRepository(self.db)
+    repo_config_repo = ModelRepoConfigRepository(self.db)
 
     # Validate repository exists
-    repo = model_repo_repo.find_by_id(repo_id)
-    if not repo:
-        logger.error(f"Repository {repo_id} not found")
-        return {"status": "error", "message": "Repository not found"}
+    repo_config = repo_config_repo.find_by_id(repo_config_id)
+    if not repo_config:
+        logger.error(f"Repository Config {repo_config_id} not found")
+        return {"status": "error", "message": "Repository Config not found"}
 
     # Find all builds for this repository
-    builds, _ = model_build_repo.list_by_repo(repo_id, limit=0)  # limit=0 means all
+    builds, _ = model_build_repo.list_by_repo(
+        repo_config_id, limit=0
+    )  # limit=0 means all
     if not builds:
-        logger.info(f"No builds found for repository {repo_id}")
+        logger.info(f"No builds found for repository {repo_config_id}")
         return {
             "status": "completed",
             "builds_queued": 0,
             "message": "No builds to reprocess",
         }
 
-    # Queue each build for reprocessing
+    # Reset all builds to PENDING and queue for reprocessing
     queued_count = 0
     for build in builds:
         try:
-            process_workflow_run.delay(repo_id, build.workflow_run_id)
+            # Reset to PENDING so process_workflow_run can pick it up
+            model_build_repo.update_one(
+                str(build.id),
+                {
+                    "extraction_status": ExtractionStatus.PENDING.value,
+                    "extraction_error": None,
+                },
+            )
+            process_workflow_run.delay(repo_config_id, str(build.id))
             queued_count += 1
         except Exception as e:
             logger.warning(f"Failed to queue build {build.id} for reprocessing: {e}")
 
     logger.info(
-        f"Queued {queued_count} builds for reprocessing in repository {repo_id}"
+        f"Queued {queued_count} builds for reprocessing in repository {repo_config_id}"
     )
 
     return {

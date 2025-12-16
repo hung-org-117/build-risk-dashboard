@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import httpx
 
+from app.config import settings
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -78,84 +79,81 @@ class TravisCIProvider(CIProviderInterface):
         repo_name: str,
         since: Optional[datetime] = None,
         limit: Optional[int] = None,
+        page: int = 1,
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
     ) -> List[BuildData]:
-        """Fetch builds from Travis CI."""
+        """Fetch builds from Travis CI (single page)."""
         base_url = self._get_base_url()
         repo_slug = self._encode_repo_slug(repo_name)
         url = f"{base_url}/repo/{repo_slug}/builds"
 
-        per_page = 100 if limit is None else min(limit, 100)
+        per_page = min(limit or 100, 100)
+        # Calculate offset from page number (1-indexed)
+        offset = (page - 1) * per_page
+
         params = {
             "limit": per_page,
+            "offset": offset,
             "sort_by": "started_at:desc",
         }
         if branch:
             params["branch.name"] = branch
-        # Only fetch finished builds
         if only_completed:
             params["state"] = "passed,failed,errored,canceled"
 
         builds = []
-        stop_fetching = False
+        consecutive_unavailable = 0
         async with httpx.AsyncClient() as client:
-            offset = 0
-            while not stop_fetching:
-                params["offset"] = offset
-                response = await client.get(
-                    url,
-                    headers=self._get_headers(),
-                    params=params,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
-                data = response.json()
+            response = await client.get(
+                url,
+                headers=self._get_headers(),
+                params=params,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            data = response.json()
 
-                build_list = data.get("builds", [])
-                if not build_list:
-                    break
+            build_list = data.get("builds", [])
 
-                for build in build_list:
-                    build_data = self._parse_build(build, repo_name)
+            for build in build_list:
+                build_data = self._parse_build(build, repo_name)
 
-                    is_bot = _is_bot_author(build_data.commit_author)
-                    build_data.is_bot_commit = is_bot
+                is_bot = _is_bot_author(build_data.commit_author)
+                build_data.is_bot_commit = is_bot
 
-                    if exclude_bots and is_bot:
-                        continue
+                if exclude_bots and is_bot:
+                    continue
 
-                    # Filter by since date
-                    if (
-                        since
-                        and build_data.created_at
-                        and build_data.created_at < since
-                    ):
-                        continue
+                if since and build_data.created_at and build_data.created_at < since:
+                    continue
 
-                    if only_with_logs:
-                        logs_available = await self._check_logs_available(
-                            client, build["id"]
-                        )
-                        build_data.logs_available = logs_available
-                        if not logs_available:
-                            logger.info(
-                                f"Build {build['id']} has no logs available, stopping fetch"
+                if only_with_logs:
+                    logs_available = await self._check_logs_available(
+                        client, build["id"]
+                    )
+                    build_data.logs_available = logs_available
+                    if not logs_available:
+                        consecutive_unavailable += 1
+                        if (
+                            consecutive_unavailable
+                            >= settings.LOG_UNAVAILABLE_THRESHOLD
+                        ):
+                            logger.warning(
+                                f"Reached {consecutive_unavailable} consecutive unavailable logs "
+                                f"for {repo_name} - may be permission issue, stopping fetch"
                             )
-                            stop_fetching = True
                             break
+                        continue
+                    else:
+                        consecutive_unavailable = 0
 
-                    builds.append(build_data)
+                builds.append(build_data)
 
                 if limit is not None and len(builds) >= limit:
                     break
-
-                if len(build_list) < per_page:
-                    break
-
-                offset += per_page
 
         return builds[:limit] if limit else builds
 

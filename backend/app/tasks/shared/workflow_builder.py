@@ -7,9 +7,10 @@ based on task levels from resource_dag.
 
 from app.ci_providers.models import CIProvider
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
-from celery import chain, group, Signature
+from celery import chain, group
+from celery.canvas import Signature
 
 from app.tasks.shared import clone_repo, create_worktrees, download_build_logs
 
@@ -26,7 +27,7 @@ def build_ingestion_workflow(
     installation_id: Optional[str] = None,
     final_task: Optional[Signature] = None,
     custom_tasks: Optional[Dict[str, Signature]] = None,
-) -> Optional[Union[chain, group, Signature]]:
+) -> Optional[Signature]:
     """
     Build a Celery workflow from task levels.
 

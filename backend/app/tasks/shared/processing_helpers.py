@@ -5,6 +5,7 @@ These helpers are used by both model_processing.py and enrichment_processing.py
 to extract features using the Hamilton pipeline.
 """
 
+from app.entities.repo_config_base import RepoConfigBase
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,10 +31,8 @@ logger = logging.getLogger(__name__)
 def extract_features_for_build(
     db,
     raw_repo: RawRepository,
-    repo_config,  # Can be ModelRepoConfig or DatasetRepoConfig
+    repo_config: RepoConfigBase,  # Can be ModelRepoConfig or DatasetRepoConfig
     build_run: RawBuildRun,
-    pipeline_category: PipelineCategory,
-    build_sample_id: str,
     selected_features: Optional[List[str]] = None,
     github_client=None,
 ) -> Dict[str, Any]:
@@ -55,7 +54,6 @@ def extract_features_for_build(
         build_run: RawBuildRun entity
         selected_features: Optional list of features to extract
         github_client: Optional GitHub client for API calls
-        pipeline_category: Category (model_training or dataset_enrichment)
 
     Returns:
         Dictionary with status, features, errors, warnings, etc.

@@ -95,6 +95,33 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         items = [RawBuildRun(**doc) for doc in cursor]
         return items, total
 
+    def find_ids_by_build_ids(
+        self,
+        raw_repo_id: ObjectId,
+        build_ids: List[str],
+        provider: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Batch query using $in to find multiple builds efficiently.
+        Returns list of dicts with _id, commit_sha, effective_sha for each found build.
+        """
+        if not build_ids:
+            return []
+
+        cursor = self.collection.find(
+            {
+                "raw_repo_id": raw_repo_id,
+                "build_id": {"$in": build_ids},
+                "provider": provider,
+            },
+            {
+                "_id": 1,
+                "commit_sha": 1,
+                "effective_sha": 1,
+            },  # Projection - only needed fields
+        )
+        return list(cursor)
+
     def upsert_by_business_key(
         self,
         raw_repo_id: ObjectId,

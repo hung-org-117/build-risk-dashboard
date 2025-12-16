@@ -1,79 +1,46 @@
 """
-Model Ingestion Tasks - Chain-based workflow for importing repositories.
+Model Ingestion Tasks - Resource preparation for model training builds.
 
-This module implements a clean, chain-based Celery workflow:
-1. import_repo - Orchestrator that starts the chain
-2. clone_repo (from shared) - Clone/update the git repository
-3. fetch_and_save_builds - Fetch builds from CI provider and save to DB
-4. download_build_logs (from shared) - Download build logs
-5. create_worktrees (from shared) - Create git worktrees
-6. dispatch_processing - Schedule feature extraction in batches
+This module uses chain-based task pattern for fetching builds:
+1. ingest_model_builds - Orchestrator: Dispatches first batch
+2. fetch_builds_batch - Fetches one page, saves to DB, chains to next page
+3. finalize_ingestion - Builds and runs ingestion workflow after all pages fetched
+
+Flow:
+  ingest_model_builds → fetch_builds_batch(page=1) → fetch_builds_batch(page=2) → ... → finalize_ingestion
 """
 
-from app.repositories.raw_repository import RawRepositoryRepository
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
-from celery import chain, group
-import redis
-import json
 
 from app.celery_app import celery_app
-from app.config import settings
 from app.tasks.base import PipelineTask
-from app.entities.enums import ExtractionStatus, ModelImportStatus
-from app.entities.model_training_build import ModelTrainingBuild
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
-from app.repositories.model_training_build import ModelTrainingBuildRepository
+from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.ci_providers import CIProvider, get_provider_config, get_ci_provider
-from app.ci_providers.models import BuildStatus, BuildConclusion
 from app.services.github.exceptions import GithubRateLimitError
-from app.paths import REPOS_DIR
 from app.tasks.pipeline.feature_dag._metadata import (
     get_required_resources_for_features,
     FeatureResource,
 )
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
-from app.repositories.dataset_template_repository import DatasetTemplateRepository
-
-# Import shared ingestion tasks and helpers
 from app.tasks.shared import build_ingestion_workflow
+from backend.app.ci_providers.models import BuildStatus
 
 logger = logging.getLogger(__name__)
 
-
-def get_redis_client():
-    """Get Redis client for publishing events."""
-    return redis.from_url(settings.REDIS_URL)
-
-
-def publish_status(repo_id: str, status: str, message: str = ""):
-    """Publish status update to Redis for real-time UI updates."""
-    try:
-        redis_client = get_redis_client()
-        redis_client.publish(
-            "events",
-            json.dumps(
-                {
-                    "type": "REPO_UPDATE",
-                    "payload": {
-                        "repo_id": repo_id,
-                        "status": status,
-                        "message": message,
-                    },
-                }
-            ),
-        )
-    except Exception as e:
-        logger.error(f"Failed to publish status update: {e}")
+# Default batch size for fetching builds
+DEFAULT_BATCH_SIZE = 50
 
 
 def get_required_resources_for_template(
     db, template_name: str = "TravisTorrent Full"
 ) -> set:
+    """Get required resources based on dataset template."""
     template_repo = DatasetTemplateRepository(db)
     template = template_repo.find_by_name(template_name)
     if template and template.feature_names:
@@ -82,175 +49,100 @@ def get_required_resources_for_template(
     return {r.value for r in FeatureResource}
 
 
-# Task 1: import_repo - Orchestrator
 @celery_app.task(
     bind=True,
     base=PipelineTask,
-    name="app.tasks.model_ingestion.import_repo",
+    name="app.tasks.model_ingestion.ingest_model_builds",
     queue="ingestion",
+    soft_time_limit=60,
+    time_limit=120,
 )
-def import_repo(
+def ingest_model_builds(
     self: PipelineTask,
-    user_id: str,
-    full_name: str,
-    installation_id: str,
-    ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
-    max_builds: Optional[int] = None,
-    since_days: Optional[int] = None,
-    only_with_logs: bool = False,
-) -> Dict[str, Any]:
-    """
-    Orchestrator task - kicks off the import chain.
-
-    Chain: clone_repo -> fetch_and_save_builds -> dispatch_processing
-
-    Uses RedisLock to prevent concurrent imports of the same repo.
-    """
-    from app.core.redis import RedisLock
-
-    model_repo_repo = ModelRepoConfigRepository(self.db)
-
-    # Use lock to prevent concurrent imports of the same repo
-    lock_key = f"import:{full_name}"
-    try:
-        with RedisLock(lock_key, timeout=1800, blocking_timeout=5):
-            # Find existing repo config
-            repo = model_repo_repo.find_one(
-                {
-                    "user_id": ObjectId(user_id),
-                    "provider": "github",
-                    "full_name": full_name,
-                }
-            )
-
-            if not repo:
-                raise ValueError(
-                    "ModelRepoConfig not found. Create it via RepositoryService first."
-                )
-
-            repo_id = str(repo.id)
-            model_repo_repo.update_repository(
-                repo_id,
-                {
-                    "import_status": ModelImportStatus.IMPORTING.value,
-                    "installation_id": installation_id,
-                    "ci_provider": ci_provider,
-                },
-            )
-
-            publish_status(repo_id, "importing", "Starting import workflow...")
-
-            # Determine required resources based on template
-            required_resources = get_required_resources_for_template(self.db)
-
-            # Get tasks grouped by level from resource_dag
-            tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
-
-            logger.info(
-                f"Required resources for {full_name}: {required_resources}. "
-                f"Tasks by level: {tasks_by_level}"
-            )
-
-            # Add fetch_and_save_builds to level 0 (always needed for model pipeline)
-            if 0 not in tasks_by_level:
-                tasks_by_level[0] = []
-            if "fetch_and_save_builds" not in tasks_by_level.get(0, []):
-                tasks_by_level[0].append("fetch_and_save_builds")
-
-            # Build workflow
-            workflow = build_ingestion_workflow(
-                tasks_by_level=tasks_by_level,
-                repo_id=repo_id,
-                full_name=full_name,
-                ci_provider=ci_provider,
-                installation_id=installation_id,
-                publish_status=True,
-                enable_fork_replay=True,
-                final_task=dispatch_processing.s(repo_id=repo_id),
-                custom_tasks={
-                    "fetch_and_save_builds": fetch_and_save_builds.s(
-                        repo_id=repo_id,
-                        full_name=full_name,
-                        installation_id=installation_id,
-                        ci_provider=ci_provider,
-                        max_builds=max_builds,
-                        since_days=since_days,
-                        only_with_logs=only_with_logs,
-                    ),
-                },
-            )
-
-            if workflow:
-                workflow.apply_async()
-
-            return {
-                "status": "queued",
-                "repo_id": repo_id,
-                "message": "Import workflow started",
-            }
-
-    except TimeoutError:
-        logger.warning(
-            f"Could not acquire lock for {full_name}, import already in progress"
-        )
-        return {
-            "status": "skipped",
-            "message": f"Import for {full_name} is already in progress",
-        }
-    except Exception as e:
-        logger.error(f"Failed to start import for {full_name}: {e}")
-        # Try to update status if we have repo_id
-        try:
-            repo = model_repo_repo.find_one({"full_name": full_name})
-            if repo:
-                repo_id = str(repo.id)
-                model_repo_repo.update_repository(
-                    repo_id,
-                    {
-                        "import_status": ModelImportStatus.FAILED.value,
-                        "last_sync_error": str(e),
-                    },
-                )
-                publish_status(repo_id, "failed", str(e))
-        except Exception:
-            pass
-        raise
-
-
-# Task 2: fetch_and_save_builds - Fetch from CI and save to DB
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.model_ingestion.fetch_and_save_builds",
-    queue="ingestion",
-    autoretry_for=(GithubRateLimitError,),
-    retry_kwargs={"max_retries": 5},
-)
-def fetch_and_save_builds(
-    self: PipelineTask,
-    clone_result: Dict[str, Any],  # Result from clone_repo
-    repo_id: str,
-    full_name: str,
+    repo_config_id: str,
     installation_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
     only_with_logs: bool = False,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Dict[str, Any]:
     """
-    Fetch builds from CI provider and save to database in batches.
-    """
-    publish_status(repo_id, "importing", "Fetching builds from CI provider...")
+    Orchestrator: Dispatch first batch fetch task.
 
-    model_repo_repo = ModelRepoConfigRepository(self.db)
+    This task validates the repo config and dispatches the first page fetch.
+    Subsequent pages are fetched via chained tasks.
+    """
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+    repo_config = repo_config_repo.find_by_id(repo_config_id)
+
+    if not repo_config:
+        raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
+
+    # Dispatch first batch (page 1)
+    fetch_builds_batch.delay(
+        repo_config_id=repo_config_id,
+        raw_repo_id=str(repo_config.raw_repo_id),
+        full_name=repo_config.full_name,
+        installation_id=installation_id,
+        ci_provider=ci_provider,
+        max_builds=max_builds,
+        since_days=since_days,
+        only_with_logs=only_with_logs,
+        batch_size=batch_size,
+        page=1,
+        total_fetched=0,
+        all_build_ids=[],
+    )
+
+    return {
+        "status": "dispatched",
+        "repo_config_id": repo_config_id,
+        "message": "First batch fetch dispatched",
+    }
+
+
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.model_ingestion.fetch_builds_batch",
+    queue="ingestion",
+    soft_time_limit=300,
+    time_limit=360,
+    autoretry_for=(GithubRateLimitError,),
+    retry_backoff=60,
+    max_retries=5,
+)
+def fetch_builds_batch(
+    self: PipelineTask,
+    repo_config_id: str,
+    raw_repo_id: str,
+    full_name: str,
+    installation_id: str,
+    ci_provider: str,
+    page: int,
+    total_fetched: int,
+    all_build_ids: List[str],
+    max_builds: Optional[int] = None,
+    since_days: Optional[int] = None,
+    only_with_logs: bool = False,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> Dict[str, Any]:
+    """
+    Fetch a single page of builds, save to DB, and chain to next page or finalize.
+
+    This task:
+    1. Fetches one page from CI provider
+    2. Saves builds to RawBuildRun collection
+    3. Chains to next page OR finalize_ingestion
+    """
+    import asyncio
+
     build_run_repo = RawBuildRunRepository(self.db)
-    model_build_repo = ModelTrainingBuildRepository(self.db)
 
     since_dt = None
     if since_days:
         since_dt = datetime.now(timezone.utc) - timedelta(days=since_days)
-
-    batch_size = settings.PROCESSING_BATCH_SIZE
 
     try:
         # Get CI provider instance
@@ -258,18 +150,18 @@ def fetch_and_save_builds(
         provider_config = get_provider_config(ci_provider_enum)
         ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=self.db)
 
-        # Fetch builds with internal pagination (CI provider handles per_page)
         fetch_kwargs = {
             "since": since_dt,
-            "limit": max_builds,
+            "limit": batch_size,
+            "page": page,
             "exclude_bots": True,
             "only_with_logs": only_with_logs,
+            "only_completed": True,
         }
         if ci_provider_enum == CIProvider.GITHUB_ACTIONS and installation_id:
             fetch_kwargs["installation_id"] = installation_id
 
-        import asyncio
-
+        # Fetch single page
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -279,195 +171,182 @@ def fetch_and_save_builds(
         finally:
             loop.close()
 
-        total_fetched = len(builds)
-        logger.info(
-            f"Fetched {total_fetched} builds from {ci_provider} for {full_name}"
-        )
-        publish_status(
-            repo_id, "importing", f"Found {total_fetched} builds, saving in batches..."
-        )
+        # Process and save builds
+        batch_build_ids = []
+        for build in builds:
+            if build.status != BuildStatus.COMPLETED:
+                continue
 
-        # Process and save builds in batches
-        saved_count = 0
-        build_ids = []
-
-        for batch_start in range(0, len(builds), batch_size):
-            batch_end = min(batch_start + batch_size, len(builds))
-            batch = builds[batch_start:batch_end]
-            batch_saved = 0
-
-            for build in batch:
-                if build.status != BuildStatus.COMPLETED:
-                    continue
-
-                run_id = build.build_id
-
-                # Atomic upsert to prevent duplicates in race conditions
-                build_run = build_run_repo.upsert_by_business_key(
-                    raw_repo_id=ObjectId(repo_id),
-                    build_id=run_id,
-                    provider=ci_provider_enum.value,
-                    build_number=build.build_number,
-                    repo_name=full_name,
-                    branch=build.branch or "",
-                    commit_sha=build.commit_sha,
-                    commit_message=None,
-                    commit_author=None,
-                    status=build.status,
-                    conclusion=build.conclusion,
-                    created_at=build.created_at or datetime.now(timezone.utc),
-                    started_at=None,
-                    completed_at=build.created_at or datetime.now(timezone.utc),
-                    duration_seconds=build.duration_seconds,
-                    web_url=build.web_url,
-                    logs_url=None,
-                    logs_available=False,
-                    logs_path=None,
-                    raw_data=build.raw_data or {},
-                    is_bot_commit=False,
-                )
-
-                # Check if ModelTrainingBuild already exists
-                existing_model_build = model_build_repo.find_by_workflow_run(
-                    ObjectId(repo_id), build_run.id
-                )
-
-                if not existing_model_build:
-                    model_build = ModelTrainingBuild(
-                        _id=None,
-                        raw_repo_id=ObjectId(repo_id),
-                        raw_workflow_run_id=build_run.id,
-                        model_repo_config_id=ObjectId(repo_id),
-                        head_sha=build.commit_sha,
-                        build_number=build.build_number,
-                        build_created_at=build.created_at,
-                        build_conclusion=build.conclusion or BuildConclusion.UNKNOWN,
-                        extraction_status=ExtractionStatus.PENDING,
-                    )
-                    model_build_repo.insert_one(model_build)
-
-                build_ids.append(build_run.build_id)
-
-            saved_count += batch_saved
-
-            # Progress update after each batch
-            publish_status(
-                repo_id,
-                "importing",
-                f"Saved builds: {batch_end}/{total_fetched} ({saved_count} new)",
+            build_run = build_run_repo.upsert_by_business_key(
+                raw_repo_id=ObjectId(raw_repo_id),
+                build_id=build.build_id,
+                provider=ci_provider_enum.value,
+                build_number=build.build_number,
+                repo_name=full_name,
+                branch=build.branch or "",
+                commit_sha=build.commit_sha,
+                commit_message=None,
+                commit_author=None,
+                status=build.status,
+                conclusion=build.conclusion,
+                created_at=build.created_at or datetime.now(timezone.utc),
+                started_at=None,
+                completed_at=build.created_at or datetime.now(timezone.utc),
+                duration_seconds=build.duration_seconds,
+                web_url=build.web_url,
+                logs_url=None,
+                logs_available=build.logs_available or False,
+                logs_path=None,
+                raw_data=build.raw_data or {},
+                is_bot_commit=build.is_bot_commit or False,
             )
+            batch_build_ids.append(build_run.build_id)
 
-        # Update repo with build count
-        model_repo_repo.update_repository(
-            repo_id,
-            {
-                "total_builds_imported": model_build_repo.count_by_repo_id(repo_id),
-                "last_synced_at": datetime.now(timezone.utc),
-            },
+            # Check max builds limit
+            if max_builds and (total_fetched + len(batch_build_ids)) >= max_builds:
+                break
+
+        # Accumulate build IDs
+        new_total = total_fetched + len(batch_build_ids)
+        new_all_build_ids = all_build_ids + batch_build_ids
+
+        logger.info(
+            f"Page {page}: saved {len(batch_build_ids)} builds for {full_name} "
+            f"(total: {new_total})"
         )
 
-        publish_status(repo_id, "importing", f"Saved {saved_count} new builds")
+        # Determine next action
+        has_more = len(builds) >= batch_size
+        reached_limit = max_builds and new_total >= max_builds
 
-        return {
-            "repo_id": repo_id,
-            "builds_saved": saved_count,
-            "total_builds": len(build_ids),
-            "build_ids": build_ids,
-        }
+        if has_more and not reached_limit:
+            # Chain to next page
+            fetch_builds_batch.delay(
+                repo_config_id=repo_config_id,
+                raw_repo_id=raw_repo_id,
+                full_name=full_name,
+                installation_id=installation_id,
+                ci_provider=ci_provider,
+                page=page + 1,
+                total_fetched=new_total,
+                all_build_ids=new_all_build_ids,
+                max_builds=max_builds,
+                since_days=since_days,
+                only_with_logs=only_with_logs,
+                batch_size=batch_size,
+            )
+            return {
+                "status": "chained",
+                "page": page,
+                "builds_this_page": len(batch_build_ids),
+                "total_so_far": new_total,
+                "next_page": page + 1,
+            }
+        else:
+            # No more pages - finalize ingestion
+            finalize_ingestion.delay(
+                repo_config_id=repo_config_id,
+                raw_repo_id=raw_repo_id,
+                full_name=full_name,
+                installation_id=installation_id,
+                ci_provider=ci_provider,
+                all_build_ids=new_all_build_ids,
+            )
+            return {
+                "status": "completed",
+                "page": page,
+                "builds_this_page": len(batch_build_ids),
+                "total_builds": new_total,
+            }
 
-    except GithubRateLimitError as e:
-        wait = e.retry_after if e.retry_after else 60
-        logger.warning(f"Rate limit hit. Retrying in {wait}s")
-        raise self.retry(countdown=wait)
+    except GithubRateLimitError:
+        logger.warning(f"Rate limit hit on page {page} for {full_name}, retrying...")
+        raise
     except Exception as e:
-        logger.error(f"Failed to fetch builds for {full_name}: {e}")
+        logger.error(f"Failed to fetch page {page} for {full_name}: {e}")
         raise
 
 
-# Task 3: dispatch_processing - Schedule feature extraction in batches
 @celery_app.task(
     bind=True,
     base=PipelineTask,
-    name="app.tasks.model_ingestion.dispatch_processing",
+    name="app.tasks.model_ingestion.finalize_ingestion",
     queue="ingestion",
+    soft_time_limit=300,
+    time_limit=360,
 )
-def dispatch_processing(
+def finalize_ingestion(
     self: PipelineTask,
-    fetch_result: Dict[str, Any],  # Result from previous task
-    repo_id: str,
-    batch_size: Optional[int] = None,
+    repo_config_id: str,
+    raw_repo_id: str,
+    full_name: str,
+    installation_id: str,
+    ci_provider: str,
+    all_build_ids: List[str],
 ) -> Dict[str, Any]:
     """
-    Dispatch feature extraction tasks in batches.
+    Final step: Build ingestion workflow and dispatch processing.
+
+    This task:
+    1. Collects raw_build_run ObjectIds
+    2. Gets commit SHAs for worktree creation
+    3. Builds and applies ingestion workflow (clone, logs, worktrees)
+    4. Dispatches dispatch_build_processing for feature extraction
     """
-    import time
+    from app.tasks.model_processing import dispatch_build_processing
 
-    # Use config default if not specified
-    if batch_size is None:
-        batch_size = settings.PROCESSING_BATCH_SIZE
+    if not all_build_ids:
+        logger.info(f"No builds to process for {full_name}")
+        return {"status": "completed", "builds": 0}
 
-    build_ids = fetch_result.get("build_ids", [])
+    build_run_repo = RawBuildRunRepository(self.db)
+    ci_provider_enum = CIProvider(ci_provider)
 
-    if not build_ids:
-        logger.info(f"No builds to process for repo {repo_id}")
-
-        model_repo_repo = ModelRepoConfigRepository(self.db)
-        model_repo_repo.update_repository(
-            repo_id,
-            {
-                "import_status": ModelImportStatus.IMPORTED.value,
-            },
-        )
-        publish_status(repo_id, "imported", "No new builds to process")
-
-        return {"repo_id": repo_id, "dispatched": 0}
-
-    publish_status(
-        repo_id, "importing", f"Scheduling {len(build_ids)} builds for processing..."
+    build_docs = build_run_repo.find_ids_by_build_ids(
+        ObjectId(raw_repo_id), all_build_ids, ci_provider_enum.value
     )
 
-    dispatched = 0
-
-    # Process in batches
-    for i in range(0, len(build_ids), batch_size):
-        batch = build_ids[i : i + batch_size]
-
-        # Create a group of tasks for this batch
-        tasks = group(
-            [
-                celery_app.signature(
-                    "app.tasks.processing.process_workflow_run",
-                    args=[repo_id, build_id],
-                )
-                for build_id in batch
-            ]
+    raw_build_run_ids = [str(doc["_id"]) for doc in build_docs]
+    commit_shas = list(
+        set(
+            doc.get("effective_sha") or doc.get("commit_sha")
+            for doc in build_docs
+            if doc.get("commit_sha")
         )
-        tasks.apply_async()
-
-        dispatched += len(batch)
-        logger.info(f"Dispatched batch {i // batch_size + 1}: {len(batch)} tasks")
-
-        # Delay between batches to prevent queue flooding
-        # This gives workers time to pick up tasks before more are added
-        if i + batch_size < len(build_ids):
-            time.sleep(1.0)
-
-    # Mark import as complete
-    model_repo_repo = ModelRepoConfigRepository(self.db)
-    model_repo_repo.update_repository(
-        repo_id,
-        {
-            "import_status": ModelImportStatus.IMPORTED.value,
-            "last_sync_status": "success",
-        },
     )
 
-    publish_status(
-        repo_id, "imported", f"Dispatched {dispatched} builds for processing"
+    logger.info(
+        f"Finalizing ingestion for {full_name}: {len(raw_build_run_ids)} builds"
+    )
+
+    # Step 2: Determine required resources based on template
+    required_resources = get_required_resources_for_template(self.db)
+    tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
+
+    # Step 3: Build ingestion workflow if resources needed
+    if tasks_by_level:
+        workflow = build_ingestion_workflow(
+            tasks_by_level=tasks_by_level,
+            raw_repo_id=raw_repo_id,
+            full_name=full_name,
+            build_ids=all_build_ids,
+            commit_shas=commit_shas,
+            ci_provider=ci_provider_enum,
+            installation_id=installation_id,
+        )
+        if workflow:
+            workflow.apply_async()
+
+    dispatch_build_processing.delay(
+        repo_config_id=repo_config_id,
+        raw_repo_id=raw_repo_id,
+        raw_build_run_ids=raw_build_run_ids,
     )
 
     return {
-        "repo_id": repo_id,
-        "dispatched": dispatched,
-        "status": "completed",
+        "status": "dispatched",
+        "raw_repo_id": raw_repo_id,
+        "builds": len(all_build_ids),
+        "raw_build_run_ids": len(raw_build_run_ids),
+        "resources": list(required_resources) if tasks_by_level else [],
     }

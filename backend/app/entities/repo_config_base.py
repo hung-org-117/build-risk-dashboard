@@ -27,6 +27,12 @@ class RepoConfigBase(BaseEntity):
     test frameworks, and CI provider.
     """
 
+    # Repository identification
+    full_name: str = Field(
+        ...,
+        description="Full repository name (e.g., 'owner/repo')",
+    )
+
     # User-configurable settings
     source_languages: List[str] = Field(
         default_factory=list,

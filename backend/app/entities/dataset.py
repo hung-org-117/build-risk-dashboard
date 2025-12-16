@@ -59,8 +59,6 @@ class DatasetProject(BaseEntity):
     columns: List[str] = Field(default_factory=list)
     mapped_fields: DatasetMapping = Field(default_factory=DatasetMapping)
     stats: DatasetStats = Field(default_factory=DatasetStats)
-    source_languages: List[str] = Field(default_factory=list)
-    test_frameworks: List[str] = Field(default_factory=list)
     preview: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Validation status

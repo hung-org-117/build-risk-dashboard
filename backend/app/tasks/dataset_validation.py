@@ -283,7 +283,7 @@ def validate_repo_builds(
 
     return {
         "repo_name": repo_name,
-        "repo_id": repo_id,
+        "repo_config_id": repo_config_id,
         "status": "dispatched",
         "chunks_dispatched": chunks_dispatched,
         "builds_total": len(build_ids),

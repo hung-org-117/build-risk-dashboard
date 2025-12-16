@@ -13,6 +13,7 @@ from typing import List, Optional
 
 import httpx
 
+from app.config import settings
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -75,24 +76,32 @@ class CircleCIProvider(CIProviderInterface):
         repo_name: str,
         since: Optional[datetime] = None,
         limit: Optional[int] = None,
+        page: int = 1,
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
     ) -> List[BuildData]:
+        """Fetch builds from CircleCI (single page)."""
         base_url = self._get_base_url()
         project_slug = self._get_project_slug(repo_name)
         url = f"{base_url}/project/{project_slug}/pipeline"
 
+        # CircleCI doesn't support page number, but we can skip to page N
+        # by making N-1 requests first (not ideal but works)
+        # For simplicity, we'll just fetch one page at a time
         params = {}
         if branch:
             params["branch"] = branch
 
         builds = []
-        stop_fetching = False
+        consecutive_unavailable = 0
         async with httpx.AsyncClient() as client:
+            # Skip to the desired page by following page tokens
+            current_page = 1
             next_page_token = None
-            while not stop_fetching:
+
+            while current_page <= page:
                 if next_page_token:
                     params["page-token"] = next_page_token
 
@@ -106,58 +115,69 @@ class CircleCIProvider(CIProviderInterface):
                 data = response.json()
 
                 items = data.get("items", [])
-                if not items:
-                    break
+                next_page_token = data.get("next_page_token")
 
-                for pipeline in items:
-                    build_data = await self._parse_pipeline(client, pipeline, repo_name)
-
-                    if only_completed and build_data.status in [
-                        BuildStatus.PENDING.value,
-                        BuildStatus.RUNNING.value,
-                        "pending",
-                        "running",
-                    ]:
-                        continue
-
-                    is_bot = _is_bot_author(build_data.commit_author)
-                    build_data.is_bot_commit = is_bot
-
-                    if exclude_bots and is_bot:
-                        continue
-
-                    if (
-                        since
-                        and build_data.created_at
-                        and build_data.created_at < since
-                    ):
-                        continue
-
-                    if only_with_logs:
-                        logs_available = await self._check_logs_available(
-                            client, pipeline["id"]
-                        )
-                        build_data.logs_available = logs_available
-                        if not logs_available:
-                            logger.info(
-                                f"Pipeline {pipeline['id']} has no logs available, stopping fetch"
-                            )
-                            stop_fetching = True
-                            break
-
-                    builds.append(build_data)
-
-                    # If we have a limit and reached it, stop
-                    if limit is not None and len(builds) >= limit:
+                # If we're at the target page, process items
+                if current_page == page:
+                    if not items:
                         break
 
-                # Check if we've reached limit or no more pages
-                if limit is not None and len(builds) >= limit:
-                    break
+                    for pipeline in items:
+                        build_data = await self._parse_pipeline(
+                            client, pipeline, repo_name
+                        )
 
-                next_page_token = data.get("next_page_token")
+                        if only_completed and build_data.status in [
+                            BuildStatus.PENDING.value,
+                            BuildStatus.RUNNING.value,
+                            "pending",
+                            "running",
+                        ]:
+                            continue
+
+                        is_bot = _is_bot_author(build_data.commit_author)
+                        build_data.is_bot_commit = is_bot
+
+                        if exclude_bots and is_bot:
+                            continue
+
+                        if (
+                            since
+                            and build_data.created_at
+                            and build_data.created_at < since
+                        ):
+                            continue
+
+                        if only_with_logs:
+                            logs_available = await self._check_logs_available(
+                                client, pipeline["id"]
+                            )
+                            build_data.logs_available = logs_available
+                            if not logs_available:
+                                consecutive_unavailable += 1
+                                if (
+                                    consecutive_unavailable
+                                    >= settings.LOG_UNAVAILABLE_THRESHOLD
+                                ):
+                                    logger.warning(
+                                        f"Reached {consecutive_unavailable} consecutive unavailable logs "
+                                        f"for {repo_name} - may be permission issue, stopping fetch"
+                                    )
+                                    break
+                                continue
+                            else:
+                                consecutive_unavailable = 0
+
+                        builds.append(build_data)
+
+                        if limit is not None and len(builds) >= limit:
+                            break
+
+                    break  # Exit after processing target page
+
+                current_page += 1
                 if not next_page_token:
-                    break
+                    break  # No more pages
 
         return builds[:limit] if limit else builds
 

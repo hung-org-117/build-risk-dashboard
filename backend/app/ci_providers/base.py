@@ -29,6 +29,7 @@ class CIProviderInterface(ABC):
         repo_name: str,
         since: Optional[datetime] = None,
         limit: Optional[int] = None,
+        page: int = 1,
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
@@ -40,14 +41,15 @@ class CIProviderInterface(ABC):
         Args:
             repo_name: Repository name
             since: Only fetch builds after this time
-            limit: Maximum number of builds to fetch. If None, fetch all available.
+            limit: Maximum number of builds per page (default: 100)
+            page: Page number for pagination (1-indexed)
             branch: Filter by branch name
-            only_with_logs: If True and limit is None, only fetch builds with available logs
+            only_with_logs: If True, only fetch builds with available logs
             exclude_bots: If True, skip builds triggered by bot commits
             only_completed: If True, only fetch builds that have completed
 
         Returns:
-            List of normalized BuildData objects
+            List of normalized BuildData objects for this page
         """
         pass
 

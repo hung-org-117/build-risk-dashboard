@@ -1,3 +1,4 @@
+from app.repositories.raw_repository import RawRepositoryRepository
 from __future__ import annotations
 
 import hashlib
@@ -151,19 +152,22 @@ def _handle_workflow_run_event(
     triggering_actor = workflow_run.get("triggering_actor", {})
     actor_type = triggering_actor.get("type")
     is_bot = actor_type == "Bot"
-    
+
     # Check if we are tracking this repo
-    repo = db.repositories.find_one({"full_name": full_name})
+    raw_repo = RawRepositoryRepository(db)
+    repo = raw_repo.find_one({"full_name": full_name})
     if not repo:
         return {"status": "ignored", "reason": "repo_not_imported"}
 
-    repo_id = str(repo["_id"])
+    repo_id = str(repo.id)
     build_id = str(workflow_run.get("id"))
 
     # Save/Update RawBuildRun
     build_run_repo = RawBuildRunRepository(db)
 
-    existing_run = build_run_repo.find_by_repo_and_build_id(repo_id, build_id)
+    existing_run = build_run_repo.find_by_business_key(
+        repo_id, build_id, CIProvider.GITHUB
+    )
 
     if existing_run:
         # Update existing run but don't reprocess (avoid duplicate processing)
@@ -193,13 +197,16 @@ def _handle_workflow_run_event(
         completed_at = workflow_run.get("updated_at")
 
         # Map GitHub status to normalized status
-        gh_status = workflow_run.get("status", "").lower()
         status = BuildStatus.COMPLETED
 
         # Map GitHub conclusion to normalized conclusion
         gh_conclusion = workflow_run.get("conclusion", "").lower()
         try:
-            conclusion = BuildConclusion(gh_conclusion) if gh_conclusion else BuildConclusion.NONE
+            conclusion = (
+                BuildConclusion(gh_conclusion)
+                if gh_conclusion
+                else BuildConclusion.NONE
+            )
         except (ValueError, KeyError):
             conclusion = BuildConclusion.UNKNOWN
 

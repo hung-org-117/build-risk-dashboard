@@ -3,11 +3,6 @@ ModelRepoConfig Entity - User-specific configuration for ML model training flow.
 
 This entity stores user preferences and settings for repositories imported
 for ML model training purposes (Flow 1: GitHub import → Model training).
-
-Key design principles:
-- User-specific: Each user can have different configs for the same repository
-- Configuration only: No raw GitHub data, only user preferences
-- References raw_repository: Links to the immutable raw data
 """
 
 from datetime import datetime
@@ -21,13 +16,6 @@ from app.entities.repo_config_base import RepoConfigBase
 
 
 class ModelRepoConfig(RepoConfigBase):
-    """
-    User configuration for a repository in the model training flow.
-
-    This represents a user's decision to track a repository for ML training.
-    The same raw_repository can have multiple configs (different users).
-    """
-
     class Config:
         collection = "model_repo_configs"
         use_enum_values = True
@@ -44,7 +32,11 @@ class ModelRepoConfig(RepoConfigBase):
         description="Reference to raw_repositories table",
     )
 
-    # User-configurable settings inherited from RepoConfigBase
+    # Import tracking
+    import_version: int = Field(
+        default=1,
+        description="Version number for this import (increments with each re-import)",
+    )
 
     # Import constraints
     max_builds_to_ingest: Optional[int] = Field(

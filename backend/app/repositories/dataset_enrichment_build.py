@@ -33,13 +33,13 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
     def find_by_workflow_run(
         self,
         dataset_id: ObjectId,
-        raw_workflow_run_id: ObjectId,
+        raw_build_run_id: ObjectId,
     ) -> Optional[DatasetEnrichmentBuild]:
         """Find build by dataset and workflow run."""
         doc = self.collection.find_one(
             {
                 "dataset_id": dataset_id,
-                "raw_workflow_run_id": raw_workflow_run_id,
+                "raw_build_run_id": raw_build_run_id,
             }
         )
         return DatasetEnrichmentBuild(**doc) if doc else None

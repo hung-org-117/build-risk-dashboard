@@ -363,6 +363,23 @@ class GitHubClient:
         items = response.get("items", []) if isinstance(response, dict) else []
         return items
 
+    def list_workflow_runs(
+        self, full_name: str, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        List workflow runs for a repository (single page, no auto-pagination).
+
+        Args:
+            full_name: Repository full name (owner/repo)
+            params: Query parameters (per_page, page, status, branch, etc.)
+
+        Returns:
+            Dict with 'workflow_runs' list and 'total_count'
+        """
+        return self._rest_request(
+            "GET", f"/repos/{full_name}/actions/runs", params=params
+        )
+
     def paginate_workflow_runs(
         self, full_name: str, params: Optional[Dict[str, Any]] = None
     ) -> Iterator[Dict[str, Any]]:

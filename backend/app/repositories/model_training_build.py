@@ -19,13 +19,13 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
     def find_by_workflow_run(
         self,
         raw_repo_id: ObjectId,
-        raw_workflow_run_id: ObjectId,
+        raw_build_run_id: ObjectId,
     ) -> Optional[ModelTrainingBuild]:
         """Find build by repo and workflow run."""
         doc = self.collection.find_one(
             {
                 "raw_repo_id": raw_repo_id,
-                "raw_workflow_run_id": raw_workflow_run_id,
+                "raw_build_run_id": raw_build_run_id,
             }
         )
         return ModelTrainingBuild(**doc) if doc else None
@@ -61,6 +61,20 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
     def count_by_repo_id(self, repo_id: str) -> int:
         """Convenience method - count by model_repo_config_id (string)."""
         return self.count_by_config(ObjectId(repo_id))
+
+    def find_by_status(
+        self,
+        repo_id: str,
+        status: ExtractionStatus,
+        limit: int = 1000,
+    ) -> List[ModelTrainingBuild]:
+        """Find builds by extraction status for a repo."""
+        query = {
+            "model_repo_config_id": ObjectId(repo_id),
+            "extraction_status": status.value if hasattr(status, "value") else status,
+        }
+        cursor = self.collection.find(query).limit(limit)
+        return [ModelTrainingBuild(**doc) for doc in cursor]
 
     def find_by_config(
         self,

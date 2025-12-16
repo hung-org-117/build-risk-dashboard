@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 )
 def ingest_dataset_builds(
     self: PipelineTask,
-    repo_id: str,
-    build_ids: List[str],
+    repo_config_id: str,
+    build_csv_ids: List[str],
     features: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
@@ -43,9 +43,9 @@ def ingest_dataset_builds(
     dataset_repo_config_repo = DatasetRepoConfigRepository(self.db)
     build_run_repo = RawBuildRunRepository(self.db)
 
-    repo_config = dataset_repo_config_repo.find_by_id(repo_id)
+    repo_config = dataset_repo_config_repo.find_by_id(repo_config_id)
     if not repo_config:
-        raise ValueError(f"Dataset repo config {repo_id} not found")
+        raise ValueError(f"Dataset repo config {repo_config_id} not found")
 
     full_name = repo_config.normalized_full_name
     ci_provider = repo_config.ci_provider
@@ -66,21 +66,23 @@ def ingest_dataset_builds(
 
     # Get commit SHAs for worktree creation
     commit_shas = []
-    for build_id in build_ids:
+    for build_csv_id in build_csv_ids:
         # Use existing raw_repo_id from config to find the build run
         target_repo_id = str(repo_config.raw_repo_id)
-        build = build_run_repo.find_by_repo_and_build_id(target_repo_id, build_id)
-        if build and build.commit_sha:
-            commit_shas.append(build.effective_sha or build.commit_sha)
+        raw_build_run = build_run_repo.find_by_business_key(
+            target_repo_id, build_csv_id, ci_provider
+        )
+        if raw_build_run and raw_build_run.commit_sha:
+            commit_shas.append(raw_build_run.effective_sha or raw_build_run.commit_sha)
     commit_shas = list(set(commit_shas))
-    build_ids = list(set(build_ids))
+    build_csv_ids = list(set(build_csv_ids))
 
     # Build workflow using shared helper
     workflow = build_ingestion_workflow(
         tasks_by_level=tasks_by_level,
         raw_repo_id=repo_config.raw_repo_id,
         full_name=full_name,
-        build_ids=build_ids,
+        build_csv_ids=build_csv_ids,
         commit_shas=commit_shas,
         ci_provider=ci_provider,
     )
@@ -93,7 +95,7 @@ def ingest_dataset_builds(
     return {
         "status": "dispatched",
         "repo_id": repo_id,
-        "builds": len(build_ids),
+        "build_csv_ids": len(build_csv_ids),
         "resources": list(required_resources),
         "tasks_by_level": {str(k): v for k, v in tasks_by_level.items()},
     }

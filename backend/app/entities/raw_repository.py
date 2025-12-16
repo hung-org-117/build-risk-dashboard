@@ -3,11 +3,6 @@ RawRepository Entity - Immutable GitHub repository data.
 
 This entity stores raw repository information fetched from GitHub.
 It serves as a single source of truth for repository metadata across all flows.
-
-Key design principles:
-- Immutable: Once fetched, data should not be modified (only updated on re-fetch)
-- Shared: Both model training and dataset enrichment flows reference this table
-- Minimal: Contains only essential GitHub metadata, no user-specific configs
 """
 
 from typing import Any, Dict, List, Optional
@@ -38,7 +33,6 @@ class RawRepository(BaseEntity):
         description="GitHub's internal repository ID. More stable than full_name.",
     )
 
-    # Repository metadata
     default_branch: str = Field(
         default="main",
         description="Default branch name (main, master, develop, etc.)",
@@ -48,18 +42,9 @@ class RawRepository(BaseEntity):
         description="Whether the repository is private",
     )
 
-    # Language information
     main_lang: Optional[str] = Field(
         None,
         description="Primary programming language (lowercase)",
-    )
-    source_languages: List[str] = Field(
-        default_factory=list,
-        description="All detected programming languages (lowercase, sorted by usage)",
-    )
-    language_stats: Dict[str, int] = Field(
-        default_factory=dict,
-        description="Language distribution in bytes from GitHub API",
     )
 
     # Full GitHub metadata (for future use)

@@ -36,7 +36,7 @@ class ModelTrainingBuild(BaseEntity):
         ...,
         description="Reference to raw_repositories table",
     )
-    raw_workflow_run_id: PyObjectId = Field(
+    raw_build_run_id: PyObjectId = Field(
         ...,
         description="Reference to raw_build_run table",
     )

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     WORKTREE_BATCH_SIZE: int = 50  # Worktrees to create per chunk
     API_RATE_LIMIT_PER_SECOND: float = 10.0  # GitHub API calls per second
     COMMIT_REPLAY_MAX_DEPTH: int = 100  # Max depth to traverse for commit replay
+    LOG_UNAVAILABLE_THRESHOLD: int = 10  # Stop after N consecutive unavailable logs
 
     DATA_DIR: str = "../repo-data/data"
     WORKFLOW_POLL_INTERVAL_MINUTES: int = 15

@@ -1,7 +1,7 @@
 """
 RawBuildRun Entity - Immutable CI/CD build run data from any provider.
 
-This entity stores raw build run information fetched from multiple CI providers (GitHub Actions, Jenkins, CircleCI, etc.).
+This entity stores raw build run information fetched from multiple CI providers (GitHub Actions, CircleCI, etc.).
 It serves as the single source of truth for build/CI run data across all providers.
 
 Key design principles:
@@ -25,7 +25,7 @@ class RawBuildRun(BaseEntity):
     Raw build run data from any CI/CD provider.
 
     This represents a single normalized CI/CD run (build) from any supported provider
-    (GitHub Actions, Jenkins, CircleCI, Travis CI, etc.).
+    (GitHub Actions, CircleCI, Travis CI, etc.).
     Multiple flows can reference and process this data.
     """
 

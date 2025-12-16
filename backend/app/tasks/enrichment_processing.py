@@ -77,18 +77,18 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
             raise ValueError("No validated builds found. Please run validation first.")
 
         # Get repos for this dataset
-        repos = repo_config_repo.find_by_dataset(version.dataset_id)
+        repo_configs = repo_config_repo.find_by_dataset(version.dataset_id)
 
         version_repo.update_one(
             version_id,
             {
                 "total_rows": total_rows,
-                "repos_total": len(repos),
+                "repos_total": len(repo_configs),
                 "ingestion_status": "ingesting",
             },
         )
         logger.info(
-            f"Found {total_rows} validated builds, {len(repos)} repos to ingest"
+            f"Found {total_rows} validated builds, {len(repo_configs)} repos to ingest"
         )
 
         # Dispatch ingestion first, then enrichment
@@ -103,7 +103,7 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         return {
             "status": "dispatched",
             "total_builds": total_rows,
-            "repos": len(repos),
+            "repos": len(repo_configs),
         }
 
     except Exception as e:
@@ -139,7 +139,6 @@ def start_ingestion_for_version(self: PipelineTask, version_id: str) -> Dict[str
     if not version:
         raise ValueError(f"Version {version_id} not found")
 
-    # Get repo_configs
     repo_configs = repo_config_repo.find_by_dataset(version.dataset_id)
     if not repo_configs:
         version_repo.update_one(
@@ -152,21 +151,21 @@ def start_ingestion_for_version(self: PipelineTask, version_id: str) -> Dict[str
     repos_failed = 0
 
     for i, repo_config in enumerate(repo_configs):
-        repo_id = str(repo_config.id)
+        raw_repo_id = str(repo_config.raw_repo_id)
 
         # Get validated builds for this repo
-        builds = build_repo.find_found_builds_by_repo(version.dataset_id, repo_id)
-        build_ids = [str(b.build_id_from_csv) for b in builds]
+        builds = build_repo.find_found_builds_by_repo(version.dataset_id, raw_repo_id)
+        build_csv_ids = [str(b.build_id_from_csv) for b in builds]
 
-        if not build_ids:
+        if not build_csv_ids:
             continue
 
         try:
             # Run ingestion synchronously for this repo
             result = ingest_dataset_builds.apply(
                 kwargs={
-                    "repo_id": repo_id,
-                    "build_ids": build_ids,
+                    "repo_config_id": str(repo_config.id),
+                    "build_csv_ids": build_csv_ids,
                     "features": version.selected_features,
                 }
             )
@@ -346,7 +345,7 @@ def process_enrichment_batch(
                 new_build = DatasetEnrichmentBuild(
                     _id=None,
                     raw_repo_id=raw_repo_id,
-                    raw_workflow_run_id=ObjectId(build.workflow_run_id),
+                    raw_build_run_id=ObjectId(build.workflow_run_id),
                     dataset_id=ObjectId(version.dataset_id),
                     dataset_version_id=ObjectId(version_id),
                     dataset_repo_config_id=ObjectId(build.repo_id),

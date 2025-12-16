@@ -68,7 +68,7 @@ package "Dataset Flow" {
     dataset_version_id
     dataset_repo_config_id
     raw_repo_id
-    raw_workflow_run_id
+    raw_build_run_id
   }
   class DatasetVersion {
     dataset_id
@@ -95,7 +95,7 @@ package "Model Training" {
   class ModelTrainingBuild {
     model_repo_config_id
     raw_repo_id
-    raw_workflow_run_id
+    raw_build_run_id
   }
 }
 
@@ -163,8 +163,8 @@ RawRepository "1" <-- "*" ScanResult : repo_id
 RawRepository "1" <-- "*" FailedScan : repo_id
 RawRepository "1" <-- "*" PipelineRun : repo_id
 
-RawBuildRun "1" <-- "*" ModelTrainingBuild : raw_workflow_run_id
-RawBuildRun "1" <-- "*" DatasetEnrichmentBuild : raw_workflow_run_id
+RawBuildRun "1" <-- "*" ModelTrainingBuild : raw_build_run_id
+RawBuildRun "1" <-- "*" DatasetEnrichmentBuild : raw_build_run_id
 RawBuildRun "1" <-- "0..*" DatasetBuild : workflow_run_id (optional)
 RawBuildRun "1" <-- "*" ScanJob : build_id
 RawBuildRun "1" <-- "*" FailedScan : build_id

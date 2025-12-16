@@ -21,7 +21,7 @@ class RepoImportRequest(BaseModel):
     )
     ci_provider: CIProvider = Field(
         default=CIProvider.GITHUB_ACTIONS,
-        description="CI/CD provider: github_actions, jenkins, circleci, travis_ci",
+        description="CI/CD provider: github_actions, circleci, travis_ci",
     )
     max_builds: Optional[int] = Field(
         default=None,

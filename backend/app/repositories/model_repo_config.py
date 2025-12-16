@@ -50,35 +50,6 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         items = [ModelRepoConfig(**doc) for doc in cursor]
         return items, total
 
-    def upsert_repository(
-        self,
-        user_id: str,
-        full_name: str,
-        data: dict,
-    ) -> ModelRepoConfig:
-        """Upsert a repository config by user and full_name."""
-        existing = self.collection.find_one(
-            {
-                "user_id": ObjectId(user_id),
-                "full_name": full_name,
-                "is_deleted": {"$ne": True},
-            }
-        )
-
-        if existing:
-            # Update existing
-            update_data = {**data, "updated_at": datetime.utcnow()}
-            self.collection.update_one({"_id": existing["_id"]}, {"$set": update_data})
-            return self.find_by_id(existing["_id"])
-        else:
-            # Create new
-            config = ModelRepoConfig(
-                user_id=ObjectId(user_id),
-                full_name=full_name,
-                **data,
-            )
-            return self.create(config)
-
     def update_repository(
         self,
         repo_id: str,
@@ -88,7 +59,7 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         updates["updated_at"] = datetime.utcnow()
         self.collection.update_one({"_id": ObjectId(repo_id)}, {"$set": updates})
 
-    def find_by_id(self, config_id) -> Optional[ModelRepoConfig]:
+    def find_by_id(self, config_id: str) -> Optional[ModelRepoConfig]:
         """Find config by ID."""
         doc = self.collection.find_one({"_id": ObjectId(config_id)})
         return ModelRepoConfig(**doc) if doc else None
@@ -96,6 +67,13 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
     def find_one(self, query: dict) -> Optional[ModelRepoConfig]:
         """Find one config by query."""
         doc = self.collection.find_one(query)
+        return ModelRepoConfig(**doc) if doc else None
+
+    def find_by_full_name(self, full_name: str) -> Optional[ModelRepoConfig]:
+        """Find config by full_name (e.g., 'owner/repo')."""
+        doc = self.collection.find_one(
+            {"full_name": full_name, "is_deleted": {"$ne": True}}
+        )
         return ModelRepoConfig(**doc) if doc else None
 
     def update_import_status(

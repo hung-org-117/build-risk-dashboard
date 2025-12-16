@@ -72,9 +72,9 @@ class BuildService:
         # Get corresponding ModelTrainingBuilds
         raw_ids = [b["_id"] for b in raw_builds]
         training_cursor = self.db.model_training_builds.find(
-            {"raw_workflow_run_id": {"$in": raw_ids}}
+            {"raw_build_run_id": {"$in": raw_ids}}
         )
-        training_map = {doc["raw_workflow_run_id"]: doc for doc in training_cursor}
+        training_map = {doc["raw_build_run_id"]: doc for doc in training_cursor}
 
         # Build response items
         items = []
@@ -148,7 +148,7 @@ class BuildService:
             return None
 
         # Get training data if exists
-        training = self.db.model_training_builds.find_one({"raw_workflow_run_id": oid})
+        training = self.db.model_training_builds.find_one({"raw_build_run_id": oid})
 
         return BuildDetail(
             _id=str(raw["_id"]),
@@ -189,9 +189,9 @@ class BuildService:
         # Get training data
         raw_ids = [b["_id"] for b in raw_builds]
         training_cursor = self.db.model_training_builds.find(
-            {"raw_workflow_run_id": {"$in": raw_ids}}
+            {"raw_build_run_id": {"$in": raw_ids}}
         )
-        training_map = {doc["raw_workflow_run_id"]: doc for doc in training_cursor}
+        training_map = {doc["raw_build_run_id"]: doc for doc in training_cursor}
 
         items = []
         for raw in raw_builds:

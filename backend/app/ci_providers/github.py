@@ -8,6 +8,8 @@ from typing import List, Optional
 
 from pymongo.database import Database
 
+from app.config import settings
+from app.utils.datetime import parse_datetime
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -18,7 +20,6 @@ from .models import (
     LogFile,
     ProviderConfig,
 )
-from app.utils.datetime import parse_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -110,17 +111,19 @@ class GitHubActionsProvider(CIProviderInterface):
         repo_name: str,
         since: Optional[datetime] = None,
         limit: Optional[int] = None,
+        page: int = 1,
         branch: Optional[str] = None,
         only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
         installation_id: Optional[str] = None,
     ) -> List[BuildData]:
-        """Fetch workflow runs from GitHub Actions."""
+        """Fetch workflow runs from GitHub Actions (single page)."""
         builds = []
-        stop_fetching = False
+        consecutive_unavailable = 0
 
-        params = {"per_page": 100 if limit is None else min(limit, 100)}
+        per_page = min(limit or 100, 100)
+        params = {"per_page": per_page, "page": page}
         if branch:
             params["branch"] = branch
         if since:
@@ -129,7 +132,11 @@ class GitHubActionsProvider(CIProviderInterface):
             params["status"] = "completed"
 
         with self._get_github_client(installation_id) as client:
-            for run in client.paginate_workflow_runs(repo_name, params):
+            # Fetch single page only (no internal pagination)
+            response = client.list_workflow_runs(repo_name, params)
+            runs = response.get("workflow_runs", [])
+
+            for run in runs:
                 build_data = self._parse_workflow_run(run, repo_name)
 
                 is_bot = _is_bot_author(build_data.commit_author)
@@ -143,19 +150,23 @@ class GitHubActionsProvider(CIProviderInterface):
                     logs_available = client.logs_available(repo_name, int(run["id"]))
                     build_data.logs_available = logs_available
                     if not logs_available:
-                        logger.info(
-                            f"Build {run['id']} has no logs available, stopping fetch"
-                        )
-                        stop_fetching = True
-                        break
+                        consecutive_unavailable += 1
+                        if (
+                            consecutive_unavailable
+                            >= settings.LOG_UNAVAILABLE_THRESHOLD
+                        ):
+                            logger.warning(
+                                f"Reached {consecutive_unavailable} consecutive unavailable logs "
+                                f"for {repo_name} - may be permission issue, stopping fetch"
+                            )
+                            break
+                        continue
+                    else:
+                        consecutive_unavailable = 0
 
                 builds.append(build_data)
 
                 if limit is not None and len(builds) >= limit:
-                    stop_fetching = True
-                    break
-
-                if stop_fetching:
                     break
 
         return builds[:limit] if limit else builds
