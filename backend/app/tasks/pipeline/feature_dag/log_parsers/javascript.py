@@ -88,7 +88,7 @@ class MochaParser(FrameworkParser):
             return None
 
         passing = int(passing_match.group("passing"))
-        
+
         # Get duration
         duration = None
         if passing_match.group("duration_ms"):

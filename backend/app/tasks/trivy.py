@@ -9,10 +9,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from bson import ObjectId
 
 from app.celery_app import celery_app
-from app.config import settings
 from app.database.mongo import get_database
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.model_training_build import ModelTrainingBuildRepository

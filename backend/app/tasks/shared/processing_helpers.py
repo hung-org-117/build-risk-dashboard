@@ -8,8 +8,7 @@ to extract features using the Hamilton pipeline.
 from app.entities.repo_config_base import RepoConfigBase
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository

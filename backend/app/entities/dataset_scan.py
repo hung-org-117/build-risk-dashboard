@@ -47,6 +47,10 @@ class DatasetScan(BaseEntity):
     # None = all commits, otherwise list of specific SHA values to scan
     selected_commit_shas: Optional[List[str]] = None
 
+    # Default scan config for all commits in this scan
+    # Content of sonar-project.properties or trivy.yaml
+    scan_config: Optional[str] = None
+
     # Progress tracking
     status: DatasetScanStatus = DatasetScanStatus.PENDING
     total_commits: int = 0

@@ -23,7 +23,6 @@ from .models import (
     CIProvider,
     JobData,
     LogFile,
-    ProviderConfig,
 )
 
 logger = logging.getLogger(__name__)

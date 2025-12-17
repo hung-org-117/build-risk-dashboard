@@ -1,13 +1,12 @@
 """Service for managing application settings."""
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Optional
 from cryptography.fernet import Fernet
 import base64
 import hashlib
 
 from pymongo.database import Database
-from fastapi import HTTPException, status
 
 from app.entities.settings import (
     ApplicationSettings,

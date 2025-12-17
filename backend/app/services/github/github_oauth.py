@@ -45,7 +45,7 @@ async def check_org_membership(access_token: str, username: str) -> bool:
 
     Args:
         access_token: GitHub OAuth access token
-        username: GitHub username to check
+        username: GitHub username to check (unused in new implementation but kept for compatibility)
 
     Returns:
         True if user is a member, False otherwise
@@ -66,7 +66,10 @@ async def check_org_membership(access_token: str, username: str) -> bool:
         )
 
     try:
-        url = GITHUB_ORG_MEMBERSHIP_URL.format(org=org, username=username)
+        # Use the user-centric membership endpoint which is more reliable for checking
+        # if the authenticated user is a member, even if membership is private.
+        # Requires 'read:org' scope.
+        url = f"https://api.github.com/user/memberships/orgs/{org}"
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
                 url,
@@ -75,8 +78,13 @@ async def check_org_membership(access_token: str, username: str) -> bool:
                     "Authorization": f"Bearer {access_token}",
                 },
             )
-            # 204 No Content = member, 404 = not a member
-            return response.status_code == 204
+
+            if response.status_code == 200:
+                data = response.json()
+                # Check if state is active (not pending)
+                return data.get("state") == "active"
+
+            return False
     except HTTPException:
         raise
     except Exception:

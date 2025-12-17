@@ -19,7 +19,6 @@ from app.tasks.pipeline.feature_dag._inputs import (
     GitHistoryInput,
     GitWorktreeInput,
     RepoConfigInput,
-    RepoInput,
 )
 from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,

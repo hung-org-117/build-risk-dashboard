@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any
 
 from pymongo.database import Database
 

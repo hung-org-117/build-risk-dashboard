@@ -3,7 +3,6 @@ from fastapi import (
     Depends,
     File,
     Form,
-    HTTPException,
     Path as PathParam,
     Query,
     UploadFile,
@@ -216,9 +215,6 @@ def get_dataset_builds_stats(
 ):
     """Get aggregated build stats for charts."""
     from bson import ObjectId
-    from app.repositories.dataset_build_repository import DatasetBuildRepository
-    from app.repositories.raw_build_run import RawBuildRunRepository
-    from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
 
     oid = ObjectId(dataset_id)
 

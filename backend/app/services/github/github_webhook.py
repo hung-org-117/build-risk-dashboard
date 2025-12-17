@@ -15,7 +15,8 @@ from app.entities.raw_build_run import RawBuildRun
 from app.ci_providers.models import BuildStatus, BuildConclusion, CIProvider
 from app.celery_app import celery_app
 from bson import ObjectId
-from app.services.github.github_app import clear_installation_token
+
+# from app.services.github.github_app import clear_installation_token
 
 
 def verify_signature(signature: str | None, body: bytes) -> None:
@@ -42,90 +43,6 @@ def verify_signature(signature: str | None, body: bytes) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Webhook signature mismatch",
         )
-
-
-def _handle_installation_event(
-    db: Database, event: str, payload: Dict[str, object]
-) -> Dict[str, object]:
-    """Handle GitHub App installation/uninstallation events."""
-    action = payload.get("action")
-    installation = payload.get("installation", {})
-    installation_id = str(installation.get("id")) if installation.get("id") else None
-    account = installation.get("account", {})
-    account_login = account.get("login")
-    account_type = account.get("type")  # "User" or "Organization"
-
-    if not installation_id:
-        return {"status": "ignored", "reason": "missing_installation_id"}
-
-    now = datetime.now(timezone.utc)
-
-    if action == "created":
-        # User installed the app
-        db.github_installations.update_one(
-            {"installation_id": installation_id},
-            {
-                "$set": {
-                    "installation_id": installation_id,
-                    "account_login": account_login,
-                    "account_type": account_type,
-                    "installed_at": now,
-                    "revoked_at": None,
-                    "suspended_at": None,
-                    "metadata": installation,
-                },
-                "$setOnInsert": {"created_at": now},
-            },
-            upsert=True,
-        )
-        return {
-            "status": "processed",
-            "action": "installation_created",
-            "installation_id": installation_id,
-        }
-
-    elif action == "added" or action == "removed":
-        # For installation_repositories event, action is 'added' or 'removed'
-        pass
-
-    elif action == "deleted":
-        # User uninstalled the app
-        db.github_installations.update_one(
-            {"installation_id": installation_id},
-            {"$set": {"revoked_at": now, "uninstalled_at": now}},
-        )
-        # Clear cached token
-
-        clear_installation_token(installation_id)
-        return {
-            "status": "processed",
-            "action": "installation_deleted",
-            "installation_id": installation_id,
-        }
-
-    elif action == "suspend":
-        db.github_installations.update_one(
-            {"installation_id": installation_id}, {"$set": {"suspended_at": now}}
-        )
-
-        clear_installation_token(installation_id)
-        return {
-            "status": "processed",
-            "action": "installation_suspended",
-            "installation_id": installation_id,
-        }
-
-    elif action == "unsuspend":
-        db.github_installations.update_one(
-            {"installation_id": installation_id}, {"$set": {"suspended_at": None}}
-        )
-        return {
-            "status": "processed",
-            "action": "installation_unsuspended",
-            "installation_id": installation_id,
-        }
-
-    return {"status": "ignored", "reason": f"unsupported_installation_action: {action}"}
 
 
 def _handle_workflow_run_event(
@@ -275,7 +192,6 @@ def _handle_workflow_run_event(
                 "repo_config_id": repo_config_id,
                 "raw_repo_id": repo_id,
                 "full_name": full_name,
-                "installation_id": repo_config.installation_id,
                 "ci_provider": (
                     repo_config.ci_provider.value
                     if hasattr(repo_config.ci_provider, "value")
@@ -297,7 +213,8 @@ def handle_github_event(
     db: Database, event: str, payload: Dict[str, object]
 ) -> Dict[str, object]:
     if event in {"installation", "installation_repositories"}:
-        return _handle_installation_event(db, event, payload)
+        # return _handle_installation_event(db, event, payload)
+        return {"status": "ignored", "reason": "installation_management_removed"}
 
     elif event == "workflow_run":
         return _handle_workflow_run_event(db, payload)

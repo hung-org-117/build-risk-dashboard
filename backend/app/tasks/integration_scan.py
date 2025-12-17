@@ -5,12 +5,9 @@ Tasks for running dataset scans with integration tools.
 """
 
 import logging
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.database.mongo import get_database
@@ -18,7 +15,7 @@ from app.entities.dataset_scan import DatasetScanStatus
 from app.repositories.dataset_scan import DatasetScanRepository
 from app.repositories.dataset_scan_result import DatasetScanResultRepository
 from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
-from app.integrations import get_tool, ToolType, ScanMode
+from app.integrations import get_tool, ScanMode
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +135,76 @@ def run_dataset_scan(self, scan_id: str):
         }
 
 
+@celery_app.task(
+    bind=True,
+    name="app.tasks.integration_scan.retry_scan_result",
+    queue="processing",
+    soft_time_limit=600,  # 10 min soft limit
+    time_limit=660,  # 11 min hard limit
+)
+def retry_scan_result(self, result_id: str, scan_id: str):
+    """
+    Retry a single failed scan result.
+
+    Uses config hierarchy: result.override_config > scan.scan_config > default
+    """
+    logger.info(f"Retrying scan result: {result_id}")
+
+    db = get_database()
+    scan_repo = DatasetScanRepository(db)
+    result_repo = DatasetScanResultRepository(db)
+    repo_repo = DatasetRepoConfigRepository(db)
+
+    # Load result
+    result = result_repo.find_by_id(result_id)
+    if not result:
+        logger.error(f"Result not found: {result_id}")
+        return {"status": "error", "error": "Result not found"}
+
+    # Load scan
+    scan = scan_repo.find_by_id(scan_id)
+    if not scan:
+        logger.error(f"Scan not found: {scan_id}")
+        return {"status": "error", "error": "Scan not found"}
+
+    # Get tool
+    tool = get_tool(scan.tool_type)
+    if not tool or not tool.is_available():
+        result_repo.mark_failed(result_id, f"Tool not available: {scan.tool_type}")
+        return {"status": "error", "error": f"Tool not available: {scan.tool_type}"}
+
+    # Get effective config: override_config > scan_config > None (default)
+    effective_config = result.override_config or scan.scan_config
+
+    try:
+        if tool.scan_mode == ScanMode.SYNC:
+            # Trivy: run sync scan with config
+            _run_trivy_scan(result, tool, result_repo, repo_repo, effective_config)
+        else:
+            # SonarQube: start async scan with config
+            _start_sonar_scan(result, tool, result_repo, repo_repo, effective_config)
+
+        # Check scan completion after single result
+        from app.services.dataset_scan_service import DatasetScanService
+
+        service = DatasetScanService(db)
+        service._check_scan_completion(scan_id)
+
+        logger.info(f"Retry completed for result {result_id}")
+        return {"status": "success", "result_id": result_id}
+
+    except Exception as e:
+        logger.error(f"Retry failed for result {result_id}: {e}")
+        result_repo.mark_failed(result_id, str(e))
+        return {"status": "error", "error": str(e)}
+
+
 def _run_trivy_scan(
     result,
     tool,
     result_repo: DatasetScanResultRepository,
     repo_repo: DatasetRepoConfigRepository,
+    config_content: Optional[str] = None,
 ):
     """Run Trivy scan on a commit (sync)."""
     from app.integrations.tools.trivy import TrivyTool
@@ -163,9 +225,9 @@ def _run_trivy_scan(
         raise Exception("Failed to checkout commit")
 
     try:
-        # Run scan
+        # Run scan with optional config
         trivy_tool: TrivyTool = tool
-        scan_result = trivy_tool.scan(str(worktree_path))
+        scan_result = trivy_tool.scan(str(worktree_path), config_content=config_content)
 
         if scan_result.get("status") == "failed":
             result_repo.mark_failed(
@@ -192,6 +254,7 @@ def _start_sonar_scan(
     tool,
     result_repo: DatasetScanResultRepository,
     repo_repo: DatasetRepoConfigRepository,
+    config_content: Optional[str] = None,
 ):
     """Start SonarQube scan on a commit (async)."""
     logger.info(
@@ -217,7 +280,7 @@ def _start_sonar_scan(
 
     repo_url = f"https://github.com/{result.repo_full_name}.git"
 
-    # Dispatch sonar scan task
+    # Dispatch sonar scan task with optional config
     from app.tasks.sonar import start_sonar_scan
 
     start_sonar_scan.delay(
@@ -226,6 +289,7 @@ def _start_sonar_scan(
         repo_url=repo_url,
         commit_sha=result.commit_sha,
         component_key=component_key,
+        config_content=config_content,
     )
 
     logger.info(f"SonarQube scan dispatched for {component_key}")

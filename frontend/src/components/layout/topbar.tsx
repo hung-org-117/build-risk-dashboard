@@ -105,24 +105,30 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
           </button>
         </div>
 
-        <div className="flex items-center gap-3 rounded-xl border px-3 py-2">
-          <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-xs font-semibold uppercase text-slate-600">
-            {githubProfile?.avatar_url ? (
-              <Image
-                src={githubProfile.avatar_url}
-                alt={displayName}
-                fill
-                className="object-cover"
-                sizes="32px"
-              />
-            ) : (
-              initials
-            )}
-          </div>
-          <div>
-            <p className="text-sm font-semibold">{displayName}</p>
-            <p className="text-xs text-muted-foreground uppercase">{displayRole}</p>
-          </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push('/profile')}
+            className="flex items-center gap-3 rounded-xl border px-3 py-2 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+          >
+            <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-xs font-semibold uppercase text-slate-600">
+              {githubProfile?.avatar_url ? (
+                <Image
+                  src={githubProfile.avatar_url}
+                  alt={displayName}
+                  fill
+                  className="object-cover"
+                  sizes="32px"
+                />
+              ) : (
+                initials
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-semibold">{displayName}</p>
+              <p className="text-xs text-muted-foreground uppercase">{displayRole}</p>
+            </div>
+          </button>
           <button
             className="rounded-full border border-slate-200 p-2 text-muted-foreground transition hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:hover:bg-red-900/30 dark:hover:text-red-400"
             aria-label="Sign out"

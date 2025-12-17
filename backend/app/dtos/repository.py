@@ -11,10 +11,6 @@ from app.entities.base import PyObjectIdStr
 
 class RepoImportRequest(BaseModel):
     full_name: str = Field(..., description="Repository full name (e.g., owner/name)")
-    installation_id: Optional[str] = Field(
-        default=None,
-        description="GitHub App installation id (required for private repos, optional for public repos)",
-    )
     test_frameworks: List[str] = Field(default_factory=list)
     source_languages: List[str] = Field(
         ..., min_length=1, description="Source languages for the repository (required)"
@@ -44,7 +40,7 @@ class RepoImportRequest(BaseModel):
 class RepoResponse(BaseModel):
     id: PyObjectIdStr = Field(..., alias="_id")
     user_id: Optional[PyObjectIdStr] = None
-    provider: str
+    provider: str = "github"
     full_name: str
     default_branch: Optional[str] = None
     is_private: bool = False
@@ -52,7 +48,6 @@ class RepoResponse(BaseModel):
     github_repo_id: Optional[int] = None
     created_at: datetime
     last_scanned_at: Optional[datetime] = None
-    installation_id: Optional[str] = None
     ci_provider: CIProvider = CIProvider.GITHUB_ACTIONS
     test_frameworks: List[TestFramework] = Field(default_factory=list)
     source_languages: List[str] = Field(default_factory=list)
@@ -100,7 +95,6 @@ class RepoSuggestion(BaseModel):
     default_branch: Optional[str] = None
     private: bool = False
     owner: Optional[str] = None
-    installation_id: Optional[str] = None
     html_url: Optional[str] = None
 
 

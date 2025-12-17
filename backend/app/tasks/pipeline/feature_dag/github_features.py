@@ -9,7 +9,7 @@ Features extracted from GitHub API:
 
 from app.tasks.pipeline.feature_dag._inputs import BuildRunInput
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from hamilton.function_modifiers import extract_fields, tag

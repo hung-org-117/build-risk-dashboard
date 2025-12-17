@@ -2,7 +2,6 @@
 
 from typing import List, Optional
 
-from bson import ObjectId
 from pymongo.database import Database
 
 from app.entities.dataset_scan import DatasetScan, DatasetScanStatus

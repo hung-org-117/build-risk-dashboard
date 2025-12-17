@@ -15,7 +15,7 @@ from app.entities.dataset_scan_result import DatasetScanResult
 from app.repositories.dataset_scan import DatasetScanRepository
 from app.repositories.dataset_scan_result import DatasetScanResultRepository
 from app.repositories.dataset_version import DatasetVersionRepository
-from app.integrations import get_tool, get_available_tools, ToolType
+from app.integrations import get_tool, get_available_tools
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,7 @@ class DatasetScanService:
         user_id: str,
         tool_type: str,
         selected_commit_shas: Optional[List[str]] = None,
+        scan_config: Optional[str] = None,
     ) -> DatasetScan:
         """
         Start a scan job for a dataset.
@@ -117,6 +118,7 @@ class DatasetScanService:
             user_id: User initiating the scan
             tool_type: Tool to use (sonarqube or trivy)
             selected_commit_shas: Specific commits to scan (None = all)
+            scan_config: Default config content for all commits
 
         Returns:
             Created DatasetScan entity
@@ -148,6 +150,7 @@ class DatasetScanService:
             tool_type=tool_type,
             commits=unique_commits,
             selected_commit_shas=selected_commit_shas,
+            scan_config=scan_config,
             total_commits=len(unique_commits),
         )
         scan = self.scan_repo.insert_one(scan)
@@ -297,3 +300,51 @@ class DatasetScanService:
                 failed=status_counts.get("failed", 0),
                 pending=len(pending),
             )
+
+    def get_failed_results(self, scan_id: str) -> List[DatasetScanResult]:
+        """Get all failed results for a scan (for retry UI)."""
+        return self.result_repo.find_failed_by_scan(scan_id)
+
+    def retry_failed_result(
+        self,
+        result_id: str,
+        override_config: Optional[str] = None,
+    ) -> Optional[DatasetScanResult]:
+        """
+        Retry a failed scan result with optional custom config.
+
+        Args:
+            result_id: ID of the failed result to retry
+            override_config: Optional config override for this commit
+
+        Returns:
+            Updated result entity or None if not found/not failed
+        """
+        # Reset the result for retry
+        success = self.result_repo.reset_for_retry(result_id, override_config)
+        if not success:
+            return None
+
+        # Get the updated result
+        result = self.result_repo.find_by_id(result_id)
+        if not result:
+            return None
+
+        # Get the parent scan
+        scan = self.scan_repo.find_by_id(str(result.scan_id))
+        if not scan:
+            return None
+
+        # Dispatch single result scan task
+        self._dispatch_single_result_task(result, scan)
+
+        return result
+
+    def _dispatch_single_result_task(
+        self, result: DatasetScanResult, scan: DatasetScan
+    ) -> str:
+        """Dispatch Celery task for a single result retry."""
+        from app.tasks.integration_scan import retry_scan_result
+
+        task = retry_scan_result.delay(str(result.id), str(scan.id))
+        return task.id

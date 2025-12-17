@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     GITHUB_TOKENS: List[str] = []
     GITHUB_WEBHOOK_SECRET: Optional[str] = None
     GITHUB_APP_ID: Optional[str] = None
-    GITHUB_APP_PRIVATE_KEY: Optional[str] = None
+    GITHUB_APP_PRIVATE_KEY: str
+    GITHUB_INSTALLATION_ID: str
     GITHUB_CLIENT_ID: Optional[str] = None
     GITHUB_CLIENT_SECRET: Optional[str] = None
     GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/auth/github/callback"

@@ -24,13 +24,13 @@ class GoTestParser(FrameworkParser):
     # --- PASS: TestFoo (0.00s)
     # --- FAIL: TestBar (0.00s)
     # --- SKIP: TestBaz (0.00s)
-    
+
     # Summary pattern: ok/FAIL package duration
     SUMMARY_PATTERN = re.compile(
         r"(?:ok|FAIL)\s+\S+\s+(?P<duration>[\d\.]+)s",
         re.MULTILINE,
     )
-    
+
     PASS_PATTERN = re.compile(r"---\s+PASS:", re.MULTILINE)
     FAIL_PATTERN = re.compile(r"---\s+FAIL:", re.MULTILINE)
     SKIP_PATTERN = re.compile(r"---\s+SKIP:", re.MULTILINE)

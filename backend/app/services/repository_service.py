@@ -1,3 +1,4 @@
+from app.config import settings
 import logging
 from typing import List, Optional
 from app.entities.enums import ModelImportStatus
@@ -26,12 +27,51 @@ from app.tasks.model_processing import start_model_processing
 logger = logging.getLogger(__name__)
 
 
+def is_org_repo(full_name: str) -> bool:
+    """
+    Check if a repository belongs to the configured organization.
+
+    Args:
+        full_name: Repository full name in format "owner/repo"
+
+    Returns:
+        True if owner matches GITHUB_ORGANIZATION, False otherwise
+    """
+    from app.config import settings
+
+    if not settings.GITHUB_ORGANIZATION:
+        return False
+
+    parts = full_name.split("/")
+    if len(parts) != 2:
+        return False
+
+    owner = parts[0].lower()
+    configured_org = settings.GITHUB_ORGANIZATION.lower()
+    return owner == configured_org
+
+
 def _serialize_repo(repo_doc) -> RepoResponse:
     return RepoResponse.model_validate(repo_doc)
 
 
-def _serialize_repo_detail(repo_doc) -> RepoDetailResponse:
-    return RepoDetailResponse.model_validate(repo_doc)
+def _serialize_repo_detail(repo_doc, raw_repo_doc=None) -> RepoDetailResponse:
+    # Convert ModelRepoConfig to dict
+    data = repo_doc.model_dump(by_alias=True)
+
+    # Merge RawRepository data if available
+    if raw_repo_doc:
+        data.update(
+            {
+                "default_branch": raw_repo_doc.default_branch,
+                "is_private": raw_repo_doc.is_private,
+                "main_lang": raw_repo_doc.main_lang,
+                "github_repo_id": raw_repo_doc.github_repo_id,
+                "metadata": raw_repo_doc.github_metadata,
+            }
+        )
+
+    return RepoDetailResponse.model_validate(data)
 
 
 class RepositoryService:
@@ -49,6 +89,9 @@ class RepositoryService:
         2. Create/update RawRepository
         3. Create/update ModelRepoConfig with raw_repo_id
         4. Queue async import task (if not already importing)
+
+        Returns list of successfully imported repos.
+        Raises HTTPException for user input errors (e.g., repo already exists).
         """
         from app.services.github.github_client import get_app_github_client
 
@@ -56,61 +99,61 @@ class RepositoryService:
 
         for payload in payloads:
             target_user_id = user_id
-            installation_id = payload.installation_id
 
             try:
-                # Check if RawRepository already exists to avoid GitHub API call
-                raw_repo = self.raw_repo.find_by_full_name(payload.full_name)
+                from app.config import settings
 
-                if not raw_repo:
-                    # Need to fetch from GitHub
-                    if installation_id:
-                        client_ctx = get_app_github_client(self.db, installation_id)
-                    else:
-                        client_ctx = get_user_github_client(self.db, user_id)
-
-                    with client_ctx as gh:
-                        repo_data = gh.get_repository(payload.full_name)
-
-                    if not repo_data:
-                        logger.warning(
-                            f"Repository {payload.full_name} not found on GitHub"
-                        )
-                        continue
-
-                    raw_repo = self.raw_repo.upsert_by_full_name(
-                        full_name=payload.full_name,
-                        github_repo_id=repo_data.get("id"),
-                        default_branch=repo_data.get("default_branch", "main"),
-                        is_private=bool(repo_data.get("private")),
-                        main_lang=repo_data.get("language"),
-                        github_metadata=repo_data,
+                is_org_owned = is_org_repo(payload.full_name)
+                if is_org_owned:
+                    client_ctx = get_app_github_client(
+                        self.db, settings.GITHUB_INSTALLATION_ID
                     )
+                else:
+                    client_ctx = get_user_github_client(self.db, user_id)
+
+                with client_ctx as gh:
+                    repo_data = gh.get_repository(payload.full_name)
+
+                if not repo_data:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Repository '{payload.full_name}' not found on GitHub or you don't have access.",
+                    )
+
+                is_private = bool(repo_data.get("private"))
+                if is_private and not is_org_owned:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Repository '{payload.full_name}' is private and not owned by the organization.",
+                    )
+
+                raw_repo = self.raw_repo.upsert_by_full_name(
+                    full_name=payload.full_name,
+                    github_repo_id=repo_data.get("id"),
+                    default_branch=repo_data.get("default_branch", "main"),
+                    is_private=is_private,
+                    main_lang=repo_data.get("language"),
+                    github_metadata=repo_data,
+                )
 
                 from app.entities.model_repo_config import ModelRepoConfig
 
-                # Check if active config already exists - user must delete first to re-import
                 existing_config = self.repo_config.find_active_by_raw_repo_id(
                     raw_repo.id
                 )
+
                 if existing_config:
-                    # Return error - user must explicitly delete before re-importing
-                    logger.warning(
-                        f"Cannot import {payload.full_name}: active config already exists"
-                    )
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail=f"Repository '{payload.full_name}' is already imported. Please delete it first to re-import.",
                     )
 
-                # Create new config (1:1 with raw_repo)
                 repo_doc = self.repo_config.insert_one(
                     ModelRepoConfig(
                         _id=None,
                         user_id=ObjectId(target_user_id),
                         full_name=payload.full_name,
                         raw_repo_id=raw_repo.id,
-                        installation_id=installation_id,
                         test_frameworks=payload.test_frameworks or [],
                         source_languages=payload.source_languages or [],
                         ci_provider=payload.ci_provider,
@@ -123,7 +166,6 @@ class RepositoryService:
 
                 start_model_processing.delay(
                     repo_config_id=str(repo_doc.id),
-                    installation_id=installation_id,
                     ci_provider=payload.ci_provider.value,
                     max_builds=payload.max_builds,
                     since_days=payload.since_days,
@@ -133,8 +175,11 @@ class RepositoryService:
                 results.append(repo_doc)
 
             except Exception as e:
-                logger.error(f"Failed to import {payload.full_name}: {e}")
-                continue
+                logger.error(f"Internal error importing {payload.full_name}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to import '{payload.full_name}'. Please try again later.",
+                )
 
         return [_serialize_repo(doc) for doc in results]
 
@@ -162,7 +207,6 @@ class RepositoryService:
                             "default_branch": repo.get("default_branch"),
                             "private": bool(repo.get("private")),
                             "owner": repo.get("owner", {}).get("login"),
-                            "installation_id": None,  # Not cached; resolved at import
                             "html_url": repo.get("html_url"),
                         }
                     )
@@ -177,6 +221,7 @@ class RepositoryService:
         """List tracked repositories with RBAC access control."""
         user_id = ObjectId(current_user["_id"])
         user_role = current_user.get("role", "user")
+        github_accessible_repos = current_user.get("github_accessible_repos", [])
 
         repos, total = self.repo_config.list_with_access_control(
             user_id=user_id,
@@ -184,6 +229,7 @@ class RepositoryService:
             skip=skip,
             limit=limit,
             search_query=q,
+            github_accessible_repos=github_accessible_repos,
         )
         return RepoListResponse(
             total=total,
@@ -199,36 +245,69 @@ class RepositoryService:
         return self.sync_repositories(user_id, limit)
 
     def search_repositories(self, user_id: str, q: str | None) -> RepoSearchResponse:
-        """Search for repositories directly against GitHub."""
-        private_matches: List[dict] = []
-        public_matches: List[dict] = []
+        """Search for repositories directly against GitHub.
+
+        Returns:
+            - private_matches: Repos in the configured org (for "Your Repositories")
+            - public_matches: Other public repos on GitHub (for "Public GitHub Repositories")
+        """
+        from app.config import settings
+
+        org_matches: List[dict] = []  # Repos in org -> "Your Repositories"
+        public_matches: List[dict] = []  # Other public repos
 
         if not q or len(q) < 1:
             return RepoSearchResponse(private_matches=[], public_matches=[])
 
+        org = settings.GITHUB_ORGANIZATION
+
         try:
             with get_user_github_client(self.db, user_id) as gh:
-                # Authenticated search returns both public and accessible private repos.
-                results = gh.search_repositories(q, per_page=10)
-                for repo in results:
-                    entry = {
-                        "full_name": repo.get("full_name"),
-                        "description": repo.get("description"),
-                        "default_branch": repo.get("default_branch"),
-                        "private": bool(repo.get("private")),
-                        "owner": repo.get("owner", {}).get("login"),
-                        "html_url": repo.get("html_url"),
-                        "installation_id": None,
-                    }
-                    if entry["private"]:
-                        private_matches.append(entry)
-                    else:
-                        public_matches.append(entry)
+                # 1. Search within organization (if configured)
+                if org:
+                    org_query = f"{q} org:{org}"
+                    org_results = gh.search_repositories(org_query, per_page=20)
+                    for repo in org_results:
+                        owner = repo.get("owner", {}).get("login", "")
+                        if owner.lower() != org.lower():
+                            continue
+                        org_matches.append(
+                            {
+                                "full_name": repo.get("full_name"),
+                                "description": repo.get("description"),
+                                "default_branch": repo.get("default_branch"),
+                                "private": bool(repo.get("private")),
+                                "owner": owner,
+                                "html_url": repo.get("html_url"),
+                            }
+                        )
+
+                # 2. Search public repos (exclude org repos to avoid duplicates)
+                public_results = gh.search_repositories(q, per_page=10)
+                org_lower = org.lower() if org else ""
+                for repo in public_results:
+                    owner = repo.get("owner", {}).get("login", "")
+                    # Skip private repos and repos already in org_matches
+                    if repo.get("private"):
+                        continue
+                    if org and owner.lower() == org_lower:
+                        continue
+                    public_matches.append(
+                        {
+                            "full_name": repo.get("full_name"),
+                            "description": repo.get("description"),
+                            "default_branch": repo.get("default_branch"),
+                            "private": False,
+                            "owner": owner,
+                            "html_url": repo.get("html_url"),
+                        }
+                    )
         except Exception as e:
             logger.error(f"Failed to search repos on GitHub: {e}")
 
         return RepoSearchResponse(
-            private_matches=private_matches, public_matches=public_matches
+            private_matches=org_matches,  # "Your Repositories (App Installed)"
+            public_matches=public_matches,  # "Public GitHub Repositories"
         )
 
     def get_repository_detail(
@@ -243,14 +322,20 @@ class RepositoryService:
         # Check RBAC access
         user_id = ObjectId(current_user["_id"])
         user_role = current_user.get("role", "user")
+        github_accessible_repos = current_user.get("github_accessible_repos", [])
 
-        if not self.repo_config.can_user_access(ObjectId(repo_id), user_id, user_role):
+        if not self.repo_config.can_user_access(
+            ObjectId(repo_id), user_id, user_role, github_accessible_repos
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this repository",
             )
 
-        return _serialize_repo_detail(repo_doc)
+        # Fetch raw repository data
+        raw_repo_doc = self.raw_repo.find_by_id(repo_doc.raw_repo_id)
+
+        return _serialize_repo_detail(repo_doc, raw_repo_doc)
 
     def update_repository_settings(
         self, repo_id: str, payload: RepoUpdateRequest, current_user: dict
@@ -309,9 +394,7 @@ class RepositoryService:
 
         # Trigger import task
         start_model_processing.delay(
-            repo_id=repo_id,
-            user_id=user_id,
-            installation_id=repo_doc.installation_id,
+            repo_config_id=repo_id,
             ci_provider=(
                 repo_doc.ci_provider.value
                 if hasattr(repo_doc.ci_provider, "value")
@@ -380,15 +463,9 @@ class RepositoryService:
 
         user_id = str(current_user["_id"])
 
-        # Check if repo is already imported with installation
-        installation_id = None
-        imported = self.repo_config.find_by_full_name(full_name)
-        if imported and imported.installation_id:
-            installation_id = imported.installation_id
-
-        # Prefer installation if available, else fallback to user token
-        if installation_id:
-            client_ctx = get_app_github_client(self.db, installation_id)
+        # Use GitHub App if configured, else fallback to user token
+        if settings.GITHUB_INSTALLATION_ID:
+            client_ctx = get_app_github_client()
         else:
             client_ctx = get_user_github_client(self.db, user_id)
 

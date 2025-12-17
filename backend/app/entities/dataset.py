@@ -1,11 +1,10 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from .base import BaseEntity, PyObjectId
-from app.ci_providers.models import CIProvider
 
 
 class DatasetValidationStatus(str, Enum):
@@ -92,16 +91,6 @@ class DatasetProject(BaseEntity):
     # Enrichment tracking
     total_versions: int = 0
     last_enriched_at: Optional[datetime] = None
-
-    # RBAC Access Control
-    visibility: Literal["public", "private"] = Field(
-        default="public",
-        description="Dataset visibility: 'public' = all org users can view, 'private' = only granted users",
-    )
-    granted_user_ids: List[PyObjectId] = Field(
-        default_factory=list,
-        description="List of user IDs granted access to this dataset (for private datasets)",
-    )
 
     class Config:
         use_enum_values = True

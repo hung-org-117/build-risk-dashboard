@@ -4,10 +4,9 @@ Monitoring Service - Gathers system stats from Celery, Redis, MongoDB.
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import redis
-from celery import Celery
 from pymongo.database import Database
 
 from app.config import settings

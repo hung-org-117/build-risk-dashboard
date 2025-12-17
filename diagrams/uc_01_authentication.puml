@@ -1,4 +1,4 @@
-@startuml Use Case - Authentication & Authorization
+@startuml
 '===============================================================
 ' UC-01: AUTHENTICATION & AUTHORIZATION
 '===============================================================
@@ -12,10 +12,12 @@ skinparam usecase {
 left to right direction
 
 actor "User" as User
-actor "GitHub OAuth" as GitHub <<External>>
+actor "Admin" as Admin
+Admin --|> User
+actor "Github" as Github
 
-rectangle "Authentication & Authorization" {
-    usecase "Login via GitHub" as UC_Login
+rectangle {
+    usecase "Login via Github" as UC_Login
     usecase "Logout" as UC_Logout
     usecase "View Profile" as UC_Profile
     usecase "Sync Repository Access" as UC_Sync
@@ -25,8 +27,8 @@ User --> UC_Login
 User --> UC_Logout
 User --> UC_Profile
 
-UC_Login --> GitHub
+UC_Login --> Github
 UC_Login ..> UC_Sync : <<include>>
-UC_Sync --> GitHub
+UC_Sync --> Github
 
 @enduml

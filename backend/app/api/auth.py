@@ -50,10 +50,19 @@ async def github_oauth_callback(
     db: Database = Depends(get_db),
 ):
     """Handle GitHub OAuth callback, exchange code for token, and redirect to frontend."""
+    from urllib.parse import quote
+
     service = AuthService(db)
-    jwt_token, refresh_token, redirect_path = await service.handle_github_callback(
-        code, state
-    )
+
+    try:
+        jwt_token, refresh_token, redirect_path = await service.handle_github_callback(
+            code, state
+        )
+    except HTTPException as e:
+        # Redirect to login page with error details
+        redirect_target = settings.FRONTEND_BASE_URL.rstrip("/")
+        error_message = quote(e.detail)
+        return RedirectResponse(url=f"{redirect_target}/login?error={error_message}")
 
     redirect_target = settings.FRONTEND_BASE_URL.rstrip("/")
     if redirect_path:

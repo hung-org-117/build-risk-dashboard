@@ -1,4 +1,4 @@
-@startuml Use Case - Manage Users & Access
+@startuml
 '===============================================================
 ' UC-08: MANAGE USERS & ACCESS (Admin)
 '===============================================================
@@ -9,11 +9,11 @@ skinparam usecase {
     BackgroundColor #FFFFCC
 }
 
-top to bottom direction
+left to right direction
 
 actor "Admin" as Admin
 
-rectangle "Manage Users & Access" {
+rectangle {
     usecase "View User List" as UC_ListUsers
     usecase "Search Users" as UC_Search
     usecase "View User Details" as UC_UserDetails
@@ -25,11 +25,5 @@ Admin --> UC_UserDetails
 Admin --> UC_Delete
 
 UC_ListUsers ..> UC_Search : <<extend>>
-
-note bottom of UC_UserDetails
-  User's repo access is determined
-  by their GitHub permissions
-  (synced at login)
-end note
 
 @enduml

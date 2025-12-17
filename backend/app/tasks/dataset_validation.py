@@ -7,7 +7,6 @@ Flow:
 3. finalize_validation - Aggregate results, update dataset status
 """
 
-from typing import Optional
 from app.entities.dataset import DatasetValidationStatus
 import logging
 from typing import Any, Dict, List
@@ -155,15 +154,8 @@ def validate_repos_task(self, dataset_id: str) -> Dict[str, Any]:
                 try:
                     repo_data = gh.get_repository(full_name)
 
-                    raw_repo = raw_repo_repo.upsert_by_full_name(
-                        full_name=full_name,
-                        github_repo_id=repo_data.get("id"),
-                        default_branch=repo_data.get("default_branch", "main"),
-                        is_private=repo_data.get("private", False),
-                        main_lang=repo_data.get("language"),
-                        github_metadata=repo_data,
-                    )
-                    if raw_repo.is_private:
+                    is_private = bool(repo_data.get("private"))
+                    if is_private:
                         logger.info(f"Repo {full_name} is private, skipping validation")
                         repos_not_found += 1
 
@@ -174,11 +166,21 @@ def validate_repos_task(self, dataset_id: str) -> Dict[str, Any]:
                             source_languages=[],
                             test_frameworks=[],
                             validation_status=DatasetRepoValidationStatus.NOT_FOUND,
-                            raw_repo_id=raw_repo.id,
-                            default_branch=repo_data.get("default_branch", "main"),
+                            raw_repo_id=None,
+                            default_branch=None,
                             validation_error="Repo is private",
                         )
                         continue
+
+                    raw_repo = raw_repo_repo.upsert_by_full_name(
+                        full_name=full_name,
+                        github_repo_id=repo_data.get("id"),
+                        default_branch=repo_data.get("default_branch", "main"),
+                        is_private=is_private,
+                        main_lang=repo_data.get("language"),
+                        github_metadata=repo_data,
+                    )
+
                     validated_raw_repo_ids.append(raw_repo.id)
 
                     repo_config_repo.upsert_repo(
@@ -213,7 +215,7 @@ def validate_repos_task(self, dataset_id: str) -> Dict[str, Any]:
                             else DatasetRepoValidationStatus.ERROR
                         ),
                         raw_repo_id=None,
-                        default_branch="main",
+                        default_branch=None,
                         validation_error=error_msg,
                     )
                     repos_not_found += 1
@@ -523,7 +525,6 @@ def validate_builds_chunk(
     Uses Redis to aggregate results across chunks.
     """
     import asyncio
-    import time
 
     async def _do_validate():
         db = get_database()

@@ -8,7 +8,7 @@ Follows app-flow architecture: API → Service → Repository.
 import hashlib
 import hmac
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 from pymongo.database import Database

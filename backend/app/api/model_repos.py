@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status, Body
+from fastapi import APIRouter, Depends, Path, Query, status
 from pymongo.database import Database
 
 from app.database.mongo import get_db

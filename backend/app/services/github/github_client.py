@@ -631,18 +631,11 @@ def get_user_github_client(db: Database, user_id: str) -> GitHubClient:
     return GitHubClient(token=identity["access_token"])
 
 
-def get_app_github_client(db: Database, installation_id: str) -> GitHubClient:
-    """
-    Get a GitHub client using the GitHub App installation token.
-    Used for backfilling past retained workflows and commits.
-    """
-    if not installation_id:
-        raise GithubConfigurationError("installation_id is required for app auth")
-
+def get_app_github_client() -> GitHubClient:
     if not github_app_configured():
         raise GithubConfigurationError("GitHub App is not configured")
 
-    token = get_installation_token(installation_id, db=db)
+    token = get_installation_token()
     return GitHubClient(token=token)
 
 

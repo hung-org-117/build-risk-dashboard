@@ -8,8 +8,10 @@ from fastapi import APIRouter, Depends
 from pymongo.database import Database
 
 from app.database.mongo import get_db
-from app.dtos import UserResponse
+from app.dtos import UserResponse, UserUpdate
 from app.services.user_service import UserService
+
+from app.middleware.auth import get_current_user as get_current_user_middleware
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -29,6 +31,22 @@ def list_users(db: Database = Depends(get_db)):
     response_model=UserResponse,
     response_model_by_alias=False,
 )
-def get_current_user(db: Database = Depends(get_db)):
+def get_current_user(
+    user: dict = Depends(get_current_user_middleware), db: Database = Depends(get_db)
+):
     service = UserService(db)
-    return service.get_current_user()
+    return service.get_user_by_id(str(user["_id"]))
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    response_model_by_alias=False,
+)
+def update_current_user(
+    update_data: UserUpdate,
+    user: dict = Depends(get_current_user_middleware),
+    db: Database = Depends(get_db),
+):
+    service = UserService(db)
+    return service.update_user(str(user["_id"]), update_data)

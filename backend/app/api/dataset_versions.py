@@ -1,8 +1,7 @@
 import logging
-from enum import Enum
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query, status, HTTPException
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.database.mongo import get_db

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from app.services.github.github_client import get_public_github_client
 
 logger = logging.getLogger(__name__)
 

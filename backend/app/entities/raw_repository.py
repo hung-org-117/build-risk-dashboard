@@ -5,7 +5,7 @@ This entity stores raw repository information fetched from GitHub.
 It serves as a single source of truth for repository metadata across all flows.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import Field
 

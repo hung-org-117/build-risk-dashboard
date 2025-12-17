@@ -4,10 +4,9 @@ Base classes for log parsers.
 
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Pattern
+from typing import Optional
 
 
 @dataclass

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 import time
-from typing import Dict, Tuple
+from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from jose import jwt
 
 from app.config import settings
-from app.services.github.exceptions import GithubConfigurationError
 from app.core.redis import get_redis
+from app.services.github.exceptions import GithubConfigurationError
 
 
 def _load_private_key(raw: str) -> str:
@@ -71,29 +70,13 @@ def _request_installation_token(
     return token, expires_at
 
 
-def get_installation_token(installation_id: str | None = None, db=None) -> str:
-    if installation_id is None:
+def get_installation_token() -> str:
+    if settings.GITHUB_INSTALLATION_ID is None:
         raise GithubConfigurationError(
             "Installation id is required to generate a GitHub App token"
         )
 
-    if db is not None:
-        installation_doc = db.github_installations.find_one(
-            {"installation_id": installation_id}
-        )
-        if installation_doc:
-            if installation_doc.get("revoked_at") or installation_doc.get(
-                "uninstalled_at"
-            ):
-                raise GithubConfigurationError(
-                    f"GitHub App installation {installation_id} has been uninstalled. "
-                    "User needs to reinstall the app."
-                )
-            if installation_doc.get("suspended_at"):
-                raise GithubConfigurationError(
-                    f"GitHub App installation {installation_id} is suspended."
-                )
-
+    installation_id = settings.GITHUB_INSTALLATION_ID
     app_id, private_key = _require_app_config()
 
     redis_client = get_redis()

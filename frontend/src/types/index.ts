@@ -233,7 +233,6 @@ export interface RepositoryRecord {
   github_repo_id?: number;
   created_at: string;
   last_scanned_at?: string;
-  installation_id?: string;
   ci_provider: string;
   test_frameworks: string[];
   source_languages: string[];
@@ -345,7 +344,6 @@ export interface RepoSuggestion {
   default_branch?: string;
   private: boolean;
   owner?: string;
-  installation_id?: string;
   html_url?: string;
 }
 
@@ -370,7 +368,6 @@ export interface RepoImportPayload {
   full_name: string;
   provider?: string;
   user_id?: string;
-  installation_id?: string;
   test_frameworks?: string[];
   source_languages?: string[];
   ci_provider?: string;
@@ -472,26 +469,9 @@ export interface UserAccount {
   };
 }
 
-export interface GithubInstallation {
-  id: string;
-  installation_id: string;
-  account_login?: string;
-  account_type?: string; // "User" or "Organization"
-  installed_at: string;
-  revoked_at?: string | null;
-  uninstalled_at?: string | null;
-  suspended_at?: string | null;
-  created_at: string;
-}
-
-export interface GithubInstallationListResponse {
-  installations: GithubInstallation[];
-}
-
 export interface AuthVerifyResponse {
   authenticated: boolean;
   github_connected?: boolean;
-  app_installed?: boolean;
   reason?: string;
   user?: {
     id: string;

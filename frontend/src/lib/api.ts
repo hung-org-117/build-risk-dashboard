@@ -16,8 +16,6 @@ import type {
   FeatureDAGResponse,
   FeatureListResponse,
   GithubAuthorizeResponse,
-  GithubInstallation,
-  GithubInstallationListResponse,
   GithubToken,
   RefreshTokenResponse,
   RepoDetail,
@@ -350,29 +348,17 @@ export const integrationApi = {
     return response.data;
   },
 
-  listGithubInstallations: async () => {
-    const response = await api.get<GithubInstallationListResponse>(
-      "/integrations/github/installations"
-    );
-    return response.data;
-  },
-  getGithubInstallation: async (installationId: string) => {
-    const response = await api.get<GithubInstallation>(
-      `/integrations/github/installations/${installationId}`
-    );
-    return response.data;
-  },
-  syncInstallations: async () => {
-    const response = await api.post<GithubInstallationListResponse>(
-      "/integrations/github/sync"
-    );
-    return response.data;
-  },
+  // Removed GithubInstallation methods as we rely on backend config
+
 };
 
 export const usersApi = {
   getCurrentUser: async () => {
     const response = await api.get<UserAccount>("/users/me");
+    return response.data;
+  },
+  updateCurrentUser: async (payload: { name?: string }) => {
+    const response = await api.patch<UserAccount>("/users/me", payload);
     return response.data;
   },
 };

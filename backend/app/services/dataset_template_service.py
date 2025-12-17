@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 from fastapi import HTTPException, status
 from pymongo.database import Database

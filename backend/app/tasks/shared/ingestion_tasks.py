@@ -14,11 +14,8 @@ Features:
 import logging
 import subprocess
 import asyncio
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from bson import ObjectId
-from celery import chain, group
 
 from app.celery_app import celery_app
 from app.config import settings
@@ -28,10 +25,9 @@ from app.repositories.raw_repository import RawRepositoryRepository
 from app.ci_providers import CIProvider, get_provider_config, get_ci_provider
 from app.services.github.exceptions import GithubRateLimitError
 from app.paths import REPOS_DIR, WORKTREES_DIR, LOGS_DIR
+from app.core.redis import RedisLock
 
 logger = logging.getLogger(__name__)
-
-from app.core.redis import RedisLock
 
 
 class RateLimiter:
@@ -101,7 +97,6 @@ def clone_repo(
     raw_repo_id: str = "",
     full_name: str = "",
     publish_status: bool = False,
-    installation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Clone or update git repository.
@@ -116,8 +111,32 @@ def clone_repo(
 
     with RedisLock(f"clone:{raw_repo_id}", timeout=700, blocking_timeout=60):
         try:
+            # Check if this repo belongs to the configured organization
+            from app.services.repository_service import is_org_repo
+
+            use_installation_token = (
+                is_org_repo(full_name) and settings.GITHUB_INSTALLATION_ID
+            )
+
             if repo_path.exists():
                 logger.info(f"Updating existing clone for {full_name}")
+
+                # For org repos, update remote URL with fresh token before fetching
+                if use_installation_token:
+                    from app.services.github.github_app import get_installation_token
+
+                    token = get_installation_token()
+                    auth_url = (
+                        f"https://x-access-token:{token}@github.com/{full_name}.git"
+                    )
+                    subprocess.run(
+                        ["git", "remote", "set-url", "origin", auth_url],
+                        cwd=str(repo_path),
+                        check=True,
+                        capture_output=True,
+                        timeout=30,
+                    )
+
                 subprocess.run(
                     ["git", "fetch", "--all", "--prune"],
                     cwd=str(repo_path),
@@ -129,11 +148,11 @@ def clone_repo(
                 logger.info(f"Cloning {full_name} to {repo_path}")
                 clone_url = f"https://github.com/{full_name}.git"
 
-                # For private repos, use installation token
-                if installation_id:
+                # For org repos, use installation token
+                if use_installation_token:
                     from app.services.github.github_app import get_installation_token
 
-                    token = get_installation_token(installation_id, self.db)
+                    token = get_installation_token()
                     clone_url = (
                         f"https://x-access-token:{token}@github.com/{full_name}.git"
                     )
@@ -366,7 +385,6 @@ def download_build_logs(
     full_name: str = "",
     build_ids: List[str] = [],
     ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
-    installation_id: Optional[str] = None,
     max_consecutive_expired: int = 10,
     publish_status: bool = False,
 ) -> Dict[str, Any]:
@@ -411,7 +429,6 @@ def download_build_logs(
             full_name=full_name,
             build_ids=chunk,
             ci_provider=ci_provider,
-            installation_id=installation_id,
             publish_status=publish_status,
             chunk_index=i // chunk_size,
             total_chunks=(len(unique_build_ids) + chunk_size - 1) // chunk_size,
@@ -445,7 +462,6 @@ def download_logs_chunk(
     full_name: str,
     build_ids: List[str],
     ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
-    installation_id: Optional[str] = None,
     publish_status: bool = False,
     chunk_index: int = 0,
     total_chunks: int = 1,
@@ -500,10 +516,7 @@ def download_logs_chunk(
             build_logs_dir = LOGS_DIR / raw_repo_id / build_id
             build_logs_dir.mkdir(parents=True, exist_ok=True)
 
-            composite_id = f"{full_name}:{build_id}"
-            fetch_kwargs = {"build_id": composite_id}
-            if ci_provider_enum == CIProvider.GITHUB_ACTIONS and installation_id:
-                fetch_kwargs["installation_id"] = installation_id
+            fetch_kwargs = {"build_id": f"{full_name}:{build_id}"}
 
             github_limiter.wait()
             log_files = await ci_instance.fetch_build_logs(**fetch_kwargs)

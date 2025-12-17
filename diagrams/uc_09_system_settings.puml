@@ -1,4 +1,4 @@
-@startuml Use Case - Configure System Settings
+@startuml
 '===============================================================
 ' UC-09: CONFIGURE SYSTEM SETTINGS (Admin)
 '===============================================================
@@ -13,29 +13,19 @@ left to right direction
 
 actor "Admin" as Admin
 
-rectangle "Configure System Settings" {
-    usecase "Configure Model\nSettings" as UC_Model
+rectangle {
+    usecase "Configure\nExternal\nIntegrations" as UC_Integrations
+    usecase "Configure\ntools, CI\nproviders" as UC_Tools
+    usecase "Manage Github\nTokens" as UC_Tokens
+    usecase "Configure\nModel Settings" as UC_Model
     usecase "Configure Alert\nChannels" as UC_AlertChannels
-    usecase "Configure External\nIntegrations" as UC_Integrations
 }
 
+Admin --> UC_Integrations
+Admin --> UC_Tokens
 Admin --> UC_Model
 Admin --> UC_AlertChannels
-Admin --> UC_Integrations
 
-note bottom of UC_Model
-  Model configuration including
-  risk thresholds (Low/Med/High)
-end note
-
-note bottom of UC_AlertChannels
-  Select notification channels:
-  Email (Gmail), In-app
-end note
-
-note bottom of UC_Integrations
-  Configure SonarQube, Trivy,
-  GitHub connections
-end note
+UC_Integrations ..> UC_Tools : <<include>>
 
 @enduml

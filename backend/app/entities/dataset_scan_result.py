@@ -47,6 +47,13 @@ class DatasetScanResult(BaseEntity):
     # Error details if failed
     error_message: Optional[str] = None
 
+    # Per-commit config override (takes precedence over DatasetScan.scan_config)
+    override_config: Optional[str] = None
+
+    # Retry tracking
+    retry_count: int = 0
+    last_retry_at: Optional[datetime] = None
+
     # Timing
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

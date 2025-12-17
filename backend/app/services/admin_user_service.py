@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List
 
 from bson import ObjectId
 from fastapi import HTTPException, status

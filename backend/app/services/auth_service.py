@@ -157,15 +157,6 @@ class AuthService:
             self.db, user_id, verify_with_api=True
         )
 
-        app_installed = False
-        if identity:
-            github_login = identity.get("account_login")
-            if github_login:
-                install_count = self.db.github_installations.count_documents(
-                    {"account_login": github_login}
-                )
-                app_installed = install_count > 0
-
         user_info = {
             "id": str(user["_id"]),
             "email": user.get("email"),
@@ -184,7 +175,6 @@ class AuthService:
             return AuthVerifyResponse(
                 authenticated=True,
                 github_connected=False,
-                app_installed=False,
                 reason="no_github_identity",
                 user=user_info,
             )
@@ -193,7 +183,6 @@ class AuthService:
             return AuthVerifyResponse(
                 authenticated=True,
                 github_connected=False,
-                app_installed=app_installed,
                 reason="github_token_expired",
                 user=user_info,
                 github=github_data,
@@ -203,7 +192,6 @@ class AuthService:
             return AuthVerifyResponse(
                 authenticated=True,
                 github_connected=False,
-                app_installed=app_installed,
                 reason="github_token_revoked",
                 user=user_info,
                 github=github_data,
@@ -216,7 +204,6 @@ class AuthService:
         return AuthVerifyResponse(
             authenticated=True,
             github_connected=True,
-            app_installed=app_installed,
             user=user_info,
             github=github_data,
         )

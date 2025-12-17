@@ -253,6 +253,7 @@ class TrivyTool(IntegrationTool):
         self,
         target_path: str,
         scan_types: Optional[List[str]] = None,
+        config_content: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run Trivy scan on a filesystem path.
@@ -260,6 +261,7 @@ class TrivyTool(IntegrationTool):
         Args:
             target_path: Path to scan (usually a cloned git repo or worktree)
             scan_types: Types of scans to run (vuln, config, secret, license)
+            config_content: Optional trivy.yaml config content
 
         Returns:
             Dict with scan results and metrics
@@ -268,6 +270,14 @@ class TrivyTool(IntegrationTool):
             scan_types = ["vuln", "config"]
 
         start_time = time.time()
+
+        # Write custom config if provided
+        config_file_path = None
+        if config_content:
+            config_file_path = Path(target_path) / "trivy.yaml"
+            with open(config_file_path, "w") as f:
+                f.write(config_content)
+            logger.info("Wrote custom trivy.yaml for scan")
 
         cmd = [
             "trivy",
@@ -279,6 +289,10 @@ class TrivyTool(IntegrationTool):
             "--timeout",
             f"{self._timeout}s",
         ]
+
+        # Use custom config if provided
+        if config_file_path:
+            cmd.extend(["--config", str(config_file_path)])
 
         # Add skip dirs
         if self._skip_dirs:

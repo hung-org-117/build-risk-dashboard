@@ -60,7 +60,6 @@ def get_required_resources_for_template(
 def ingest_model_builds(
     self: PipelineTask,
     repo_config_id: str,
-    installation_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
@@ -84,7 +83,6 @@ def ingest_model_builds(
         repo_config_id=repo_config_id,
         raw_repo_id=str(repo_config.raw_repo_id),
         full_name=repo_config.full_name,
-        installation_id=installation_id,
         ci_provider=ci_provider,
         max_builds=max_builds,
         since_days=since_days,
@@ -118,7 +116,6 @@ def fetch_builds_batch(
     repo_config_id: str,
     raw_repo_id: str,
     full_name: str,
-    installation_id: str,
     ci_provider: str,
     page: int,
     total_fetched: int,
@@ -158,8 +155,6 @@ def fetch_builds_batch(
             "only_with_logs": only_with_logs,
             "only_completed": True,
         }
-        if ci_provider_enum == CIProvider.GITHUB_ACTIONS and installation_id:
-            fetch_kwargs["installation_id"] = installation_id
 
         # Fetch single page
         loop = asyncio.new_event_loop()
@@ -225,7 +220,6 @@ def fetch_builds_batch(
                 repo_config_id=repo_config_id,
                 raw_repo_id=raw_repo_id,
                 full_name=full_name,
-                installation_id=installation_id,
                 ci_provider=ci_provider,
                 page=page + 1,
                 total_fetched=new_total,
@@ -247,7 +241,6 @@ def fetch_builds_batch(
                 repo_config_id=repo_config_id,
                 raw_repo_id=raw_repo_id,
                 full_name=full_name,
-                installation_id=installation_id,
                 ci_provider=ci_provider,
                 ci_build_ids=new_ci_build_ids,
             )
@@ -279,7 +272,6 @@ def prepare_and_dispatch_processing(
     repo_config_id: str,
     raw_repo_id: str,
     full_name: str,
-    installation_id: str,
     ci_provider: str,
     ci_build_ids: List[str],
 ) -> Dict[str, Any]:
@@ -331,7 +323,6 @@ def prepare_and_dispatch_processing(
             build_ids=ci_build_ids,
             commit_shas=commit_shas,
             ci_provider=ci_provider_enum,
-            installation_id=installation_id,
         )
         if workflow:
             workflow.apply_async()

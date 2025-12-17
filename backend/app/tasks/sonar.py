@@ -7,12 +7,10 @@ Tasks:
 """
 
 import logging
-from datetime import datetime, timezone
 
 from bson import ObjectId
 
 from app.celery_app import celery_app
-from app.config import settings
 from app.database.mongo import get_database
 from app.entities.sonar_scan_pending import SonarScanPending, ScanPendingStatus
 from app.repositories.sonar_scan_pending import SonarScanPendingRepository

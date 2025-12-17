@@ -5,11 +5,9 @@ This module uses the Hamilton-based pipeline directly for feature extraction.
 """
 
 from typing import List
-from app.ci_providers.models import CIProvider
 from app.entities.model_training_build import ModelTrainingBuild
-from app.entities.enums import ExtractionStatus, ModelBuildConclusion
+from app.entities.enums import ExtractionStatus
 import logging
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from bson import ObjectId
@@ -17,7 +15,6 @@ import redis
 import json
 
 from app.celery_app import celery_app
-from app.entities.model_training_build import ModelTrainingBuild
 from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
@@ -25,7 +22,6 @@ from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
 from app.tasks.shared import extract_features_for_build
 from app.config import settings
-from app.paths import REPOS_DIR
 from app.tasks.pipeline.feature_dag._metadata import (
     format_features_for_storage,
 )
@@ -85,7 +81,6 @@ def publish_status(repo_id: str, status: str, message: str = ""):
 def start_model_processing(
     self: PipelineTask,
     repo_config_id: str,
-    installation_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
@@ -96,7 +91,6 @@ def start_model_processing(
 
     Flow: start_model_processing -> ingest_model_builds -> dispatch_build_processing
     """
-    from celery import chain
     from app.tasks.model_ingestion import ingest_model_builds
     from app.repositories.model_repo_config import ModelRepoConfigRepository
     from app.entities.enums import ModelImportStatus
@@ -119,7 +113,6 @@ def start_model_processing(
     try:
         ingest_model_builds.delay(
             repo_config_id=repo_config_id,
-            installation_id=installation_id,
             ci_provider=ci_provider,
             max_builds=max_builds,
             since_days=since_days,
@@ -176,7 +169,6 @@ def dispatch_build_processing(
     from app.repositories.model_training_build import ModelTrainingBuildRepository
     from app.repositories.model_repo_config import ModelRepoConfigRepository
     from app.repositories.raw_build_run import RawBuildRunRepository
-    from app.entities.model_training_build import ModelTrainingBuild
     from app.entities.enums import ExtractionStatus, ModelImportStatus
 
     if batch_size is None:

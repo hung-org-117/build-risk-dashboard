@@ -34,7 +34,7 @@ from .dataset import (
 from .dataset_build import DatasetBuild, DatasetBuildStatus
 
 # Other entities
-from .github_installation import GithubInstallation
+# from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
 from .user import User
 from .dataset_template import DatasetTemplate
@@ -79,7 +79,8 @@ __all__ = [
     "DatasetBuild",
     "DatasetBuildStatus",
     # Other
-    "GithubInstallation",
+    # Other
+    # "GithubInstallation",
     "OAuthIdentity",
     "User",
     "DatasetTemplate",

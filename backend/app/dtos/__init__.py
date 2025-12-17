@@ -18,8 +18,8 @@ from .build import (
 )
 from .github import (
     GithubAuthorizeResponse,
-    GithubInstallationListResponse,
-    GithubInstallationResponse,
+    # GithubInstallationListResponse,
+    # GithubInstallationResponse,
     GithubOAuthInitRequest,
     GithubRepositoryStatus,
 )
@@ -36,6 +36,7 @@ from .repository import (
 from .user import (
     OAuthIdentityResponse,
     UserResponse,
+    UserUpdate,
 )
 from .dataset import (
     DatasetResponse,
@@ -105,8 +106,8 @@ __all__ = [
     "RepoDistributionEntry",
     # GitHub
     "GithubAuthorizeResponse",
-    "GithubInstallationListResponse",
-    "GithubInstallationResponse",
+    # "GithubInstallationListResponse",
+    # "GithubInstallationResponse",
     "GithubOAuthInitRequest",
     "GithubRepositoryStatus",
     # Repository
@@ -121,6 +122,7 @@ __all__ = [
     # User
     "OAuthIdentityResponse",
     "UserResponse",
+    "UserUpdate",
     # Build
     "BuildSummary",
     "BuildDetail",

@@ -55,8 +55,7 @@ class LogParserRegistry:
     def get_frameworks_by_language(self) -> Dict[str, List[str]]:
         """Get frameworks grouped by language."""
         return {
-            lang: [p.name for p in parsers]
-            for lang, parsers in self._parsers.items()
+            lang: [p.name for p in parsers] for lang, parsers in self._parsers.items()
         }
 
     def get_languages(self) -> List[str]:
@@ -81,9 +80,7 @@ class LogParserRegistry:
             ParsedLog with extracted metrics, or empty result if no match
         """
         allowed = (
-            {f.lower() for f in allowed_frameworks}
-            if allowed_frameworks
-            else None
+            {f.lower() for f in allowed_frameworks} if allowed_frameworks else None
         )
 
         # Build ordered list of parsers to try
@@ -112,7 +109,8 @@ class LogParserRegistry:
 
         # Fallback: no tests detected
         detected_language = (
-            language_hint.lower() if language_hint
+            language_hint.lower()
+            if language_hint
             else ("python" if "pytest" in text.lower() else None)
         )
         return ParsedLog(

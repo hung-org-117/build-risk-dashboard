@@ -4,6 +4,7 @@
 - Logs method, path, status, duration, client IP, user subject (from cookie/jwt)
 - Does not log request/response bodies to avoid leaking sensitive data
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,7 +52,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         if jwt_token:
             try:
-                payload = jwt.decode(jwt_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+                payload = jwt.decode(
+                    jwt_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+                )
                 user_sub = payload.get("sub")
             except JWTError:
                 # Not valid or expired — don't fail the request

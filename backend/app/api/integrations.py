@@ -15,12 +15,12 @@ from pydantic import BaseModel
 from pymongo.database import Database
 
 from app.database.mongo import get_db
-from app.dtos.github import (
-    GithubInstallationListResponse,
-    GithubInstallationResponse,
-)
+
+# from app.dtos.github import (
+#     GithubInstallationListResponse,
+#     GithubInstallationResponse,
+# )
 from app.middleware.auth import get_current_user
-from app.services.integration_service import IntegrationService
 from app.services.dataset_scan_service import DatasetScanService
 from app.services.sonar_webhook_service import SonarWebhookService
 
@@ -28,48 +28,9 @@ router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
 
 # =============================================================================
-# GitHub Installations (existing)
+# GitHub Installations (DEPRECATED/REMOVED)
+# We now use single-tenant config GITHUB_INSTALLATION_ID.
 # =============================================================================
-
-
-@router.get(
-    "/github/installations",
-    response_model=GithubInstallationListResponse,
-    response_model_by_alias=False,
-)
-def list_github_installations(
-    db: Database = Depends(get_db), current_user: dict = Depends(get_current_user)
-):
-    service = IntegrationService(db)
-    return service.list_github_installations()
-
-
-@router.get(
-    "/github/installations/{installation_id}",
-    response_model=GithubInstallationResponse,
-    response_model_by_alias=False,
-)
-def get_github_installation(
-    installation_id: str,
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    service = IntegrationService(db)
-    return service.get_github_installation(installation_id)
-
-
-@router.post(
-    "/github/sync",
-    response_model=GithubInstallationListResponse,
-    response_model_by_alias=False,
-)
-def sync_github_installations(
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Sync GitHub App installations from GitHub API."""
-    service = IntegrationService(db)
-    return service.sync_installations(current_user["_id"])
 
 
 # =============================================================================
@@ -138,6 +99,7 @@ def get_unique_commits(
 class StartScanRequest(BaseModel):
     tool_type: str  # "sonarqube" or "trivy"
     selected_commit_shas: Optional[List[str]] = None  # None = all
+    scan_config: Optional[str] = None  # Default config for all commits
 
 
 class ScanResponse(BaseModel):
@@ -169,6 +131,7 @@ def start_scan(
             user_id=str(current_user["_id"]),
             tool_type=request.tool_type,
             selected_commit_shas=request.selected_commit_shas,
+            scan_config=request.scan_config,
         )
         return {
             "id": str(scan.id),
@@ -373,6 +336,96 @@ def get_scan_summary(
 
     summary = service.get_scan_summary(scan_id)
     return summary
+
+
+# =============================================================================
+# Failed Results and Retry
+# =============================================================================
+
+
+class FailedResultResponse(BaseModel):
+    id: str
+    commit_sha: str
+    repo_full_name: str
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    override_config: Optional[str] = None
+
+
+class FailedResultsListResponse(BaseModel):
+    results: List[FailedResultResponse]
+    total: int
+
+
+@router.get(
+    "/datasets/{dataset_id}/scans/{scan_id}/failed",
+    response_model=FailedResultsListResponse,
+)
+def get_failed_results(
+    dataset_id: str,
+    scan_id: str,
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get failed results for retry UI."""
+    service = DatasetScanService(db)
+    scan = service.get_scan(scan_id)
+    if not scan or str(scan.dataset_id) != dataset_id:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    results = service.get_failed_results(scan_id)
+    return {
+        "results": [
+            {
+                "id": str(r.id),
+                "commit_sha": r.commit_sha,
+                "repo_full_name": r.repo_full_name,
+                "error_message": r.error_message,
+                "retry_count": r.retry_count,
+                "override_config": r.override_config,
+            }
+            for r in results
+        ],
+        "total": len(results),
+    }
+
+
+class RetryResultRequest(BaseModel):
+    override_config: Optional[str] = None  # Per-commit config override
+
+
+@router.post(
+    "/datasets/{dataset_id}/scans/{scan_id}/results/{result_id}/retry",
+    response_model=ScanResultResponse,
+)
+def retry_result(
+    dataset_id: str,
+    scan_id: str,
+    result_id: str,
+    request: RetryResultRequest,
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Retry a failed scan result with optional config override."""
+    service = DatasetScanService(db)
+    scan = service.get_scan(scan_id)
+    if not scan or str(scan.dataset_id) != dataset_id:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    result = service.retry_failed_result(result_id, request.override_config)
+    if not result:
+        raise HTTPException(status_code=400, detail="Cannot retry this result")
+
+    return {
+        "id": str(result.id),
+        "commit_sha": result.commit_sha,
+        "repo_full_name": result.repo_full_name,
+        "row_indices": result.row_indices,
+        "status": result.status,
+        "results": result.results,
+        "error_message": result.error_message,
+        "scan_duration_ms": result.scan_duration_ms,
+    }
 
 
 # =============================================================================

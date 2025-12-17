@@ -1,7 +1,7 @@
 """OAuth identity repository for database operations"""
 
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 from pymongo.database import Database
 

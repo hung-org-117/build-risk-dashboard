@@ -2,6 +2,8 @@
 GitHub Actions CI Provider - Uses GitHubClient for rate limit tracking.
 """
 
+from __future__ import annotations
+from app.ci_providers.models import BuildConclusion
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -81,24 +83,35 @@ class GitHubActionsProvider(CIProviderInterface):
                     "GitHub token not provided and no DB for pool - API rate limits will apply"
                 )
 
-    def _get_github_client(self, installation_id: Optional[str] = None):
+    def _get_github_client(
+        self, repo_name: Optional[str] = None, installation_id: Optional[str] = None
+    ):
         """
         Get GitHubClient for API calls.
 
         Priority:
-        1. GitHub App installation (if installation_id provided)
+        1. GitHub App installation (if repo belongs to org and installation configured)
         2. Direct config token (if configured)
         3. Public token pool (new instance each time to avoid closing singleton)
+
+        Args:
+            repo_name: Repository full name (owner/repo) to check org membership
+            installation_id: Explicit installation ID override (bypasses org check)
         """
         from app.services.github.github_client import (
             GitHubClient,
             get_public_github_client,
             get_app_github_client,
         )
+        from app.services.repository_service import is_org_repo
 
-        # If installation_id provided, use GitHub App auth
-        if installation_id and self._db is not None:
-            return get_app_github_client(self._db, installation_id)
+        # If explicit installation_id provided, use it directly
+        if installation_id:
+            return get_app_github_client(installation_id)
+
+        # Check if repo belongs to org and use installation token
+        if repo_name and is_org_repo(repo_name) and settings.GITHUB_INSTALLATION_ID:
+            return get_app_github_client(settings.GITHUB_INSTALLATION_ID)
 
         # If direct token configured, use it
         if self._has_direct_token():
@@ -131,7 +144,7 @@ class GitHubActionsProvider(CIProviderInterface):
         if only_completed:
             params["status"] = "completed"
 
-        with self._get_github_client(installation_id) as client:
+        with self._get_github_client(repo_name, installation_id) as client:
             # Fetch single page only (no internal pagination)
             response = client.list_workflow_runs(repo_name, params)
             runs = response.get("workflow_runs", [])
@@ -180,7 +193,7 @@ class GitHubActionsProvider(CIProviderInterface):
         else:
             return None
 
-        with self._get_github_client(installation_id) as client:
+        with self._get_github_client(repo_name, installation_id) as client:
             try:
                 run = client.get_workflow_run(repo_name, int(run_id))
                 return self._parse_workflow_run(run, repo_name)
@@ -196,7 +209,7 @@ class GitHubActionsProvider(CIProviderInterface):
         else:
             return []
 
-        with self._get_github_client(installation_id) as client:
+        with self._get_github_client(repo_name, installation_id) as client:
             jobs_data = client.list_workflow_jobs(repo_name, int(run_id))
             return [self._parse_job(job) for job in jobs_data]
 
@@ -216,7 +229,7 @@ class GitHubActionsProvider(CIProviderInterface):
 
         logs = []
 
-        with self._get_github_client(installation_id) as client:
+        with self._get_github_client(repo_name, installation_id) as client:
             if job_id:
                 try:
                     content = client.download_job_logs(repo_name, int(job_id))
@@ -267,10 +280,8 @@ class GitHubActionsProvider(CIProviderInterface):
         }
         return status_map.get(raw_status.lower(), BuildStatus.UNKNOWN)
 
-    def normalize_conclusion(self, raw_conclusion: str) -> "BuildConclusion":
+    def normalize_conclusion(self, raw_conclusion: str) -> BuildConclusion:
         """Normalize GitHub Actions conclusion to BuildConclusion enum."""
-        from .models import BuildConclusion
-
         conclusion_map = {
             "success": BuildConclusion.SUCCESS,
             "failure": BuildConclusion.FAILURE,
@@ -384,7 +395,7 @@ class GitHubActionsProvider(CIProviderInterface):
         Get a specific workflow run from GitHub API.
         Datetime fields are normalized to naive UTC.
         """
-        with self._get_github_client(installation_id) as client:
+        with self._get_github_client(repo_name, installation_id) as client:
             try:
                 run = client.get_workflow_run(repo_name, run_id)
                 if run:

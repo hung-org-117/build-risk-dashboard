@@ -13,7 +13,6 @@ from app.entities.raw_repository import RawRepository
 from app.entities.dataset_repo_config import DatasetRepoConfig
 from datetime import datetime
 import logging
-from pathlib import Path
 from typing import Any, Dict, List
 
 from bson import ObjectId
@@ -21,7 +20,6 @@ from celery import chain, chord, group
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.paths import REPOS_DIR
 from app.entities.dataset_build import DatasetBuild
 from app.entities.enums import ExtractionStatus
 from app.entities.dataset_enrichment_build import DatasetEnrichmentBuild
@@ -34,7 +32,6 @@ from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
 from app.tasks.shared import extract_features_for_build
-from app.entities.base import PyObjectId
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +145,6 @@ def start_ingestion_for_version(
     and waits for them to complete before returning.
     """
     from app.tasks.dataset_ingestion import ingest_dataset_builds
-    from bson import ObjectId
 
     version_repo = DatasetVersionRepository(self.db)
     repo_config_repo = DatasetRepoConfigRepository(self.db)

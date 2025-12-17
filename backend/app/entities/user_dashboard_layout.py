@@ -1,7 +1,7 @@
 """Entity for storing user dashboard layout preferences."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 from pydantic import Field
 

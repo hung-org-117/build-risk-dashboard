@@ -7,7 +7,7 @@ from typing import Optional, List
 from bson import ObjectId
 from pymongo.database import Database
 
-from app.entities.export_job import ExportJob, ExportStatus
+from app.entities.export_job import ExportJob
 
 
 class ExportJobRepository:

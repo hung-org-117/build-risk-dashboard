@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence
 from uuid import uuid4
 
 import pandas as pd

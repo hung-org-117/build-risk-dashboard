@@ -3,7 +3,7 @@ Tool registry for managing integration tools.
 """
 
 from typing import Dict, List, Optional
-from .base import IntegrationTool, ToolType
+from .base import IntegrationTool
 
 
 class ToolRegistry:

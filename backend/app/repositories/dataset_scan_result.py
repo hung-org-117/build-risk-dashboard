@@ -2,7 +2,6 @@
 
 from typing import List, Optional, Dict, Any
 
-from bson import ObjectId
 from pymongo.database import Database
 
 from app.entities.dataset_scan_result import DatasetScanResult
@@ -168,3 +167,44 @@ class DatasetScanResultRepository(BaseRepository[DatasetScanResult]):
         ]
         result = list(self.collection.aggregate(pipeline))
         return result[0] if result else {}
+
+    def find_failed_by_scan(self, scan_id: str) -> List[DatasetScanResult]:
+        """Find all failed results for a scan (for retry UI)."""
+        return self.find_many(
+            {
+                "scan_id": self._to_object_id(scan_id),
+                "status": "failed",
+            },
+            sort=[("created_at", 1)],
+        )
+
+    def reset_for_retry(
+        self,
+        result_id: str,
+        override_config: Optional[str] = None,
+    ) -> bool:
+        """Reset a failed result to pending for retry."""
+        from datetime import datetime, timezone
+
+        update: dict = {
+            "status": "pending",
+            "error_message": None,
+            "started_at": None,
+            "completed_at": None,
+            "results": {},
+            "last_retry_at": datetime.now(timezone.utc),
+        }
+        if override_config is not None:
+            update["override_config"] = override_config
+
+        result = self.collection.update_one(
+            {
+                "_id": self._to_object_id(result_id),
+                "status": "failed",  # Only allow retry of failed results
+            },
+            {
+                "$set": update,
+                "$inc": {"retry_count": 1},
+            },
+        )
+        return result.modified_count > 0

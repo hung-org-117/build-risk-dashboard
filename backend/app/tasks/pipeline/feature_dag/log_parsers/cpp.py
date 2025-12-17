@@ -25,7 +25,7 @@ class GTestParser(FrameworkParser):
     # [  PASSED  ] 8 tests.
     # [  FAILED  ] 2 tests.
     # [  SKIPPED ] 1 test.
-    
+
     TOTAL_PATTERN = re.compile(
         r"\[=+\]\s+(?P<total>\d+)\s+tests?\s+from\s+\d+\s+test\s+(?:suites?|cases?)\s+ran\."
         r"\s*\((?P<duration>\d+)\s*ms\s+total\)",
@@ -87,7 +87,7 @@ class Catch2Parser(FrameworkParser):
     # All tests passed (42 assertions in 10 test cases)
     # test cases: 10 | 8 passed | 2 failed
     # assertions: 42 | 38 passed | 4 failed
-    
+
     TEST_CASES_PATTERN = re.compile(
         r"test\s+cases:\s*(?P<total>\d+)\s*\|\s*(?P<passed>\d+)\s+passed"
         r"(?:\s*\|\s*(?P<failed>\d+)\s+failed)?",
@@ -109,7 +109,7 @@ class Catch2Parser(FrameworkParser):
             total = int(match.group("total"))
             passed = int(match.group("passed"))
             failed = int(match.group("failed") or 0)
-            
+
             return ParsedLog(
                 framework=self.name,
                 language=self.language,
@@ -143,7 +143,7 @@ class CTestParser(FrameworkParser):
 
     # 100% tests passed, 0 tests failed out of 10
     # Total Test time (real) =   5.67 sec
-    
+
     SUMMARY_PATTERN = re.compile(
         r"(?P<percent>\d+)%\s+tests\s+passed,\s*(?P<failed>\d+)\s+tests?\s+failed\s+out\s+of\s+(?P<total>\d+)",
         re.IGNORECASE,

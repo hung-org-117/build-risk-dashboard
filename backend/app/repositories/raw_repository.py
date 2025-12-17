@@ -2,7 +2,6 @@
 
 from typing import List, Optional
 
-from bson import ObjectId
 
 from app.entities.raw_repository import RawRepository
 from app.repositories.base import BaseRepository
@@ -40,7 +39,7 @@ class RawRepositoryRepository(BaseRepository[RawRepository]):
         else:
             # Create new
             repo = RawRepository(full_name=full_name, **kwargs)
-            return self.create(repo)
+            return self.insert_one(repo)
 
     def list_all(
         self,

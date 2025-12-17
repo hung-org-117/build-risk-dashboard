@@ -4,7 +4,6 @@ Export Celery Task - Background job for large dataset exports.
 
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from app.celery_app import celery_app
 from app.tasks.base import PipelineTask

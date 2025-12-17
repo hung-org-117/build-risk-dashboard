@@ -8,9 +8,14 @@ import logging
 from fastapi import HTTPException
 
 from app.tasks.pipeline.constants import DEFAULT_FEATURES, HAMILTON_MODULES
-from app.tasks.pipeline.feature_dag._metadata import build_metadata_registry
+from app.tasks.pipeline.shared.resources import FeatureResource
 
 logger = logging.getLogger(__name__)
+
+# Input resources derived from FeatureResource enum (source of truth)
+# These are passed as inputs to Hamilton, not computed features
+# Also includes Hamilton parameter name aliases (e.g., github_client for github_api)
+INPUT_RESOURCES = {r.value for r in FeatureResource} | {"github_client"}
 
 
 class FeatureService:
@@ -28,9 +33,17 @@ class FeatureService:
 
         return driver.Builder().with_modules(*self._feature_modules).build()
 
-    def _build_feature_to_module_mapping(self) -> Dict[str, str]:
-        """Build mapping from feature name to module name by introspection."""
+    def _build_feature_to_module_mapping(self) -> tuple[Dict[str, str], Set[str]]:
+        """Build mapping from feature name to module name by introspection.
+
+        Also handles @extract_fields decorator by mapping extracted field names
+        back to the parent function's module.
+
+        Returns:
+            Tuple of (mapping dict, set of parent function names with @extract_fields)
+        """
         mapping: Dict[str, str] = {}
+        extract_field_parents: Set[str] = set()
 
         for module in self._feature_modules:
             # Extract extractor name from module name (e.g., git_features -> git)
@@ -44,10 +57,21 @@ class FeatureService:
                     try:
                         if obj.__module__ == module.__name__:
                             mapping[name] = extractor_name
+
+                            # Check for @extract_fields decorator
+                            # Hamilton stores extract_fields info in func.transform attribute
+                            transforms = getattr(obj, "transform", [])
+                            for t in transforms:
+                                if hasattr(t, "fields") and isinstance(t.fields, dict):
+                                    # Mark this parent function for exclusion
+                                    extract_field_parents.add(name)
+                                    # Map each extracted field to this extractor
+                                    for field_name in t.fields.keys():
+                                        mapping[field_name] = extractor_name
                     except Exception:
                         pass
 
-        return mapping
+        return mapping, extract_field_parents
 
     def _extract_feature_info(self) -> Dict[str, Dict[str, Any]]:
         """Extract metadata about all features from Hamilton driver."""
@@ -56,8 +80,10 @@ class FeatureService:
 
         driver = self._build_pipeline_for_dag_only()
 
-        # Build feature -> module mapping
-        feature_to_module = self._build_feature_to_module_mapping()
+        # Build feature -> module mapping and get parent functions to exclude
+        feature_to_module, extract_field_parents = (
+            self._build_feature_to_module_mapping()
+        )
 
         # Get all available variables (features) and their upstream dependencies
         all_variables = {v.name for v in driver.list_available_variables()}
@@ -69,33 +95,23 @@ class FeatureService:
                 continue
 
             # Skip input resources (not actual features)
-            if var_name in [
-                "db",
-                "repo",
-                "workflow_run",
-                "git_history",
-                "git_worktree",
-                "github_client",
-                "ci_provider",
-            ]:
+            # Uses module-level INPUT_RESOURCES derived from FeatureResource enum
+            if var_name in INPUT_RESOURCES:
                 continue
 
-            # Determine extractor node from module mapping
+            # Skip parent functions with @extract_fields (their fields are included separately)
+            if var_name in extract_field_parents:
+                continue
+
+            # Determine extractor node from module mapping (source of truth)
             extractor = feature_to_module.get(var_name)
             if not extractor:
-                # Fallback to prefix detection
-                if var_name.startswith("tr_"):
-                    extractor = "build"
-                elif var_name.startswith("gh_"):
-                    extractor = "github"
-                elif var_name.startswith("g_") or var_name.startswith("gi_"):
-                    extractor = "git"
-                elif var_name.startswith("repo_"):
-                    extractor = "repo"
-                elif var_name.startswith("log_"):
-                    extractor = "log"
-                else:
-                    extractor = "unknown"
+                # Feature not found in any module - log warning and skip
+                logger.warning(
+                    f"Feature '{var_name}' not found in module mapping. "
+                    f"Ensure it's defined in one of HAMILTON_MODULES or is an extracted field."
+                )
+                continue
 
             try:
                 # Get upstream dependencies for this variable
@@ -154,11 +170,14 @@ class FeatureService:
         driver = self._build_pipeline_for_dag_only()
 
         # Get all available features from Hamilton
+        # Uses module-level INPUT_RESOURCES derived from FeatureResource enum
         all_variables = {v.name for v in driver.list_available_variables()}
         all_features = {
             f
             for f in all_variables
-            if not f.startswith("_") and f not in DEFAULT_FEATURES
+            if not f.startswith("_")
+            and f not in DEFAULT_FEATURES
+            and f not in INPUT_RESOURCES
         }
 
         # Get feature info
@@ -179,8 +198,11 @@ class FeatureService:
 
             # Identify resource dependencies (parameters that aren't features)
             for dep in info["depends_on"]:
-                if dep not in all_features:
+                if dep in INPUT_RESOURCES:
                     node_depends_on_resources[node_name].add(dep)
+                elif dep not in all_features:
+                    # Other non-feature dependencies (could be intermediate)
+                    pass
 
         # Filter if specific features requested (include dependencies)
         if selected_features:
@@ -221,10 +243,16 @@ class FeatureService:
 
         # Calculate execution levels (topological sort)
         levels_map: Dict[str, int] = {}
+        computing: Set[str] = set()  # Track nodes in current recursion stack
 
         def calc_level(node: str) -> int:
             if node in levels_map:
                 return levels_map[node]
+            # Cycle detection: if node is already being computed, break cycle
+            if node in computing:
+                logger.warning(f"Circular dependency detected at node: {node}")
+                return 0
+            computing.add(node)
             deps = node_deps.get(node, set())
             if not deps:
                 levels_map[node] = 0
@@ -233,6 +261,7 @@ class FeatureService:
                     (calc_level(d) for d in deps if d in node_features), default=-1
                 )
                 levels_map[node] = max_dep_level + 1
+            computing.discard(node)
             return levels_map[node]
 
         for node in node_features:

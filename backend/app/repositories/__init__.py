@@ -19,7 +19,7 @@ from .dataset_repository import DatasetRepository
 from .dataset_build_repository import DatasetBuildRepository
 
 # Other repositories
-from .github_installation import GithubInstallationRepository
+# from .github_installation import GithubInstallationRepository
 from .oauth_identity import OAuthIdentityRepository
 from .user import UserRepository
 from .dataset_template_repository import DatasetTemplateRepository
@@ -41,7 +41,8 @@ __all__ = [
     "DatasetRepository",
     "DatasetBuildRepository",
     # Other
-    "GithubInstallationRepository",
+    # Other
+    # "GithubInstallationRepository",
     "OAuthIdentityRepository",
     "UserRepository",
     "DatasetTemplateRepository",

@@ -10,6 +10,10 @@ import {
     RefreshCw,
     AlertCircle,
     RotateCcw,
+    Globe,
+    Lock,
+    GitBranch,
+    ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -350,8 +354,8 @@ export default function RepoBuildsPage() {
                         variant="outline"
                         size="sm"
                         onClick={handleSync}
-                        disabled={syncing || (repo?.installation_id ? true : false)}
-                        title={repo?.installation_id ? "Sync is managed by GitHub App" : "Sync builds from GitHub"}
+                        disabled={syncing}
+                        title="Sync builds from GitHub"
                     >
                         {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                         Sync Builds
@@ -371,6 +375,82 @@ export default function RepoBuildsPage() {
                     </Card>
                 ) : null
             }
+
+            {/* Repository Info Card */}
+            {repo && (
+                <Card>
+                    <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <CardTitle className="text-lg">{repo.full_name}</CardTitle>
+                                <Badge variant={repo.is_private ? "secondary" : "outline"} className="gap-1">
+                                    {repo.is_private ? <Lock className="h-3 w-3" /> : <Globe className="h-3 w-3" />}
+                                    {repo.is_private ? "Private" : "Public"}
+                                </Badge>
+                            </div>
+                            {repo.metadata?.html_url && (
+                                <a
+                                    href={repo.metadata.html_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                                >
+                                    <ExternalLink className="h-4 w-4" />
+                                    View on GitHub
+                                </a>
+                            )}
+                        </div>
+                        {repo.metadata?.description && (
+                            <CardDescription className="mt-1">
+                                {repo.metadata.description}
+                            </CardDescription>
+                        )}
+                    </CardHeader>
+                    <CardContent>
+                        <div className="flex flex-wrap gap-6 text-sm">
+                            <div className="flex items-center gap-2">
+                                <GitBranch className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-muted-foreground">Default branch:</span>
+                                <span className="font-medium">{repo.default_branch || "main"}</span>
+                            </div>
+                            {repo.main_lang && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground">Language:</span>
+                                    <Badge variant="outline">{repo.main_lang}</Badge>
+                                </div>
+                            )}
+                            {repo.source_languages?.length > 0 && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground">Configured languages:</span>
+                                    <div className="flex gap-1">
+                                        {repo.source_languages.map((lang) => (
+                                            <Badge key={lang} variant="secondary" className="text-xs">{lang}</Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {repo.test_frameworks?.length > 0 && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground">Test frameworks:</span>
+                                    <div className="flex gap-1">
+                                        {repo.test_frameworks.map((fw) => (
+                                            <Badge key={fw} variant="secondary" className="text-xs">{fw}</Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                                <span className="text-muted-foreground">Total builds:</span>
+                                <span className="font-medium">{repo.total_builds_imported.toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-muted-foreground">CI Provider:</span>
+                                <Badge variant="outline">{repo.ci_provider}</Badge>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
 
 

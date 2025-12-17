@@ -1,14 +1,13 @@
 """User account service using repository pattern"""
 
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-from pymongo.database import Database
-
+from bson import ObjectId
 from fastapi import HTTPException, status
 from pymongo.database import Database
 
-from app.dtos import UserResponse
+from app.dtos import UserResponse, UserUpdate
 from app.entities.oauth_identity import OAuthIdentity
 from app.entities.user import User
 from app.repositories.oauth_identity import OAuthIdentityRepository
@@ -59,21 +58,30 @@ class UserService:
         documents = user_repo.list_all()
         return [UserResponse.model_validate(doc) for doc in documents]
 
-    def get_current_user(self) -> UserResponse:
-        # Find an OAuth identity for GitHub and use the linked user document.
-        identity = self.db.oauth_identities.find_one({"provider": PROVIDER_GITHUB})
-        if not identity:
+    def get_user_by_id(self, user_id: str) -> UserResponse:
+        """Get user by ID"""
+        user_doc = self.db.users.find_one({"_id": ObjectId(user_id)})
+
+        if not user_doc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No user is currently logged in.",
-            )
-
-        user_doc = self.db.users.find_one({"_id": identity["user_id"]})
-
-        if user_doc is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No user found for the current GitHub connection.",
+                detail="User not found",
             )
 
         return UserResponse.model_validate(user_doc)
+
+    def update_user(self, user_id: str, update_data: UserUpdate) -> UserResponse:
+        """Update user details"""
+        user_repo = UserRepository(self.db)
+
+        # Create update dict, excluding None values
+        update_dict = {
+            k: v for k, v in update_data.model_dump().items() if v is not None
+        }
+
+        if not update_dict:
+            # If nothing to update, just return current user
+            return self.get_user_by_id(user_id)
+
+        user_repo.update(user_id, update_dict)
+        return self.get_user_by_id(user_id)

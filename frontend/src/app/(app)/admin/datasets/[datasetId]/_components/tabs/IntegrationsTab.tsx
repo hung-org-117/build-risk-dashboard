@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,10 +17,14 @@ import { useDynamicWebSocket } from "@/hooks/use-websocket";
 import {
     AlertCircle,
     CheckCircle2,
+    ChevronDown,
+    ChevronUp,
     Clock,
+    Code,
     Loader2,
     Play,
     RefreshCw,
+    RotateCcw,
     Settings,
     Shield,
     StopCircle,
@@ -28,6 +32,7 @@ import {
     WifiOff,
     XCircle,
 } from "lucide-react";
+import { ScanConfigModal } from "./ScanConfigModal";
 
 // =============================================================================
 // Types
@@ -73,6 +78,15 @@ interface DatasetScan {
     error_message?: string | null;
 }
 
+interface FailedResult {
+    id: string;
+    commit_sha: string;
+    repo_full_name: string;
+    error_message: string | null;
+    retry_count: number;
+    override_config: string | null;
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -87,6 +101,18 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
     const [selectedTool, setSelectedTool] = useState<string | null>(null);
     const [selectedCommits, setSelectedCommits] = useState<Set<string>>(new Set());
     const [isStartingScan, setIsStartingScan] = useState(false);
+
+    // Config modal state
+    const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+    const [configModalMode, setConfigModalMode] = useState<"start" | "retry">("start");
+    const [retryResultId, setRetryResultId] = useState<string | null>(null);
+    const [retryScanId, setRetryScanId] = useState<string | null>(null);
+    const [retryCommitSha, setRetryCommitSha] = useState<string | null>(null);
+
+    // Expanded scan state for showing failed results
+    const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
+    const [failedResults, setFailedResults] = useState<FailedResult[]>([]);
+    const [loadingFailedResults, setLoadingFailedResults] = useState(false);
 
     // Load tools
     const loadTools = useCallback(async () => {
@@ -146,8 +172,8 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
         load();
     }, [loadTools, loadCommits, loadScans]);
 
-    // Handle start scan
-    const handleStartScan = async () => {
+    // Handle start scan with config
+    const handleStartScan = async (scanConfig: string | null = null) => {
         if (!selectedTool || selectedCommits.size === 0) return;
 
         setIsStartingScan(true);
@@ -157,6 +183,7 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                 {
                     tool_type: selectedTool,
                     selected_commit_shas: Array.from(selectedCommits),
+                    scan_config: scanConfig,
                 }
             );
             setScans((prev) => [response.data, ...prev]);
@@ -199,6 +226,72 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
             setSelectedCommits(new Set());
         } else {
             setSelectedCommits(new Set(commits.map((c) => c.sha)));
+        }
+    };
+
+    // Open config modal for starting scan
+    const openStartScanModal = () => {
+        setConfigModalMode("start");
+        setRetryResultId(null);
+        setRetryScanId(null);
+        setRetryCommitSha(null);
+        setIsConfigModalOpen(true);
+    };
+
+    // Handle config modal submit
+    const handleConfigSubmit = async (config: string | null) => {
+        if (configModalMode === "start") {
+            await handleStartScan(config);
+        } else if (retryResultId && retryScanId) {
+            await handleRetryResult(retryResultId, retryScanId, config);
+        }
+        setIsConfigModalOpen(false);
+    };
+
+    // Load failed results for a scan
+    const loadFailedResults = async (scanId: string) => {
+        if (expandedScanId === scanId) {
+            setExpandedScanId(null);
+            return;
+        }
+
+        setLoadingFailedResults(true);
+        try {
+            const response = await api.get<{ results: FailedResult[] }>(
+                `/integrations/datasets/${datasetId}/scans/${scanId}/failed`
+            );
+            setFailedResults(response.data.results);
+            setExpandedScanId(scanId);
+        } catch (error) {
+            console.error("Failed to load failed results:", error);
+        } finally {
+            setLoadingFailedResults(false);
+        }
+    };
+
+    // Open retry modal for a specific result
+    const openRetryModal = (resultId: string, scanId: string, commitSha: string) => {
+        setConfigModalMode("retry");
+        setRetryResultId(resultId);
+        setRetryScanId(scanId);
+        setRetryCommitSha(commitSha);
+        setIsConfigModalOpen(true);
+    };
+
+    // Handle retry result
+    const handleRetryResult = async (resultId: string, scanId: string, overrideConfig: string | null) => {
+        try {
+            await api.post(
+                `/integrations/datasets/${datasetId}/scans/${scanId}/results/${resultId}/retry`,
+                { override_config: overrideConfig }
+            );
+            // Reload scans and failed results
+            await loadScans();
+            if (expandedScanId === scanId) {
+                await loadFailedResults(scanId);
+            }
+        } catch (error) {
+            console.error("Failed to retry result:", error);
         }
     };
 
@@ -307,9 +400,18 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                         : "Select All"}
                                 </Button>
                                 <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={selectedCommits.size === 0}
+                                    onClick={openStartScanModal}
+                                >
+                                    <Code className="h-4 w-4 mr-1" />
+                                    Configure
+                                </Button>
+                                <Button
                                     size="sm"
                                     disabled={selectedCommits.size === 0 || isStartingScan}
-                                    onClick={handleStartScan}
+                                    onClick={() => handleStartScan(null)}
                                 >
                                     {isStartingScan ? (
                                         <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -477,50 +579,125 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                 </thead>
                                 <tbody className="divide-y">
                                     {historyScans.map((scan) => (
-                                        <tr key={scan.id}>
-                                            <td className="px-4 py-3">
-                                                <Badge variant="outline">
-                                                    {scan.tool_type === "sonarqube"
-                                                        ? "SonarQube"
-                                                        : "Trivy"}
-                                                </Badge>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {scan.status === "completed" && (
-                                                    <Badge className="bg-green-500">
-                                                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                                                        Completed
+                                        <React.Fragment key={scan.id}>
+                                            <tr>
+                                                <td className="px-4 py-3">
+                                                    <Badge variant="outline">
+                                                        {scan.tool_type === "sonarqube"
+                                                            ? "SonarQube"
+                                                            : "Trivy"}
                                                     </Badge>
-                                                )}
-                                                {scan.status === "failed" && (
-                                                    <Badge variant="destructive">
-                                                        <XCircle className="h-3 w-3 mr-1" />
-                                                        Failed
-                                                    </Badge>
-                                                )}
-                                                {scan.status === "cancelled" && (
-                                                    <Badge variant="secondary">
-                                                        <AlertCircle className="h-3 w-3 mr-1" />
-                                                        Cancelled
-                                                    </Badge>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className="text-green-600">
-                                                    {scan.scanned_commits}
-                                                </span>
-                                                {scan.failed_commits > 0 && (
-                                                    <span className="text-red-600 ml-1">
-                                                        / {scan.failed_commits} failed
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {scan.status === "completed" && (
+                                                        <Badge className="bg-green-500">
+                                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                                            Completed
+                                                        </Badge>
+                                                    )}
+                                                    {scan.status === "failed" && (
+                                                        <Badge variant="destructive">
+                                                            <XCircle className="h-3 w-3 mr-1" />
+                                                            Failed
+                                                        </Badge>
+                                                    )}
+                                                    {scan.status === "cancelled" && (
+                                                        <Badge variant="secondary">
+                                                            <AlertCircle className="h-3 w-3 mr-1" />
+                                                            Cancelled
+                                                        </Badge>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-green-600">
+                                                        {scan.scanned_commits}
                                                     </span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-muted-foreground">
-                                                {scan.completed_at
-                                                    ? new Date(scan.completed_at).toLocaleString()
-                                                    : "—"}
-                                            </td>
-                                        </tr>
+                                                    {scan.failed_commits > 0 && (
+                                                        <span className="text-red-600 ml-1">
+                                                            / {scan.failed_commits} failed
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-muted-foreground">
+                                                    {scan.completed_at
+                                                        ? new Date(scan.completed_at).toLocaleString()
+                                                        : "—"}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {scan.failed_commits > 0 && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => loadFailedResults(scan.id)}
+                                                            disabled={loadingFailedResults}
+                                                        >
+                                                            {expandedScanId === scan.id ? (
+                                                                <ChevronUp className="h-4 w-4" />
+                                                            ) : (
+                                                                <ChevronDown className="h-4 w-4" />
+                                                            )}
+                                                        </Button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {/* Expanded Failed Results */}
+                                            {expandedScanId === scan.id && failedResults.length > 0 && (
+                                                <tr>
+                                                    <td colSpan={5} className="bg-slate-50/50 dark:bg-slate-900/50 p-4">
+                                                        <div className="space-y-2">
+                                                            <h4 className="font-medium text-sm mb-3">
+                                                                Failed Commits ({failedResults.length})
+                                                            </h4>
+                                                            {failedResults.map((result) => (
+                                                                <div
+                                                                    key={result.id}
+                                                                    className="flex items-start justify-between p-3 rounded-lg bg-white dark:bg-slate-800 border"
+                                                                >
+                                                                    <div className="flex-1">
+                                                                        <div className="flex items-center gap-2 mb-1">
+                                                                            <span className="font-mono text-sm">
+                                                                                {result.commit_sha.slice(0, 8)}
+                                                                            </span>
+                                                                            <span className="text-muted-foreground text-sm">
+                                                                                {result.repo_full_name}
+                                                                            </span>
+                                                                            {result.retry_count > 0 && (
+                                                                                <Badge variant="secondary" className="text-xs">
+                                                                                    Retried {result.retry_count}x
+                                                                                </Badge>
+                                                                            )}
+                                                                        </div>
+                                                                        {result.error_message && (
+                                                                            <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded mt-2">
+                                                                                <AlertCircle className="h-3 w-3 inline mr-1" />
+                                                                                {result.error_message}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex gap-2 ml-4">
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            onClick={() => openRetryModal(result.id, scan.id, result.commit_sha)}
+                                                                        >
+                                                                            <Code className="h-4 w-4 mr-1" />
+                                                                            Config
+                                                                        </Button>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={() => handleRetryResult(result.id, scan.id, null)}
+                                                                        >
+                                                                            <RotateCcw className="h-4 w-4 mr-1" />
+                                                                            Retry
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
                                     ))}
                                 </tbody>
                             </table>
@@ -541,6 +718,16 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                     </CardContent>
                 </Card>
             )}
+
+            {/* Config Modal */}
+            <ScanConfigModal
+                isOpen={isConfigModalOpen}
+                onClose={() => setIsConfigModalOpen(false)}
+                onSubmit={handleConfigSubmit}
+                toolType={selectedTool || "sonarqube"}
+                mode={configModalMode}
+                commitSha={retryCommitSha || undefined}
+            />
         </div>
     );
 }

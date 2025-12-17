@@ -1,7 +1,7 @@
 """Notification API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pymongo.database import Database
 from bson import ObjectId
 from typing import Optional

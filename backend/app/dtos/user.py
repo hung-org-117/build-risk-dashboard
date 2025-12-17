@@ -19,6 +19,10 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+
+
 class OAuthIdentityResponse(BaseModel):
     id: PyObjectIdStr = Field(..., alias="_id")
     user_id: PyObjectIdStr

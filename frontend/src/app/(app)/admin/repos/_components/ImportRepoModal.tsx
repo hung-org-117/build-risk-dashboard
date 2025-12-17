@@ -1,36 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { createPortal } from "react-dom";
 import {
-    AlertCircle,
-    CheckCircle2,
+    Building2,
+    Globe,
     Loader2,
     Search,
-    X,
-    Globe,
-    Lock,
-
+    X
 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { integrationApi, reposApi, featuresApi, datasetsApi } from "@/lib/api";
-import {
-    RepoSuggestion,
-    RepoImportPayload,
-    CIProvider,
-    FeatureDefinitionSummary,
-    DatasetTemplateRecord,
-} from "@/types";
-import { useAuth } from "@/contexts/auth-context";
-import { useDebounce } from "@/hooks/use-debounce";
-import { Input } from "@/components/ui/input";
 import { FeatureDAGVisualization, type FeatureDAGData } from "@/components/features";
-import { SelectedFeaturesPanel } from "./SelectedFeaturesPanel";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { useDebounce } from "@/hooks/use-debounce";
+import { datasetsApi, featuresApi, reposApi } from "@/lib/api";
+import {
+    CIProvider,
+    DatasetTemplateRecord,
+    FeatureDefinitionSummary,
+    RepoImportPayload,
+    RepoSuggestion,
+} from "@/types";
 import { ExtractionPlanTimeline } from "./ExtractionPlanTimeline";
+import { SelectedFeaturesPanel } from "./SelectedFeaturesPanel";
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
     const [mounted, setMounted] = useState(false);
@@ -185,8 +180,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
         setSearchError(null);
         try {
             const data = await reposApi.search(query.trim() || undefined);
-            setPrivateMatches(data.private_matches);
-            setPublicMatches(data.public_matches);
+            setPrivateMatches(data.private_matches.map(r => ({ ...r })));
+            setPublicMatches(data.public_matches.map(r => ({ ...r })));
         } catch (err) {
             console.error(err);
             setSearchError("Failed to search repositories.");
@@ -198,6 +193,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     const loadFeatures = useCallback(async () => {
         if (featuresLoading || featuresData) return;
         setFeaturesLoading(true);
+        // ... (rest of loadFeatures is unchanged, just need to match surrounding code)
+
         setFeaturesError(null);
         try {
             const data = await featuresApi.list({ is_active: true });
@@ -466,7 +463,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                 return {
                     full_name: repo.full_name,
                     provider: "github",
-                    installation_id: repo.installation_id, // Can be undefined for public repos
                     test_frameworks: config.test_frameworks,
                     source_languages: config.source_languages,
                     ci_provider: config.ci_provider,
@@ -486,65 +482,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
         }
     };
 
-    const { status } = useAuth();
-    const [isAppInstalled, setIsAppInstalled] = useState(false);
-    const [isPolling, setIsPolling] = useState(false);
-
-    // Check installation status on mount and when status changes
-    useEffect(() => {
-        if (status?.app_installed) {
-            setIsAppInstalled(true);
-        } else {
-            checkInstallation();
-        }
-    }, [status]);
-
-    const checkInstallation = async () => {
-        try {
-            const response = await integrationApi.syncInstallations();
-
-            if (response.installations.length > 0) {
-                setIsAppInstalled(true);
-            }
-        } catch (error) {
-            console.error("Failed to check installation status", error);
-        }
-    };
-
-    const handleInstallApp = () => {
-        window.open("https://github.com/apps/builddefection", "_blank");
-        setIsPolling(true);
-    };
-
-    // Polling logic
-    useEffect(() => {
-        let intervalId: NodeJS.Timeout;
-        let attempts = 0;
-        const maxAttempts = 24; // 2 minutes (5s interval)
-
-        if (isPolling && !isAppInstalled) {
-            intervalId = setInterval(async () => {
-                attempts++;
-                await checkInstallation();
-
-                // If installed (checked via effect on status) or max attempts reached
-                if (attempts >= maxAttempts) {
-                    setIsPolling(false);
-                }
-            }, 5000);
-        }
-
-        return () => {
-            if (intervalId) clearInterval(intervalId);
-        };
-    }, [isPolling, isAppInstalled]);
-
-    // Stop polling if installed
-    useEffect(() => {
-        if (isAppInstalled) {
-            setIsPolling(false);
-        }
-    }, [isAppInstalled]);
 
     if (!isOpen) return null;
 
@@ -571,58 +508,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                         </button>
                     </div>
 
-                    {!isAppInstalled ? (
-                        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-900/20">
-                            <div className="flex items-start gap-3">
-                                <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                                <div className="flex-1">
-                                    <h3 className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                                        GitHub App Required
-                                    </h3>
-                                    <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
-                                        To import private repositories and enable automatic build tracking, you must install the BuildGuard GitHub App.
-                                    </p>
-                                    <div className="mt-3 flex items-center gap-3">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="border-amber-200 bg-white text-amber-900 hover:bg-amber-50 hover:text-amber-900 dark:border-amber-800 dark:bg-slate-950 dark:text-amber-200 dark:hover:bg-amber-900/20"
-                                            onClick={handleInstallApp}
-                                            disabled={isPolling}
-                                        >
-                                            {isPolling ? (
-                                                <>
-                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                    Checking installation...
-                                                </>
-                                            ) : (
-                                                "Install GitHub App"
-                                            )}
-                                        </Button>
-                                        {isPolling && (
-                                            <span className="text-xs text-amber-700 dark:text-amber-300 animate-pulse">
-                                                Listening for installation...
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-900/20">
-                            <div className="flex items-center gap-3">
-                                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-                                <div>
-                                    <h3 className="text-sm font-medium text-green-900 dark:text-green-200">
-                                        GitHub App Connected
-                                    </h3>
-                                    <p className="text-sm text-green-700 dark:text-green-300">
-                                        Your private repositories are ready to be imported.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+
+                    {/* GitHub App status banner removed - app is managed at organization level */}
 
                     <div className="flex-1 overflow-y-auto">
                         {step === 1 ? (
@@ -673,12 +560,12 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     {/* Private Repos Section */}
                                     <div>
                                         <h3 className="mb-3 text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                            <Lock className="h-3 w-3" /> Your Repositories (App Installed)
+                                            <Building2 className="h-3 w-3" /> Organization Repositories
                                         </h3>
                                         <div className="space-y-2">
                                             {privateMatches.length === 0 && !isSearching ? (
                                                 <div className="text-sm text-muted-foreground italic px-2">
-                                                    No matching private repositories found.
+                                                    No matching organization repositories found.
                                                 </div>
                                             ) : (
                                                 privateMatches.map((repo) => (
