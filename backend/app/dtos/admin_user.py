@@ -14,7 +14,7 @@ class AdminUserResponse(BaseModel):
     id: PyObjectIdStr = Field(..., alias="_id")
     email: str
     name: Optional[str] = None
-    role: Literal["admin", "user"]
+    role: Literal["admin", "user", "guest"]
     created_at: datetime
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
@@ -32,7 +32,7 @@ class AdminUserCreateRequest(BaseModel):
 
     email: str = Field(..., description="User email address")
     name: Optional[str] = Field(None, description="User display name")
-    role: Literal["admin", "user"] = Field("user", description="User role")
+    role: Literal["admin", "user", "guest"] = Field("user", description="User role")
 
 
 class AdminUserUpdateRequest(BaseModel):
@@ -45,4 +45,4 @@ class AdminUserUpdateRequest(BaseModel):
 class AdminUserRoleUpdateRequest(BaseModel):
     """Request to update user role."""
 
-    role: Literal["admin", "user"] = Field(..., description="New role")
+    role: Literal["admin", "user", "guest"] = Field(..., description="New role")

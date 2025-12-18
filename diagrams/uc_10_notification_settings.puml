@@ -1,6 +1,6 @@
 @startuml
 '===============================================================
-' UC-10: CONFIGURE NOTIFICATION SETTINGS (Both)
+' UC-10: CONFIGURE NOTIFICATION SETTINGS (Admin/User/Guest)
 '===============================================================
 
 skinparam actorStyle stick
@@ -14,6 +14,7 @@ left to right direction
 actor "Admin" as Admin
 actor "User" as User
 Admin --|> User
+actor "Guest" as Guest
 actor "Gmail SMTP" as SMTP
 
 rectangle {
@@ -24,8 +25,15 @@ rectangle {
 
 User --> UC_Feed
 User --> UC_MarkRead
-User --> UC_Email
+Guest --> UC_Feed
+Guest --> UC_MarkRead
+Admin --> UC_Email
 
 UC_Email --> SMTP
+
+note right of UC_Email
+  Configure Gmail/SMTP channel
+  (system-wide, admin only).
+end note
 
 @enduml

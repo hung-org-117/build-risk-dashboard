@@ -458,6 +458,11 @@ export interface GithubAuthorizeResponse {
   state: string;
 }
 
+export interface GoogleAuthorizeResponse {
+  authorize_url: string;
+  state: string;
+}
+
 export interface UserAccount {
   id: string;
   email: string;

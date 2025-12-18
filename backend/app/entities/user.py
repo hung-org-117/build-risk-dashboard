@@ -11,7 +11,7 @@ from .base import BaseEntity
 class User(BaseEntity):
     email: str
     name: str | None = None
-    role: Literal["admin", "user"] = "user"
+    role: Literal["admin", "user", "guest"] = "user"
     notification_email: Optional[str] = None
 
     # GitHub repo membership sync (for RBAC)

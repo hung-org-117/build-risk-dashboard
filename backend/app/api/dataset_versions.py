@@ -53,7 +53,10 @@ async def list_versions(
     current_user: dict = Depends(get_current_user),
 ):
     service = DatasetVersionService(db)
-    versions = service.list_versions(dataset_id, str(current_user["_id"]), limit)
+    role = current_user.get("role", "user")
+    versions = service.list_versions(
+        dataset_id, str(current_user["_id"]), role=role, limit=limit
+    )
     return VersionListResponse(
         versions=[_to_response(v) for v in versions],
         total=len(versions),
@@ -68,9 +71,11 @@ async def create_version(
     current_user: dict = Depends(get_current_user),
 ):
     service = DatasetVersionService(db)
+    role = current_user.get("role", "user")
     version = service.create_version(
         dataset_id=dataset_id,
         user_id=str(current_user["_id"]),
+        role=role,
         selected_features=request.selected_features,
         name=request.name,
         description=request.description,
@@ -86,7 +91,10 @@ async def get_version(
     current_user: dict = Depends(get_current_user),
 ):
     service = DatasetVersionService(db)
-    version = service.get_version(dataset_id, version_id, str(current_user["_id"]))
+    role = current_user.get("role", "user")
+    version = service.get_version(
+        dataset_id, version_id, str(current_user["_id"]), role=role
+    )
     return _to_response(version)
 
 
@@ -106,10 +114,12 @@ async def export_version(
     - **features**: Optional list of features to include (defaults to all selected features)
     """
     service = DatasetVersionService(db)
+    role = current_user.get("role", "user")
     result = service.export_version(
         dataset_id=dataset_id,
         version_id=version_id,
         user_id=str(current_user["_id"]),
+        role=role,
         format=format,
         features=features,
     )
@@ -134,6 +144,7 @@ async def preview_version(
         dataset_id=dataset_id,
         version_id=version_id,
         user_id=str(current_user["_id"]),
+        role=current_user.get("role", "user"),
     )
 
 
@@ -159,6 +170,7 @@ async def get_version_data(
         dataset_id=dataset_id,
         version_id=version_id,
         user_id=str(current_user["_id"]),
+        role=current_user.get("role", "user"),
         page=page,
         page_size=page_size,
     )
@@ -172,7 +184,9 @@ async def delete_version(
     current_user: dict = Depends(get_current_user),
 ):
     service = DatasetVersionService(db)
-    service.delete_version(dataset_id, version_id, str(current_user["_id"]))
+    service.delete_version(
+        dataset_id, version_id, str(current_user["_id"]), role=current_user.get("role", "user")
+    )
 
 
 @router.post("/{version_id}/cancel", response_model=VersionResponse)
@@ -183,5 +197,7 @@ async def cancel_version(
     current_user: dict = Depends(get_current_user),
 ):
     service = DatasetVersionService(db)
-    version = service.cancel_version(dataset_id, version_id, str(current_user["_id"]))
+    version = service.cancel_version(
+        dataset_id, version_id, str(current_user["_id"]), role=current_user.get("role", "user")
+    )
     return _to_response(version)

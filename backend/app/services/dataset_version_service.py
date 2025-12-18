@@ -35,11 +35,23 @@ class DatasetVersionService:
         self._export_service = ExportService(db)
         self._enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
 
-    def _verify_dataset_access(self, dataset_id: str, user_id: str) -> DatasetProject:
-        """Verify user has access to dataset. Raises HTTPException if not found."""
-        dataset = self._dataset_service.get_dataset(dataset_id, user_id)
+    def _verify_dataset_access(
+        self, dataset_id: str, user_id: str, role: str = "user"
+    ) -> DatasetProject:
+        """
+        Verify dataset access based on role:
+        - admin: full
+        - guest: read-only
+        - user: no access
+        """
+        dataset = self._dataset_service.get_dataset(dataset_id, user_id, role=role)
         if not dataset:
             raise HTTPException(status_code=404, detail="Dataset not found")
+        if role == "user":
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to access datasets.",
+            )
         return dataset
 
     def _get_version(self, dataset_id: str, version_id: str) -> DatasetVersion:
@@ -50,23 +62,24 @@ class DatasetVersionService:
         return version
 
     def list_versions(
-        self, dataset_id: str, user_id: str, limit: int = 50
+        self, dataset_id: str, user_id: str, role: str = "user", limit: int = 50
     ) -> List[DatasetVersion]:
         """List all versions for a dataset."""
-        self._verify_dataset_access(dataset_id, user_id)
+        self._verify_dataset_access(dataset_id, user_id, role=role)
         return self._repo.find_by_dataset(dataset_id, limit=limit)
 
     def get_version(
-        self, dataset_id: str, version_id: str, user_id: str
+        self, dataset_id: str, version_id: str, user_id: str, role: str = "user"
     ) -> DatasetVersion:
         """Get a specific version."""
-        self._verify_dataset_access(dataset_id, user_id)
+        self._verify_dataset_access(dataset_id, user_id, role=role)
         return self._get_version(dataset_id, version_id)
 
     def create_version(
         self,
         dataset_id: str,
         user_id: str,
+        role: str,
         selected_features: List[str],
         name: Optional[str] = None,
         description: Optional[str] = None,
@@ -75,7 +88,13 @@ class DatasetVersionService:
         from datetime import datetime, timezone
         from app.core.redis import get_redis, RedisLock
 
-        dataset = self._verify_dataset_access(dataset_id, user_id)
+        if role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to create dataset versions.",
+            )
+
+        dataset = self._verify_dataset_access(dataset_id, user_id, role=role)
 
         if dataset.validation_status != "completed":
             raise HTTPException(
@@ -146,6 +165,7 @@ class DatasetVersionService:
         dataset_id: str,
         version_id: str,
         user_id: str,
+        role: str = "user",
         format: str = "csv",
         features: Optional[List[str]] = None,
     ) -> ExportResult:
@@ -153,7 +173,7 @@ class DatasetVersionService:
         import tempfile
         import os
 
-        dataset = self._verify_dataset_access(dataset_id, user_id)
+        dataset = self._verify_dataset_access(dataset_id, user_id, role=role)
         version = self._get_version(dataset_id, version_id)
 
         if version.status != VersionStatus.COMPLETED:
@@ -336,10 +356,10 @@ class DatasetVersionService:
         return None
 
     def get_export_preview(
-        self, dataset_id: str, version_id: str, user_id: str
+        self, dataset_id: str, version_id: str, user_id: str, role: str = "user"
     ) -> dict:
         """Get preview of exportable data."""
-        self._verify_dataset_access(dataset_id, user_id)
+        self._verify_dataset_access(dataset_id, user_id, role=role)
 
         builds = self._enrichment_build_repo.get_enriched_for_export(
             dataset_id=ObjectId(dataset_id),
@@ -363,9 +383,17 @@ class DatasetVersionService:
             "feature_count": len(all_features),
         }
 
-    def delete_version(self, dataset_id: str, version_id: str, user_id: str) -> None:
+    def delete_version(
+        self, dataset_id: str, version_id: str, user_id: str, role: str
+    ) -> None:
         """Delete a version and its enrichment builds."""
-        self._verify_dataset_access(dataset_id, user_id)
+        if role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to delete dataset versions.",
+            )
+
+        self._verify_dataset_access(dataset_id, user_id, role=role)
         version = self._get_version(dataset_id, version_id)
 
         if version.status in (VersionStatus.PENDING, VersionStatus.PROCESSING):
@@ -379,7 +407,7 @@ class DatasetVersionService:
         logger.info(f"Deleted version {version_id} for dataset {dataset_id}")
 
     def cancel_version(
-        self, dataset_id: str, version_id: str, user_id: str
+        self, dataset_id: str, version_id: str, user_id: str, role: str
     ) -> DatasetVersion:
         """Cancel a processing version.
 
@@ -389,7 +417,13 @@ class DatasetVersionService:
         from datetime import datetime, timezone
         from app.core.redis import get_redis
 
-        self._verify_dataset_access(dataset_id, user_id)
+        if role != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to cancel dataset versions.",
+            )
+
+        self._verify_dataset_access(dataset_id, user_id, role=role)
         version = self._get_version(dataset_id, version_id)
 
         if version.status not in (VersionStatus.PENDING, VersionStatus.PROCESSING):
@@ -418,6 +452,7 @@ class DatasetVersionService:
         dataset_id: str,
         version_id: str,
         user_id: str,
+        role: str = "user",
         page: int = 1,
         page_size: int = 20,
         include_stats: bool = True,
@@ -425,7 +460,7 @@ class DatasetVersionService:
         """Get paginated version data with column statistics."""
         from bson import ObjectId
 
-        self._verify_dataset_access(dataset_id, user_id)
+        self._verify_dataset_access(dataset_id, user_id, role=role)
         version = self._get_version(dataset_id, version_id)
 
         if version.status != VersionStatus.COMPLETED:

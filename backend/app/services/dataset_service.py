@@ -59,11 +59,41 @@ class DatasetService:
                 },
             )
 
+    def _can_view_dataset(self, dataset, user_id: str, role: str) -> bool:
+        """
+        Access rules:
+        - admin: full access
+        - guest: read-only access
+        - user: no access
+        """
+        if role == "admin":
+            return True
+        if role == "guest":
+            return True
+        return False
+
     def list_datasets(
-        self, user_id: str, skip: int = 0, limit: int = 20, q: Optional[str] = None
+        self,
+        user_id: str,
+        role: str = "user",
+        skip: int = 0,
+        limit: int = 20,
+        q: Optional[str] = None,
     ) -> DatasetListResponse:
-        """List datasets for the current user."""
-        datasets, total = self.repo.list_by_user(user_id, skip=skip, limit=limit, q=q)
+        """
+        List datasets with access control.
+
+        - admin: list all
+        - guest: list all (read-only)
+        - user: no access
+        """
+        if role == "user":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access datasets.",
+            )
+
+        datasets, total = self.repo.list_by_user(None, skip=skip, limit=limit, q=q)
         return DatasetListResponse(
             total=total,
             skip=skip,
@@ -71,24 +101,43 @@ class DatasetService:
             items=[self._serialize(ds) for ds in datasets],
         )
 
-    def get_dataset(self, dataset_id: str, user_id: str) -> DatasetResponse:
+    def get_dataset(
+        self, dataset_id: str, user_id: str, role: str = "user"
+    ) -> DatasetResponse:
         dataset = self.repo.find_by_id(dataset_id)
-        if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
+        if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
             )
+        if role == "user":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this dataset",
+            )
+        if not self._can_view_dataset(dataset, user_id, role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this dataset",
+            )
         return self._serialize(dataset)
 
-    def list_repos(self, dataset_id: str, user_id: str) -> DatasetRepoListResponse:
+    def list_repos(
+        self, dataset_id: str, user_id: str, role: str = "user"
+    ) -> DatasetRepoListResponse:
         """
         List repos for a dataset.
 
         Uses DatasetRepoConfigRepository to get repos, converts to DTOs.
         """
         dataset = self.repo.find_by_id(dataset_id)
-        if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
+        if not dataset:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
+            )
+        if not self._can_view_dataset(dataset, user_id, role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this dataset",
             )
 
         configs = self.repo_config_repo.list_by_dataset(ObjectId(dataset_id))
@@ -195,7 +244,7 @@ class DatasetService:
     def create_from_upload(
         self,
         user_id: str,
-        filename: str,
+        filename: Optional[str],
         upload_file,
         name: Optional[str] = None,
         description: Optional[str] = None,
@@ -203,6 +252,12 @@ class DatasetService:
         """
         Create a dataset record from an uploaded CSV
         """
+        if not filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Filename is required",
+            )
+
         temp_path = DATASET_DIR / f"tmp_{uuid4()}_{filename}"
         size_bytes = 0
 
@@ -275,6 +330,7 @@ class DatasetService:
         now = datetime.now(timezone.utc)
 
         dataset_entity = DatasetProject(
+            _id=None,
             user_id=ObjectId(user_id),
             name=name or filename.rsplit(".", 1)[0],
             description=description,

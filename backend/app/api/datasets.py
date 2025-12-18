@@ -1,5 +1,6 @@
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     Form,
@@ -34,8 +35,9 @@ def list_datasets(
 ):
     """List datasets for the signed-in user."""
     user_id = str(current_user["_id"])
+    role = current_user.get("role", "user")
     service = DatasetService(db)
-    return service.list_datasets(user_id, skip=skip, limit=limit, q=q)
+    return service.list_datasets(user_id, role=role, skip=skip, limit=limit, q=q)
 
 
 @router.post(
@@ -81,8 +83,9 @@ def get_dataset(
 ):
     """Get dataset details."""
     user_id = str(current_user["_id"])
+    role = current_user.get("role", "user")
     service = DatasetService(db)
-    return service.get_dataset(dataset_id, user_id)
+    return service.get_dataset(dataset_id, user_id, role=role)
 
 
 @router.patch(
@@ -92,7 +95,7 @@ def get_dataset(
 )
 def update_dataset(
     dataset_id: str = PathParam(..., description="Dataset id (Mongo ObjectId)"),
-    payload: DatasetUpdateRequest = ...,
+    payload: DatasetUpdateRequest = Body(...),
     db: Database = Depends(get_db),
     admin_user: dict = Depends(require_admin),
 ):
@@ -131,8 +134,9 @@ def list_dataset_repos(
     for drill-down to RawBuildRun via /repos/{raw_repo_id}/builds.
     """
     user_id = str(current_user["_id"])
+    role = current_user.get("role", "user")
     service = DatasetService(db)
-    return service.list_repos(dataset_id, user_id)
+    return service.list_repos(dataset_id, user_id, role=role)
 
 
 @router.get("/{dataset_id}/builds")
@@ -148,11 +152,15 @@ def list_dataset_builds(
 ):
     """List builds for a dataset with enriched details from RawBuildRun."""
     from bson import ObjectId
-    from app.repositories.dataset_build_repository import DatasetBuildRepository
     from app.repositories.raw_build_run import RawBuildRunRepository
 
-    build_repo = DatasetBuildRepository(db)
     raw_build_repo = RawBuildRunRepository(db)
+    service = DatasetService(db)
+    user_id = str(current_user["_id"])
+    role = current_user.get("role", "user")
+
+    # Access check and dataset existence
+    service.get_dataset(dataset_id, user_id, role=role)
 
     # Build query
     query = {"dataset_id": ObjectId(dataset_id)}
@@ -216,6 +224,12 @@ def get_dataset_builds_stats(
 ):
     """Get aggregated build stats for charts."""
     from bson import ObjectId
+
+    service = DatasetService(db)
+    user_id = str(current_user["_id"])
+    role = current_user.get("role", "user")
+    # Access check (raises if not permitted)
+    service.get_dataset(dataset_id, user_id, role=role)
 
     oid = ObjectId(dataset_id)
 

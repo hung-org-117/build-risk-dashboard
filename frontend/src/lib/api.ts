@@ -16,6 +16,7 @@ import type {
   FeatureDAGResponse,
   FeatureListResponse,
   GithubAuthorizeResponse,
+  GoogleAuthorizeResponse,
   GithubToken,
   RefreshTokenResponse,
   RepoDetail,
@@ -444,6 +445,12 @@ export const integrationApi = {
       {
         redirect_path: redirectPath,
       }
+    );
+    return response.data;
+  },
+  startGoogleOAuth: async () => {
+    const response = await api.post<GoogleAuthorizeResponse>(
+      "/auth/google/login"
     );
     return response.data;
   },
@@ -1008,5 +1015,98 @@ export const notificationsApi = {
   // Mark all notifications as read
   markAllAsRead: async (): Promise<void> => {
     await api.put("/notifications/read-all");
+  },
+};
+
+// ============================================================================
+// Dataset Scan Results API
+// ============================================================================
+
+export interface ScanResultItem {
+  id: string;
+  commit_sha: string;
+  repo_full_name: string;
+  row_indices: number[];
+  status: string;
+  results: Record<string, unknown>;
+  error_message?: string | null;
+  scan_duration_ms?: number | null;
+}
+
+export interface ScanResultsResponse {
+  results: ScanResultItem[];
+  total: number;
+}
+
+export interface ScanSummaryResponse {
+  scan_id: string;
+  tool_type: string;
+  status: string;
+  progress: number;
+  total_commits: number;
+  status_counts: Record<string, number>;
+  aggregated_metrics: Record<string, number | string>;
+}
+
+export const datasetScanApi = {
+  getResults: async (
+    datasetId: string,
+    scanId: string,
+    skip = 0,
+    limit = 50
+  ): Promise<ScanResultsResponse> => {
+    const response = await api.get<ScanResultsResponse>(
+      `/integrations/datasets/${datasetId}/scans/${scanId}/results`,
+      { params: { skip, limit } }
+    );
+    return response.data;
+  },
+
+  getSummary: async (
+    datasetId: string,
+    scanId: string
+  ): Promise<ScanSummaryResponse> => {
+    const response = await api.get<ScanSummaryResponse>(
+      `/integrations/datasets/${datasetId}/scans/${scanId}/summary`
+    );
+    return response.data;
+  },
+
+  exportResults: async (datasetId: string, scanId: string): Promise<void> => {
+    const response = await api.get(
+      `/integrations/datasets/${datasetId}/scans/${scanId}/results`,
+      { params: { skip: 0, limit: 1000 } }
+    );
+
+    // Convert to CSV
+    const results = response.data.results as ScanResultItem[];
+    if (results.length === 0) {
+      alert("No results to export");
+      return;
+    }
+
+    // Build CSV
+    const headers = ["commit_sha", "repo_full_name", "status", "error_message", ...Object.keys(results[0]?.results || {})];
+    const csvRows = [headers.join(",")];
+
+    for (const r of results) {
+      const row = [
+        r.commit_sha,
+        r.repo_full_name,
+        r.status,
+        r.error_message || "",
+        ...Object.values(r.results || {}).map(v => String(v ?? "")),
+      ];
+      csvRows.push(row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+    }
+
+    // Download
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scan_${scanId}_results.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   },
 };

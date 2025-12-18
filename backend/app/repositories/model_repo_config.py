@@ -95,8 +95,8 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         if search_query:
             base_query["full_name"] = {"$regex": search_query, "$options": "i"}
 
-        if user_role == "admin":
-            # Admin sees everything
+        if user_role in ("admin", "guest"):
+            # Admin and guest see everything
             pass
         else:
             # Regular user: only sees repos they have access to on GitHub
@@ -127,7 +127,7 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         Args:
             github_accessible_repos: List of repo full_names user can access on GitHub
         """
-        if user_role == "admin":
+        if user_role in ("admin", "guest"):
             return True
 
         repo = self.find_by_id(repo_id)

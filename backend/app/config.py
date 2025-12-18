@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import List, Optional
+import os
 
 
 class Settings(BaseSettings):
@@ -37,6 +38,17 @@ class Settings(BaseSettings):
     # RBAC / Organization Access
     GITHUB_ORGANIZATION: Optional[str] = None  # GitHub org name for membership check
     REQUIRE_ORG_MEMBERSHIP: bool = True
+
+    # Google OAuth (for guest login via Gmail)
+    GOOGLE_CLIENT_ID: str = (
+        "Optional[str] = None"
+    )
+    GOOGLE_CLIENT_SECRET: str = "Optional[str] = None"
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
+
+    # Gmail API Integration (Environment Variables)
+    # Paste the content of gmail_token.json here (minified)
+    GMAIL_TOKEN_JSON: Optional[str] = None
 
     # CircleCI
     CIRCLECI_TOKEN: Optional[str] = None
@@ -97,11 +109,23 @@ class Settings(BaseSettings):
     TRIVY_SKIP_DIRS: str = "node_modules,vendor,.git"
     TRIVY_ASYNC_THRESHOLD: int = 1000
 
-    # Notifications - Gmail (requires App Password, NOT regular password)
+    # Notifications - Gmail
+    # Uses Gmail API if json env vars are present, otherwise falls back to SMTP
     GMAIL_NOTIFICATIONS_ENABLED: bool = False
     GMAIL_USER: Optional[str] = None
     GMAIL_APP_PASSWORD: Optional[str] = None  # 16-char app password from Google
     GMAIL_RECIPIENTS: List[str] = []  # Comma-separated in .env, e.g. "a@x.com,b@x.com"
+
+    def model_post_init(self, __context):
+        """Post-initialization to check for Gmail API capability."""
+        super().model_post_init(__context)
+
+        if self.GMAIL_TOKEN_JSON:
+            print("✓ Loaded GMAIL_TOKEN_JSON from environment.")
+            self.GMAIL_NOTIFICATIONS_ENABLED = True
+        else:
+            print("! GMAIL_TOKEN_JSON not found in environment. Gmail API disabled.")
+            print("  Check your .env file syntax or ensure the variable is set.")
 
     class Config:
         env_file = ".env"

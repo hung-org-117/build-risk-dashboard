@@ -22,6 +22,7 @@ from app.database.mongo import get_db
 # )
 from app.middleware.auth import get_current_user
 from app.middleware.require_admin import require_admin
+from app.middleware.rbac import require_view_scans, require_start_scans
 from app.services.dataset_scan_service import DatasetScanService
 from app.services.sonar_webhook_service import SonarWebhookService
 
@@ -135,9 +136,9 @@ def list_scans(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Database = Depends(get_db),
-    _admin: dict = Depends(require_admin),
+    _viewer: dict = Depends(require_view_scans),
 ):
-    """List scans for a dataset with pagination (Admin only)."""
+    """List scans for a dataset with pagination (Admin + Guest)."""
     service = DatasetScanService(db)
     scans, total = service.list_scans(dataset_id, skip=skip, limit=limit)
     return {
@@ -182,9 +183,9 @@ def get_scan(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    _admin: dict = Depends(require_admin),
+    _viewer: dict = Depends(require_view_scans),
 ):
-    """Get scan details (Admin only)."""
+    """Get scan details (Admin + Guest)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -253,9 +254,9 @@ def get_scan_results(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Database = Depends(get_db),
-    _admin: dict = Depends(require_admin),
+    _viewer: dict = Depends(require_view_scans),
 ):
-    """Get scan results with pagination (Admin only)."""
+    """Get scan results with pagination (Admin + Guest)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -298,9 +299,9 @@ def get_scan_summary(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    _admin: dict = Depends(require_admin),
+    _viewer: dict = Depends(require_view_scans),
 ):
-    """Get aggregated summary of scan results (Admin only)."""
+    """Get aggregated summary of scan results (Admin + Guest)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -337,9 +338,9 @@ def get_failed_results(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    _admin: dict = Depends(require_admin),
+    _viewer: dict = Depends(require_view_scans),
 ):
-    """Get failed results for retry UI (Admin only)."""
+    """Get failed results for retry UI (Admin + Guest read-only view)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:

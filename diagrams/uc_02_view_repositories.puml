@@ -1,6 +1,6 @@
 @startuml
 '===============================================================
-' UC-02: VIEW REPOSITORIES / BUILD DETAILS (User)
+' UC-02: VIEW REPOSITORIES / BUILD DETAILS (User & Guest)
 '===============================================================
 
 skinparam actorStyle stick
@@ -12,6 +12,7 @@ skinparam usecase {
 left to right direction
 
 actor "User" as User
+actor "Guest\n(Read-only)" as Guest
 
 rectangle {
     usecase "View Repositories" as UC_ListRepos
@@ -21,6 +22,7 @@ rectangle {
 }
 
 User --> UC_ListRepos
+Guest --> UC_ListRepos
 
 UC_ListRepos ..> UC_ViewBuilds : <<include>>
 UC_ViewBuilds ..> UC_Metadata : <<include>>

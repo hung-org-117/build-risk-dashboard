@@ -27,9 +27,8 @@ logger = logging.getLogger(__name__)
 # Gmail API scopes
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
-# Token file path (relative to backend directory)
-TOKEN_FILE = Path(__file__).parent.parent.parent / "gmail_token.json"
-CREDENTIALS_FILE = Path(__file__).parent.parent.parent / "gmail_credentials.json"
+# Global cache for credentials to avoid refreshing on every request
+_CACHED_CREDS = None
 
 
 def _get_gmail_service():
@@ -39,11 +38,14 @@ def _get_gmail_service():
     Returns:
         Gmail API service or None if not configured/available
     """
+    global _CACHED_CREDS
+
     try:
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
+        import json
     except ImportError:
         logger.warning(
             "Gmail API dependencies not installed. "
@@ -51,43 +53,36 @@ def _get_gmail_service():
         )
         return None
 
-    if not CREDENTIALS_FILE.exists():
-        logger.debug(f"Gmail credentials file not found: {CREDENTIALS_FILE}")
-        return None
+    creds = _CACHED_CREDS
 
-    creds = None
-
-    # Load existing token if available
-    if TOKEN_FILE.exists():
+    # If no cached creds, try loading from Environment Variables
+    if not creds and settings.GMAIL_TOKEN_JSON:
         try:
-            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+            token_info = json.loads(settings.GMAIL_TOKEN_JSON)
+            creds = Credentials.from_authorized_user_info(token_info, SCOPES)
         except Exception as e:
-            logger.warning(f"Failed to load Gmail token: {e}")
+            logger.warning(f"Failed to load Gmail token from environment: {e}")
 
-    # Refresh or get new credentials
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-            except Exception as e:
-                logger.error(f"Failed to refresh Gmail token: {e}")
-                creds = None
+    # Auto-Refresh if expired
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            logger.info("Gmail API token expired, refreshing...")
+            creds.refresh(Request())
+        except Exception as e:
+            logger.error(f"Failed to refresh Gmail token: {e}")
+            creds = None
 
-        if not creds:
-            # Need to run authorization flow
+    # Update cache if we have valid creds
+    if creds and creds.valid:
+        _CACHED_CREDS = creds
+    else:
+        # If we failed to get/refresh valid creds, check config status for warning
+        has_token_config = settings.GMAIL_TOKEN_JSON is not None
+        if has_token_config:
             logger.warning(
-                "Gmail API not authorized. Run the setup script to authorize: "
-                "python -m app.services.gmail_api_service --setup"
+                "Gmail API token is present but invalid/expired and could not be refreshed."
             )
-            return None
-
-    # Save the token for future use
-    if creds:
-        try:
-            with open(TOKEN_FILE, "w") as token:
-                token.write(creds.to_json())
-        except Exception as e:
-            logger.warning(f"Failed to save Gmail token: {e}")
+        return None
 
     try:
         return build("gmail", "v1", credentials=creds)
@@ -160,7 +155,7 @@ def setup_gmail_api():
     """
     Interactive setup for Gmail API authorization.
 
-    Run this once to authorize the application and generate token.json.
+    Run this once to authorize the application and generate token.json content.
     """
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -171,28 +166,42 @@ def setup_gmail_api():
         )
         return False
 
-    if not CREDENTIALS_FILE.exists():
-        print(f"Error: Credentials file not found: {CREDENTIALS_FILE}")
-        print("Please download OAuth 2.0 credentials from Google Cloud Console")
-        print("and save as 'gmail_credentials.json' in the backend directory.")
+    client_id = settings.GOOGLE_CLIENT_ID
+    client_secret = settings.GOOGLE_CLIENT_SECRET
+
+    if not client_id or not client_secret:
+        print("Error: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
+        print("in your environment variables to run this setup.")
         return False
 
+    # Construct config from env vars
+    client_config = {
+        "installed": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": ["http://localhost"],
+        }
+    }
+
     print("Starting Gmail API authorization...")
-    print(f"Credentials file: {CREDENTIALS_FILE}")
-    print(f"Token will be saved to: {TOKEN_FILE}")
+    print("Please follow the instructions in the browser to authorize the app.")
     print()
 
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+        flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
         creds = flow.run_local_server(port=8888)
-
-        # Save the credentials
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
 
         print()
         print("✓ Gmail API authorized successfully!")
-        print(f"✓ Token saved to: {TOKEN_FILE}")
+        print("-" * 50)
+        print("IMPORTANT: Copy the JSON content below")
+        print("and set it as GMAIL_TOKEN_JSON environment variable:")
+        print("-" * 50)
+        print(creds.to_json())
+        print("-" * 50)
         return True
 
     except Exception as e:
@@ -212,10 +221,4 @@ if __name__ == "__main__":
         print("  python -m app.services.gmail_api_service --setup")
         print()
         print("Status:")
-        print(
-            f"  Credentials file: {CREDENTIALS_FILE} - {'EXISTS' if CREDENTIALS_FILE.exists() else 'NOT FOUND'}"
-        )
-        print(
-            f"  Token file: {TOKEN_FILE} - {'EXISTS' if TOKEN_FILE.exists() else 'NOT FOUND'}"
-        )
         print(f"  Gmail API available: {is_gmail_api_available()}")

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/contexts/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +12,7 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { api } from "@/lib/api";
+import { api, datasetScanApi } from "@/lib/api";
 import { useDynamicWebSocket } from "@/hooks/use-websocket";
 import {
     AlertCircle,
@@ -30,6 +31,8 @@ import {
     Wifi,
     WifiOff,
     XCircle,
+    Eye,
+    Download,
 } from "lucide-react";
 import { ScanConfigModal } from "./ScanConfigModal";
 
@@ -87,6 +90,9 @@ interface FailedResult {
 // =============================================================================
 
 export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
+
     const [tools, setTools] = useState<ToolInfo[]>([]);
     const [scans, setScans] = useState<DatasetScan[]>([]);
     const [loading, setLoading] = useState(true);
@@ -334,8 +340,8 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                 ))}
             </div>
 
-            {/* Start Scan Panel */}
-            {selectedTool && (
+            {/* Start Scan Panel - Admin only */}
+            {isAdmin && selectedTool && (
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center justify-between">
@@ -409,13 +415,15 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                         {Math.round(scan.progress_percentage)}% complete
                                     </p>
                                 </div>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleCancelScan(scan.id)}
-                                >
-                                    <StopCircle className="h-4 w-4" />
-                                </Button>
+                                {isAdmin && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleCancelScan(scan.id)}
+                                    >
+                                        <StopCircle className="h-4 w-4" />
+                                    </Button>
+                                )}
                             </div>
                         ))}
                     </CardContent>
@@ -439,6 +447,9 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                         <th className="px-4 py-3 text-left font-medium">Commits</th>
                                         <th className="px-4 py-3 text-left font-medium">
                                             Completed
+                                        </th>
+                                        <th className="px-4 py-3 text-left font-medium">
+                                            Actions
                                         </th>
                                     </tr>
                                 </thead>
@@ -489,20 +500,46 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                                         : "—"}
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    {scan.failed_commits > 0 && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={() => loadFailedResults(scan.id)}
-                                                            disabled={loadingFailedResults}
-                                                        >
-                                                            {expandedScanId === scan.id ? (
-                                                                <ChevronUp className="h-4 w-4" />
-                                                            ) : (
-                                                                <ChevronDown className="h-4 w-4" />
-                                                            )}
-                                                        </Button>
-                                                    )}
+                                                    <div className="flex gap-1">
+                                                        {/* View Results */}
+                                                        {scan.scanned_commits > 0 && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => window.open(`/admin/datasets/${datasetId}/scans/${scan.id}/results`, '_blank')}
+                                                                title="View Results"
+                                                            >
+                                                                <Eye className="h-4 w-4" />
+                                                            </Button>
+                                                        )}
+                                                        {/* Export Results */}
+                                                        {scan.scanned_commits > 0 && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => datasetScanApi.exportResults(datasetId, scan.id)}
+                                                                title="Export CSV"
+                                                            >
+                                                                <Download className="h-4 w-4" />
+                                                            </Button>
+                                                        )}
+                                                        {/* Failed Results Toggle */}
+                                                        {scan.failed_commits > 0 && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => loadFailedResults(scan.id)}
+                                                                disabled={loadingFailedResults}
+                                                                title="View Failed"
+                                                            >
+                                                                {expandedScanId === scan.id ? (
+                                                                    <ChevronUp className="h-4 w-4" />
+                                                                ) : (
+                                                                    <ChevronDown className="h-4 w-4" />
+                                                                )}
+                                                            </Button>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                             {/* Expanded Failed Results */}
@@ -539,23 +576,25 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                                                             </p>
                                                                         )}
                                                                     </div>
-                                                                    <div className="flex gap-2 ml-4">
-                                                                        <Button
-                                                                            variant="outline"
-                                                                            size="sm"
-                                                                            onClick={() => openRetryModal(result.id, scan.id, result.commit_sha)}
-                                                                        >
-                                                                            <Code className="h-4 w-4 mr-1" />
-                                                                            Config
-                                                                        </Button>
-                                                                        <Button
-                                                                            size="sm"
-                                                                            onClick={() => handleRetryResult(result.id, scan.id, null)}
-                                                                        >
-                                                                            <RotateCcw className="h-4 w-4 mr-1" />
-                                                                            Retry
-                                                                        </Button>
-                                                                    </div>
+                                                                    {isAdmin && (
+                                                                        <div className="flex gap-2 ml-4">
+                                                                            <Button
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() => openRetryModal(result.id, scan.id, result.commit_sha)}
+                                                                            >
+                                                                                <Code className="h-4 w-4 mr-1" />
+                                                                                Config
+                                                                            </Button>
+                                                                            <Button
+                                                                                size="sm"
+                                                                                onClick={() => handleRetryResult(result.id, scan.id, null)}
+                                                                            >
+                                                                                <RotateCcw className="h-4 w-4 mr-1" />
+                                                                                Retry
+                                                                            </Button>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             ))}
                                                         </div>
