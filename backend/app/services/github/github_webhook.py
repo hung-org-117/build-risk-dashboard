@@ -16,8 +16,6 @@ from app.ci_providers.models import BuildStatus, BuildConclusion, CIProvider
 from app.celery_app import celery_app
 from bson import ObjectId
 
-# from app.services.github.github_app import clear_installation_token
-
 
 def verify_signature(signature: str | None, body: bytes) -> None:
     if not settings.GITHUB_WEBHOOK_SECRET:

@@ -62,11 +62,85 @@ const processQueue = (error: any, token: string | null = null) => {
   failedQueue = [];
 };
 
-// Response interceptor to handle token expiration
+// Types for standardized API response format
+interface ApiSuccessResponse<T = any> {
+  success: true;
+  data: T;
+  meta?: {
+    request_id?: string;
+    duration_ms?: number;
+  };
+}
+
+interface ApiErrorResponse {
+  success: false;
+  error: {
+    code: string;
+    message: string;
+    details?: Array<{
+      field: string;
+      message: string;
+      type: string;
+    }>;
+    request_id?: string;
+  };
+  timestamp: string;
+}
+
+type ApiResponse<T = any> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+// Custom error class for API errors
+export class ApiError extends Error {
+  code: string;
+  details?: Array<{ field: string; message: string; type: string }>;
+  requestId?: string;
+  statusCode?: number;
+
+  constructor(
+    message: string,
+    code: string,
+    details?: Array<{ field: string; message: string; type: string }>,
+    requestId?: string,
+    statusCode?: number
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.details = details;
+    this.requestId = requestId;
+    this.statusCode = statusCode;
+  }
+}
+
+// Response interceptor to unwrap standardized response format
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Check if response is in new wrapped format
+    const data = response.data;
+    if (data && typeof data === "object" && "success" in data) {
+      if (data.success === true && "data" in data) {
+        // Unwrap successful response
+        response.data = data.data;
+      }
+      // If success is false, it should have been caught by error interceptor
+    }
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
+
+    // Handle new standardized error format
+    if (error.response?.data?.success === false && error.response?.data?.error) {
+      const errorData = error.response.data as ApiErrorResponse;
+      const apiError = new ApiError(
+        errorData.error.message,
+        errorData.error.code,
+        errorData.error.details,
+        errorData.error.request_id,
+        error.response.status
+      );
+      error.apiError = apiError;
+    }
 
     if (
       error.response?.status === 401 &&
@@ -122,6 +196,46 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Helper to extract error message from API error
+export function getApiErrorMessage(error: any): string {
+  // Check for new ApiError format
+  if (error.apiError instanceof ApiError) {
+    return error.apiError.message;
+  }
+  // Check for standardized error response
+  if (error.response?.data?.error?.message) {
+    return error.response.data.error.message;
+  }
+  // Fallback to axios error detail
+  if (error.response?.data?.detail) {
+    return error.response.data.detail;
+  }
+  // Generic message
+  if (error.message) {
+    return error.message;
+  }
+  return "An unexpected error occurred";
+}
+
+// Helper to get field-level validation errors
+export function getValidationErrors(
+  error: any
+): Array<{ field: string; message: string }> | null {
+  if (error.apiError instanceof ApiError && error.apiError.details) {
+    return error.apiError.details.map((d) => ({
+      field: d.field,
+      message: d.message,
+    }));
+  }
+  if (error.response?.data?.error?.details) {
+    return error.response.data.error.details.map((d: any) => ({
+      field: d.field,
+      message: d.message,
+    }));
+  }
+  return null;
+}
 
 export const buildApi = {
   getByRepo: async (

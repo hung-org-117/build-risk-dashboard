@@ -215,9 +215,13 @@ def _run_trivy_scan(
 
     result_repo.mark_scanning(str(result.id))
 
+    # Use effective_sha for worktree if available (for fork commits)
+    # Otherwise use commit_sha
+    checkout_sha = result.effective_sha or result.commit_sha
+
     # Get or create worktree for the commit
     worktree_path, is_temp_clone = _ensure_worktree(
-        str(result.dataset_id), result.repo_full_name, result.commit_sha, repo_repo
+        str(result.dataset_id), result.repo_full_name, checkout_sha, repo_repo
     )
 
     if not worktree_path:
@@ -261,7 +265,7 @@ def _start_sonar_scan(
         f"Starting SonarQube scan on {result.repo_full_name}@{result.commit_sha[:8]}"
     )
 
-    # Generate component key
+    # Generate component key using original commit_sha (for result identification)
     repo_name_safe = result.repo_full_name.replace("/", "_")
     component_key = f"{repo_name_safe}_{result.commit_sha[:12]}"
 
@@ -280,6 +284,12 @@ def _start_sonar_scan(
 
     repo_url = f"https://github.com/{result.repo_full_name}.git"
 
+    # Use effective_sha for checkout if available (for fork commits)
+    checkout_sha = result.effective_sha or result.commit_sha
+
+    # Get raw_repo_id for shared worktree
+    raw_repo_id = str(repo.raw_repo_id) if repo.raw_repo_id else str(repo.id)
+
     # Dispatch sonar scan task with optional config
     from app.tasks.sonar import start_sonar_scan
 
@@ -287,12 +297,55 @@ def _start_sonar_scan(
         build_id=str(result.scan_id),  # Use scan_id as reference
         build_type="dataset_scan",
         repo_url=repo_url,
-        commit_sha=result.commit_sha,
+        commit_sha=checkout_sha,  # Use effective_sha for checkout
         component_key=component_key,
         config_content=config_content,
+        raw_repo_id=raw_repo_id,
+        full_name=result.repo_full_name,
     )
 
     logger.info(f"SonarQube scan dispatched for {component_key}")
+
+
+def _clone_bare_repo(raw_repo_id: str, full_name: str) -> None:
+    """
+    Clone a repository as bare for worktree creation.
+
+    Uses installation token for org repos.
+    Raises exception on failure.
+    """
+    import subprocess
+    from app.paths import REPOS_DIR
+    from app.config import settings
+    from app.core.redis import RedisLock
+
+    repo_path = REPOS_DIR / raw_repo_id
+
+    with RedisLock(f"clone:{raw_repo_id}", timeout=700, blocking_timeout=60):
+        # Double-check after acquiring lock
+        if repo_path.exists():
+            logger.info(f"Repo already cloned by another process: {repo_path}")
+            return
+
+        # Check if org repo for installation token
+        from app.services.repository_service import is_org_repo
+
+        clone_url = f"https://github.com/{full_name}.git"
+
+        if is_org_repo(full_name) and settings.GITHUB_INSTALLATION_ID:
+            from app.services.github.github_app import get_installation_token
+
+            token = get_installation_token()
+            clone_url = f"https://x-access-token:{token}@github.com/{full_name}.git"
+
+        logger.info(f"Cloning {full_name} to {repo_path}")
+        subprocess.run(
+            ["git", "clone", "--bare", clone_url, str(repo_path)],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+        logger.info(f"Successfully cloned {full_name}")
 
 
 def _ensure_worktree(
@@ -304,18 +357,20 @@ def _ensure_worktree(
     """
     Ensure a git worktree exists for the commit.
 
-    First checks if a shared worktree exists at repo-data/worktrees/{repo_id}/{commit_sha}.
-    If not, creates a temporary directory with the repo checked out.
+    Uses shared worktrees from WORKTREES_DIR/{raw_repo_id}/{commit_sha[:12]}.
+    If worktree doesn't exist, creates it from bare repo in REPOS_DIR.
+    Uses RedisLock to prevent race conditions with ingestion_tasks.
 
     Returns:
         Tuple of (worktree_path, is_temp_clone)
-        - is_temp_clone: True if we created a temp clone that needs cleanup
+        - is_temp_clone: Always False for shared worktrees (no cleanup needed)
     """
     import subprocess
-    import tempfile
+    from app.paths import REPOS_DIR, WORKTREES_DIR
+    from app.core.redis import RedisLock
 
     try:
-        # Get repo from DB to check if it exists
+        # Get repo from DB to get raw_repo_id
         repo = repo_repo.find_by_dataset_and_full_name(dataset_id, repo_full_name)
         if not repo:
             logger.error(
@@ -323,84 +378,80 @@ def _ensure_worktree(
             )
             return None, False
 
-        # Check for existing shared worktree first
-        # Path: repo-data/worktrees/{repo_id}/{commit_sha}
-        shared_worktree_base = Path("../repo-data/worktrees") / str(repo.id)
-        shared_worktree_path = shared_worktree_base / commit_sha
+        raw_repo_id = str(repo.raw_repo_id) if repo.raw_repo_id else str(repo.id)
 
-        if shared_worktree_path.exists():
-            git_marker = shared_worktree_path / ".git"
+        # Path: WORKTREES_DIR/{raw_repo_id}/{commit_sha[:12]}
+        worktrees_dir = WORKTREES_DIR / raw_repo_id
+        worktree_path = worktrees_dir / commit_sha[:12]
+
+        # Check for existing shared worktree (quick check without lock)
+        if worktree_path.exists():
+            git_marker = worktree_path / ".git"
             if git_marker.exists():
                 logger.info(
-                    f"Using existing shared worktree at {shared_worktree_path} "
+                    f"Using existing shared worktree at {worktree_path} "
                     f"for {commit_sha[:8]}"
                 )
-                return shared_worktree_path, False  # Not a temp clone, don't cleanup
+                return worktree_path, False
 
-        # No existing worktree found, create a temp clone
-        logger.info(
-            f"No shared worktree found for {commit_sha[:8]}, creating temp clone"
-        )
+        # Lock to prevent race condition with ingestion_tasks
+        with RedisLock(
+            f"worktree:{raw_repo_id}:{commit_sha[:12]}",
+            timeout=120,
+            blocking_timeout=60,
+        ):
+            # Double-check after acquiring lock
+            if worktree_path.exists():
+                git_marker = worktree_path / ".git"
+                if git_marker.exists():
+                    logger.info(f"Worktree created by another process: {worktree_path}")
+                    return worktree_path, False
 
-        repo_url = f"https://github.com/{repo_full_name}.git"
+            # Check if bare repo exists, clone if not
+            repo_path = REPOS_DIR / raw_repo_id
+            if not repo_path.exists():
+                logger.info(f"Bare repo not found, cloning {repo_full_name}...")
+                try:
+                    _clone_bare_repo(raw_repo_id, repo_full_name)
+                except Exception as e:
+                    logger.error(f"Failed to clone repo {repo_full_name}: {e}")
+                    return None, False
 
-        # Create temp directory for worktree
-        worktree_dir = Path(tempfile.mkdtemp(prefix=f"scan_{commit_sha[:8]}_"))
-
-        # Clone the repo at specific commit (shallow clone for speed)
-        try:
-            # First try shallow clone at specific commit
-            subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--depth",
-                    "1",
-                    "--branch",
-                    commit_sha,
-                    repo_url,
-                    str(worktree_dir),
-                ],
+            # Verify commit exists in bare repo
+            result = subprocess.run(
+                ["git", "cat-file", "-e", commit_sha],
+                cwd=str(repo_path),
                 capture_output=True,
-                text=True,
-                timeout=300,
-                check=True,
-            )
-        except subprocess.CalledProcessError:
-            # If shallow clone fails (commit not a branch/tag), do full clone
-            logger.info(f"Shallow clone failed, trying full clone for {commit_sha[:8]}")
-
-            # Clean up failed attempt
-            import shutil
-
-            if worktree_dir.exists():
-                shutil.rmtree(worktree_dir, ignore_errors=True)
-            worktree_dir = Path(tempfile.mkdtemp(prefix=f"scan_{commit_sha[:8]}_"))
-
-            # Full clone
-            subprocess.run(
-                ["git", "clone", repo_url, str(worktree_dir)],
-                capture_output=True,
-                text=True,
-                timeout=600,
-                check=True,
+                timeout=10,
             )
 
-            # Checkout specific commit
+            if result.returncode != 0:
+                logger.warning(
+                    f"Commit {commit_sha[:8]} not found in repo {raw_repo_id}. "
+                    f"May need to run clone_repo task first or commit is from fork."
+                )
+                return None, False
+
+            # Create worktree from bare repo
+            worktrees_dir.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["git", "checkout", commit_sha],
-                cwd=str(worktree_dir),
+                ["git", "worktree", "add", "--detach", str(worktree_path), commit_sha],
+                cwd=str(repo_path),
+                check=True,
                 capture_output=True,
-                text=True,
                 timeout=60,
-                check=True,
             )
 
-        logger.info(f"Created temp worktree at {worktree_dir} for {commit_sha[:8]}")
-        return worktree_dir, True  # Is a temp clone, needs cleanup
+            logger.info(
+                f"Created shared worktree at {worktree_path} for {commit_sha[:8]}"
+            )
+            return worktree_path, False  # Shared worktree, no cleanup needed
 
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to create worktree for {commit_sha[:8]}: {e}")
+        return None, False
     except subprocess.TimeoutExpired:
-        logger.error(f"Timeout cloning {repo_full_name}@{commit_sha}")
+        logger.error(f"Timeout creating worktree for {repo_full_name}@{commit_sha}")
         return None, False
     except Exception as e:
         logger.error(

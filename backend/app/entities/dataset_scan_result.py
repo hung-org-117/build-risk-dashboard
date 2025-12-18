@@ -25,8 +25,12 @@ class DatasetScanResult(BaseEntity):
 
     scan_id: PyObjectId  # Parent DatasetScan
     dataset_id: PyObjectId  # For quick lookups
-    commit_sha: str
+    commit_sha: str  # Original commit SHA (used as primary ID for results)
     repo_full_name: str
+
+    # For fork commits - the replayed SHA to use for worktree checkout
+    # If None, use commit_sha for checkout
+    effective_sha: Optional[str] = None
 
     # Which rows in dataset this commit maps to
     row_indices: List[int] = Field(default_factory=list)

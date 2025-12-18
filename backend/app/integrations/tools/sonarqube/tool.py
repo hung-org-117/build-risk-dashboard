@@ -21,11 +21,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
 # SONARQUBE METRICS DEFINITIONS
-# =============================================================================
-# Preserved from pipeline/feature_metadata/sonar.py
-
 SONARQUBE_METRICS: List[MetricDefinition] = [
     # -------------------------------------------------------------------------
     # Reliability Metrics (Bugs)
@@ -641,6 +637,7 @@ class SonarQubeTool(IntegrationTool):
         project_key: str,
         worktree_path: Optional[str] = None,
         config_content: Optional[str] = None,
+        raw_repo_id: Optional[str] = None,
     ) -> str:
         """
         Start an async SonarQube scan.
@@ -650,7 +647,7 @@ class SonarQubeTool(IntegrationTool):
         """
         from app.integrations.tools.sonarqube.runner import SonarCommitRunner
 
-        runner = SonarCommitRunner(project_key)
+        runner = SonarCommitRunner(project_key, raw_repo_id=raw_repo_id)
         component_key = runner.scan_commit(
             repo_url=repo_url,
             commit_sha=commit_sha,

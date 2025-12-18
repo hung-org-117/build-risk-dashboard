@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Build Risk Assessment"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
+    ENV: str = "dev"  # Environment: "dev", "staging", "prod"
 
     # Database (MongoDB)
     MONGODB_URI: str = "mongodb://localhost:27017"

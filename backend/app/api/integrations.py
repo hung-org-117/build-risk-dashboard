@@ -69,36 +69,8 @@ def list_tools(
 # =============================================================================
 
 
-class UniqueCommitInfo(BaseModel):
-    sha: str
-    repo_full_name: str
-    row_count: int
-    row_indices: List[int]
-    last_scanned: Optional[str] = None
-    scan_results: Optional[dict] = None
-
-
-class UniqueCommitsResponse(BaseModel):
-    commits: List[UniqueCommitInfo]
-    total: int
-
-
-@router.get("/datasets/{dataset_id}/commits", response_model=UniqueCommitsResponse)
-def get_unique_commits(
-    dataset_id: str,
-    version_id: Optional[str] = None,
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Get unique commits from dataset for scan selection."""
-    service = DatasetScanService(db)
-    commits = service.get_unique_commits(dataset_id, version_id)
-    return {"commits": commits, "total": len(commits)}
-
-
 class StartScanRequest(BaseModel):
     tool_type: str  # "sonarqube" or "trivy"
-    selected_commit_shas: Optional[List[str]] = None  # None = all
     scan_config: Optional[str] = None  # Default config for all commits
 
 
@@ -123,14 +95,13 @@ def start_scan(
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Start a new scan job for a dataset."""
+    """Start a new scan job for a dataset. Scans all validated builds."""
     service = DatasetScanService(db)
     try:
         scan = service.start_scan(
             dataset_id=dataset_id,
             user_id=str(current_user["_id"]),
             tool_type=request.tool_type,
-            selected_commit_shas=request.selected_commit_shas,
             scan_config=request.scan_config,
         )
         return {

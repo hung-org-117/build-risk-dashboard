@@ -49,3 +49,16 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
         return self.find_many(
             {"dataset_id": oid_ds, "raw_repo_id": oid_repo, "status": "found"}
         )
+
+    def find_builds_with_run_ids(self, dataset_id: str) -> list[DatasetBuild]:
+        """Find all validated builds with workflow_run_id populated."""
+        oid = self._to_object_id(dataset_id)
+        if not oid:
+            return []
+        return self.find_many(
+            {
+                "dataset_id": oid,
+                "status": "found",
+                "workflow_run_id": {"$ne": None},
+            }
+        )

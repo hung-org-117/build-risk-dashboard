@@ -14,7 +14,7 @@ Features:
 import logging
 import subprocess
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 from app.celery_app import celery_app
@@ -291,61 +291,74 @@ def create_worktree_chunk(
 
     for sha in commit_shas:
         worktree_path = worktrees_dir / sha[:12]
+
+        # Quick check without lock
         if worktree_path.exists():
             worktrees_skipped += 1
             continue
 
         build_run = build_run_repo.find_by_commit_or_effective_sha(raw_repo_id, sha)
 
+        # Use lock to prevent race condition with integration_scan
         try:
-            # Check if commit exists
-            result = subprocess.run(
-                ["git", "cat-file", "-e", sha],
-                cwd=str(repo_path),
-                capture_output=True,
-                timeout=10,
-            )
-
-            if result.returncode != 0:
-                # Attempt fork replay
-                if github_client and raw_repo:
-                    try:
-                        from app.services.commit_replay import ensure_commit_exists
-
-                        synthetic_sha = ensure_commit_exists(
-                            repo_path=repo_path,
-                            commit_sha=sha,
-                            repo_slug=raw_repo.full_name,
-                            github_client=github_client,
-                        )
-                        if synthetic_sha:
-                            if build_run:
-                                build_run_repo.update_effective_sha(
-                                    build_run.id, synthetic_sha
-                                )
-                            sha = synthetic_sha
-                            fork_commits_replayed += 1
-                        else:
-                            worktrees_skipped += 1
-                            continue
-                    except Exception as e:
-                        logger.warning(f"Fork replay failed for {sha[:8]}: {e}")
-                        worktrees_skipped += 1
-                        continue
-                else:
+            with RedisLock(
+                f"worktree:{raw_repo_id}:{sha[:12]}",
+                timeout=120,
+                blocking_timeout=60,
+            ):
+                # Double-check after acquiring lock
+                if worktree_path.exists():
                     worktrees_skipped += 1
                     continue
 
-            # Create worktree
-            worktree_path = worktrees_dir / sha[:12]
-            subprocess.run(
-                ["git", "worktree", "add", "--detach", str(worktree_path), sha],
-                cwd=str(repo_path),
-                check=True,
-                capture_output=True,
-                timeout=60,
-            )
-            worktrees_created += 1
+                # Check if commit exists
+                result = subprocess.run(
+                    ["git", "cat-file", "-e", sha],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    timeout=10,
+                )
+
+                if result.returncode != 0:
+                    # Attempt fork replay
+                    if github_client and raw_repo:
+                        try:
+                            from app.services.commit_replay import ensure_commit_exists
+
+                            synthetic_sha = ensure_commit_exists(
+                                repo_path=repo_path,
+                                commit_sha=sha,
+                                repo_slug=raw_repo.full_name,
+                                github_client=github_client,
+                            )
+                            if synthetic_sha:
+                                if build_run:
+                                    build_run_repo.update_effective_sha(
+                                        build_run.id, synthetic_sha
+                                    )
+                                sha = synthetic_sha
+                                fork_commits_replayed += 1
+                            else:
+                                worktrees_skipped += 1
+                                continue
+                        except Exception as e:
+                            logger.warning(f"Fork replay failed for {sha[:8]}: {e}")
+                            worktrees_skipped += 1
+                            continue
+                    else:
+                        worktrees_skipped += 1
+                        continue
+
+                # Create worktree
+                worktree_path = worktrees_dir / sha[:12]
+                subprocess.run(
+                    ["git", "worktree", "add", "--detach", str(worktree_path), sha],
+                    cwd=str(repo_path),
+                    check=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+                worktrees_created += 1
 
         except subprocess.CalledProcessError as e:
             logger.warning(f"Failed to create worktree for {sha[:8]}: {e}")

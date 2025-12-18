@@ -1,104 +1,140 @@
 import logging
 import os
-import shutil
 import subprocess
-from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
 
 import requests
-import fcntl
 
 from app.config import settings
-from app.paths import SONAR_WORK_DIR
+from app.paths import REPOS_DIR, WORKTREES_DIR
+from app.core.redis import RedisLock
 from app.integrations.tools.sonarqube.config import get_sonar_runtime_config
 
 logger = logging.getLogger(__name__)
 
 
 class SonarCommitRunner:
-    def __init__(self, project_key: str):
+    """
+    SonarQube scanner that uses shared repo/worktree infrastructure.
+
+    Now uses:
+    - REPOS_DIR for bare repos (shared with ingestion_tasks)
+    - WORKTREES_DIR for worktrees (shared with ingestion_tasks)
+    - RedisLock for concurrency control
+    """
+
+    def __init__(self, project_key: str, raw_repo_id: Optional[str] = None):
         self.project_key = project_key
+        self.raw_repo_id = raw_repo_id  # For shared worktree lookup
+
         # Prefer DB-configured settings if available (merged ENV + DB)
         cfg = get_sonar_runtime_config()
         self.host = cfg.host_url
         # If token is empty (masked or not set in DB), fall back to ENV
         self.token = cfg.token or settings.SONAR_TOKEN
 
-        # Use centralized sonar work directory from paths.py
-        self.work_dir = SONAR_WORK_DIR / project_key
-        self.repo_dir = self.work_dir / "repo"
-        self.worktrees_dir = self.work_dir / "worktrees"
-
-        self.worktrees_dir.mkdir(parents=True, exist_ok=True)
-        self.repo_lock_path = self.work_dir / ".repo.lock"
-        self.repo_lock_path.touch(exist_ok=True)
-
         self.session = requests.Session()
         self.session.auth = (self.token, "")
 
-    def ensure_repo(self, repo_url: str) -> Path:
-        if self.repo_dir.exists() and (self.repo_dir / ".git").exists():
-            return self.repo_dir
-        if self.repo_dir.exists():
-            shutil.rmtree(self.repo_dir)
+    def _get_repo_path(self) -> Optional[Path]:
+        """Get path to bare repo in shared REPOS_DIR."""
+        if not self.raw_repo_id:
+            return None
+        return REPOS_DIR / self.raw_repo_id
 
-        logger.info(f"Cloning {repo_url} to {self.repo_dir}")
-        subprocess.run(
-            ["git", "clone", repo_url, str(self.repo_dir)],
-            check=True,
-            capture_output=True,
-        )
-        return self.repo_dir
+    def _get_worktree_path(self, commit_sha: str) -> Optional[Path]:
+        """Get path to worktree in shared WORKTREES_DIR."""
+        if not self.raw_repo_id:
+            return None
+        return WORKTREES_DIR / self.raw_repo_id / commit_sha[:12]
 
-    @contextmanager
-    def repo_mutex(self):
-        with self.repo_lock_path.open("r+") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+    def ensure_shared_worktree(self, commit_sha: str, full_name: str) -> Optional[Path]:
+        """
+        Ensure worktree exists using shared infrastructure.
 
-    def refresh_repo(self, repo_url: str):
-        self.ensure_repo(repo_url)
-        subprocess.run(
-            ["git", "fetch", "--all", "--tags", "--prune"],
-            cwd=self.repo_dir,
-            check=False,
-            capture_output=True,
-        )
+        Uses RedisLock to coordinate with ingestion_tasks and integration_scan.
+        """
+        if not self.raw_repo_id:
+            logger.warning("No raw_repo_id set, cannot use shared worktree")
+            return None
 
-    def create_worktree(self, commit_sha: str) -> Path:
-        target = self.worktrees_dir / commit_sha
-        if target.exists():
-            subprocess.run(
-                ["git", "worktree", "remove", str(target), "--force"],
-                cwd=self.repo_dir,
-                check=False,
+        worktree_path = self._get_worktree_path(commit_sha)
+        repo_path = self._get_repo_path()
+
+        # Quick check
+        if worktree_path.exists() and (worktree_path / ".git").exists():
+            logger.info(f"Using existing shared worktree: {worktree_path}")
+            return worktree_path
+
+        with RedisLock(
+            f"worktree:{self.raw_repo_id}:{commit_sha[:12]}",
+            timeout=120,
+            blocking_timeout=60,
+        ):
+            # Double-check after lock
+            if worktree_path.exists() and (worktree_path / ".git").exists():
+                return worktree_path
+
+            # Check if bare repo exists
+            if not repo_path or not repo_path.exists():
+                logger.warning(f"Bare repo not found at {repo_path}")
+                # Try to clone it
+                self._clone_bare_repo(full_name)
+                if not repo_path.exists():
+                    return None
+
+            # Verify commit exists
+            result = subprocess.run(
+                ["git", "cat-file", "-e", commit_sha],
+                cwd=str(repo_path),
                 capture_output=True,
+                timeout=10,
             )
-            shutil.rmtree(target, ignore_errors=True)
+            if result.returncode != 0:
+                logger.warning(f"Commit {commit_sha[:8]} not found in repo")
+                return None
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git", "worktree", "add", "--detach", str(target), commit_sha],
-            cwd=self.repo_dir,
-            check=True,
-            capture_output=True,
-        )
-        return target
-
-    def remove_worktree(self, commit_sha: str):
-        target = self.worktrees_dir / commit_sha
-        if target.exists():
+            # Create worktree
+            worktree_path.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["git", "worktree", "remove", str(target), "--force"],
-                cwd=self.repo_dir,
-                check=False,
+                ["git", "worktree", "add", "--detach", str(worktree_path), commit_sha],
+                cwd=str(repo_path),
+                check=True,
                 capture_output=True,
+                timeout=60,
             )
-            shutil.rmtree(target, ignore_errors=True)
+            logger.info(f"Created shared worktree: {worktree_path}")
+            return worktree_path
+
+    def _clone_bare_repo(self, full_name: str) -> None:
+        """Clone repo as bare using shared infrastructure."""
+        if not self.raw_repo_id:
+            return
+
+        repo_path = self._get_repo_path()
+
+        with RedisLock(f"clone:{self.raw_repo_id}", timeout=700, blocking_timeout=60):
+            if repo_path.exists():
+                return
+
+            from app.services.repository_service import is_org_repo
+
+            clone_url = f"https://github.com/{full_name}.git"
+
+            if is_org_repo(full_name) and settings.GITHUB_INSTALLATION_ID:
+                from app.services.github.github_app import get_installation_token
+
+                token = get_installation_token()
+                clone_url = f"https://x-access-token:{token}@github.com/{full_name}.git"
+
+            logger.info(f"Cloning {full_name} to {repo_path}")
+            subprocess.run(
+                ["git", "clone", "--bare", clone_url, str(repo_path)],
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
 
     def build_scan_command(self, component_key: str, source_dir: Path) -> List[str]:
         scanner_args = [
@@ -126,16 +162,17 @@ class SonarCommitRunner:
         commit_sha: str,
         sonar_config_content: Optional[str] = None,
         shared_worktree_path: Optional[Path] = None,
+        full_name: Optional[str] = None,
     ) -> str:
         """
         Run SonarQube scan on a commit.
 
         Args:
-            repo_url: Repository URL (used if shared_worktree_path not provided)
+            repo_url: Repository URL (used for extracting full_name if not provided)
             commit_sha: Commit SHA to scan
             sonar_config_content: Optional custom sonar-project.properties content
             shared_worktree_path: Optional path to shared worktree from pipeline.
-                                  If provided, uses this instead of creating own worktree.
+            full_name: Optional repo full name (e.g., "owner/repo")
         """
         component_key = f"{self.project_key}_{commit_sha}"
 
@@ -144,22 +181,32 @@ class SonarCommitRunner:
             logger.info(f"Component {component_key} already exists, skipping scan.")
             return component_key
 
-        # Use shared worktree if provided, otherwise create our own
-        use_shared_worktree = shared_worktree_path is not None
+        # Extract full_name from repo_url if not provided
+        if not full_name and repo_url:
+            # Parse "https://github.com/owner/repo.git" -> "owner/repo"
+            full_name = repo_url.replace("https://github.com/", "").replace(".git", "")
+
         worktree = None
 
         try:
-            if use_shared_worktree:
-                # Use shared worktree from pipeline
+            if shared_worktree_path:
+                # Use provided shared worktree
                 worktree = Path(shared_worktree_path)
                 if not worktree.exists():
                     raise ValueError(f"Shared worktree path does not exist: {worktree}")
+                logger.info(f"Using provided shared worktree at {worktree} for scan")
+            elif self.raw_repo_id and full_name:
+                # Use shared worktree infrastructure
+                worktree = self.ensure_shared_worktree(commit_sha, full_name)
+                if not worktree:
+                    raise ValueError(
+                        f"Failed to create shared worktree for {commit_sha}"
+                    )
                 logger.info(f"Using shared worktree at {worktree} for scan")
             else:
-                # Create our own worktree (legacy behavior)
-                with self.repo_mutex():
-                    self.refresh_repo(repo_url)
-                    worktree = self.create_worktree(commit_sha)
+                raise ValueError(
+                    "Either shared_worktree_path or raw_repo_id + full_name required"
+                )
 
             # Write custom config if provided
             if sonar_config_content:
@@ -182,11 +229,6 @@ class SonarCommitRunner:
         except subprocess.CalledProcessError as e:
             logger.error(f"Scan failed: {e.stderr}")
             raise
-        finally:
-            # Only cleanup if we created our own worktree
-            if worktree and not use_shared_worktree:
-                with self.repo_mutex():
-                    self.remove_worktree(commit_sha)
 
     def _project_exists(self, component_key: str) -> bool:
         url = f"{self.host}/api/projects/search"

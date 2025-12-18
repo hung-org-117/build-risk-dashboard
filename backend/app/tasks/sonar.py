@@ -38,6 +38,8 @@ def start_sonar_scan(
     component_key: str,
     config_content: str = None,
     shared_worktree_path: str = None,
+    raw_repo_id: str = None,
+    full_name: str = None,
 ):
     """
     Start SonarQube scan for a commit (CPU-intensive).
@@ -55,6 +57,8 @@ def start_sonar_scan(
         component_key: SonarQube component key
         config_content: Optional sonar-project.properties content
         shared_worktree_path: Optional path to shared worktree from pipeline
+        raw_repo_id: Optional raw repo ID for shared worktree lookup
+        full_name: Optional repo full name (owner/repo)
     """
     logger.info(f"Starting SonarQube scan for {component_key}")
 
@@ -82,13 +86,14 @@ def start_sonar_scan(
         # Get project key from component key (component_key = project_key_commit_sha)
         project_key = component_key.rsplit("_", 1)[0]
 
-        # Run scanner (use shared worktree if available)
-        runner = SonarCommitRunner(project_key)
+        # Run scanner (pass raw_repo_id for shared worktree support)
+        runner = SonarCommitRunner(project_key, raw_repo_id=raw_repo_id)
         runner.scan_commit(
             repo_url,
             commit_sha,
             sonar_config_content=config_content,
             shared_worktree_path=shared_worktree_path,
+            full_name=full_name,
         )
 
         logger.info(

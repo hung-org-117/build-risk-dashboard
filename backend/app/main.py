@@ -1,10 +1,42 @@
 """FastAPI application entry point."""
 
 import logging
+import os
 
-from fastapi import FastAPI
+# Configure logging based on ENV environment variable
+# ENV=dev: INFO level with detailed format (default)
+# ENV=prod/staging: WARNING level, minimal logs
+_env = os.getenv("ENV", "dev").lower()
+_is_dev = _env == "dev"
+_log_level = logging.INFO if _is_dev else logging.WARNING
+
+logging.basicConfig(
+    level=_log_level,
+    format=(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+        if _is_dev
+        else "%(levelname)s | %(message)s"
+    ),
+    datefmt="%H:%M:%S",
+)
+
+# Enable request/exception loggers in dev mode only
+if _is_dev:
+    logging.getLogger("app.request").setLevel(logging.INFO)
+    logging.getLogger("app.exception").setLevel(logging.INFO)
+
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.middleware.exception_handlers import (
+    http_exception_handler,
+    validation_exception_handler,
+    general_exception_handler,
+)
+
+# ResponseWrapperMiddleware disabled - has issues with StreamingResponse
+# from app.middleware.response_wrapper import ResponseWrapperMiddleware
 from app.api import (
     dashboard,
     health,
@@ -49,6 +81,12 @@ app.add_middleware(
 
 # Trace middleware for request logging and correlation
 app.add_middleware(RequestLoggingMiddleware)
+
+# Register global exception handlers
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
+
 
 app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])

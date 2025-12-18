@@ -10,7 +10,6 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
 import { useDynamicWebSocket } from "@/hooks/use-websocket";
@@ -56,10 +55,6 @@ interface ToolInfo {
 interface UniqueCommit {
     sha: string;
     repo_full_name: string;
-    row_count: number;
-    row_indices: number[];
-    last_scanned: string | null;
-    scan_results: Record<string, unknown> | null;
 }
 
 interface DatasetScan {
@@ -93,13 +88,11 @@ interface FailedResult {
 
 export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
     const [tools, setTools] = useState<ToolInfo[]>([]);
-    const [commits, setCommits] = useState<UniqueCommit[]>([]);
     const [scans, setScans] = useState<DatasetScan[]>([]);
     const [loading, setLoading] = useState(true);
 
     // Selection state
     const [selectedTool, setSelectedTool] = useState<string | null>(null);
-    const [selectedCommits, setSelectedCommits] = useState<Set<string>>(new Set());
     const [isStartingScan, setIsStartingScan] = useState(false);
 
     // Config modal state
@@ -123,18 +116,6 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
             setTools([]);
         }
     }, []);
-
-    // Load unique commits
-    const loadCommits = useCallback(async () => {
-        try {
-            const response = await api.get<{ commits: UniqueCommit[]; total: number }>(
-                `/integrations/datasets/${datasetId}/commits`
-            );
-            setCommits(response.data.commits || []);
-        } catch {
-            setCommits([]);
-        }
-    }, [datasetId]);
 
     // Load scans (active + history)
     const loadScans = useCallback(async () => {
@@ -166,15 +147,15 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
     useEffect(() => {
         const load = async () => {
             setLoading(true);
-            await Promise.all([loadTools(), loadCommits(), loadScans()]);
+            await Promise.all([loadTools(), loadScans()]);
             setLoading(false);
         };
         load();
-    }, [loadTools, loadCommits, loadScans]);
+    }, [loadTools, loadScans]);
 
     // Handle start scan with config
     const handleStartScan = async (scanConfig: string | null = null) => {
-        if (!selectedTool || selectedCommits.size === 0) return;
+        if (!selectedTool) return;
 
         setIsStartingScan(true);
         try {
@@ -182,12 +163,10 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                 `/integrations/datasets/${datasetId}/scans`,
                 {
                     tool_type: selectedTool,
-                    selected_commit_shas: Array.from(selectedCommits),
                     scan_config: scanConfig,
                 }
             );
             setScans((prev) => [response.data, ...prev]);
-            setSelectedCommits(new Set());
         } catch (error) {
             console.error("Failed to start scan:", error);
         } finally {
@@ -207,27 +186,7 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
         }
     };
 
-    // Toggle commit selection
-    const toggleCommit = (sha: string) => {
-        setSelectedCommits((prev) => {
-            const newSet = new Set(prev);
-            if (newSet.has(sha)) {
-                newSet.delete(sha);
-            } else {
-                newSet.add(sha);
-            }
-            return newSet;
-        });
-    };
 
-    // Select/deselect all
-    const toggleAllCommits = () => {
-        if (selectedCommits.size === commits.length) {
-            setSelectedCommits(new Set());
-        } else {
-            setSelectedCommits(new Set(commits.map((c) => c.sha)));
-        }
-    };
 
     // Open config modal for starting scan
     const openStartScanModal = () => {
@@ -375,34 +334,21 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                 ))}
             </div>
 
-            {/* Commit Selection Panel */}
+            {/* Start Scan Panel */}
             {selectedTool && (
                 <Card>
-                    <CardHeader>
+                    <CardContent className="pt-6">
                         <div className="flex items-center justify-between">
                             <div>
-                                <CardTitle>Select Commits to Scan</CardTitle>
-                                <CardDescription>
-                                    {commits.length} unique commits found in dataset
-                                </CardDescription>
+                                <h3 className="font-semibold">Ready to Scan</h3>
+                                <p className="text-sm text-muted-foreground">
+                                    All validated builds in this dataset will be scanned
+                                </p>
                             </div>
                             <div className="flex items-center gap-2">
-                                <Badge variant="outline">
-                                    {selectedCommits.size} selected
-                                </Badge>
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={toggleAllCommits}
-                                >
-                                    {selectedCommits.size === commits.length
-                                        ? "Deselect All"
-                                        : "Select All"}
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={selectedCommits.size === 0}
                                     onClick={openStartScanModal}
                                 >
                                     <Code className="h-4 w-4 mr-1" />
@@ -410,7 +356,7 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                 </Button>
                                 <Button
                                     size="sm"
-                                    disabled={selectedCommits.size === 0 || isStartingScan}
+                                    disabled={isStartingScan}
                                     onClick={() => handleStartScan(null)}
                                 >
                                     {isStartingScan ? (
@@ -421,87 +367,6 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                                     Start Scan
                                 </Button>
                             </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                        <div className="max-h-[300px] overflow-auto">
-                            <table className="min-w-full text-sm">
-                                <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left w-12">
-                                            <Checkbox
-                                                checked={selectedCommits.size === commits.length}
-                                                onCheckedChange={toggleAllCommits}
-                                            />
-                                        </th>
-                                        <th className="px-4 py-3 text-left font-medium">
-                                            Commit
-                                        </th>
-                                        <th className="px-4 py-3 text-left font-medium">
-                                            Repository
-                                        </th>
-                                        <th className="px-4 py-3 text-left font-medium">
-                                            Rows
-                                        </th>
-                                        <th className="px-4 py-3 text-left font-medium">
-                                            Status
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                    {commits.length === 0 ? (
-                                        <tr>
-                                            <td
-                                                colSpan={5}
-                                                className="px-4 py-8 text-center text-muted-foreground"
-                                            >
-                                                No commits found in dataset
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        commits.map((commit) => (
-                                            <tr
-                                                key={commit.sha}
-                                                className="hover:bg-slate-50 dark:hover:bg-slate-900/40 cursor-pointer"
-                                                onClick={() => toggleCommit(commit.sha)}
-                                            >
-                                                <td className="px-4 py-2">
-                                                    <Checkbox
-                                                        checked={selectedCommits.has(commit.sha)}
-                                                        onCheckedChange={() =>
-                                                            toggleCommit(commit.sha)
-                                                        }
-                                                    />
-                                                </td>
-                                                <td className="px-4 py-2 font-mono text-xs">
-                                                    {commit.sha.slice(0, 8)}
-                                                </td>
-                                                <td className="px-4 py-2 text-muted-foreground">
-                                                    {commit.repo_full_name}
-                                                </td>
-                                                <td className="px-4 py-2">
-                                                    <Badge variant="secondary">
-                                                        {commit.row_count}
-                                                    </Badge>
-                                                </td>
-                                                <td className="px-4 py-2">
-                                                    {commit.last_scanned ? (
-                                                        <Badge
-                                                            variant="outline"
-                                                            className="border-green-500 text-green-600"
-                                                        >
-                                                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                                                            Scanned
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge variant="secondary">Not scanned</Badge>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
                         </div>
                     </CardContent>
                 </Card>

@@ -14,7 +14,8 @@ from app.entities.dataset_scan import DatasetScan, DatasetScanStatus
 from app.entities.dataset_scan_result import DatasetScanResult
 from app.repositories.dataset_scan import DatasetScanRepository
 from app.repositories.dataset_scan_result import DatasetScanResultRepository
-from app.repositories.dataset_version import DatasetVersionRepository
+from app.repositories.dataset_build_repository import DatasetBuildRepository
+from app.repositories.raw_build_run import RawBuildRunRepository
 from app.integrations import get_tool, get_available_tools
 
 logger = logging.getLogger(__name__)
@@ -27,97 +28,93 @@ class DatasetScanService:
         self.db = db
         self.scan_repo = DatasetScanRepository(db)
         self.result_repo = DatasetScanResultRepository(db)
-        self.version_repo = DatasetVersionRepository(db)
+        self.build_repo = DatasetBuildRepository(db)
+        self.run_repo = RawBuildRunRepository(db)
 
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available integration tools with their info."""
         return [tool.to_info_dict() for tool in get_available_tools()]
 
-    def get_unique_commits(
-        self, dataset_id: str, version_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def get_commits_from_builds(self, dataset_id: str) -> List[Dict[str, Any]]:
         """
-        Get unique commits from a dataset for scan selection UI.
+        Get commits from validated dataset builds.
+
+        Queries dataset_builds with status=FOUND and joins with
+        raw_build_runs to get commit SHA and repo info.
 
         Returns list of:
         {
             "sha": "abc123...",
             "repo_full_name": "owner/repo",
-            "row_count": 5,
-            "row_indices": [0, 3, 7, 12, 15],
-            "last_scanned": "2024-01-15T...",  # or null if never scanned
-            "scan_results": {...}  # summary if previously scanned
+            "build_id": "123456",
+            "workflow_run_id": ObjectId,
         }
         """
-        # Get latest version if not specified
-        if version_id:
-            version = self.version_repo.find_by_id(version_id)
-        else:
-            version = self.version_repo.find_latest_by_dataset(dataset_id)
-
-        if not version or not version.data:
+        # Get validated builds with workflow_run_id
+        builds = self.build_repo.find_builds_with_run_ids(dataset_id)
+        if not builds:
             return []
 
-        # Build commit map
-        commit_map: Dict[str, Dict[str, Any]] = {}
+        commits = []
+        seen_commits = set()  # Deduplicate by commit_sha
 
-        for idx, row in enumerate(version.data):
-            commit_sha = row.get("commit_sha") or row.get("head_sha")
-            repo_name = row.get("repo_full_name") or row.get("full_name")
-
-            if not commit_sha or not repo_name:
+        for build in builds:
+            if not build.workflow_run_id:
                 continue
 
-            key = f"{repo_name}:{commit_sha}"
+            # Get the RawBuildRun to get commit info
+            run = self.run_repo.find_by_id(str(build.workflow_run_id))
+            if not run:
+                logger.warning(
+                    f"RawBuildRun not found for workflow_run_id: {build.workflow_run_id}"
+                )
+                continue
 
-            if key not in commit_map:
-                commit_map[key] = {
-                    "sha": commit_sha,
-                    "repo_full_name": repo_name,
-                    "row_count": 0,
-                    "row_indices": [],
-                    "last_scanned": None,
-                    "scan_results": None,
+            # commit_sha = original commit for scan result identification
+            # effective_sha = for worktree checkout (replayed fork commits)
+            commit_sha = run.commit_sha
+            effective_sha = run.effective_sha  # May be None if not a fork
+
+            if not commit_sha:
+                continue
+
+            # Deduplicate by original commit_sha (for scan result identification)
+            if commit_sha in seen_commits:
+                continue
+            seen_commits.add(commit_sha)
+
+            commits.append(
+                {
+                    "sha": commit_sha,  # Primary ID for scan results
+                    "effective_sha": effective_sha,  # For worktree checkout (if fork)
+                    "repo_full_name": run.repo_name,
+                    "build_id": build.build_id_from_csv,
+                    "workflow_run_id": str(build.workflow_run_id),
+                    "row_indices": [],  # Not used anymore but kept for compatibility
                 }
-
-            commit_map[key]["row_count"] += 1
-            commit_map[key]["row_indices"].append(idx)
-
-        # Look up previous scan results for each commit
-        for key, commit_info in commit_map.items():
-            results = self.result_repo.find_by_dataset_and_commit(
-                dataset_id, commit_info["sha"]
             )
-            if results:
-                # Get latest completed result
-                completed = [r for r in results if r.status == "completed"]
-                if completed:
-                    latest = max(
-                        completed, key=lambda r: r.completed_at or r.created_at
-                    )
-                    commit_info["last_scanned"] = (
-                        latest.completed_at or latest.created_at
-                    )
-                    commit_info["scan_results"] = latest.results
 
-        return list(commit_map.values())
+        logger.info(
+            f"Found {len(commits)} unique commits from {len(builds)} validated builds"
+        )
+        return commits
 
     def start_scan(
         self,
         dataset_id: str,
         user_id: str,
         tool_type: str,
-        selected_commit_shas: Optional[List[str]] = None,
         scan_config: Optional[str] = None,
     ) -> DatasetScan:
         """
         Start a scan job for a dataset.
 
+        Scans all validated builds (status=FOUND) for the dataset.
+
         Args:
             dataset_id: Dataset to scan
             user_id: User initiating the scan
             tool_type: Tool to use (sonarqube or trivy)
-            selected_commit_shas: Specific commits to scan (None = all)
             scan_config: Default config content for all commits
 
         Returns:
@@ -130,40 +127,32 @@ class DatasetScanService:
         if not tool.is_available():
             raise ValueError(f"Tool {tool_type} is not configured or available")
 
-        # Get unique commits
-        unique_commits = self.get_unique_commits(dataset_id)
-        if not unique_commits:
-            raise ValueError("No commits found in dataset")
-
-        # Filter to selected commits if specified
-        if selected_commit_shas:
-            unique_commits = [
-                c for c in unique_commits if c["sha"] in selected_commit_shas
-            ]
-            if not unique_commits:
-                raise ValueError("None of the selected commits found in dataset")
+        # Get commits from validated builds
+        commits = self.get_commits_from_builds(dataset_id)
+        if not commits:
+            raise ValueError("No validated builds with commits found in dataset")
 
         # Create scan record
         scan = DatasetScan(
             dataset_id=ObjectId(dataset_id),
             user_id=ObjectId(user_id),
             tool_type=tool_type,
-            commits=unique_commits,
-            selected_commit_shas=selected_commit_shas,
+            commits=commits,
             scan_config=scan_config,
-            total_commits=len(unique_commits),
+            total_commits=len(commits),
         )
         scan = self.scan_repo.insert_one(scan)
 
         # Create result records for each commit
         results = []
-        for commit in unique_commits:
+        for commit in commits:
             result = DatasetScanResult(
                 scan_id=scan.id,
                 dataset_id=ObjectId(dataset_id),
                 commit_sha=commit["sha"],
+                effective_sha=commit.get("effective_sha"),  # For worktree checkout
                 repo_full_name=commit["repo_full_name"],
-                row_indices=commit["row_indices"],
+                row_indices=commit.get("row_indices", []),
             )
             results.append(result)
 
