@@ -166,6 +166,18 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         )
         return ModelRepoConfig(**doc) if doc else None
 
+    def find_by_full_name_include_deleted(
+        self, full_name: str
+    ) -> Optional[ModelRepoConfig]:
+        """
+        Find config by full_name including soft-deleted records.
+
+        Used for upsert logic when re-importing a previously deleted repo.
+        This ensures we update existing records instead of creating duplicates.
+        """
+        doc = self.collection.find_one({"full_name": full_name})
+        return ModelRepoConfig(**doc) if doc else None
+
     def update_import_status(
         self,
         config_id: ObjectId,
@@ -210,43 +222,49 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         self,
         config_id: ObjectId,
         count: int = 1,
-    ) -> None:
+    ) -> Optional[ModelRepoConfig]:
         """Increment the total builds imported count."""
-        self.collection.update_one(
+        doc = self.collection.find_one_and_update(
             {"_id": config_id},
             {
                 "$inc": {"total_builds_imported": count},
                 "$set": {"updated_at": datetime.utcnow()},
             },
+            return_document=True,
         )
+        return ModelRepoConfig(**doc) if doc else None
 
     def increment_builds_processed(
         self,
         config_id: ObjectId,
         count: int = 1,
-    ) -> None:
+    ) -> Optional[ModelRepoConfig]:
         """Increment the total builds processed count."""
-        self.collection.update_one(
+        doc = self.collection.find_one_and_update(
             {"_id": config_id},
             {
                 "$inc": {"total_builds_processed": count},
                 "$set": {"updated_at": datetime.utcnow()},
             },
+            return_document=True,
         )
+        return ModelRepoConfig(**doc) if doc else None
 
     def increment_builds_failed(
         self,
         config_id: ObjectId,
         count: int = 1,
-    ) -> None:
+    ) -> Optional[ModelRepoConfig]:
         """Increment the total builds failed count."""
-        self.collection.update_one(
+        doc = self.collection.find_one_and_update(
             {"_id": config_id},
             {
                 "$inc": {"total_builds_failed": count},
                 "$set": {"updated_at": datetime.utcnow()},
             },
+            return_document=True,
         )
+        return ModelRepoConfig(**doc) if doc else None
 
     def soft_delete(self, config_id: ObjectId) -> None:
         """Soft delete a config."""

@@ -230,14 +230,10 @@ export default function UserBuildDetailPage() {
                         )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                         <div className="rounded-lg border p-4">
                             <p className="text-xs text-muted-foreground">Duration</p>
                             <p className="font-medium mt-1">{formatDuration(build.duration_seconds)}</p>
-                        </div>
-                        <div className="rounded-lg border p-4">
-                            <p className="text-xs text-muted-foreground">Jobs</p>
-                            <p className="font-medium mt-1">{build.jobs_count}</p>
                         </div>
                         <div className="rounded-lg border p-4">
                             <p className="text-xs text-muted-foreground">Created</p>

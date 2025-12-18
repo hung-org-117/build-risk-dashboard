@@ -208,6 +208,27 @@ class DatasetService:
             updates["mapped_fields"] = merged
             self._validate_required_mapping(updates["mapped_fields"], dataset.columns)
 
+            # Check if repo_name is newly set and validation hasn't started
+            old_repo_name = (
+                dataset.mapped_fields.repo_name if dataset.mapped_fields else None
+            )
+            new_repo_name = merged.get("repo_name")
+            repo_validation_status = getattr(dataset, "repo_validation_status", None)
+
+            # Trigger validation if repo_name is set and validation is still pending/None
+            if new_repo_name and (
+                not old_repo_name or repo_validation_status in [None, "pending"]
+            ):
+                from app.tasks.dataset_validation import validate_repos_task
+                from app.entities.dataset import RepoValidationStatus
+
+                task = validate_repos_task.delay(dataset_id)
+                updates["repo_validation_task_id"] = task.id
+                updates["repo_validation_status"] = RepoValidationStatus.VALIDATING
+                logger.info(
+                    f"Dispatched repo validation task {task.id} for dataset {dataset_id}"
+                )
+
         if "stats" in payload_dict:
             merged_stats = {}
             if getattr(dataset, "stats", None):

@@ -50,23 +50,25 @@ def publish_build_update(repo_id: str, build_id: str, status: str):
         logger.error(f"Failed to publish build update: {e}")
 
 
-def publish_status(repo_id: str, status: str, message: str = ""):
+def publish_status(
+    repo_id: str, status: str, message: str = "", stats: Optional[Dict[str, int]] = None
+):
     """Publish status update to Redis for real-time UI updates."""
     try:
         redis_client = redis.from_url(settings.REDIS_URL)
-        redis_client.publish(
-            "events",
-            json.dumps(
-                {
-                    "type": "REPO_UPDATE",
-                    "payload": {
-                        "repo_id": repo_id,
-                        "status": status,
-                        "message": message,
-                    },
-                }
-            ),
-        )
+        payload = {
+            "type": "REPO_UPDATE",
+            "payload": {
+                "repo_id": repo_id,
+                "status": status,
+                "message": message,
+            },
+        }
+        if stats:
+            payload["payload"]["stats"] = stats
+
+        redis_client.publish("events", json.dumps(payload))
+
     except Exception as e:
         logger.error(f"Failed to publish status update: {e}")
 
@@ -287,7 +289,10 @@ def dispatch_build_processing(
     queue="processing",
 )
 def process_workflow_run(
-    self: PipelineTask, repo_config_id: str, model_build_id: str
+    self: PipelineTask,
+    repo_config_id: str,
+    model_build_id: str,
+    is_reprocess: bool = False,
 ) -> Dict[str, Any]:
     """
     Process a single build for feature extraction.
@@ -295,6 +300,7 @@ def process_workflow_run(
     Args:
         repo_config_id: The model_repo_config_id
         model_build_id: The ModelTrainingBuild ObjectId string (already created with PENDING status)
+        is_reprocess: If True, skip incrementing build counters (build was already counted)
     """
     model_build_repo = ModelTrainingBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -400,20 +406,51 @@ def process_workflow_run(
 
         model_build_repo.update_one(build_id, updates)
 
-        # Update repo config stats
-        if updates["extraction_status"] in (
+        # Update repo config stats (skip if reprocessing - already counted)
+        if not is_reprocess and updates["extraction_status"] in (
             ExtractionStatus.COMPLETED.value,
             ExtractionStatus.PARTIAL.value,
         ):
-            repo_config_repo.increment_builds_processed(ObjectId(repo_config_id))
+            updated_config = repo_config_repo.increment_builds_processed(
+                ObjectId(repo_config_id)
+            )
+            stats = None
+            if updated_config:
+                stats = {
+                    "total_builds_imported": updated_config.total_builds_imported,
+                    "total_builds_processed": updated_config.total_builds_processed,
+                    "total_builds_failed": updated_config.total_builds_failed,
+                }
+
             # Notify frontend of stats update
             publish_status(
-                repo_config_id, "processing", f"Build {build_id[:8]} completed"
+                repo_config_id,
+                "processing",
+                f"Build {build_id[:8]} completed",
+                stats=stats,
             )
-        elif updates["extraction_status"] == ExtractionStatus.FAILED.value:
-            repo_config_repo.increment_builds_failed(ObjectId(repo_config_id))
+        elif (
+            not is_reprocess
+            and updates["extraction_status"] == ExtractionStatus.FAILED.value
+        ):
+            updated_config = repo_config_repo.increment_builds_failed(
+                ObjectId(repo_config_id)
+            )
+            stats = None
+            if updated_config:
+                stats = {
+                    "total_builds_imported": updated_config.total_builds_imported,
+                    "total_builds_processed": updated_config.total_builds_processed,
+                    "total_builds_failed": updated_config.total_builds_failed,
+                }
+
             # Notify frontend of stats update
-            publish_status(repo_config_id, "processing", f"Build {build_id[:8]} failed")
+            publish_status(
+                repo_config_id,
+                "processing",
+                f"Build {build_id[:8]} failed",
+                stats=stats,
+            )
 
         publish_build_update(repo_config_id, build_id, updates["extraction_status"])
 
@@ -443,9 +480,24 @@ def process_workflow_run(
         )
 
         # Increment failed count
-        repo_config_repo.increment_builds_failed(ObjectId(repo_config_id))
+        updated_config = repo_config_repo.increment_builds_failed(
+            ObjectId(repo_config_id)
+        )
+        stats = None
+        if updated_config:
+            stats = {
+                "total_builds_imported": updated_config.total_builds_imported,
+                "total_builds_processed": updated_config.total_builds_processed,
+                "total_builds_failed": updated_config.total_builds_failed,
+            }
+
         # Notify frontend of stats update
-        publish_status(repo_config_id, "processing", f"Build {build_id[:8]} failed")
+        publish_status(
+            repo_config_id,
+            "processing",
+            f"Build {build_id[:8]} failed",
+            stats=stats,
+        )
 
         publish_build_update(repo_config_id, build_id, "failed")
 
@@ -487,7 +539,7 @@ def reprocess_build(self: PipelineTask, build_id: str) -> Dict[str, Any]:
     )
 
     repo_config_id = str(model_build.model_repo_config_id)
-    process_workflow_run.delay(repo_config_id, build_id)
+    process_workflow_run.delay(repo_config_id, build_id, is_reprocess=True)
 
     return {
         "status": "queued",

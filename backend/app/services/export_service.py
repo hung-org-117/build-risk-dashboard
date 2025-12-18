@@ -57,7 +57,7 @@ class ExportService:
         """Get the MongoDB collection for the given source."""
         if source == ExportSource.ENRICHMENT_BUILDS:
             return self.db.enrichment_builds
-        return self.db.model_builds
+        return self.db.model_training_builds
 
     def _build_query(
         self,
@@ -78,8 +78,9 @@ class ExportService:
             if version_id:
                 query["version_id"] = ObjectId(version_id)
         else:
+            # repo_id is the ModelRepoConfig._id
             if repo_id:
-                query["repo_id"] = ObjectId(repo_id)
+                query["model_repo_config_id"] = ObjectId(repo_id)
 
         if start_date or end_date:
             query["created_at"] = {}
@@ -165,20 +166,10 @@ class ExportService:
         doc: dict,
         features: Optional[List[str]] = None,
         all_feature_keys: Optional[Set[str]] = None,
-        include_metadata: bool = True,
     ) -> dict:
         """Format a document row for export."""
         feature_dict = doc.get("features", {})
         row = {}
-
-        # Add metadata columns for enrichment builds
-        if include_metadata:
-            if "build_id_from_csv" in doc:
-                row["build_id"] = doc.get("build_id_from_csv")
-            if "head_sha" in doc:
-                row["commit_sha"] = doc.get("head_sha")
-            if "build_number" in doc:
-                row["build_number"] = doc.get("build_number")
 
         if features:
             for f in features:

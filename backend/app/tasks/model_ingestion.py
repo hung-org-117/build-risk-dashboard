@@ -196,7 +196,7 @@ def fetch_builds_batch(
                 raw_data=build.raw_data or {},
                 is_bot_commit=build.is_bot_commit or False,
             )
-            batch_ci_build_ids.append(raw_build_run.build_id)
+            batch_ci_build_ids.append(raw_build_run.ci_run_id)
 
             # Check max builds limit
             if max_builds and (total_fetched + len(batch_ci_build_ids)) >= max_builds:

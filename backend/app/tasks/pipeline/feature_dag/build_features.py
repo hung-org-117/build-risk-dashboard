@@ -34,7 +34,7 @@ from app.tasks.pipeline.feature_dag._metadata import (
 @tag(group="build_log")
 def tr_build_id(build_run: BuildRunInput) -> int:
     """Workflow run ID."""
-    return int(build_run.build_id)
+    return int(build_run.ci_run_id)
 
 
 @feature_metadata(

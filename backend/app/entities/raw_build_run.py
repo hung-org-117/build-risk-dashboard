@@ -39,9 +39,15 @@ class RawBuildRun(BaseEntity):
     )
 
     # Core identifiers
-    build_id: str = Field(
+    # NOTE: ci_run_id is the ID from the CI provider (e.g., GitHub Actions run ID like "20349163111")
+    # This is NOT the MongoDB _id. For MongoDB _id, use the inherited `id` field from BaseEntity.
+    # - validation_alias: reads from MongoDB field "build_id" (existing data)
+    # - serialization_alias: outputs as "build_id" for API backward compatibility
+    ci_run_id: str = Field(
         ...,
-        description="Unique build identifier from CI provider",
+        description="Unique workflow run ID from CI provider (GitHub Actions run ID, CircleCI build ID, etc.)",
+        validation_alias="build_id",  # Read from MongoDB "build_id" field
+        serialization_alias="build_id",  # Write as "build_id" in API responses
     )
 
     build_number: Optional[int] = Field(

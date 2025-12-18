@@ -489,7 +489,7 @@ export default function RepoBuildsPage() {
                 <CardHeader>
                     <CardTitle>Build History</CardTitle>
                     <CardDescription>
-                        List of all recorded workflow runs.
+                        Builds with extracted features for model training.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -512,9 +512,7 @@ export default function RepoBuildsPage() {
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Branch
                                     </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Jobs
-                                    </th>
+
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Date
                                     </th>
@@ -528,7 +526,7 @@ export default function RepoBuildsPage() {
                                 {builds.length === 0 ? (
                                     <tr>
                                         <td
-                                            colSpan={8}
+                                            colSpan={7}
                                             className="px-6 py-6 text-center text-sm text-muted-foreground"
                                         >
                                             No builds recorded yet.
@@ -574,9 +572,7 @@ export default function RepoBuildsPage() {
                                             <td className="px-6 py-4 text-muted-foreground text-xs">
                                                 {build.branch}
                                             </td>
-                                            <td className="px-6 py-4 text-muted-foreground">
-                                                {build.jobs_count}
-                                            </td>
+
                                             <td className="px-6 py-4 text-muted-foreground">
                                                 {formatTimestamp(build.created_at)}
                                             </td>

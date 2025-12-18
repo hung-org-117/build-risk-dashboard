@@ -14,7 +14,7 @@ Usage:
     )
     @tag(group="build_log")
     def tr_build_id(build_run: BuildRunInput) -> int:
-        return int(build_run.build_id)
+        return int(build_run.ci_run_id)
 """
 
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar

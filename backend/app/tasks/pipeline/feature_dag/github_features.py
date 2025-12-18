@@ -82,7 +82,7 @@ def github_discussion_features(
 
     # Find previous build time for PR comment window
     prev_build_start_time = _get_previous_build_start_time(
-        raw_build_runs, repo.id, build_run.build_id, build_start_time
+        raw_build_runs, repo.id, build_run.ci_run_id, build_start_time
     )
 
     # 1. Commit comments (same as before - no time filter needed)
@@ -148,19 +148,26 @@ def github_discussion_features(
 def _get_previous_build_start_time(
     raw_build_runs: Any,
     repo_id: str,
-    current_build_id: str,
+    current_ci_run_id: str,
     current_build_time: Optional[datetime],
 ) -> Optional[datetime]:
-    """Get the start time of the previous build for this repo."""
+    """Get the start time of the previous build for this repo.
+
+    Note: Query uses MongoDB field names (raw_repo_id, build_id), not Python entity names.
+    build_id in MongoDB = ci_run_id in RawBuildRun entity.
+    """
+    from bson import ObjectId
+
     if not current_build_time:
         return None
 
     try:
+        # Note: build_id is the MongoDB field name (= ci_run_id in entity)
         prev_build = raw_build_runs.find_one(
             {
-                "repo_id": repo_id,
+                "raw_repo_id": ObjectId(repo_id),
                 "created_at": {"$lt": current_build_time},
-                "build_id": {"$ne": current_build_id},
+                "build_id": {"$ne": current_ci_run_id},
             },
             sort=[("created_at", -1)],
         )

@@ -39,9 +39,9 @@ class DatasetRepoConfig(RepoConfigBase):
     )
 
     # Reference to raw repository (None if not found/validated yet)
-    raw_repo_id: PyObjectId = Field(
-        ...,
-        description="Reference to raw_repositories._id",
+    raw_repo_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to raw_repositories._id (None if repo not found/validated)",
     )
 
     # Original data from CSV

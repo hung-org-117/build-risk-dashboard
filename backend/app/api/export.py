@@ -312,6 +312,8 @@ def preview_export(
     )
 
     # Get sample rows (first 5)
+    from app.services.export_service import ExportSource
+
     query = service._build_query(
         ExportSource.MODEL_BUILDS,
         repo_id=repo_id,
@@ -320,15 +322,16 @@ def preview_export(
         build_status=build_status,
     )
     sample_docs = list(
-        service.db.model_builds.find(query).sort("created_at", 1).limit(5)
+        service._get_collection(ExportSource.MODEL_BUILDS)
+        .find(query)
+        .sort("created_at", 1)
+        .limit(5)
     )
 
     feature_list = features.split(",") if features else None
     sample_rows = [service._format_row(doc, feature_list) for doc in sample_docs]
 
     # Get available features
-    from app.services.export_service import ExportSource
-
     available_features = list(
         service._get_all_feature_keys(
             ExportSource.MODEL_BUILDS,

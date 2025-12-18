@@ -286,10 +286,6 @@ export default function BuildDetailPage() {
                                 {formatDuration(build.duration_seconds)}
                             </p>
                         </div>
-                        <div className="rounded-lg border p-4">
-                            <p className="text-xs text-muted-foreground">Jobs</p>
-                            <p className="font-medium mt-1">{build.jobs_count}</p>
-                        </div>
                     </div>
 
                     {/* Timestamps */}

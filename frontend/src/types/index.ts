@@ -42,7 +42,6 @@ export interface Build {
   created_at?: string;
   completed_at?: string;
   duration_seconds?: number;
-  jobs_count: number;
   web_url?: string;
 
   // Logs info
@@ -64,7 +63,6 @@ export interface BuildDetail extends Build {
   commit_message?: string;
   commit_author?: string;
   started_at?: string;
-  jobs_metadata: Array<Record<string, unknown>>;
   provider: string;
 
   // Training features

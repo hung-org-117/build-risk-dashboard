@@ -129,9 +129,12 @@ export default function AdminReposPage() {
       setRepositories((prev) => {
         return prev.map((repo) => {
           if (repo.id === data.repo_id) {
-            // Update status
-            const updated = { ...repo, import_status: data.status };
-            return updated;
+            // Update status and stats if available
+            return {
+              ...repo,
+              import_status: data.status,
+              ...(data.stats || {}),
+            };
           }
           return repo;
         });

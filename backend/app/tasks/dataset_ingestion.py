@@ -4,10 +4,18 @@ Dataset Ingestion Tasks - Resource preparation for dataset builds.
 This module uses shared ingestion infrastructure to prepare resources
 (clone, worktree, logs) for dataset builds. It leverages resource_dag
 to automatically determine which tasks are needed based on selected features.
+
+Flow (similar to model_ingestion):
+1. Determine required resources based on selected features
+2. Build ingestion workflow (clone → worktrees → logs)
+3. If final_task provided: append to workflow chain (async)
+4. If no final_task: wait for workflow completion (sync)
 """
 
 import logging
 from typing import Any, Dict, List, Optional
+
+from celery.canvas import Signature
 
 from app.celery_app import celery_app
 from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
@@ -25,12 +33,15 @@ logger = logging.getLogger(__name__)
     base=PipelineTask,
     name="app.tasks.dataset_ingestion.ingest_dataset_builds",
     queue="ingestion",
+    soft_time_limit=1800,  # 30 min
+    time_limit=1860,
 )
 def ingest_dataset_builds(
     self: PipelineTask,
     repo_config_id: str,
     build_csv_ids: List[str],
     features: Optional[List[str]] = None,
+    final_task: Optional[Signature] = None,
 ) -> Dict[str, Any]:
     """
     Orchestrate resource preparation for dataset builds.
@@ -38,7 +49,16 @@ def ingest_dataset_builds(
     Uses resource_dag to determine required ingestion tasks based on selected features.
     Tasks are grouped by level:
     - Level 0 tasks run first (e.g., clone_repo)
-    - Level 1 tasks run after level 0, in parallel if multiple (e.g., worktrees, logs)
+    - Level 1 tasks run after level 0 (e.g., worktrees, logs)
+
+    Args:
+        repo_config_id: DatasetRepoConfig ID
+        build_csv_ids: List of build IDs from CSV
+        features: Optional list of features to extract
+        final_task: Optional task to append after ingestion (like dispatch_enrichment)
+
+    If final_task is provided, it runs AFTER ingestion (chained).
+    If no final_task, waits for ingestion to complete synchronously.
     """
     dataset_repo_config_repo = DatasetRepoConfigRepository(self.db)
     build_run_repo = RawBuildRunRepository(self.db)
@@ -58,16 +78,23 @@ def ingest_dataset_builds(
     tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
 
     logger.info(
-        f"Required resources: {required_resources}, tasks by level: {tasks_by_level}"
+        f"[Dataset Ingestion] {full_name}: resources={required_resources}, "
+        f"tasks_by_level={tasks_by_level}"
     )
 
     if not tasks_by_level:
+        # No ingestion needed, run final_task directly if provided
+        if final_task:
+            final_task.apply_async()
+            return {
+                "status": "dispatched",
+                "reason": "No resources required, final_task dispatched",
+            }
         return {"status": "skipped", "reason": "No resources required"}
 
     # Get commit SHAs for worktree creation
     commit_shas = []
     for build_csv_id in build_csv_ids:
-        # Use existing raw_repo_id from config to find the build run
         target_repo_id = str(repo_config.raw_repo_id)
         raw_build_run = build_run_repo.find_by_business_key(
             target_repo_id, build_csv_id, ci_provider
@@ -77,25 +104,42 @@ def ingest_dataset_builds(
     commit_shas = list(set(commit_shas))
     build_csv_ids = list(set(build_csv_ids))
 
-    # Build workflow using shared helper
+    # Build workflow using shared helper (with optional final_task)
     workflow = build_ingestion_workflow(
         tasks_by_level=tasks_by_level,
-        raw_repo_id=repo_config.raw_repo_id,
+        raw_repo_id=str(repo_config.raw_repo_id),
         full_name=full_name,
-        build_csv_ids=build_csv_ids,
+        build_ids=build_csv_ids,
         commit_shas=commit_shas,
         ci_provider=ci_provider,
+        final_task=final_task,  # Chain processing AFTER ingestion
     )
 
     if not workflow:
+        if final_task:
+            final_task.apply_async()
+            return {
+                "status": "dispatched",
+                "reason": "No applicable tasks, final_task dispatched",
+            }
         return {"status": "skipped", "reason": "No applicable tasks"}
 
-    workflow.apply_async()
-
-    return {
-        "status": "dispatched",
-        "repo_config_id": repo_config_id,
-        "build_csv_ids": len(build_csv_ids),
-        "resources": list(required_resources),
-        "tasks_by_level": {str(k): v for k, v in tasks_by_level.items()},
-    }
+    if final_task:
+        # Async: workflow includes final_task in chain
+        workflow.apply_async()
+        return {
+            "status": "dispatched",
+            "repo_config_id": repo_config_id,
+            "build_csv_ids": len(build_csv_ids),
+            "resources": list(required_resources),
+            "has_final_task": True,
+        }
+    else:
+        # Sync: wait for ingestion to complete
+        workflow.apply_async().get(timeout=1800, disable_sync_subtasks=False)
+        return {
+            "status": "completed",
+            "repo_config_id": repo_config_id,
+            "build_csv_ids": len(build_csv_ids),
+            "resources": list(required_resources),
+        }

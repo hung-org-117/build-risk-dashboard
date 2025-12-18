@@ -82,7 +82,6 @@ logger = logging.getLogger(__name__)
 def git_commit_info(
     git_history: GitHistoryInput,
     repo: RepoInput,
-    build_run: BuildRunInput,
     raw_build_runs: Any,
 ) -> Dict[str, Any]:
     """

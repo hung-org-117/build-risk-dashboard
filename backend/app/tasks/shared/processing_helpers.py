@@ -116,7 +116,7 @@ def _save_pipeline_run(
         pipeline_run_repo.insert_one(pipeline_run)
 
         logger.debug(
-            f"Saved pipeline run ({category.value}) for build {raw_build_run.build_id}: "
+            f"Saved pipeline run ({category.value}) for build {raw_build_run.ci_run_id}: "
             f"{pipeline_run.nodes_succeeded}/{pipeline_run.nodes_executed} nodes succeeded"
         )
 
@@ -181,9 +181,24 @@ def extract_features_for_build(
         # Execute Hamilton pipeline with tracking enabled
         pipeline = HamiltonPipeline(db=db, enable_tracking=True)
 
-        # Build logs input - LOGS_DIR/{raw_repo_id}/{raw_build_run_id}/*.log
-        logs_dir = LOGS_DIR / str(raw_repo.id) / str(raw_build_run.id)
+        # Build logs input - check logs_path from entity first, then fallback to expected path
+        # Logs are stored at LOGS_DIR/{raw_repo_id}/{build_id} (CI provider build ID, NOT MongoDB ObjectId)
+        if raw_build_run.logs_path:
+            # Use the path stored when logs were downloaded
+            from pathlib import Path
+
+            logs_dir = Path(raw_build_run.logs_path)
+            logger.info(f"[DEBUG] Using logs_path from entity: {logs_dir}")
+        else:
+            # Fallback: construct path using build_id (from CI provider)
+            logs_dir = LOGS_DIR / str(raw_repo.id) / str(raw_build_run.ci_run_id)
+            logger.info(f"[DEBUG] Using fallback logs path: {logs_dir}")
+
         build_logs_input = BuildLogsInput.from_path(logs_dir)
+        logger.info(
+            f"[DEBUG] BuildLogsInput: is_available={build_logs_input.is_available}, "
+            f"logs_dir_exists={logs_dir.exists()}, log_files={list(logs_dir.glob('*.log')) if logs_dir.exists() else []}"
+        )
 
         features = pipeline.run(
             git_history=inputs.git_history,
@@ -243,7 +258,7 @@ def extract_features_for_build(
 
     except Exception as e:
         logger.error(
-            f"Pipeline failed for build {raw_build_run.build_id}: {e}",
+            f"Pipeline failed for build {raw_build_run.ci_run_id}: {e}",
             exc_info=True,
         )
 

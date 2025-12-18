@@ -50,11 +50,17 @@ celery_app.conf.update(
             Exchange("buildguard"),
             routing_key="pipeline.ingestion",
         ),
-        # Processing: feature extraction, validation, enrichment, export, maintenance
+        # Processing: feature extraction, enrichment, export
         Queue(
             "processing",
             Exchange("buildguard"),
             routing_key="pipeline.processing",
+        ),
+        # Validation: dataset repo/build validation (can be long-running)
+        Queue(
+            "validation",
+            Exchange("buildguard"),
+            routing_key="pipeline.validation",
         ),
         # Sonar: CPU-intensive external tool, long-running
         Queue(

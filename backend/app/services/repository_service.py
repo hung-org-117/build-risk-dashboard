@@ -138,20 +138,25 @@ class RepositoryService:
 
                 from app.entities.model_repo_config import ModelRepoConfig
 
-                existing_config = self.repo_config.find_active_by_raw_repo_id(
-                    raw_repo.id
+                # Find by full_name INCLUDING deleted records to avoid duplicates
+                existing_config = self.repo_config.find_by_full_name_include_deleted(
+                    payload.full_name
                 )
 
                 if existing_config:
+                    # Check if it's an active (non-deleted) config
                     if not existing_config.is_deleted:
                         raise HTTPException(
                             status_code=status.HTTP_409_CONFLICT,
                             detail=f"Repository '{payload.full_name}' is already imported. Please delete it first to re-import.",
                         )
+
+                    # Re-activate deleted config with new settings
                     repo_doc = self.repo_config.update_one(
                         existing_config.id,
                         {
                             "user_id": ObjectId(target_user_id),
+                            "raw_repo_id": raw_repo.id,  # Update in case raw_repo changed
                             "test_frameworks": payload.test_frameworks or [],
                             "source_languages": payload.source_languages or [],
                             "ci_provider": payload.ci_provider,
@@ -159,9 +164,24 @@ class RepositoryService:
                             "max_builds_to_ingest": payload.max_builds,
                             "since_days": payload.since_days,
                             "only_with_logs": payload.only_with_logs or False,
+                            "is_deleted": False,  # Re-activate
+                            "deleted_at": None,
+                            "import_error": None,
+                            "import_version": existing_config.import_version + 1,
+                            # Reset stats for fresh re-import
+                            "total_builds_imported": 0,
+                            "total_builds_processed": 0,
+                            "total_builds_failed": 0,
+                            "feature_extractors": [],
+                            "last_synced_at": None,
+                            "last_sync_status": None,
+                            "last_sync_error": None,
+                            "import_started_at": None,
+                            "import_completed_at": None,
                         },
                     )
                 else:
+                    # No existing config - create new
                     repo_doc = self.repo_config.insert_one(
                         ModelRepoConfig(
                             _id=None,
@@ -527,13 +547,26 @@ class RepositoryService:
             "languages": registry.get_languages(),
         }
 
-    def reprocess_build(self, repo_id: str, build_id: str, current_user: dict) -> dict:
+    def reprocess_build(
+        self, repo_id: str, raw_build_run_id: str, current_user: dict
+    ) -> dict:
         """
         Reprocess a build using the DAG-based feature pipeline.
 
         Useful for:
         - Retrying failed builds
         - Re-extracting features after pipeline updates
+
+        Args:
+            repo_id: ModelRepoConfig._id (MongoDB ObjectId string)
+            raw_build_run_id: RawBuildRun._id (MongoDB ObjectId string)
+                              This is what the UI sends from Build History table
+            current_user: Current authenticated user
+
+        Note on ID types:
+            - raw_build_run_id: The RawBuildRun._id shown in UI (from Build History)
+            - model_training_build_id: The ModelTrainingBuild._id needed by the task
+            - ci_run_id: CI provider's workflow ID (e.g., GitHub run ID like "20349163111")
         """
         from app.tasks.model_processing import (
             reprocess_build as reprocess_build_task,
@@ -542,26 +575,42 @@ class RepositoryService:
         from app.repositories.model_training_build import ModelTrainingBuildRepository
         from app.services.build_service import BuildService
 
+        # Validate raw build exists
         build_service = BuildService(self.db)
-        build = build_service.get_build_detail(build_id)
+        build = build_service.get_build_detail(raw_build_run_id)
         if not build:
             raise HTTPException(status_code=404, detail="Build not found")
 
-        # Reset extraction status to pending before reprocessing
+        # Find corresponding ModelTrainingBuild by raw_build_run_id
         build_repo = ModelTrainingBuildRepository(self.db)
+        model_training_build = build_repo.find_one(
+            {"raw_build_run_id": ObjectId(raw_build_run_id)}
+        )
+
+        if not model_training_build:
+            raise HTTPException(
+                status_code=404,
+                detail="ModelTrainingBuild not found for this build. "
+                "The build may not have been processed yet.",
+            )
+
+        model_training_build_id = str(model_training_build.id)
+
+        # Reset extraction status to pending before reprocessing
         build_repo.update_one(
-            build_id,
+            model_training_build_id,
             {
                 "extraction_status": ExtractionStatus.PENDING.value,
-                "error_message": None,
+                "extraction_error": None,
             },
         )
 
-        # Trigger async reprocessing
-        reprocess_build_task.delay(build_id)
+        # Trigger async reprocessing with the correct ModelTrainingBuild._id
+        reprocess_build_task.delay(model_training_build_id)
 
         return {
             "status": "queued",
-            "build_id": build_id,
+            "raw_build_run_id": raw_build_run_id,
+            "model_training_build_id": model_training_build_id,
             "message": "Build reprocessing has been queued",
         }

@@ -129,7 +129,7 @@ class RepoConfigInput:
 class BuildRunInput:
     """Build run data from any CI provider."""
 
-    build_id: str
+    ci_run_id: str
     build_number: Optional[int]
     commit_sha: str
     conclusion: Optional[str]
@@ -137,6 +137,7 @@ class BuildRunInput:
     completed_at: Optional[datetime]
     duration_seconds: Optional[float]
     raw_data: Dict[str, Any]
+    ci_provider: str
 
     @classmethod
     def from_entity(cls, build_run: RawBuildRun) -> BuildRunInput:
@@ -148,7 +149,7 @@ class BuildRunInput:
         conclusion_str = str(conclusion_value) if conclusion_value else None
 
         return cls(
-            build_id=build_run.build_id,
+            ci_run_id=build_run.ci_run_id,
             build_number=build_run.build_number,
             commit_sha=build_run.commit_sha,
             conclusion=conclusion_str,
@@ -156,6 +157,7 @@ class BuildRunInput:
             completed_at=build_run.completed_at,
             duration_seconds=build_run.duration_seconds,
             raw_data=build_run.raw_data or {},
+            ci_provider=build_run.provider.value,
         )
 
 

@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 
 class BuildSummary(BaseModel):
     """
-    Summary of a CI build from RawBuildRun with optional ModelTrainingBuild enrichment.
+    Summary of a CI build from ModelTrainingBuild with RawBuildRun enrichment.
 
-    Primary data comes from RawBuildRun (available immediately after ingestion).
-    Training data (extraction_status, features) comes from ModelTrainingBuild (after processing).
+    Primary data comes from ModelTrainingBuild (builds that have been processed).
+    Additional data (conclusion, branch, etc.) comes from RawBuildRun.
     """
 
     # Identity - using RawBuildRun._id as primary key
@@ -26,19 +26,19 @@ class BuildSummary(BaseModel):
     created_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
-    jobs_count: int = 0
     web_url: Optional[str] = None
 
     # Logs info from RawBuildRun
     logs_available: Optional[bool] = None
     logs_expired: bool = False
 
-    # Training enrichment from ModelTrainingBuild (optional - may not exist yet)
+    # Training data from ModelTrainingBuild (always present since we query from training builds)
     has_training_data: bool = False
     training_build_id: Optional[str] = None
     extraction_status: Optional[str] = None  # pending, completed, failed, partial
     feature_count: int = 0
     extraction_error: Optional[str] = None
+    missing_resources: List[str] = []
 
     class Config:
         populate_by_name = True
@@ -64,8 +64,6 @@ class BuildDetail(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
-    jobs_count: int = 0
-    jobs_metadata: List[Dict[str, Any]] = []
     web_url: Optional[str] = None
     provider: str = "github_actions"
 

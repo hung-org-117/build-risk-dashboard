@@ -190,8 +190,8 @@ def clone_repo(
     base=PipelineTask,
     name="app.tasks.shared.create_worktrees",
     queue="ingestion",
-    soft_time_limit=300,  # 5 min (just dispatches chunks)
-    time_limit=360,
+    soft_time_limit=1800,  # 30 min (sequential chunks take longer)
+    time_limit=1860,
 )
 def create_worktrees(
     self: PipelineTask,
@@ -200,9 +200,13 @@ def create_worktrees(
     publish_status: bool = False,
 ) -> Dict[str, Any]:
     """
-    Orchestrator: Dispatch worktree creation in chunks.
+    Orchestrator: Create worktrees in chunks SEQUENTIALLY.
 
-    Each chunk runs as a separate task for better fault tolerance.
+    Runs chunks one by one to avoid Git/disk contention.
+    This ensures worktrees are ready before feature extraction begins.
+
+    NOTE: We call _create_worktree_chunk_impl directly (not via Celery)
+    to avoid 'Never call result.get() within a task!' error.
     """
     if not commit_shas:
         return {"worktrees_created": 0, "worktrees_skipped": 0}
@@ -217,43 +221,61 @@ def create_worktrees(
             f"Creating worktrees for {len(unique_shas)} commits...",
         )
 
-    # Dispatch chunks
+    # Build chunk parameters
     chunk_size = getattr(settings, "WORKTREE_BATCH_SIZE", 50)
-    chunks_dispatched = 0
+    total_chunks = (len(unique_shas) + chunk_size - 1) // chunk_size
 
+    logger.info(
+        f"Creating worktrees for repo {raw_repo_id}: "
+        f"{len(unique_shas)} commits in {total_chunks} sequential chunks"
+    )
+
+    # Execute chunks SEQUENTIALLY by calling implementation directly
+    # (not via Celery to avoid subtask blocking error)
+    results = []
     for i in range(0, len(unique_shas), chunk_size):
         chunk = unique_shas[i : i + chunk_size]
-        create_worktree_chunk.delay(
+        chunk_index = i // chunk_size
+
+        result = _create_worktree_chunk_impl(
+            db=self.db,
             raw_repo_id=raw_repo_id,
             commit_shas=chunk,
             publish_status=publish_status,
-            chunk_index=i // chunk_size,
-            total_chunks=(len(unique_shas) + chunk_size - 1) // chunk_size,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
         )
-        chunks_dispatched += 1
+        results.append(result)
+
+    # Aggregate results
+    total_created = sum(r.get("worktrees_created", 0) for r in results if r)
+    total_skipped = sum(r.get("worktrees_skipped", 0) for r in results if r)
+    total_failed = sum(r.get("worktrees_failed", 0) for r in results if r)
+    total_replayed = sum(r.get("fork_commits_replayed", 0) for r in results if r)
 
     logger.info(
-        f"Dispatched {chunks_dispatched} worktree chunks for repo {raw_repo_id}"
+        f"Worktree creation completed for {raw_repo_id}: "
+        f"created={total_created}, skipped={total_skipped}, failed={total_failed}"
     )
 
+    if publish_status and raw_repo_id:
+        _publish_status(
+            raw_repo_id,
+            "importing",
+            f"Worktrees ready: {total_created} created, {total_skipped} skipped",
+        )
+
     return {
-        "worktree_chunks_dispatched": chunks_dispatched,
-        "total_commits": len(unique_shas),
+        "worktrees_created": total_created,
+        "worktrees_skipped": total_skipped,
+        "worktrees_failed": total_failed,
+        "fork_commits_replayed": total_replayed,
+        "chunks_completed": len(results),
     }
 
 
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.shared.create_worktree_chunk",
-    queue="ingestion",
-    soft_time_limit=300,  # 5 min per chunk
-    time_limit=360,
-    autoretry_for=(subprocess.CalledProcessError, subprocess.TimeoutExpired),
-    retry_kwargs={"max_retries": 2, "countdown": 30},
-)
-def create_worktree_chunk(
-    self: PipelineTask,
+def _create_worktree_chunk_impl(
+    db,
     raw_repo_id: str,
     commit_shas: List[str],
     publish_status: bool = False,
@@ -261,10 +283,14 @@ def create_worktree_chunk(
     total_chunks: int = 1,
 ) -> Dict[str, Any]:
     """
-    Worker: Create worktrees for a chunk of commits.
+    Implementation: Create worktrees for a chunk of commits.
+
+    This is the actual implementation that can be called directly or from the Celery task.
+    Extracting this allows create_worktrees to call it directly without going through Celery,
+    avoiding the 'Never call result.get() within a task!' error.
     """
-    build_run_repo = RawBuildRunRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
+    build_run_repo = RawBuildRunRepository(db)
+    raw_repo_repo = RawRepositoryRepository(db)
     raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
 
     repo_path = REPOS_DIR / raw_repo_id
@@ -385,10 +411,44 @@ def create_worktree_chunk(
 @celery_app.task(
     bind=True,
     base=PipelineTask,
+    name="app.tasks.shared.create_worktree_chunk",
+    queue="ingestion",
+    soft_time_limit=300,  # 5 min per chunk
+    time_limit=360,
+    autoretry_for=(subprocess.CalledProcessError, subprocess.TimeoutExpired),
+    retry_kwargs={"max_retries": 2, "countdown": 30},
+)
+def create_worktree_chunk(
+    self: PipelineTask,
+    raw_repo_id: str,
+    commit_shas: List[str],
+    publish_status: bool = False,
+    chunk_index: int = 0,
+    total_chunks: int = 1,
+) -> Dict[str, Any]:
+    """
+    Worker: Create worktrees for a chunk of commits.
+
+    Delegates to _create_worktree_chunk_impl for the actual work.
+    This task is used when called from outside (e.g., standalone chunk processing).
+    """
+    return _create_worktree_chunk_impl(
+        db=self.db,
+        raw_repo_id=raw_repo_id,
+        commit_shas=commit_shas,
+        publish_status=publish_status,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+    )
+
+
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
     name="app.tasks.shared.download_build_logs",
     queue="ingestion",
-    soft_time_limit=300,  # 5 min (just dispatches chunks)
-    time_limit=360,
+    soft_time_limit=1800,  # 30 min (sequential chunks)
+    time_limit=1860,
 )
 def download_build_logs(
     self: PipelineTask,
@@ -400,13 +460,18 @@ def download_build_logs(
     publish_status: bool = False,
 ) -> Dict[str, Any]:
     """
-    Orchestrator: Dispatch log downloads in chunks.
+    Orchestrator: Download logs in chunks SEQUENTIALLY.
 
-    Uses Redis shared state for consecutive_expired tracking across chunks.
+    Runs chunks one by one and calls implementation directly to avoid
+    'Never call result.get() within a task!' error.
+    This ensures logs are ready before feature extraction begins.
     """
     import redis
 
     unique_build_ids = list(dict.fromkeys(build_ids))
+
+    if not unique_build_ids:
+        return {"logs_downloaded": 0, "logs_expired": 0, "logs_skipped": 0}
 
     if publish_status and raw_repo_id:
         _publish_status(
@@ -422,45 +487,65 @@ def download_build_logs(
     redis_client.delete(f"{session_key}:stop")
     redis_client.set(f"{session_key}:max_expired", max_consecutive_expired, ex=3600)
 
-    # Dispatch chunks
+    # Process chunks SEQUENTIALLY
     chunk_size = getattr(settings, "DOWNLOAD_LOGS_BATCH_SIZE", 50)
-    chunks_dispatched = 0
+    total_chunks = (len(unique_build_ids) + chunk_size - 1) // chunk_size
 
+    logger.info(
+        f"Downloading logs for repo {raw_repo_id}: "
+        f"{len(unique_build_ids)} builds in {total_chunks} sequential chunks"
+    )
+
+    results = []
     for i in range(0, len(unique_build_ids), chunk_size):
         chunk = unique_build_ids[i : i + chunk_size]
-        download_logs_chunk.delay(
+        chunk_index = i // chunk_size
+
+        # Call implementation directly (not via Celery)
+        result = _download_logs_chunk_impl(
+            db=self.db,
             raw_repo_id=raw_repo_id,
             full_name=full_name,
             build_ids=chunk,
             ci_provider=ci_provider,
             publish_status=publish_status,
-            chunk_index=i // chunk_size,
-            total_chunks=(len(unique_build_ids) + chunk_size - 1) // chunk_size,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
         )
-        chunks_dispatched += 1
+        results.append(result)
+
+        # Check if stop flag was set (max consecutive expired reached)
+        if redis_client.get(f"{session_key}:stop"):
+            logger.info("Stopping log download early: max consecutive expired reached")
+            break
+
+    # Aggregate results
+    total_downloaded = sum(r.get("logs_downloaded", 0) for r in results if r)
+    total_expired = sum(r.get("logs_expired", 0) for r in results if r)
+    total_skipped = sum(r.get("logs_skipped", 0) for r in results if r)
 
     logger.info(
-        f"Dispatched {chunks_dispatched} log download chunks for repo {raw_repo_id}"
+        f"Log download completed for {raw_repo_id}: "
+        f"downloaded={total_downloaded}, expired={total_expired}, skipped={total_skipped}"
     )
 
+    if publish_status and raw_repo_id:
+        _publish_status(
+            raw_repo_id,
+            "importing",
+            f"Logs ready: {total_downloaded} downloaded, {total_expired} expired",
+        )
+
     return {
-        "log_chunks_dispatched": chunks_dispatched,
-        "total_builds": len(unique_build_ids),
+        "logs_downloaded": total_downloaded,
+        "logs_expired": total_expired,
+        "logs_skipped": total_skipped,
+        "chunks_completed": len(results),
     }
 
 
-@celery_app.task(
-    bind=True,
-    base=PipelineTask,
-    name="app.tasks.shared.download_logs_chunk",
-    queue="ingestion",
-    soft_time_limit=600,  # 10 min per chunk
-    time_limit=660,
-    autoretry_for=(GithubRateLimitError, GithubRetryableError),
-    retry_kwargs={"max_retries": 2, "countdown": 60},
-)
-def download_logs_chunk(
-    self: PipelineTask,
+def _download_logs_chunk_impl(
+    db,
     raw_repo_id: str,
     full_name: str,
     build_ids: List[str],
@@ -470,10 +555,11 @@ def download_logs_chunk(
     total_chunks: int = 1,
 ) -> Dict[str, Any]:
     """
-    Worker: Download logs for a chunk of builds.
+    Implementation: Download logs for a chunk of builds.
 
-    Uses Redis shared state to track consecutive_expired across all chunks.
-    Stops early if global stop flag is set.
+    This is the actual implementation that can be called directly or from the Celery task.
+    Extracting this allows download_build_logs to call it directly without going through Celery,
+    avoiding the 'Never call result.get() within a task!' error.
     """
     import redis
     from app.services.github.exceptions import GithubLogsUnavailableError
@@ -486,10 +572,10 @@ def download_logs_chunk(
         logger.info(f"Chunk {chunk_index} skipped: stop flag set by another chunk")
         return {"chunk_index": chunk_index, "skipped": True, "reason": "early_stop"}
 
-    build_run_repo = RawBuildRunRepository(self.db)
+    build_run_repo = RawBuildRunRepository(db)
     ci_provider_enum = CIProvider(ci_provider)
     provider_config = get_provider_config(ci_provider_enum)
-    ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=self.db)
+    ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=db)
 
     logs_downloaded = 0
     logs_expired = 0
@@ -600,3 +686,41 @@ def download_logs_chunk(
         "logs_expired": logs_expired,
         "logs_skipped": logs_skipped,
     }
+
+
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.shared.download_logs_chunk",
+    queue="ingestion",
+    soft_time_limit=600,  # 10 min per chunk
+    time_limit=660,
+    autoretry_for=(GithubRateLimitError, GithubRetryableError),
+    retry_kwargs={"max_retries": 2, "countdown": 60},
+)
+def download_logs_chunk(
+    self: PipelineTask,
+    raw_repo_id: str,
+    full_name: str,
+    build_ids: List[str],
+    ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
+    publish_status: bool = False,
+    chunk_index: int = 0,
+    total_chunks: int = 1,
+) -> Dict[str, Any]:
+    """
+    Worker: Download logs for a chunk of builds.
+
+    Delegates to _download_logs_chunk_impl for the actual work.
+    This task is used when called from outside (e.g., standalone chunk processing).
+    """
+    return _download_logs_chunk_impl(
+        db=self.db,
+        raw_repo_id=raw_repo_id,
+        full_name=full_name,
+        build_ids=build_ids,
+        ci_provider=ci_provider,
+        publish_status=publish_status,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+    )

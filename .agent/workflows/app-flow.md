@@ -176,6 +176,29 @@ export const datasetApi = {
   - Task → *_task
   - Client / Adapter → *_client
 
+### ID Naming Convention (CRITICAL)
+
+Different entities have different ID types. Use explicit names to avoid confusion:
+
+| Name Pattern | Meaning | Example |
+|--------------|---------|---------|
+| `ci_run_id` / `workflow_run_id` | ID from CI provider (GitHub Actions, CircleCI, etc.) | `"20349163111"` |
+| `raw_build_run_id` | MongoDB `_id` of `RawBuildRun` entity | `ObjectId("6944711f...")` |
+| `model_training_build_id` / `model_build_id` | MongoDB `_id` of `ModelTrainingBuild` entity | `ObjectId("6944711f...")` |
+| `raw_repo_id` | MongoDB `_id` of `RawRepository` entity | `ObjectId("...")` |
+| `repo_config_id` / `model_repo_config_id` | MongoDB `_id` of `ModelRepoConfig` entity | `ObjectId("...")` |
+
+**Rules:**
+- ❌ NEVER use ambiguous `build_id` in internal code/tasks
+- ✅ Use explicit names: `raw_build_run_id`, `model_training_build_id`
+- ✅ For API path params, `build_id` refers to `raw_build_run_id` (what UI shows)
+- ✅ Add docstring explaining which ID type each parameter expects
+
+**Entity Field Reference:**
+- `RawBuildRun.build_id` → CI provider's run ID (keep for API compatibility)
+- `RawBuildRun._id` → MongoDB ObjectId → use as `raw_build_run_id`
+- `ModelTrainingBuild._id` → MongoDB ObjectId → use as `model_training_build_id`
+
 ## 4. New Feature Checklist
 
 ### Backend
