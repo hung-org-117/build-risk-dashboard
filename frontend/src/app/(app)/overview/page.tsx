@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
-import { ShieldCheck, Workflow, Clock, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft } from "lucide-react";
+import { ShieldCheck, Workflow, Clock, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload } from "lucide-react";
+import { FailureHeatmap } from "@/components/dashboard/FailureHeatmap";
 import GridLayout from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 
@@ -237,6 +238,54 @@ export default function OverviewPage() {
     );
   };
 
+  const exportLayout = () => {
+    const exportData = {
+      version: 1,
+      widgets: widgets.map((w) => ({
+        widget_id: w.widget_id,
+        widget_type: w.widget_type,
+        title: w.title,
+        enabled: w.enabled,
+        x: w.x,
+        y: w.y,
+        w: w.w,
+        h: w.h,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dashboard-layout-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importLayout = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target?.result as string);
+          if (data.version === 1 && Array.isArray(data.widgets)) {
+            setWidgets(data.widgets);
+          } else {
+            alert("Invalid layout file format");
+          }
+        } catch {
+          alert("Failed to parse layout file");
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
   const addWidget = (definition: WidgetDefinition) => {
     const existingWidget = widgets.find((w) => w.widget_id === definition.widget_id);
     if (existingWidget) {
@@ -465,6 +514,49 @@ export default function OverviewPage() {
             isEditing={isEditing}
           />
         );
+      case "risk_trend":
+        return (
+          <Card className={commonCardClass}>
+            {isEditing && (
+              <div className="absolute top-2 left-2 z-10">
+                <GripVertical className="h-4 w-4 text-muted-foreground" />
+              </div>
+            )}
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
+              <CardDescription className="text-xs truncate">
+                Build risk score trend over time
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex items-center justify-center h-[calc(100%-60px)]">
+              <div className="text-center space-y-2">
+                <ShieldCheck className="h-8 w-8 mx-auto text-muted-foreground/50" />
+                <p className="text-xs text-muted-foreground">
+                  Risk model integration pending
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      case "failure_heatmap":
+        return (
+          <Card className={commonCardClass}>
+            {isEditing && (
+              <div className="absolute top-2 left-2 z-10">
+                <GripVertical className="h-4 w-4 text-muted-foreground" />
+              </div>
+            )}
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
+              <CardDescription className="text-xs truncate">
+                Failures by day and hour
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-2">
+              <FailureHeatmap />
+            </CardContent>
+          </Card>
+        );
       default:
         return (
           <Card className={commonCardClass}>
@@ -585,6 +677,17 @@ export default function OverviewPage() {
                         </div>
                       );
                     })}
+                  </div>
+                  <div className="mt-6 border-t pt-4 space-y-2">
+                    <p className="text-xs text-muted-foreground mb-2">Layout Management</p>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={exportLayout} className="flex-1 gap-1">
+                        <Download className="h-3 w-3" /> Export
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={importLayout} className="flex-1 gap-1">
+                        <Upload className="h-3 w-3" /> Import
+                      </Button>
+                    </div>
                   </div>
                 </SheetContent>
               </Sheet>

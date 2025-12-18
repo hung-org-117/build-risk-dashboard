@@ -8,11 +8,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/components/ui/use-toast'
-import { settingsApi } from '@/lib/api'
-import type { ApplicationSettings } from '@/types'
+import { settingsApi, usersApi } from '@/lib/api'
+import type { ApplicationSettings, UserAccount } from '@/types'
 
 export function NotificationsTab() {
   const [settings, setSettings] = useState<ApplicationSettings | null>(null)
+  const [user, setUser] = useState<UserAccount | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
@@ -23,8 +24,12 @@ export function NotificationsTab() {
 
   const loadSettings = async () => {
     try {
-      const data = await settingsApi.get()
-      setSettings(data)
+      const [settingsData, userData] = await Promise.all([
+        settingsApi.get(),
+        usersApi.getCurrentUser(),
+      ])
+      setSettings(settingsData)
+      setUser(userData)
     } catch (error) {
       toast({ title: 'Failed to load settings', variant: 'destructive' })
     } finally {
@@ -37,7 +42,12 @@ export function NotificationsTab() {
 
     setSaving(true)
     try {
-      await settingsApi.update(settings)
+      await Promise.all([
+        settingsApi.update(settings),
+        usersApi.updateCurrentUser({
+          notification_email: user?.notification_email || null,
+        }),
+      ])
       toast({ title: 'Notification settings saved successfully' })
     } catch (error) {
       toast({ title: 'Failed to save settings', variant: 'destructive' })
@@ -58,6 +68,37 @@ export function NotificationsTab() {
 
   return (
     <div className="space-y-6">
+      {/* Personal Email Settings */}
+      {user && (
+        <Card>
+          <CardHeader>
+            <CardTitle>My Notification Settings</CardTitle>
+            <CardDescription>
+              Configure how you receive personal notifications.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="personal-email">Notification Email</Label>
+              <Input
+                id="personal-email"
+                value={user.notification_email || ''}
+                onChange={(e) =>
+                  setUser({
+                    ...user,
+                    notification_email: e.target.value,
+                  })
+                }
+                placeholder={user.email}
+              />
+              <p className="text-sm text-muted-foreground">
+                Leave empty to use your default email address ({user.email}).
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Email */}
       <Card>
         <CardHeader>

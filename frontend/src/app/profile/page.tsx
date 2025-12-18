@@ -125,7 +125,7 @@ export default function ProfilePage() {
                                 <Label htmlFor="role">Role</Label>
                                 <Input
                                     id="role"
-                                    value={authUser.role.toUpperCase()}
+                                    value={authUser.role?.toUpperCase() || 'USER'}
                                     disabled
                                     className="bg-muted"
                                 />

@@ -471,7 +471,7 @@ export const usersApi = {
     const response = await api.get<UserAccount>("/users/me");
     return response.data;
   },
-  updateCurrentUser: async (payload: { name?: string }) => {
+  updateCurrentUser: async (payload: { name?: string; notification_email?: string | null }) => {
     const response = await api.patch<UserAccount>("/users/me", payload);
     return response.data;
   },

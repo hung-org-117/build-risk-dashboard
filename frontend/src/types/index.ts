@@ -459,6 +459,7 @@ export interface UserAccount {
   email: string;
   name?: string | null;
   role: "admin" | "user";
+  notification_email?: string | null;
   created_at: string;
   github?: {
     connected: boolean;
@@ -477,6 +478,8 @@ export interface AuthVerifyResponse {
     id: string;
     email: string;
     name?: string;
+    role?: string;
+    github_accessible_repos?: string[];
   };
   github?: {
     login?: string;

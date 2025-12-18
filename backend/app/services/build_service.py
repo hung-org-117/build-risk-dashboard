@@ -178,9 +178,33 @@ class BuildService:
             features=training.get("features", {}) if training else {},
         )
 
-    def get_recent_builds(self, limit: int = 10) -> List[BuildSummary]:
-        """Get most recent builds across all repos."""
-        raw_cursor = self.db.raw_build_runs.find({}).sort("created_at", -1).limit(limit)
+    def get_recent_builds(
+        self, limit: int = 10, current_user: dict = None
+    ) -> List[BuildSummary]:
+        """Get most recent builds across repos accessible to user."""
+        user_role = current_user.get("role", "user") if current_user else "admin"
+        accessible_repos = (
+            current_user.get("github_accessible_repos", []) if current_user else []
+        )
+
+        # Build query filter based on RBAC
+        query = {}
+        if user_role != "admin" and accessible_repos:
+            # Get raw_repo_ids for accessible repos
+            repo_filter = {
+                "full_name": {"$in": accessible_repos},
+                "is_deleted": {"$ne": True},
+            }
+            repos = self.db.repositories.find(repo_filter, {"raw_repo_id": 1})
+            raw_repo_ids = [r["raw_repo_id"] for r in repos if r.get("raw_repo_id")]
+
+            if not raw_repo_ids:
+                return []
+            query["raw_repo_id"] = {"$in": raw_repo_ids}
+
+        raw_cursor = (
+            self.db.raw_build_runs.find(query).sort("created_at", -1).limit(limit)
+        )
         raw_builds = list(raw_cursor)
 
         if not raw_builds:

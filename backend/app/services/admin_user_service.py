@@ -33,9 +33,9 @@ class AdminUserService:
             created_at=user.created_at,
         )
 
-    def list_users(self) -> AdminUserListResponse:
+    def list_users(self, search: str = None) -> AdminUserListResponse:
         """List all users (UC6: View User List)."""
-        users = self.user_repo.list_all()
+        users = self.user_repo.list_all(search=search)
         return AdminUserListResponse(
             items=[self._to_response(u) for u in users],
             total=len(users),

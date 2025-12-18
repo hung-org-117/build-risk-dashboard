@@ -17,6 +17,7 @@ from app.dtos import (
     DatasetUpdateRequest,
 )
 from app.middleware.auth import get_current_user
+from app.middleware.require_admin import require_admin
 from app.services.dataset_service import DatasetService
 
 
@@ -48,10 +49,10 @@ async def upload_dataset(
     name: str | None = Form(default=None),
     description: str | None = Form(default=None),
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(require_admin),
 ):
-    """Upload a CSV file and create dataset."""
-    user_id = str(current_user["_id"])
+    """Upload a CSV file and create dataset (Admin only)."""
+    user_id = str(admin_user["_id"])
     upload_fobj = file.file
     try:
         upload_fobj.seek(0)
@@ -93,10 +94,10 @@ def update_dataset(
     dataset_id: str = PathParam(..., description="Dataset id (Mongo ObjectId)"),
     payload: DatasetUpdateRequest = ...,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(require_admin),
 ):
-    """Update dataset metadata."""
-    user_id = str(current_user["_id"])
+    """Update dataset metadata (Admin only)."""
+    user_id = str(admin_user["_id"])
     service = DatasetService(db)
     return service.update_dataset(dataset_id, user_id, payload)
 
@@ -108,10 +109,10 @@ def update_dataset(
 def delete_dataset(
     dataset_id: str = PathParam(..., description="Dataset id (Mongo ObjectId)"),
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(require_admin),
 ):
-    """Delete a dataset and all associated data."""
-    user_id = str(current_user["_id"])
+    """Delete a dataset and all associated data (Admin only)."""
+    user_id = str(admin_user["_id"])
     service = DatasetService(db)
     service.delete_dataset(dataset_id, user_id)
     return None

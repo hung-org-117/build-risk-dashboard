@@ -278,3 +278,101 @@ class MonitoringService:
                 "active_enrichments": len(active_enrichments),
             },
         }
+
+    def get_system_logs(
+        self,
+        limit: int = 100,
+        skip: int = 0,
+        level: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get system logs from MongoDB 'system_logs' collection.
+
+        Args:
+            limit: Max number of logs to return
+            skip: Pagination offset
+            level: Filter by log level (DEBUG, INFO, WARNING, ERROR)
+            source: Filter by source/component
+        """
+        collection = self.db["system_logs"]
+
+        # Build filter
+        query: Dict[str, Any] = {}
+        if level:
+            query["level"] = level.upper()
+        if source:
+            query["source"] = {"$regex": source, "$options": "i"}
+
+        # Get total count
+        total = collection.count_documents(query)
+
+        # Get logs sorted by timestamp desc
+        cursor = collection.find(query).sort("timestamp", -1).skip(skip).limit(limit)
+
+        logs = []
+        for doc in cursor:
+            logs.append(
+                {
+                    "id": str(doc["_id"]),
+                    "timestamp": (
+                        doc.get("timestamp").isoformat()
+                        if doc.get("timestamp")
+                        else None
+                    ),
+                    "level": doc.get("level", "INFO"),
+                    "source": doc.get("source", "unknown"),
+                    "message": doc.get("message", ""),
+                    "details": doc.get("details"),
+                }
+            )
+
+        return {
+            "logs": logs,
+            "total": total,
+            "has_more": skip + limit < total,
+        }
+
+    def get_logs_for_export(
+        self,
+        level: Optional[str] = None,
+        source: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> list[Dict[str, Any]]:
+        """
+        Get logs for export with optional date filtering.
+        """
+        collection = self.db["system_logs"]
+
+        query: Dict[str, Any] = {}
+        if level:
+            query["level"] = level.upper()
+        if source:
+            query["source"] = {"$regex": source, "$options": "i"}
+        if start_date or end_date:
+            query["timestamp"] = {}
+            if start_date:
+                query["timestamp"]["$gte"] = start_date
+            if end_date:
+                query["timestamp"]["$lte"] = end_date
+
+        cursor = collection.find(query).sort("timestamp", -1).limit(10000)
+
+        logs = []
+        for doc in cursor:
+            logs.append(
+                {
+                    "timestamp": (
+                        doc.get("timestamp").isoformat()
+                        if doc.get("timestamp")
+                        else None
+                    ),
+                    "level": doc.get("level", "INFO"),
+                    "source": doc.get("source", "unknown"),
+                    "message": doc.get("message", ""),
+                    "details": doc.get("details"),
+                }
+            )
+
+        return logs

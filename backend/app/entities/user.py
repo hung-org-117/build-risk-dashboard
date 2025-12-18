@@ -12,6 +12,7 @@ class User(BaseEntity):
     email: str
     name: str | None = None
     role: Literal["admin", "user"] = "user"
+    notification_email: Optional[str] = None
 
     # GitHub repo membership sync (for RBAC)
     # Stores list of repo full_names the user has access to on GitHub

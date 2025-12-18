@@ -14,6 +14,7 @@ class UserResponse(BaseModel):
     email: str
     name: Optional[str] = None
     role: Literal["admin", "user"] = "user"
+    notification_email: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(populate_by_name=True)
@@ -21,6 +22,7 @@ class UserResponse(BaseModel):
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
+    notification_email: Optional[str] = None
 
 
 class OAuthIdentityResponse(BaseModel):

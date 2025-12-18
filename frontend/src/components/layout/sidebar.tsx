@@ -4,36 +4,57 @@ import { cn } from "@/lib/utils";
 import { Activity, BadgeCheck, Database, Home, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/contexts/auth-context";
+
 const navigation = [
   {
     label: "Overview",
     href: "/overview",
     icon: Home,
+    adminOnly: false,
+  },
+  {
+    label: "My Repositories",
+    href: "/repos",
+    icon: GitBranch,
+    adminOnly: false,
   },
   {
     label: "Projects",
     href: "/admin/datasets",
     icon: Database,
+    adminOnly: true,
   },
   {
     label: "Repositories",
     href: "/admin/repos",
     icon: BadgeCheck,
+    adminOnly: true,
   },
   {
     label: "Monitoring",
     href: "/admin/monitoring",
     icon: Activity,
+    adminOnly: true,
   },
   {
     label: "Users",
     href: "/admin/users",
     icon: Users,
+    adminOnly: true,
   }
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const isAdmin = user?.role === "admin";
+
+  // Filter navigation items based on user role
+  const visibleNavigation = navigation.filter(
+    (item) => !item.adminOnly || isAdmin
+  );
 
   return (
     <div className="flex h-full flex-col border-r bg-white/70 backdrop-blur dark:bg-slate-950/90">
@@ -44,7 +65,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {navigation.map((item) => {
+        {visibleNavigation.map((item) => {
           const isActive = pathname.startsWith(item.href);
           const Icon = item.icon;
 
@@ -71,3 +92,4 @@ export function Sidebar() {
     </div>
   );
 }
+

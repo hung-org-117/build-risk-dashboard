@@ -21,6 +21,7 @@ from app.database.mongo import get_db
 #     GithubInstallationResponse,
 # )
 from app.middleware.auth import get_current_user
+from app.middleware.require_admin import require_admin
 from app.services.dataset_scan_service import DatasetScanService
 from app.services.sonar_webhook_service import SonarWebhookService
 
@@ -93,14 +94,14 @@ def start_scan(
     dataset_id: str,
     request: StartScanRequest,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(require_admin),
 ):
-    """Start a new scan job for a dataset. Scans all validated builds."""
+    """Start a new scan job for a dataset. Scans all validated builds (Admin only)."""
     service = DatasetScanService(db)
     try:
         scan = service.start_scan(
             dataset_id=dataset_id,
-            user_id=str(current_user["_id"]),
+            user_id=str(admin_user["_id"]),
             tool_type=request.tool_type,
             scan_config=request.scan_config,
         )
@@ -134,9 +135,9 @@ def list_scans(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """List scans for a dataset with pagination."""
+    """List scans for a dataset with pagination (Admin only)."""
     service = DatasetScanService(db)
     scans, total = service.list_scans(dataset_id, skip=skip, limit=limit)
     return {
@@ -181,9 +182,9 @@ def get_scan(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Get scan details."""
+    """Get scan details (Admin only)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -211,9 +212,9 @@ def cancel_scan(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Cancel a running scan."""
+    """Cancel a running scan (Admin only)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -252,9 +253,9 @@ def get_scan_results(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Get scan results with pagination."""
+    """Get scan results with pagination (Admin only)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -297,9 +298,9 @@ def get_scan_summary(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Get aggregated summary of scan results."""
+    """Get aggregated summary of scan results (Admin only)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -336,9 +337,9 @@ def get_failed_results(
     dataset_id: str,
     scan_id: str,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Get failed results for retry UI."""
+    """Get failed results for retry UI (Admin only)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:
@@ -375,9 +376,9 @@ def retry_result(
     result_id: str,
     request: RetryResultRequest,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Retry a failed scan result with optional config override."""
+    """Retry a failed scan result with optional config override (Admin only)."""
     service = DatasetScanService(db)
     scan = service.get_scan(scan_id)
     if not scan or str(scan.dataset_id) != dataset_id:

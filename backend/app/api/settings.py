@@ -5,6 +5,7 @@ from pymongo.database import Database
 
 from app.database.mongo import get_db
 from app.middleware.auth import get_current_user
+from app.middleware.require_admin import require_admin
 from app.dtos.settings import (
     ApplicationSettingsResponse,
     ApplicationSettingsUpdateRequest,
@@ -29,9 +30,9 @@ def get_settings(
 def update_settings(
     request: ApplicationSettingsUpdateRequest,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
-    """Update application settings."""
+    """Update application settings (Admin only)."""
     service = SettingsService(db)
     return service.update_settings(request)
 

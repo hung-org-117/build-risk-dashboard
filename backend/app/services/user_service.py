@@ -75,9 +75,8 @@ class UserService:
         user_repo = UserRepository(self.db)
 
         # Create update dict, excluding None values
-        update_dict = {
-            k: v for k, v in update_data.model_dump().items() if v is not None
-        }
+        # Create update dict using only set fields (allows setting to None)
+        update_dict = update_data.model_dump(exclude_unset=True)
 
         if not update_dict:
             # If nothing to update, just return current user

@@ -1,0 +1,208 @@
+version: "3.8"
+
+services:
+  # =========================================
+  # INFRASTRUCTURE (Databases & Brokers)
+  # =========================================
+
+  # MongoDB - Shared Database
+  mongo:
+    image: mongo:6
+    container_name: build-risk-mongo
+    ports:
+      - "27017:27017" # Expose for Local Backend
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # RabbitMQ - Message Broker for Celery
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: build-risk-rabbitmq
+    ports:
+      - "5672:5672"   # Expose for Local Backend
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-myuser}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-mypass}
+    restart: unless-stopped
+
+  # Redis - Cache & Broker Result Backend
+  redis:
+    image: redis:latest
+    container_name: build-risk-redis
+    ports:
+      - "6379:6379" # Expose for Local Backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+  # =========================================
+  # MONITORING STACK (Loki, Alloy, Grafana)
+  # =========================================
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: build-risk-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      # Use custom config if provided, otherwise default
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: build-risk-alloy
+    volumes:
+      - ./monitoring/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: build-risk-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Provision datasources automatically
+      - ./monitoring/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  # =========================================
+  # HEAVY TOOLS (SonarQube)
+  # =========================================
+
+  # SonarQube Server
+  sonarqube:
+    image: sonarqube:lts-community
+    container_name: build-risk-sonarqube
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      SONAR_WEB_JAVAADDITIONALOPTS: "-Dsonar.web.http.maxThreads=100"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    ports:
+      - "9000:9000" # Expose for Local Backend & Browser
+    depends_on:
+      - sonar-db
+    restart: unless-stopped
+
+  # PostgreSQL for SonarQube
+  sonar-db:
+    image: postgres:15-alpine
+    container_name: build-risk-sonar-db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # =========================================
+  # WORKERS (Heavy Processing)
+  # =========================================
+
+  # Celery Worker - Runs Heavy Scans (Sonar, Trivy)
+  # Uses Dockerfile.scanner which includes Trivy + SonarScanner
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+    container_name: build-risk-celery-worker
+    # Consumes queues tailored for heavy tasks + default
+    command: uv run celery -A app.celery_app worker -Q pipeline.default,ingestion,processing,sonar_scan,trivy_scan --loglevel=info -c 4
+    environment:
+      # Internal Docker Network Connections
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: buildguard
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      REDIS_URL: redis://redis:6379/0
+      HOME: /tmp
+      DATA_DIR: /app/repo-data/data
+      
+      # Tool Configs
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      SONAR_DEFAULT_PROJECT_KEY: build-risk-ui
+      TRIVY_ENABLED: "true"
+
+      # Secrets (Must match Local Backend)
+      SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-change-me}
+    volumes:
+      - ./backend:/app
+      # IMPORTANT: Mount repo-data here for worker access
+      - ./repo-data:/app/repo-data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      sonarqube:
+        condition: service_started
+    restart: unless-stopped
+
+  # Celery Beat - Scheduler (Can live on server reliably)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+    container_name: build-risk-celery-beat
+    command: uv run celery -A app.celery_app beat --loglevel=info --schedule=/app/repo-data/celerybeat-schedule
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: buildguard
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      REDIS_URL: redis://redis:6379/0
+      HOME: /tmp
+      DATA_DIR: /app/repo-data/data
+    volumes:
+      - ./backend:/app
+      - ./repo-data:/app/repo-data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  postgres_data:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  loki_data:
+  grafana_data:
+  alloy_data:

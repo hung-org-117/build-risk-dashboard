@@ -112,6 +112,24 @@ export function LogsViewer({
                                 className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
                             />
                         </Button>
+                        <a
+                            href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/monitoring/logs/export?format=json`}
+                            download
+                            className="inline-flex"
+                        >
+                            <Button variant="outline" size="sm">
+                                Export JSON
+                            </Button>
+                        </a>
+                        <a
+                            href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/monitoring/logs/export?format=csv`}
+                            download
+                            className="inline-flex"
+                        >
+                            <Button variant="outline" size="sm">
+                                Export CSV
+                            </Button>
+                        </a>
                     </div>
                 </div>
 

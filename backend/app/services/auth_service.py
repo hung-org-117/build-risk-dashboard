@@ -161,6 +161,8 @@ class AuthService:
             "id": str(user["_id"]),
             "email": user.get("email"),
             "name": user.get("name"),
+            "role": user.get("role", "user"),
+            "github_accessible_repos": user.get("github_accessible_repos", []),
         }
 
         github_data = None

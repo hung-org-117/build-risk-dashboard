@@ -31,7 +31,7 @@ async def get_dashboard_summary(
 ):
     """Return aggregated dashboard metrics derived from repository metadata."""
     service = DashboardService(db)
-    return service.get_summary()
+    return service.get_summary(current_user)
 
 
 @router.get("/recent-builds", response_model=list[BuildSummary])
@@ -40,9 +40,9 @@ async def get_recent_builds(
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return recent builds across all repositories."""
+    """Return recent builds across repositories accessible to the user."""
     service = BuildService(db)
-    return service.get_recent_builds(limit)
+    return service.get_recent_builds(limit, current_user)
 
 
 @router.get("/layout", response_model=DashboardLayoutResponse)
@@ -174,5 +174,21 @@ def get_available_widgets(
             description="Total datasets count",
             default_w=1,
             default_h=1,
+        ),
+        WidgetDefinition(
+            widget_id="risk_trend",
+            widget_type="chart",
+            title="Risk Trend",
+            description="Build risk score over time (placeholder)",
+            default_w=2,
+            default_h=2,
+        ),
+        WidgetDefinition(
+            widget_id="failure_heatmap",
+            widget_type="chart",
+            title="Failure Heatmap",
+            description="Build failures by day/hour",
+            default_w=2,
+            default_h=2,
         ),
     ]

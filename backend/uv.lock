@@ -148,7 +148,7 @@ dependencies = [
     { name = "python-jose", extra = ["cryptography"] },
     { name = "python-multipart" },
     { name = "redis" },
-    { name = "sf-hamilton" },
+    { name = "sf-hamilton", extra = ["pandera"] },
     { name = "tenacity" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -203,7 +203,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.6,<0.0.9" },
     { name = "redis", specifier = ">=5.0,<6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5.0,<0.6.0" },
-    { name = "sf-hamilton", specifier = ">=1.62" },
+    { name = "sf-hamilton", extras = ["pandera"], specifier = ">=1.62" },
     { name = "tenacity", specifier = ">=8.2,<9.0" },
     { name = "torch", marker = "extra == 'ml'", specifier = ">=2.1,<2.2" },
     { name = "torchvision", marker = "extra == 'ml'", specifier = ">=0.16,<0.17" },
@@ -875,6 +875,22 @@ wheels = [
 ]
 
 [[package]]
+name = "pandera"
+version = "0.27.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pydantic" },
+    { name = "typeguard" },
+    { name = "typing-extensions" },
+    { name = "typing-inspect" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ed/9d/36af210c7cef275d646b8dded8cc555078a271514e34f8f8d1c056462dc3/pandera-0.27.0.tar.gz", hash = "sha256:83c66d5896b97b3a91c810621038d2495f56c83864493819e7587d2059e641ad", size = 567135, upload-time = "2025-11-25T16:20:35.156Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/26/8e4a28ffbf3406c60d58eaa7f0529fb6197f5ae49f77b173dc84c057e1a2/pandera-0.27.0-py3-none-any.whl", hash = "sha256:e43b8062dfcde984300d798686815cc93feaae09645d3cddee3ab437f2d11ed5", size = 295880, upload-time = "2025-11-25T16:20:33.635Z" },
+]
+
+[[package]]
 name = "passlib"
 version = "1.7.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1362,6 +1378,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/ce/3591411d90bf0f6829fec4403f77a63280c8eee942f55715ae1ed7ff8492/sf_hamilton-1.89.0-py3-none-any.whl", hash = "sha256:25c0efeb498cd1847aec5fbde2e69b4756c4e0c2a5238bbedbe2178d559fd677", size = 468919, upload-time = "2025-10-11T17:43:53.902Z" },
 ]
 
+[package.optional-dependencies]
+pandera = [
+    { name = "pandera" },
+]
+
 [[package]]
 name = "six"
 version = "1.17.0"
@@ -1481,6 +1502,18 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5c/c1/54fffb2eb13d293d9a429fead3646752ea190de0229bcf3d591ba2481263/triton-2.1.0-0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:919b06453f0033ea52c13eaf7833de0e57db3178d23d4e04f9fc71c4f2c32bf8", size = 89234153, upload-time = "2023-09-01T07:26:20.161Z" },
+]
+
+[[package]]
+name = "typeguard"
+version = "4.4.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c7/68/71c1a15b5f65f40e91b65da23b8224dad41349894535a97f63a52e462196/typeguard-4.4.4.tar.gz", hash = "sha256:3a7fd2dffb705d4d0efaed4306a704c89b9dee850b688f060a8b1615a79e5f74", size = 75203, upload-time = "2025-06-18T09:56:07.624Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/a9/e3aee762739c1d7528da1c3e06d518503f8b6c439c35549b53735ba52ead/typeguard-4.4.4-py3-none-any.whl", hash = "sha256:b5f562281b6bfa1f5492470464730ef001646128b180769880468bd84b68b09e", size = 34874, upload-time = "2025-06-18T09:56:05.999Z" },
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from pydantic import BaseModel
 
 from .user import OAuthIdentityResponse, UserResponse
@@ -20,7 +20,7 @@ class AuthVerifyResponse(BaseModel):
     authenticated: bool
     github_connected: Optional[bool] = None
     reason: Optional[str] = None
-    user: Optional[Dict[str, Optional[str]]] = None
+    user: Optional[Dict[str, Any]] = None
     github: Optional[Dict[str, Optional[str]]] = None
 
 

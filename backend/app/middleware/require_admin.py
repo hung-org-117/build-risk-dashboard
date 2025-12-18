@@ -11,22 +11,17 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """
     Dependency that requires the current user to have admin role.
 
-    NOTE: Temporarily disabled - all authenticated users have access.
-    TODO: Re-enable when ready to enforce RBAC.
-
     Raises:
         HTTPException: 403 Forbidden if user is not an admin
 
     Returns:
         The user dict if they are an admin
     """
-    # Temporarily disabled - allow all authenticated users
-    # Uncomment below to enforce admin check:
-    # if user.get("role") != "admin":
-    #     raise HTTPException(
-    #         status_code=status.HTTP_403_FORBIDDEN,
-    #         detail="Admin access required. You don't have permission to perform this action.",
-    #     )
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required. You don't have permission to perform this action.",
+        )
     return user
 
 

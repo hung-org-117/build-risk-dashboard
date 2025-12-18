@@ -155,8 +155,9 @@ def trigger_sync(
 def trigger_reprocess_features(
     repo_id: str,
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
+    """Reprocess features for all builds in the repository (Admin only)."""
     service = RepositoryService(db)
     return service.trigger_reprocess(repo_id)
 
@@ -217,10 +218,10 @@ def reprocess_build(
     repo_id: str = Path(..., description="Repository id (Mongo ObjectId)"),
     build_id: str = Path(..., description="Build id (Mongo ObjectId)"),
     db: Database = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    _admin: dict = Depends(require_admin),
 ):
     """
-    Reprocess a build using the new DAG-based feature pipeline.
+    Reprocess a build using the new DAG-based feature pipeline (Admin only).
 
     Useful for:
     - Retrying failed builds
@@ -228,4 +229,4 @@ def reprocess_build(
     - Testing new feature extractors on existing data
     """
     service = RepositoryService(db)
-    return service.reprocess_build(repo_id, build_id, current_user)
+    return service.reprocess_build(repo_id, build_id, _admin)

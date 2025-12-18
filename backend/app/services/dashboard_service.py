@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from pymongo.database import Database
 
@@ -11,23 +12,47 @@ class DashboardService:
         self.build_collection = db["model_builds"]
         self.repo_collection = db["repositories"]
 
-    def get_summary(self) -> DashboardSummaryResponse:
-        # 1. Calculate total builds (last 14 days)
-        two_weeks_ago = datetime.now(timezone.utc) - timedelta(days=14)
+    def get_summary(
+        self, current_user: Optional[dict] = None
+    ) -> DashboardSummaryResponse:
+        """
+        Get dashboard summary with RBAC filtering.
 
-        total_builds = self.build_collection.count_documents({})
-
-        # 2. Success rate
-        successful_builds = self.build_collection.count_documents(
-            {"tr_status": "passed"}
+        - Admin: sees all repos and builds
+        - User: sees only repos in their github_accessible_repos
+        """
+        user_role = current_user.get("role", "user") if current_user else "admin"
+        accessible_repos = (
+            current_user.get("github_accessible_repos", []) if current_user else []
         )
+
+        # Base repo filter
+        repo_filter = {"import_status": "imported", "is_deleted": {"$ne": True}}
+
+        # For non-admin users, filter by accessible repos
+        if user_role != "admin" and accessible_repos:
+            repo_filter["full_name"] = {"$in": accessible_repos}
+
+        # 1. Get repos based on filter
+        repos = list(self.repo_collection.find(repo_filter))
+        repo_ids = [repo["_id"] for repo in repos]
+
+        # Build filter for RBAC
+        build_filter = {"repo_id": {"$in": repo_ids}} if user_role != "admin" else {}
+
+        # 2. Calculate total builds
+        total_builds = self.build_collection.count_documents(build_filter)
+
+        # 3. Success rate
+        success_filter = {**build_filter, "tr_status": "passed"}
+        successful_builds = self.build_collection.count_documents(success_filter)
         success_rate = (
             (successful_builds / total_builds * 100) if total_builds > 0 else 0.0
         )
 
-        # 3. Average duration
+        # 4. Average duration
         pipeline = [
-            {"$match": {"tr_duration": {"$ne": None}}},
+            {"$match": {**build_filter, "tr_duration": {"$ne": None}}},
             {"$group": {"_id": None, "avg_duration": {"$avg": "$tr_duration"}}},
         ]
         avg_duration_result = list(self.build_collection.aggregate(pipeline))
@@ -36,8 +61,7 @@ class DashboardService:
         )
         avg_duration_minutes = avg_duration_seconds / 60 if avg_duration_seconds else 0
 
-        # 4. Repo distribution
-        repos = list(self.repo_collection.find({"import_status": "imported"}))
+        # 5. Repo distribution (already filtered)
         repo_distribution = []
         for repo in repos:
             repo_id = repo["_id"]

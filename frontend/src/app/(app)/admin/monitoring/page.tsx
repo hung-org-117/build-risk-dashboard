@@ -139,59 +139,45 @@ export default function MonitoringPage() {
         }
     }, []);
 
-    // Generate mock logs for demo (in production, this would come from Loki)
+    // Fetch logs from MongoDB via monitoring API
     const fetchLogs = useCallback(async () => {
         setIsLoadingLogs(true);
         try {
             // Build query params
             const params = new URLSearchParams();
-            if (containerFilter !== "all") {
-                params.set("query", `{container_name="${containerFilter}"}`);
-            }
             if (levelFilter !== "all") {
-                params.set("query", `{level="${levelFilter}"}`);
+                params.set("level", levelFilter.toUpperCase());
+            }
+            if (containerFilter !== "all") {
+                params.set("source", containerFilter);
             }
             params.set("limit", "100");
 
-            const res = await fetch(`${API_BASE}/logs?${params.toString()}`, {
+            const res = await fetch(`${API_BASE}/monitoring/logs?${params.toString()}`, {
                 credentials: "include",
             });
 
             if (res.ok) {
                 const data = await res.json();
-                // Parse Loki response format
-                if (data.data?.result) {
-                    const parsedLogs: LogEntry[] = [];
-                    for (const stream of data.data.result) {
-                        const container = stream.stream?.container_name || "unknown";
-                        for (const [ts, msg] of stream.values || []) {
-                            // Parse timestamp (nanoseconds to readable)
-                            const date = new Date(parseInt(ts) / 1000000);
-                            const timestamp = date.toISOString().replace("T", " ").split(".")[0];
-
-                            // Try to extract level from message
-                            const levelMatch = msg.match(/\[(INFO|WARNING|ERROR|DEBUG)\]/);
-                            const level = levelMatch ? levelMatch[1] : "INFO";
-
-                            parsedLogs.push({
-                                timestamp,
-                                level,
-                                message: msg,
-                                container,
-                            });
-                        }
-                    }
+                // Parse new response format from MongoDB
+                if (data.logs && Array.isArray(data.logs)) {
+                    const parsedLogs: LogEntry[] = data.logs.map((log: any) => ({
+                        timestamp: log.timestamp || new Date().toISOString(),
+                        level: log.level || "INFO",
+                        message: log.message || "",
+                        container: log.source || "unknown",
+                    }));
                     setLogs(parsedLogs);
                 }
             }
         } catch (error) {
             console.error("Failed to fetch logs:", error);
-            // Set demo logs if Loki is not available
+            // Set demo logs if API is not available
             setLogs([
                 {
                     timestamp: new Date().toISOString().replace("T", " ").split(".")[0],
                     level: "INFO",
-                    message: "Loki is not configured. Enable monitoring stack in docker-compose.yml",
+                    message: "System logs will appear here when activity is logged.",
                     container: "system",
                 },
             ]);

@@ -19,9 +19,17 @@ class UserRepository(BaseRepository[User]):
         """Find a user by email"""
         return self.find_one({"email": email})
 
-    def list_all(self) -> List[User]:
-        """List all users sorted by creation date"""
-        return self.find_many({}, sort=[("created_at", -1)])
+    def list_all(self, search: str = None) -> List[User]:
+        """List all users sorted by creation date, optionally filtered by search."""
+        query = {}
+        if search:
+            # Search in name, email, and username (case-insensitive)
+            query["$or"] = [
+                {"name": {"$regex": search, "$options": "i"}},
+                {"email": {"$regex": search, "$options": "i"}},
+                {"username": {"$regex": search, "$options": "i"}},
+            ]
+        return self.find_many(query, sort=[("created_at", -1)])
 
     def create_user(self, email: str, name: Optional[str], role: str = "user") -> User:
         """Create a new user"""

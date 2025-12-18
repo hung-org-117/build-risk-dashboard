@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Path, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Path, Query, status
 from pymongo.database import Database
 
 from app.database.mongo import get_db
@@ -25,12 +27,13 @@ router = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
     response_model_by_alias=False,
 )
 def list_users(
+    q: Optional[str] = Query(None, description="Search by name, username, or email"),
     db: Database = Depends(get_db),
     _admin: dict = Depends(require_admin),
 ):
     """List all users (Admin only). UC6: View User List"""
     service = AdminUserService(db)
-    return service.list_users()
+    return service.list_users(search=q)
 
 
 @router.post(
