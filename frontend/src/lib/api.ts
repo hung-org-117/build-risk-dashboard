@@ -499,8 +499,10 @@ export interface UserRoleUpdatePayload {
 }
 
 export const adminUsersApi = {
-  list: async (): Promise<UserListResponse> => {
-    const response = await api.get<UserListResponse>("/admin/users");
+  list: async (q?: string): Promise<UserListResponse> => {
+    const response = await api.get<UserListResponse>("/admin/users", {
+      params: q ? { q } : undefined,
+    });
     return response.data;
   },
   create: async (payload: UserCreatePayload): Promise<UserAccount> => {
@@ -521,6 +523,51 @@ export const adminUsersApi = {
   },
   delete: async (userId: string): Promise<void> => {
     await api.delete(`/admin/users/${userId}`);
+  },
+};
+
+// Admin Invitations API
+export interface Invitation {
+  id: string;
+  email: string;
+  github_username?: string | null;
+  status: "pending" | "accepted" | "expired" | "revoked";
+  role: "admin" | "user";
+  invited_by: string;
+  expires_at: string;
+  accepted_at?: string | null;
+  created_at: string;
+}
+
+export interface InvitationListResponse {
+  items: Invitation[];
+  total: number;
+}
+
+export interface InvitationCreatePayload {
+  email: string;
+  github_username?: string;
+  role?: "admin" | "user" | "guest";
+}
+
+export const adminInvitationsApi = {
+  list: async (status?: string): Promise<InvitationListResponse> => {
+    const response = await api.get<InvitationListResponse>("/admin/invitations", {
+      params: status ? { status } : undefined,
+    });
+    return response.data;
+  },
+  create: async (payload: InvitationCreatePayload): Promise<Invitation> => {
+    const response = await api.post<Invitation>("/admin/invitations", payload);
+    return response.data;
+  },
+  get: async (invitationId: string): Promise<Invitation> => {
+    const response = await api.get<Invitation>(`/admin/invitations/${invitationId}`);
+    return response.data;
+  },
+  revoke: async (invitationId: string): Promise<Invitation> => {
+    const response = await api.delete<Invitation>(`/admin/invitations/${invitationId}`);
+    return response.data;
   },
 };
 

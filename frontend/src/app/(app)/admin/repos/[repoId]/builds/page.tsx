@@ -524,6 +524,14 @@ export default function RepoBuildsPage() {
                                                             <AlertCircle className="h-4 w-4" />
                                                         </div>
                                                     )}
+                                                    {build.missing_resources && build.missing_resources.length > 0 && (
+                                                        <div
+                                                            title={`Missing resources: ${build.missing_resources.join(", ")}`}
+                                                            className="text-orange-400"
+                                                        >
+                                                            <AlertCircle className="h-4 w-4" />
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">

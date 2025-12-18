@@ -11,6 +11,9 @@ When adding new features, add them to the appropriate FEATURES_* set below.
 import logging
 from app.database.mongo import get_database
 
+# Import DEFAULT_FEATURES from constants (always extracted, not user-selectable)
+from app.tasks.pipeline.constants import DEFAULT_FEATURES
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -94,9 +97,6 @@ FEATURES_REPO = {
 
 # All features combined
 ALL_FEATURES = FEATURES_BUILD_LOG | FEATURES_GIT | FEATURES_GITHUB | FEATURES_REPO
-
-# Import DEFAULT_FEATURES from constants (always extracted, not user-selectable)
-from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
 
 def seed_travistorrent_template():

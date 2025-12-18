@@ -128,7 +128,9 @@ class NotificationManager:
         recipients: Optional[List[str]] = None,
     ) -> bool:
         """
-        Send an email via Gmail using App Password.
+        Send an email via Gmail.
+
+        Uses Gmail API (OAuth2) if available, otherwise falls back to SMTP.
 
         Args:
             subject: Email subject
@@ -137,31 +139,54 @@ class NotificationManager:
             recipients: List of email addresses to send to.
                         If None, uses self.gmail_recipients from config.
 
-        Gmail SMTP Settings:
-        - Host: smtp.gmail.com
-        - Port: 587 (TLS) or 465 (SSL)
-        - Auth: Gmail address + App Password (NOT regular password)
-
-        To generate App Password:
-        1. Go to https://myaccount.google.com/apppasswords
-        2. Select "Mail" and your device
-        3. Copy the 16-character password
+        Returns:
+            True if sent successfully, False otherwise
         """
-        if not self.gmail_enabled or not self.gmail_user or not self.gmail_app_password:
-            logger.debug("Gmail not configured or disabled")
-            return False
-
         # Use provided recipients or fall back to config
         to_recipients = recipients if recipients else self.gmail_recipients
         if not to_recipients:
             logger.debug("No Gmail recipients specified")
             return False
 
+        # Try Gmail API first (OAuth2)
+        try:
+            from app.services.gmail_api_service import (
+                is_gmail_api_available,
+                send_email_via_gmail_api,
+            )
+
+            if is_gmail_api_available():
+                return send_email_via_gmail_api(
+                    to=to_recipients,
+                    subject=subject,
+                    body=body,
+                    html_body=html_body,
+                )
+        except ImportError:
+            pass  # Gmail API not installed, try SMTP
+        except Exception as e:
+            logger.warning(f"Gmail API failed, falling back to SMTP: {e}")
+
+        # Fallback to SMTP with App Password
+        return self._send_gmail_smtp(subject, body, html_body, to_recipients)
+
+    def _send_gmail_smtp(
+        self,
+        subject: str,
+        body: str,
+        html_body: Optional[str],
+        recipients: List[str],
+    ) -> bool:
+        """Send email via SMTP with App Password (fallback method)."""
+        if not self.gmail_enabled or not self.gmail_user or not self.gmail_app_password:
+            logger.debug("Gmail SMTP not configured or disabled")
+            return False
+
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = f"[BuildGuard] {subject}"
             msg["From"] = self.gmail_user
-            msg["To"] = ", ".join(to_recipients)
+            msg["To"] = ", ".join(recipients)
 
             msg.attach(MIMEText(body, "plain", "utf-8"))
             if html_body:
@@ -173,9 +198,9 @@ class NotificationManager:
                 server.starttls()
                 server.ehlo()
                 server.login(self.gmail_user, self.gmail_app_password)
-                server.sendmail(self.gmail_user, to_recipients, msg.as_string())
+                server.sendmail(self.gmail_user, recipients, msg.as_string())
 
-            logger.info(f"Gmail sent to {len(to_recipients)} recipients: {subject}")
+            logger.info(f"Gmail SMTP sent to {len(recipients)} recipients: {subject}")
             return True
         except smtplib.SMTPAuthenticationError as e:
             logger.error(
@@ -184,7 +209,7 @@ class NotificationManager:
             )
             return False
         except Exception as e:
-            logger.error(f"Gmail error: {e}")
+            logger.error(f"Gmail SMTP error: {e}")
             return False
 
 

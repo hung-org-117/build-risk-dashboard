@@ -389,6 +389,12 @@ def process_workflow_run(
         if result.get("is_missing_commit"):
             updates["is_missing_commit"] = True
 
+        # Track missing resources and skipped features (Graceful Degradation)
+        if result.get("missing_resources"):
+            updates["missing_resources"] = result["missing_resources"]
+        if result.get("skipped_features"):
+            updates["skipped_features"] = result["skipped_features"]
+
         model_build_repo.update_one(build_id, updates)
 
         # Update repo config stats

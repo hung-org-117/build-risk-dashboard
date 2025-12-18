@@ -90,6 +90,9 @@ class HamiltonPipeline:
         self._cache_path: Optional[Path] = None
         self._driver = self._build_driver()
         self._all_features = self._get_all_feature_names()
+        # Track skipped features and missing resources after run()
+        self._last_skipped_features: Set[str] = set()
+        self._last_missing_resources: Set[str] = set()
 
     def _get_cache_path(self) -> Optional[Path]:
         """
@@ -266,6 +269,14 @@ class HamiltonPipeline:
             requested_features, available_resources
         )
 
+        # Calculate missing resources for tracking
+        all_required = get_required_resources_for_features(requested_features)
+        missing_resources = all_required - available_resources
+
+        # Store for later retrieval
+        self._last_skipped_features = skipped_features
+        self._last_missing_resources = missing_resources
+
         if skipped_features:
             logger.warning(
                 f"Skipping {len(skipped_features)} features due to missing resources: "
@@ -371,3 +382,13 @@ class HamiltonPipeline:
     def cache_path(self) -> Optional[Path]:
         """Get the cache directory path if using file-based cache."""
         return self._cache_path
+
+    @property
+    def skipped_features(self) -> Set[str]:
+        """Get features skipped in last run due to missing resources."""
+        return self._last_skipped_features.copy()
+
+    @property
+    def missing_resources(self) -> Set[str]:
+        """Get resources that were missing in last run."""
+        return self._last_missing_resources.copy()

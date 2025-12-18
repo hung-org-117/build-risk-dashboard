@@ -1,7 +1,5 @@
 """Tests for GitHub token pool and rate limiting improvements."""
 
-import time
-import pytest
 from unittest.mock import MagicMock, patch
 
 

@@ -55,6 +55,8 @@ export interface Build {
   extraction_status?: string; // pending, completed, failed, partial
   feature_count: number;
   extraction_error?: string;
+  missing_resources?: string[];  // Resources unavailable during extraction
+  skipped_features?: string[];   // Features skipped due to missing resources
 }
 
 export interface BuildDetail extends Build {
@@ -460,7 +462,7 @@ export interface UserAccount {
   id: string;
   email: string;
   name?: string | null;
-  role: "admin" | "user";
+  role: "admin" | "user" | "guest";
   notification_email?: string | null;
   created_at: string;
   github?: {

@@ -4,7 +4,6 @@ Maps HTTP status codes to semantic error codes for consistent client-side handli
 """
 
 from enum import Enum
-from typing import Optional
 
 
 class ErrorCode(str, Enum):

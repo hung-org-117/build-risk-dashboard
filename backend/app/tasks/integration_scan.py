@@ -42,7 +42,7 @@ def run_dataset_scan(self, scan_id: str):
     db = get_database()
     scan_repo = DatasetScanRepository(db)
     result_repo = DatasetScanResultRepository(db)
-    repo_repo = DatasetRepoConfigRepository(db)
+    dataset_repo_config = DatasetRepoConfigRepository(db)
 
     # Load scan
     scan = scan_repo.find_by_id(scan_id)
@@ -86,11 +86,11 @@ def run_dataset_scan(self, scan_id: str):
         try:
             if tool.scan_mode == ScanMode.SYNC:
                 # Trivy: run sync scan
-                _run_trivy_scan(result, tool, result_repo, repo_repo)
+                _run_trivy_scan(result, tool, result_repo, dataset_repo_config)
                 completed += 1
             else:
                 # SonarQube: start async scan
-                _start_sonar_scan(result, tool, result_repo, repo_repo)
+                _start_sonar_scan(result, tool, result_repo, dataset_repo_config)
                 pending += 1
 
             # Update progress
@@ -153,7 +153,7 @@ def retry_scan_result(self, result_id: str, scan_id: str):
     db = get_database()
     scan_repo = DatasetScanRepository(db)
     result_repo = DatasetScanResultRepository(db)
-    repo_repo = DatasetRepoConfigRepository(db)
+    dataset_repo_config = DatasetRepoConfigRepository(db)
 
     # Load result
     result = result_repo.find_by_id(result_id)
@@ -179,10 +179,14 @@ def retry_scan_result(self, result_id: str, scan_id: str):
     try:
         if tool.scan_mode == ScanMode.SYNC:
             # Trivy: run sync scan with config
-            _run_trivy_scan(result, tool, result_repo, repo_repo, effective_config)
+            _run_trivy_scan(
+                result, tool, result_repo, dataset_repo_config, effective_config
+            )
         else:
             # SonarQube: start async scan with config
-            _start_sonar_scan(result, tool, result_repo, repo_repo, effective_config)
+            _start_sonar_scan(
+                result, tool, result_repo, dataset_repo_config, effective_config
+            )
 
         # Check scan completion after single result
         from app.services.dataset_scan_service import DatasetScanService
@@ -203,7 +207,7 @@ def _run_trivy_scan(
     result,
     tool,
     result_repo: DatasetScanResultRepository,
-    repo_repo: DatasetRepoConfigRepository,
+    dataset_repo_config: DatasetRepoConfigRepository,
     config_content: Optional[str] = None,
 ):
     """Run Trivy scan on a commit (sync)."""
@@ -221,7 +225,7 @@ def _run_trivy_scan(
 
     # Get or create worktree for the commit
     worktree_path, is_temp_clone = _ensure_worktree(
-        str(result.dataset_id), result.repo_full_name, checkout_sha, repo_repo
+        str(result.dataset_id), result.repo_full_name, checkout_sha, dataset_repo_config
     )
 
     if not worktree_path:
@@ -257,7 +261,7 @@ def _start_sonar_scan(
     result,
     tool,
     result_repo: DatasetScanResultRepository,
-    repo_repo: DatasetRepoConfigRepository,
+    dataset_repo_config: DatasetRepoConfigRepository,
     config_content: Optional[str] = None,
 ):
     """Start SonarQube scan on a commit (async)."""
@@ -272,7 +276,7 @@ def _start_sonar_scan(
     result_repo.mark_scanning(str(result.id), component_key)
 
     # Get repo URL
-    repo = repo_repo.find_by_dataset_and_full_name(
+    repo = dataset_repo_config.find_by_dataset_and_full_name(
         str(result.dataset_id), result.repo_full_name
     )
     if not repo:
@@ -352,7 +356,7 @@ def _ensure_worktree(
     dataset_id: str,
     repo_full_name: str,
     commit_sha: str,
-    repo_repo: DatasetRepoConfigRepository,
+    dataset_repo_config: DatasetRepoConfigRepository,
 ) -> tuple[Optional[Path], bool]:
     """
     Ensure a git worktree exists for the commit.
@@ -371,7 +375,9 @@ def _ensure_worktree(
 
     try:
         # Get repo from DB to get raw_repo_id
-        repo = repo_repo.find_by_dataset_and_full_name(dataset_id, repo_full_name)
+        repo = dataset_repo_config.find_by_dataset_and_full_name(
+            dataset_id, repo_full_name
+        )
         if not repo:
             logger.error(
                 f"Repository not found in DB: {repo_full_name} for dataset {dataset_id}"

@@ -260,12 +260,22 @@ async def exchange_code_for_token(
     # Check organization membership
     github_login = user_data.get("login")
     is_org_member = await check_org_membership(access_token, github_login)
+
+    # If not org member, check for valid invitation
+    invitation = None
     if not is_org_member:
-        org_name = settings.GITHUB_ORGANIZATION
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Access denied. You must be a member of the '{org_name}' organization to use this application.",
+        from app.services.invitation_service import find_valid_invitation
+
+        invitation = find_valid_invitation(
+            db, email=email, github_username=github_login
         )
+
+        if not invitation:
+            org_name = settings.GITHUB_ORGANIZATION
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. You must be a member of the '{org_name}' organization or have a valid invitation to use this application.",
+            )
 
     user_doc, identity_doc = upsert_github_identity(
         db,
@@ -298,6 +308,22 @@ async def exchange_code_for_token(
             )
     except Exception:
         pass  # Non-critical - don't fail login if sync fails
+
+    # Accept invitation if user logged in via invitation
+    if invitation:
+        try:
+            from app.services.invitation_service import InvitationService
+
+            invitation_service = InvitationService(db)
+            invitation_service.accept_invitation(invitation, user_doc["_id"])
+
+            # Update user role if invitation specifies a different role
+            if invitation.role and invitation.role != "user":
+                db.users.update_one(
+                    {"_id": user_doc["_id"]}, {"$set": {"role": invitation.role}}
+                )
+        except Exception:
+            pass  # Non-critical - invitation already used for access check
 
     db.github_states.update_one(
         {"state": state},

@@ -187,6 +187,10 @@ def extract_features_for_build(
 
         formatted_features = format_features_for_storage(features)
 
+        # Get skipped features and missing resources from pipeline
+        skipped_features = list(pipeline.skipped_features) if pipeline else []
+        missing_resources = list(pipeline.missing_resources) if pipeline else []
+
         result = {
             "status": "completed",
             "features": formatted_features,
@@ -194,7 +198,16 @@ def extract_features_for_build(
             "errors": [],
             "warnings": [],
             "is_missing_commit": not inputs.is_commit_available,
+            "skipped_features": skipped_features,
+            "missing_resources": missing_resources,
         }
+
+        # Adjust status if features were skipped
+        if skipped_features:
+            result["status"] = "partial"
+            result["warnings"].append(
+                f"Skipped {len(skipped_features)} features due to missing resources"
+            )
 
         if not inputs.is_commit_available:
             result["warnings"].append(

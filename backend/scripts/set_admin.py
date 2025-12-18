@@ -56,7 +56,7 @@ def set_admin_by_github_login(github_login: str) -> bool:
 
     user_id = identity.get("user_id")
     if not user_id:
-        print(f"❌ OAuth identity found but no user_id linked")
+        print("❌ OAuth identity found but no user_id linked")
         return False
 
     result = db.users.update_one(

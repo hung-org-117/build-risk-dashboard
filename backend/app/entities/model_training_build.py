@@ -75,6 +75,14 @@ class ModelTrainingBuild(BaseEntity):
         default=False,
         description="Whether the commit is missing from the repository",
     )
+    missing_resources: list = Field(
+        default_factory=list,
+        description="Resources unavailable during extraction (e.g., 'git_worktree', 'build_logs')",
+    )
+    skipped_features: list = Field(
+        default_factory=list,
+        description="Features skipped due to missing resources",
+    )
 
     # ** FEATURES - The actual extracted feature values **
     features: Dict[str, Any] = Field(

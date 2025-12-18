@@ -56,6 +56,7 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
   const pageTitle = useMemo(() => {
     if (pathname?.startsWith('/admin/datasets')) return 'Projects / Datasets'
     if (pathname?.startsWith('/admin/repos')) return 'Repositories'
+    if (pathname?.startsWith('/admin/users')) return 'User Management'
     if (pathname?.startsWith('/overview')) return 'Overview'
     if (pathname?.startsWith('/admin/monitoring')) return 'Monitoring'
     if (pathname?.startsWith('/admin/settings')) return 'Settings'

@@ -426,6 +426,8 @@ def process_enrichment_batch(
             # Determine extraction status from result
             if result["status"] == "completed":
                 extraction_status = ExtractionStatus.COMPLETED
+            elif result["status"] == "partial":
+                extraction_status = ExtractionStatus.PARTIAL
             elif result["status"] == "failed":
                 extraction_status = ExtractionStatus.FAILED
             else:
@@ -434,25 +436,21 @@ def process_enrichment_batch(
             features = result["features"]
             extraction_error = result["errors"][0] if result["errors"] else None
 
-            # 3. Update EnrichmentBuild with results
-            # enrichment_build.save_features(
-            #     enrichment_build_id,
-            #     features,
-            # )
-            # enrichment_build.update_extraction_status(
-            #     enrichment_build_id,
-            #     extraction_status,
-            #     error=extraction_error,
-            # )
-            enrichment_build.update_one(
-                enrichment_build_id,
-                {
-                    "extraction_status": extraction_status,
-                    "extraction_error": extraction_error,
-                    "features": features,
-                    "enriched_at": datetime.now(),
-                },
-            )
+            # Build update dict with Graceful Degradation tracking
+            update_data = {
+                "extraction_status": extraction_status,
+                "extraction_error": extraction_error,
+                "features": features,
+                "enriched_at": datetime.now(),
+            }
+
+            # Track missing resources and skipped features
+            if result.get("missing_resources"):
+                update_data["missing_resources"] = result["missing_resources"]
+            if result.get("skipped_features"):
+                update_data["skipped_features"] = result["skipped_features"]
+
+            enrichment_build.update_one(enrichment_build_id, update_data)
 
             if result["status"] == "completed":
                 enriched += 1

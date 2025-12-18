@@ -350,7 +350,16 @@ def prepare_and_dispatch_processing(
             },
         )
 
-        # Step 3: Build ingestion workflow if resources needed
+        # Step 3: Create processing task signature
+        from app.tasks.model_processing import dispatch_build_processing
+
+        final_task = dispatch_build_processing.si(
+            repo_config_id=repo_config_id,
+            raw_repo_id=raw_repo_id,
+            raw_build_run_ids=raw_build_run_ids,
+        )
+
+        # Step 4: Build and execute workflow with processing as final task
         if tasks_by_level:
             workflow = build_ingestion_workflow(
                 tasks_by_level=tasks_by_level,
@@ -359,15 +368,16 @@ def prepare_and_dispatch_processing(
                 build_ids=ci_build_ids,
                 commit_shas=commit_shas,
                 ci_provider=ci_provider_enum.value,
+                final_task=final_task,  # Processing runs AFTER ingestion
             )
             if workflow:
                 workflow.apply_async()
-
-        dispatch_build_processing.delay(
-            repo_config_id=repo_config_id,
-            raw_repo_id=raw_repo_id,
-            raw_build_run_ids=raw_build_run_ids,
-        )
+            else:
+                # No ingestion tasks, run processing directly
+                final_task.apply_async()
+        else:
+            # No resources needed, run processing directly
+            final_task.apply_async()
 
         return {
             "status": "dispatched",

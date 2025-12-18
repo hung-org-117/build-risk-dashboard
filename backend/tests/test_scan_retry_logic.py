@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from app.entities.dataset_scan import DatasetScan, DatasetScanStatus
+from app.entities.dataset_scan import DatasetScan
 from app.entities.dataset_scan_result import DatasetScanResult
 from app.tasks.integration_scan import retry_scan_result
-from app.integrations import ToolType, ScanMode
+from app.integrations import ScanMode
 
 
 class TestScanRetryLogic(unittest.TestCase):
