@@ -46,9 +46,14 @@ export function EnrichmentTab({
     );
 
     // Handle create version
-    const handleCreateVersion = async (features: string[], name?: string) => {
+    const handleCreateVersion = async (
+        features: string[],
+        featureConfigs: Record<string, unknown>,
+        name?: string
+    ) => {
         const version = await createVersion({
             selected_features: features,
+            feature_configs: featureConfigs,
             name,
         });
         if (version) {

@@ -17,8 +17,8 @@ Usage:
         return int(build_run.ci_run_id)
 """
 
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
 from app.tasks.pipeline.shared.resources import FeatureResource
 
@@ -107,16 +107,13 @@ def feature_metadata(
             "category": category.value if isinstance(category, Enum) else category,
             "data_type": data_type.value if isinstance(data_type, Enum) else data_type,
             "required_resources": [
-                r.value if isinstance(r, Enum) else r
-                for r in (required_resources or [])
+                r.value if isinstance(r, Enum) else r for r in (required_resources or [])
             ],
             "nullable": nullable,
             "example_value": example_value,
             "unit": unit,
             "output_format": (
-                output_format.value
-                if isinstance(output_format, Enum)
-                else output_format
+                output_format.value if isinstance(output_format, Enum) else output_format
             ),
             "output_formats": formats_dict,
         }
@@ -322,3 +319,151 @@ def format_features_for_storage(
             result[name] = value
 
     return result
+
+
+# =============================================================================
+# Config Requirements Decorator
+# =============================================================================
+
+# Global registry to store config requirements
+_CONFIG_REQUIREMENTS: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def requires_config(**field_specs: Dict[str, Any]) -> Callable[[F], F]:
+    """
+    Decorator to mark features that need user config input.
+
+    This allows features to declaratively specify their configuration
+    requirements instead of relying on a static RepoConfigInput class.
+
+    Config Scopes:
+        - "global": Applied to all builds in dataset/repo (e.g., lookback_days)
+        - "repo": Applied per-repository (e.g., source_languages, test_frameworks)
+
+    Example:
+        @requires_config(
+            lookback_days={
+                "type": "integer",
+                "scope": "global",
+                "required": False,
+                "description": "Days to look back for commit history",
+                "default": 90
+            },
+            source_languages={
+                "type": "list",
+                "scope": "repo",
+                "required": True,
+                "description": "Main programming languages",
+                "default": []
+            }
+        )
+        @tag(group="git")
+        def my_feature(feature_config: FeatureConfigInput, ...):
+            lookback = feature_config.get("lookback_days", 90, scope="global")
+            languages = feature_config.get("source_languages", [], scope="repo")
+
+    Args:
+        **field_specs: Keyword arguments where key is field name and value
+                      is a dict with keys: type, scope, required, description, default
+
+    Returns:
+        Decorator function that attaches config requirements to the function
+    """
+
+    def decorator(func: F) -> F:
+        func_name = func.__name__
+        _CONFIG_REQUIREMENTS[func_name] = []
+
+        for field_name, spec in field_specs.items():
+            _CONFIG_REQUIREMENTS[func_name].append(
+                {
+                    "field": field_name,
+                    "type": spec.get("type", "string"),
+                    "scope": spec.get("scope", "repo"),  # Default to repo scope
+                    "required": spec.get("required", True),
+                    "description": spec.get("description", ""),
+                    "default": spec.get("default"),
+                }
+            )
+
+        # Add metadata to function itself for introspection
+        func._config_requirements = _CONFIG_REQUIREMENTS[func_name]
+
+        return func
+
+    return decorator
+
+
+def collect_config_requirements(
+    feature_names: List[str],
+    modules: Optional[list] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Scan selected features and collect all required config fields.
+
+    Args:
+        feature_names: List of feature names user has selected
+        modules: Optional list of Hamilton modules. If not provided,
+                lazy-loads HAMILTON_MODULES from constants.
+
+    Returns:
+        Dict mapping field names to their specifications.
+        Example:
+        {
+            "source_languages": {
+                "field": "source_languages",
+                "type": "list",
+                "required": True,
+                "description": "Main programming languages",
+                "default": []
+            }
+        }
+    """
+    # Lazy load to avoid circular import
+    if modules is None:
+        from app.tasks.pipeline.constants import HAMILTON_MODULES
+
+        modules = HAMILTON_MODULES
+
+    all_fields: Dict[str, Dict[str, Any]] = {}
+
+    for module in modules:
+        for name in dir(module):
+            if name.startswith("_"):
+                continue
+
+            obj = getattr(module, name)
+
+            # Skip non-callable items
+            if not callable(obj):
+                continue
+
+            # Check if this function is in the selected features
+            # OR if it has @extract_fields and any of its fields are selected
+            is_selected = name in feature_names
+
+            # Also check @extract_fields
+            if not is_selected:
+                transforms = getattr(obj, "transform", [])
+                for t in transforms:
+                    if hasattr(t, "fields") and isinstance(t.fields, dict):
+                        for field_name in t.fields.keys():
+                            if field_name in feature_names:
+                                is_selected = True
+                                break
+                    if is_selected:
+                        break
+
+            # If this feature is selected and has config requirements
+            if is_selected and hasattr(obj, "_config_requirements"):
+                for req in obj._config_requirements:
+                    field_name = req["field"]
+                    if field_name in all_fields:
+                        # Merge requirements (e.g., if one requires and another doesn't)
+                        all_fields[field_name]["required"] = (
+                            all_fields[field_name]["required"] or req["required"]
+                        )
+                    else:
+                        all_fields[field_name] = req.copy()
+
+    return all_fields

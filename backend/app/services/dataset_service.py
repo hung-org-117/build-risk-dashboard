@@ -5,7 +5,6 @@ from typing import Dict, Optional, Sequence
 from uuid import uuid4
 
 import pandas as pd
-
 from bson import ObjectId
 from fastapi import HTTPException, status
 from pymongo.database import Database
@@ -16,10 +15,10 @@ from app.dtos import (
     DatasetResponse,
     DatasetUpdateRequest,
 )
-from app.dtos.dataset_repo import DatasetRepoListResponse, DatasetRepoSummary
-from app.entities.dataset import DatasetProject, DatasetMapping, DatasetStats
+from app.entities.dataset import DatasetMapping, DatasetProject, DatasetStats
+from app.repositories.dataset_build_repository import DatasetBuildRepository
+from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_repository import DatasetRepository
-from app.repositories.dataset_repo_config_repository import DatasetRepoConfigRepository
 
 logger = logging.getLogger(__name__)
 DATASET_DIR = Path("../repo-data/datasets")
@@ -31,14 +30,11 @@ class DatasetService:
     def __init__(self, db: Database):
         self.db = db
         self.repo = DatasetRepository(db)
-        self.repo_config_repo = DatasetRepoConfigRepository(db)
+        self.build_repo = DatasetBuildRepository(db)
+        self.enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
 
     def _serialize(self, dataset) -> DatasetResponse:
-        payload = (
-            dataset.model_dump(by_alias=True)
-            if hasattr(dataset, "model_dump")
-            else dataset
-        )
+        payload = dataset.model_dump(by_alias=True) if hasattr(dataset, "model_dump") else dataset
         return DatasetResponse.model_validate(payload)
 
     def _validate_required_mapping(
@@ -101,14 +97,10 @@ class DatasetService:
             items=[self._serialize(ds) for ds in datasets],
         )
 
-    def get_dataset(
-        self, dataset_id: str, user_id: str, role: str = "user"
-    ) -> DatasetResponse:
+    def get_dataset(self, dataset_id: str, user_id: str, role: str = "user") -> DatasetResponse:
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
         if role == "user":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -121,51 +113,7 @@ class DatasetService:
             )
         return self._serialize(dataset)
 
-    def list_repos(
-        self, dataset_id: str, user_id: str, role: str = "user"
-    ) -> DatasetRepoListResponse:
-        """
-        List repos for a dataset.
-
-        Uses DatasetRepoConfigRepository to get repos, converts to DTOs.
-        """
-        dataset = self.repo.find_by_id(dataset_id)
-        if not dataset:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
-            )
-        if not self._can_view_dataset(dataset, user_id, role):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to access this dataset",
-            )
-
-        configs = self.repo_config_repo.list_by_dataset(ObjectId(dataset_id))
-
-        items = []
-        for c in configs:
-            items.append(
-                DatasetRepoSummary(
-                    _id=c.id,
-                    raw_repo_id=c.raw_repo_id,
-                    repo_name=c.full_name,
-                    validation_status=(
-                        c.validation_status.value
-                        if hasattr(c.validation_status, "value")
-                        else c.validation_status
-                    ),
-                    validation_error=c.validation_error,
-                    builds_in_csv=c.builds_in_csv,
-                    builds_found=c.builds_found,
-                    builds_processed=c.builds_processed,
-                )
-            )
-
-        return DatasetRepoListResponse(items=items, total=len(items))
-
-    def create_dataset(
-        self, user_id: str, payload: DatasetCreateRequest
-    ) -> DatasetResponse:
+    def create_dataset(self, user_id: str, payload: DatasetCreateRequest) -> DatasetResponse:
         now = datetime.now(timezone.utc)
         data = payload.model_dump(exclude_none=True)
         data["user_id"] = ObjectId(user_id) if user_id else None
@@ -181,9 +129,7 @@ class DatasetService:
     ) -> DatasetResponse:
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
         payload_dict = payload.model_dump(exclude_none=True)
         updates = {}
@@ -207,25 +153,21 @@ class DatasetService:
             updates["mapped_fields"] = merged
             self._validate_required_mapping(updates["mapped_fields"], dataset.columns)
 
-            # Check if repo_name is newly set and validation hasn't started
-            old_repo_name = (
-                dataset.mapped_fields.repo_name if dataset.mapped_fields else None
-            )
+            # Trigger unified validation if all required fields are set
             new_repo_name = merged.get("repo_name")
-            repo_validation_status = getattr(dataset, "repo_validation_status", None)
+            validation_status = getattr(dataset, "validation_status", None)
 
-            # Trigger validation if repo_name is set and validation is still pending/None
-            if new_repo_name and (
-                not old_repo_name or repo_validation_status in [None, "pending"]
-            ):
-                from app.tasks.dataset_validation import validate_repos_task
-                from app.entities.dataset import RepoValidationStatus
+            # Trigger unified validation if all required fields are set
+            if new_repo_name and merged.get("build_id") and validation_status in [None, "pending"]:
+                from app.tasks.dataset_validation import (
+                    dataset_validation_orchestrator,
+                )
 
-                task = validate_repos_task.delay(dataset_id)
-                updates["repo_validation_task_id"] = task.id
-                updates["repo_validation_status"] = RepoValidationStatus.VALIDATING
+                task = dataset_validation_orchestrator.delay(dataset_id)
+                updates["validation_task_id"] = task.id
+                updates["validation_status"] = "validating"
                 logger.info(
-                    f"Dispatched repo validation task {task.id} for dataset {dataset_id}"
+                    f"Dispatched distributed validation task {task.id} for dataset {dataset_id}"
                 )
 
         if "stats" in payload_dict:
@@ -253,12 +195,8 @@ class DatasetService:
             return None
 
         return {
-            "build_id": find_match(
-                ["build_id", "build id", "id", "workflow_run_id", "run_id"]
-            ),
-            "repo_name": find_match(
-                ["repo", "repository", "repo_name", "full_name", "project"]
-            ),
+            "build_id": find_match(["build_id", "build id", "id", "workflow_run_id", "run_id"]),
+            "repo_name": find_match(["repo", "repository", "repo_name", "full_name", "project"]),
         }
 
     def create_from_upload(
@@ -296,7 +234,7 @@ class DatasetService:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to persist uploaded file: {exc}",
-            )
+            ) from exc
 
         try:
             df_preview = pd.read_csv(temp_path, nrows=5, dtype=str)
@@ -310,24 +248,26 @@ class DatasetService:
 
             preview = df_preview.head(3).fillna("").to_dict(orient="records")
 
-            # Read full file for stats calculation
-            df_full = pd.read_csv(temp_path, dtype=str)
-            row_count = len(df_full)
+            # Calculate stats using chunks to avoid OOM
+            row_count = 0
+            total_cells = 0
+            empty_cells = 0
 
-            # Calculate missing_rate: percentage of empty cells
-            total_cells = df_full.size  # rows * columns
+            # Note: Global duplicate check is expensive for large files, skipping/simplifying
+            # We could implement a bloom filter or hash set if stricter validation is needed
+
+            for chunk in pd.read_csv(temp_path, dtype=str, chunksize=10000):
+                row_count += len(chunk)
+                total_cells += chunk.size
+                empty_cells += chunk.isna().sum().sum() + (chunk == "").sum().sum()
+
+            # Calculate missing_rate
             if total_cells > 0:
-                empty_cells = df_full.isna().sum().sum() + (df_full == "").sum().sum()
                 missing_rate = round((empty_cells / total_cells) * 100, 2)
             else:
                 missing_rate = 0.0
 
-            # Calculate duplicate_rate: percentage of duplicate rows
-            if row_count > 0:
-                duplicate_count = df_full.duplicated().sum()
-                duplicate_rate = round((duplicate_count / row_count) * 100, 2)
-            else:
-                duplicate_rate = 0.0
+            duplicate_rate = 0.0  # Placeholder, skipping expensive global duplicate check
 
             stats = DatasetStats(
                 missing_rate=missing_rate,
@@ -343,7 +283,7 @@ class DatasetService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Failed to parse CSV: {exc}",
-            )
+            ) from exc
 
         mapping = self._guess_mapping(columns)
 
@@ -372,24 +312,24 @@ class DatasetService:
         final_path = DATASET_DIR / f"{dataset.id}_{filename}"
         try:
             temp_path.rename(final_path)
-            self.repo.update_one(
-                str(dataset.id), {"file_path": str(final_path.resolve())}
-            )
+            self.repo.update_one(str(dataset.id), {"file_path": str(final_path.resolve())})
         except Exception as e:
             logger.warning("Failed to move uploaded dataset file: %s", e)
             # file_path already set to temp_path, so just log warning
 
-        # Dispatch repo validation task if repo_name column is mapped
-        if mapping.get("repo_name"):
-            from app.tasks.dataset_validation import validate_repos_task
+        # Dispatch unified validation task if required columns are mapped
+        if mapping.get("repo_name") and mapping.get("build_id"):
+            from app.tasks.dataset_validation import (
+                dataset_validation_orchestrator,
+            )
 
-            task = validate_repos_task.delay(str(dataset.id))
+            task = dataset_validation_orchestrator.delay(str(dataset.id))
             self.repo.update_one(
                 str(dataset.id),
-                {"repo_validation_task_id": task.id},
+                {"validation_task_id": task.id, "validation_status": "validating"},
             )
             logger.info(
-                f"Dispatched repo validation task {task.id} for dataset {dataset.id}"
+                f"Dispatched distributed validation task {task.id} for dataset {dataset.id}"
             )
 
         return self._serialize(self.repo.find_by_id(str(dataset.id)))
@@ -398,17 +338,15 @@ class DatasetService:
         """Delete a dataset and all associated data."""
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
         dataset_oid = ObjectId(dataset_id)
 
-        # Delete associated enrichment_repositories
-        self.db.enrichment_repositories.delete_many({"dataset_id": dataset_oid})
+        # Delete associated enrichment builds
+        self.enrichment_build_repo.delete_by_dataset(dataset_oid)
 
-        # Delete associated dataset_builds
-        self.db.dataset_builds.delete_many({"dataset_id": dataset_oid})
+        # Delete associated dataset builds
+        self.build_repo.delete_by_dataset(dataset_id)
 
         # Delete the CSV file if exists
         if dataset.file_path:

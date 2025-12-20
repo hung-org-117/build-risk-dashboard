@@ -5,6 +5,7 @@ from typing import List, Optional
 import httpx
 
 from app.config import settings
+
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -130,16 +131,11 @@ class TravisCIProvider(CIProviderInterface):
                     continue
 
                 if only_with_logs:
-                    logs_available = await self._check_logs_available(
-                        client, build["id"]
-                    )
+                    logs_available = await self._check_logs_available(client, build["id"])
                     build_data.logs_available = logs_available
                     if not logs_available:
                         consecutive_unavailable += 1
-                        if (
-                            consecutive_unavailable
-                            >= settings.LOG_UNAVAILABLE_THRESHOLD
-                        ):
+                        if consecutive_unavailable >= settings.LOG_UNAVAILABLE_THRESHOLD:
                             logger.warning(
                                 f"Reached {consecutive_unavailable} consecutive unavailable logs "
                                 f"for {repo_name} - may be permission issue, stopping fetch"
@@ -156,9 +152,7 @@ class TravisCIProvider(CIProviderInterface):
 
         return builds[:limit] if limit else builds
 
-    async def _check_logs_available(
-        self, client: httpx.AsyncClient, build_id: int
-    ) -> bool:
+    async def _check_logs_available(self, client: httpx.AsyncClient, build_id: int) -> bool:
         """Check if logs are still available for a build."""
         base_url = self._get_base_url()
         jobs_url = f"{base_url}/build/{build_id}/jobs"
@@ -190,6 +184,9 @@ class TravisCIProvider(CIProviderInterface):
 
     async def fetch_build_details(self, build_id: str) -> Optional[BuildData]:
         """Fetch details for a specific build."""
+        if ":" in build_id:
+            _, build_id = build_id.rsplit(":", 1)
+
         base_url = self._get_base_url()
         url = f"{base_url}/build/{build_id}"
 
@@ -321,15 +318,11 @@ class TravisCIProvider(CIProviderInterface):
         # Parse timestamps
         created_at = None
         if build.get("started_at"):
-            created_at = datetime.fromisoformat(
-                build["started_at"].replace("Z", "+00:00")
-            )
+            created_at = datetime.fromisoformat(build["started_at"].replace("Z", "+00:00"))
 
         finished_at = None
         if build.get("finished_at"):
-            finished_at = datetime.fromisoformat(
-                build["finished_at"].replace("Z", "+00:00")
-            )
+            finished_at = datetime.fromisoformat(build["finished_at"].replace("Z", "+00:00"))
 
         # Duration
         duration = build.get("duration")
@@ -344,9 +337,7 @@ class TravisCIProvider(CIProviderInterface):
             branch=build.get("branch", {}).get("name") if build.get("branch") else None,
             commit_sha=commit.get("sha"),
             commit_message=commit.get("message"),
-            commit_author=(
-                commit.get("author", {}).get("name") if commit.get("author") else None
-            ),
+            commit_author=(commit.get("author", {}).get("name") if commit.get("author") else None),
             status=self.normalize_status(build.get("state", "unknown")),
             conclusion=self.normalize_conclusion(build.get("state")),
             created_at=created_at,
@@ -362,15 +353,11 @@ class TravisCIProvider(CIProviderInterface):
         """Parse Travis CI job to JobData."""
         started_at = None
         if job.get("started_at"):
-            started_at = datetime.fromisoformat(
-                job["started_at"].replace("Z", "+00:00")
-            )
+            started_at = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
 
         finished_at = None
         if job.get("finished_at"):
-            finished_at = datetime.fromisoformat(
-                job["finished_at"].replace("Z", "+00:00")
-            )
+            finished_at = datetime.fromisoformat(job["finished_at"].replace("Z", "+00:00"))
 
         duration = None
         if started_at and finished_at:
@@ -404,37 +391,3 @@ class TravisCIProvider(CIProviderInterface):
 
     def get_build_url(self, repo_name: str, build_id: str) -> str:
         return f"https://app.travis-ci.com/{repo_name}/builds/{build_id}"
-
-    async def get_workflow_run(self, repo_name: str, run_id: int) -> Optional[dict]:
-        """Get a specific build from Travis CI."""
-        from app.utils.datetime import parse_datetime
-
-        base_url = self._get_base_url()
-        url = f"{base_url}/build/{run_id}"
-
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    url,
-                    headers=self._get_headers(),
-                    timeout=30.0,
-                )
-                if response.status_code == 404:
-                    return None
-                response.raise_for_status()
-                data = response.json()
-                # Normalize datetime fields to naive UTC
-                data["created_at"] = parse_datetime(
-                    data.get("started_at"), default_now=False
-                )
-                data["updated_at"] = parse_datetime(
-                    data.get("finished_at"), default_now=False
-                )
-                return data
-            except Exception as e:
-                logger.warning(f"Failed to get build {run_id}: {e}")
-                return None
-
-    def is_run_completed(self, run_data: dict) -> bool:
-        """Check if Travis CI build is completed."""
-        return run_data.get("state") in ["passed", "failed", "errored", "canceled"]

@@ -5,25 +5,25 @@ These helpers are used by both model_processing.py and enrichment_processing.py
 to extract features using the Hamilton pipeline.
 """
 
-from app.entities.repo_config_base import RepoConfigBase
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.entities.raw_build_run import RawBuildRun
-from app.entities.raw_repository import RawRepository
 from app.entities.pipeline_run import (
-    PipelineRun,
-    PipelineRunStatus,
-    PipelineCategory,
     NodeExecutionResult,
     NodeExecutionStatus,
+    PipelineCategory,
+    PipelineRun,
+    PipelineRunStatus,
 )
+from app.entities.raw_build_run import RawBuildRun
+from app.entities.raw_repository import RawRepository
+from app.entities.repo_config_base import FeatureConfigBase
+from app.paths import LOGS_DIR, REPOS_DIR
 from app.repositories.pipeline_run import PipelineRunRepository
-from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
-from app.tasks.pipeline.feature_dag._inputs import build_hamilton_inputs, BuildLogsInput
+from app.tasks.pipeline.feature_dag._inputs import BuildLogsInput, build_hamilton_inputs
 from app.tasks.pipeline.feature_dag._metadata import format_features_for_storage
-from app.paths import REPOS_DIR, LOGS_DIR
+from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +62,7 @@ def _save_pipeline_run(
             raw_repo_id=raw_repo.id,
             raw_build_run_id=raw_build_run.id,
             status=(
-                PipelineRunStatus.COMPLETED
-                if status == "completed"
-                else PipelineRunStatus.FAILED
+                PipelineRunStatus.COMPLETED if status == "completed" else PipelineRunStatus.FAILED
             ),
             feature_count=len(features),
             features_extracted=features,
@@ -127,7 +125,7 @@ def _save_pipeline_run(
 def extract_features_for_build(
     db,
     raw_repo: RawRepository,
-    repo_config: RepoConfigBase,  # Can be ModelRepoConfig or DatasetRepoConfig
+    repo_config: FeatureConfigBase,  # Can be ModelRepoConfig or DatasetRepoConfig
     raw_build_run: RawBuildRun,
     selected_features: List[str] = [],
     github_client=None,
@@ -205,7 +203,7 @@ def extract_features_for_build(
             git_worktree=inputs.git_worktree,
             repo=inputs.repo,
             build_run=inputs.build_run,
-            repo_config=inputs.repo_config,
+            repo_config=inputs.feature_config,
             github_client=github_client,
             build_logs=build_logs_input,
             features_filter=set(selected_features) if selected_features else None,
@@ -236,9 +234,7 @@ def extract_features_for_build(
             )
 
         if not inputs.is_commit_available:
-            result["warnings"].append(
-                f"Commit {raw_build_run.commit_sha} not found in repo"
-            )
+            result["warnings"].append(f"Commit {raw_build_run.commit_sha} not found in repo")
 
         # Save pipeline run to database
         if save_run and pipeline:

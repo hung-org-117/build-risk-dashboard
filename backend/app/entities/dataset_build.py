@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+
 from pydantic import Field
 
 from .base import BaseEntity, PyObjectId
@@ -10,6 +11,7 @@ class DatasetBuildStatus(str, Enum):
     PENDING = "pending"
     FOUND = "found"
     NOT_FOUND = "not_found"
+    FILTERED = "filtered"  # Excluded by build filters (bot, cancelled, etc.)
     ERROR = "error"
 
 

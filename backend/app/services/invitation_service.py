@@ -14,11 +14,12 @@ from pymongo.database import Database
 from app.config import settings
 from app.dtos.invitation import (
     InvitationCreateRequest,
-    InvitationResponse,
     InvitationListResponse,
+    InvitationResponse,
 )
 from app.entities.invitation import Invitation
 from app.repositories.invitation import InvitationRepository
+from app.repositories.user import UserRepository
 from app.services.notification_service import get_notification_manager
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class InvitationService:
     def __init__(self, db: Database):
         self.db = db
         self.repo = InvitationRepository(db)
+        self.user_repo = UserRepository(db)
 
     def _to_response(self, invitation: Invitation) -> InvitationResponse:
         """Convert entity to response DTO."""
@@ -45,9 +47,7 @@ class InvitationService:
             created_at=invitation.created_at,
         )
 
-    def list_invitations(
-        self, status_filter: Optional[str] = None
-    ) -> InvitationListResponse:
+    def list_invitations(self, status_filter: Optional[str] = None) -> InvitationListResponse:
         """List all invitations with optional status filter."""
         # Mark expired invitations first
         self.repo.mark_expired()
@@ -85,9 +85,7 @@ class InvitationService:
             )
 
         # Check if user already exists in system
-        existing_user = self.db.users.find_one(
-            {"email": {"$regex": f"^{payload.email}$", "$options": "i"}}
-        )
+        existing_user = self.user_repo.find_by_email(payload.email)
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -143,9 +141,7 @@ class InvitationService:
             )
         return self._to_response(invitation)
 
-    def accept_invitation(
-        self, invitation: Invitation, user_id: ObjectId
-    ) -> Invitation:
+    def accept_invitation(self, invitation: Invitation, user_id: ObjectId) -> Invitation:
         """
         Accept an invitation (called from OAuth flow).
 

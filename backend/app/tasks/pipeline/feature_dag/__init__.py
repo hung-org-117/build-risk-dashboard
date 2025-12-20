@@ -1,8 +1,10 @@
-from app.tasks.pipeline.feature_dag import git_features
-from app.tasks.pipeline.feature_dag import build_features
-from app.tasks.pipeline.feature_dag import github_features
-from app.tasks.pipeline.feature_dag import repo_features
-from app.tasks.pipeline.feature_dag import log_features
+from app.tasks.pipeline.feature_dag import (
+    build_features,
+    git_features,
+    github_features,
+    log_features,
+    repo_features,
+)
 
 __all__ = [
     "git_features",

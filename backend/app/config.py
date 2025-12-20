@@ -1,10 +1,9 @@
-from pydantic_settings import BaseSettings
 from typing import List, Optional
-import os
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-
     # Application
     APP_NAME: str = "Build Risk Assessment"
     APP_VERSION: str = "1.0.0"
@@ -44,10 +43,6 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: Optional[str] = None
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
 
-    # Gmail API Integration (Environment Variables)
-    # Paste the content of gmail_token.json here (minified)
-    GMAIL_TOKEN_JSON: Optional[str] = None
-
     # CircleCI
     CIRCLECI_TOKEN: Optional[str] = None
     CIRCLECI_BASE_URL: str = "https://circleci.com/api/v2"
@@ -80,6 +75,21 @@ class Settings(BaseSettings):
     COMMIT_REPLAY_MAX_DEPTH: int = 100  # Max depth to traverse for commit replay
     LOG_UNAVAILABLE_THRESHOLD: int = 10  # Stop after N consecutive unavailable logs
 
+    # CSV Dataset Validation
+    CSV_MAX_FILE_SIZE_MB: int = 50  # Maximum CSV file size in MB
+    CSV_MAX_ROWS: int = 100000  # Maximum rows allowed in CSV
+    CSV_BATCH_SIZE: int = 500  # Rows per batch for validation processing
+    CSV_BATCH_PROGRESS_INTERVAL: int = 100  # Rows between WebSocket progress updates
+    CSV_DUPLICATE_WARN_THRESHOLD: float = 0.1  # Warn if >10% duplicates
+    CSV_MISSING_WARN_THRESHOLD: float = 0.05  # Warn if >5% missing values
+    CSV_MIN_ROWS: int = 1  # Minimum rows required
+
+    # Distributed Validation Processing
+    CSV_CHUNK_SIZE: int = 10000  # Rows per CSV chunk for chunked reading
+    REPO_CHUNK_SIZE: int = 20  # Repos per worker task
+    BUILD_CHUNK_SIZE: int = 500  # Builds per worker task
+    VALIDATION_RATE_LIMIT: str = "10/s"  # Celery rate limit for API calls
+
     # Hamilton Pipeline Caching
     HAMILTON_CACHE_ENABLED: bool = True  # Enable/disable DAG result caching
     HAMILTON_CACHE_DIR: str = "../repo-data/hamilton_cache"  # Directory for cache files
@@ -107,23 +117,17 @@ class Settings(BaseSettings):
     TRIVY_SKIP_DIRS: str = "node_modules,vendor,.git"
     TRIVY_ASYNC_THRESHOLD: int = 1000
 
-    # Notifications - Gmail
-    # Uses Gmail API if json env vars are present, otherwise falls back to SMTP
-    GMAIL_NOTIFICATIONS_ENABLED: bool = False
-    GMAIL_USER: Optional[str] = None
-    GMAIL_APP_PASSWORD: Optional[str] = None  # 16-char app password from Google
-    GMAIL_RECIPIENTS: List[str] = []  # Comma-separated in .env, e.g. "a@x.com,b@x.com"
+    # Gmail API (OAuth2) Notifications
+    GMAIL_TOKEN_JSON: Optional[str] = None  # Paste gmail token JSON content
 
     def model_post_init(self, __context):
         """Post-initialization to check for Gmail API capability."""
         super().model_post_init(__context)
 
         if self.GMAIL_TOKEN_JSON:
-            print("✓ Loaded GMAIL_TOKEN_JSON from environment.")
-            self.GMAIL_NOTIFICATIONS_ENABLED = True
+            print("✓ Gmail API configured (GMAIL_TOKEN_JSON found).")
         else:
-            print("! GMAIL_TOKEN_JSON not found in environment. Gmail API disabled.")
-            print("  Check your .env file syntax or ensure the variable is set.")
+            print("! Gmail API not configured (GMAIL_TOKEN_JSON missing).")
 
     class Config:
         env_file = ".env"

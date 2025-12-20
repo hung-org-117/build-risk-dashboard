@@ -18,8 +18,10 @@ from typing import Any, Dict, List, Optional
 from celery.canvas import Signature
 
 from app.celery_app import celery_app
-from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
+from app.repositories.dataset_repository import DatasetRepository
+from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
+from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
 from app.tasks.pipeline.feature_dag._metadata import get_required_resources_for_features
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
@@ -31,14 +33,15 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=PipelineTask,
-    name="app.tasks.dataset_ingestion.ingest_dataset_builds",
+    name="app.tasks.dataset_ingestion.ingest_dataset_builds_for_repo",
     queue="ingestion",
     soft_time_limit=1800,  # 30 min
     time_limit=1860,
 )
-def ingest_dataset_builds(
+def ingest_dataset_builds_for_repo(
     self: PipelineTask,
-    repo_config_id: str,
+    version_id: str,
+    raw_repo_id: str,
     build_csv_ids: List[str],
     features: Optional[List[str]] = None,
     final_task: Optional[Signature] = None,
@@ -52,7 +55,8 @@ def ingest_dataset_builds(
     - Level 1 tasks run after level 0 (e.g., worktrees, logs)
 
     Args:
-        repo_config_id: DatasetRepoConfig ID
+        version_id: DatasetVersion ID
+        raw_repo_id: RawRepository ID
         build_csv_ids: List of build IDs from CSV
         features: Optional list of features to extract
         final_task: Optional task to append after ingestion (like dispatch_enrichment)
@@ -60,15 +64,31 @@ def ingest_dataset_builds(
     If final_task is provided, it runs AFTER ingestion (chained).
     If no final_task, waits for ingestion to complete synchronously.
     """
-    dataset_repo_config_repo = DatasetRepoConfigRepository(self.db)
+    version_repo = DatasetVersionRepository(self.db)
+    dataset_repo = DatasetRepository(self.db)
+    raw_repo_repo = RawRepositoryRepository(self.db)
     build_run_repo = RawBuildRunRepository(self.db)
 
-    repo_config = dataset_repo_config_repo.find_by_id(repo_config_id)
-    if not repo_config:
-        raise ValueError(f"Dataset repo config {repo_config_id} not found")
+    # Get version and dataset for ci_provider lookup
+    dataset_version = version_repo.find_by_id(version_id)
+    if not dataset_version:
+        raise ValueError(f"Dataset version {version_id} not found")
 
-    full_name = repo_config.full_name
-    ci_provider = repo_config.ci_provider
+    dataset = dataset_repo.find_by_id(dataset_version.dataset_id)
+    if not dataset:
+        raise ValueError(f"Dataset {dataset_version.dataset_id} not found")
+
+    # Get raw repository
+    raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+    if not raw_repo:
+        raise ValueError(f"RawRepository {raw_repo_id} not found")
+
+    full_name = raw_repo.full_name
+
+    # Get CI provider from dataset.repo_ci_providers (set during validation)
+    ci_provider = "github_actions"  # default
+    if dataset.repo_ci_providers:
+        ci_provider = dataset.repo_ci_providers.get(raw_repo_id, "github_actions")
 
     # Determine required resources using feature_dag metadata
     feature_set = set(features) if features else set()
@@ -95,10 +115,7 @@ def ingest_dataset_builds(
     # Get commit SHAs for worktree creation
     commit_shas = []
     for build_csv_id in build_csv_ids:
-        target_repo_id = str(repo_config.raw_repo_id)
-        raw_build_run = build_run_repo.find_by_business_key(
-            target_repo_id, build_csv_id, ci_provider
-        )
+        raw_build_run = build_run_repo.find_by_business_key(raw_repo_id, build_csv_id, ci_provider)
         if raw_build_run and raw_build_run.commit_sha:
             commit_shas.append(raw_build_run.effective_sha or raw_build_run.commit_sha)
     commit_shas = list(set(commit_shas))
@@ -107,7 +124,7 @@ def ingest_dataset_builds(
     # Build workflow using shared helper (with optional final_task)
     workflow = build_ingestion_workflow(
         tasks_by_level=tasks_by_level,
-        raw_repo_id=str(repo_config.raw_repo_id),
+        raw_repo_id=raw_repo_id,
         full_name=full_name,
         build_ids=build_csv_ids,
         commit_shas=commit_shas,
@@ -129,7 +146,8 @@ def ingest_dataset_builds(
         workflow.apply_async()
         return {
             "status": "dispatched",
-            "repo_config_id": repo_config_id,
+            "version_id": version_id,
+            "raw_repo_id": raw_repo_id,
             "build_csv_ids": len(build_csv_ids),
             "resources": list(required_resources),
             "has_final_task": True,
@@ -139,7 +157,8 @@ def ingest_dataset_builds(
         workflow.apply_async().get(timeout=1800, disable_sync_subtasks=False)
         return {
             "status": "completed",
-            "repo_config_id": repo_config_id,
+            "version_id": version_id,
+            "raw_repo_id": raw_repo_id,
             "build_csv_ids": len(build_csv_ids),
             "resources": list(required_resources),
         }

@@ -1,18 +1,18 @@
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.database.mongo import get_db
-from app.middleware.auth import get_current_user
-from app.entities.dataset_version import DatasetVersion, VersionStatus
-from app.services.dataset_version_service import DatasetVersionService
 from app.dtos.dataset_version import (
     CreateVersionRequest,
-    VersionResponse,
     VersionListResponse,
+    VersionResponse,
 )
+from app.entities.dataset_version import DatasetVersion, VersionStatus
+from app.middleware.auth import get_current_user
+from app.services.dataset_version_service import DatasetVersionService
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,7 @@ def _to_response(version: DatasetVersion) -> VersionResponse:
         description=version.description,
         selected_features=version.selected_features,
         status=(
-            version.status.value
-            if isinstance(version.status, VersionStatus)
-            else version.status
+            version.status.value if isinstance(version.status, VersionStatus) else version.status
         ),
         total_rows=version.total_rows,
         processed_rows=version.processed_rows,
@@ -54,9 +52,7 @@ async def list_versions(
 ):
     service = DatasetVersionService(db)
     role = current_user.get("role", "user")
-    versions = service.list_versions(
-        dataset_id, str(current_user["_id"]), role=role, limit=limit
-    )
+    versions = service.list_versions(dataset_id, str(current_user["_id"]), role=role, limit=limit)
     return VersionListResponse(
         versions=[_to_response(v) for v in versions],
         total=len(versions),
@@ -77,6 +73,7 @@ async def create_version(
         user_id=str(current_user["_id"]),
         role=role,
         selected_features=request.selected_features,
+        feature_configs=request.feature_configs,
         name=request.name,
         description=request.description,
     )
@@ -92,9 +89,7 @@ async def get_version(
 ):
     service = DatasetVersionService(db)
     role = current_user.get("role", "user")
-    version = service.get_version(
-        dataset_id, version_id, str(current_user["_id"]), role=role
-    )
+    version = service.get_version(dataset_id, version_id, str(current_user["_id"]), role=role)
     return _to_response(version)
 
 

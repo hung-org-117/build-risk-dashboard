@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +8,10 @@ class CreateVersionRequest(BaseModel):
 
     selected_features: List[str] = Field(
         ..., min_length=1, description="List of feature names to extract"
+    )
+    feature_configs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Feature configuration values (global and per-repo)",
     )
     name: Optional[str] = Field(None, description="Optional version name")
     description: Optional[str] = Field(None, description="Optional description")

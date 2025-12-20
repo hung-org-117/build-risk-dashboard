@@ -101,7 +101,7 @@ export interface DatasetRecord {
   preview: DatasetPreviewRow[];
   created_at?: string;
   updated_at?: string | null;
-  // Build validation fields (Step 3)
+  // Validation fields (unified validation)
   validation_status?: "pending" | "validating" | "completed" | "failed" | "cancelled";
   validation_task_id?: string;
   validation_started_at?: string;
@@ -109,11 +109,7 @@ export interface DatasetRecord {
   validation_progress?: number;
   validation_error?: string;
   validation_stats?: ValidationStats;
-  // Repo validation fields (during upload, before Step 2)
-  repo_validation_status?: "pending" | "validating" | "completed" | "failed";
-  repo_validation_task_id?: string;
-  repo_validation_error?: string;
-  // Setup progress tracking (1=uploaded, 2=configured, 3=validated)
+  // Setup progress tracking (1=uploaded, 2=validated)
   setup_step?: number;
   // Aggregated enrichment info (computed from enrichment_jobs)
   enrichment_jobs_count?: number;
@@ -191,6 +187,7 @@ export interface DatasetUpdatePayload {
   description?: string | null;
   mapped_fields?: DatasetMapping;
   stats?: DatasetStats;
+  ci_provider?: string | null;
   source_languages?: string[];
   test_frameworks?: string[];
   setup_step?: number;
@@ -717,6 +714,16 @@ export type EnrichmentWebSocketEvent =
   | { type: "connected"; job_id: string }
   | { type: "heartbeat" };
 
+export interface RepoValidationStats {
+  full_name: string;
+  ci_provider?: string;
+  builds_total: number;
+  builds_found: number;
+  builds_not_found: number;
+  is_valid: boolean;
+  error?: string;
+}
+
 export interface ValidationStats {
   repos_total: number;
   repos_valid: number;
@@ -725,6 +732,7 @@ export interface ValidationStats {
   builds_total: number;
   builds_found: number;
   builds_not_found: number;
+  repo_stats?: RepoValidationStats[];
 }
 
 export interface IngestionStats {

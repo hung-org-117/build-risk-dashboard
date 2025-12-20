@@ -39,6 +39,7 @@ import type {
 import { createPortal } from "react-dom";
 import { EnrichmentPanel } from "./_components/EnrichmentPanel";
 import { UploadDatasetModal } from "./_components/UploadDatasetModal/index";
+import { useWebSocket } from "@/contexts/websocket-context";
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
   const [mounted, setMounted] = useState(false);
@@ -120,19 +121,40 @@ export default function DatasetsPage() {
     loadDatasets(1, true);
   }, [loadDatasets]);
 
-  // Auto-refresh if any dataset is validating (repo or build)
+  // WebSocket subscription for real-time dataset updates
+  const { subscribe } = useWebSocket();
+
   useEffect(() => {
-    const hasValidating = datasets.some(
-      d => d.repo_validation_status === "validating" || d.validation_status === "validating"
-    );
-    if (!hasValidating) return;
+    const unsubscribe = subscribe("DATASET_UPDATE", (data: {
+      dataset_id: string;
+      validation_status: string;
+      validation_progress?: number;
+      validation_stats?: any;
+      validation_error?: string;
+    }) => {
+      setDatasets((prev) =>
+        prev.map((d) => {
+          if (d.id === data.dataset_id) {
+            return {
+              ...d,
+              validation_status: data.validation_status as DatasetRecord["validation_status"],
+              validation_progress: data.validation_progress ?? d.validation_progress,
+              validation_stats: data.validation_stats ?? d.validation_stats,
+              validation_error: data.validation_error ?? d.validation_error,
+            };
+          }
+          return d;
+        })
+      );
 
-    const interval = setInterval(() => {
-      loadDatasets(page, false);
-    }, 3000); // Refresh every 3 seconds
+      // Reload to get fresh data when validation completes or fails
+      if (data.validation_status === "completed" || data.validation_status === "failed") {
+        loadDatasets(page, false);
+      }
+    });
 
-    return () => clearInterval(interval);
-  }, [datasets, page, loadDatasets]);
+    return () => unsubscribe();
+  }, [subscribe, loadDatasets, page]);
 
   const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
   const pageStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -186,20 +208,11 @@ export default function DatasetsPage() {
 
   const getStatusBadge = (dataset: DatasetRecord) => {
     const validationStatus = dataset.validation_status;
-    const repoValidationStatus = dataset.repo_validation_status;
     const setupStep = dataset.setup_step || 1;
 
-    // Check repo validation status first (during upload phase)
-    if (repoValidationStatus === "validating") {
-      return <Badge variant="outline" className="border-purple-500 text-purple-600">Validating Repos...</Badge>;
-    }
-    if (repoValidationStatus === "failed") {
-      return <Badge variant="destructive">Repo Validation Failed</Badge>;
-    }
-
-    // Check build validation status (takes priority after repos validated)
+    // Check validation status
     if (validationStatus === "validating") {
-      return <Badge variant="outline" className="border-blue-500 text-blue-600">Validating Builds...</Badge>;
+      return <Badge variant="outline" className="border-blue-500 text-blue-600">Validating...</Badge>;
     }
     if (validationStatus === "cancelled") {
       return <Badge variant="outline" className="border-amber-500 text-amber-600">Cancelled</Badge>;
@@ -212,13 +225,9 @@ export default function DatasetsPage() {
     }
 
     // Use setup_step for pending/not-started states
-    // Step 3: Ready for validation (Step 2 completed, repos configured)
-    if (setupStep >= 3) {
-      return <Badge variant="outline" className="border-blue-400 text-blue-500">Ready for Validation</Badge>;
-    }
-    // Step 2: Configuring repos (Step 1 completed, need to configure repos)
-    if (setupStep === 2) {
-      return <Badge variant="outline" className="border-amber-400 text-amber-500">Configuring Repos</Badge>;
+    // Step 2: Validated (ready for enrichment)
+    if (setupStep >= 2) {
+      return <Badge variant="outline" className="border-green-400 text-green-500">Ready</Badge>;
     }
 
     // Step 1: Pending config (just uploaded, need to map columns)

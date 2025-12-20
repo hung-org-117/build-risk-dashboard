@@ -1,11 +1,11 @@
 from .base import LanguageStrategy
-from .python import PythonStrategy
-from .java import JavaStrategy
-from .ruby import RubyStrategy
-from .javascript import JavascriptStrategy
-from .go import GoStrategy
 from .cpp import CppStrategy
 from .generic import GenericStrategy
+from .go import GoStrategy
+from .java import JavaStrategy
+from .javascript import JavascriptStrategy
+from .python import PythonStrategy
+from .ruby import RubyStrategy
 
 
 class LanguageRegistry:

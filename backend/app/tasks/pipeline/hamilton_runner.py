@@ -18,7 +18,8 @@ from typing import Any, Dict, Optional, Set
 from hamilton import driver
 
 from app.config import settings
-
+from app.tasks.pipeline.constants import DEFAULT_FEATURES
+from app.tasks.pipeline.execution_tracker import ExecutionResult, ExecutionTracker
 from app.tasks.pipeline.feature_dag import (
     build_features,
     git_features,
@@ -27,20 +28,18 @@ from app.tasks.pipeline.feature_dag import (
     repo_features,
 )
 from app.tasks.pipeline.feature_dag._inputs import (
+    BuildLogsInput,
+    BuildRunInput,
+    FeatureConfigInput,
     GitHistoryInput,
     GitHubClientInput,
     GitWorktreeInput,
-    RepoConfigInput,
     RepoInput,
-    BuildRunInput,
-    BuildLogsInput,
 )
-from app.tasks.pipeline.constants import DEFAULT_FEATURES
 from app.tasks.pipeline.feature_dag._metadata import (
-    get_required_resources_for_features,
     FeatureResource,
+    get_required_resources_for_features,
 )
-from app.tasks.pipeline.execution_tracker import ExecutionTracker, ExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +82,7 @@ class HamiltonPipeline:
         self.db = db
         self._enable_tracking = enable_tracking
         self._enable_cache = (
-            enable_cache
-            if enable_cache is not None
-            else settings.HAMILTON_CACHE_ENABLED
+            enable_cache if enable_cache is not None else settings.HAMILTON_CACHE_ENABLED
         )
         self._tracker: Optional[ExecutionTracker] = None
         self._cache_path: Optional[Path] = None
@@ -137,9 +134,7 @@ class HamiltonPipeline:
                 # File-based persistent cache
                 self._cache_path = self._get_cache_path()
                 if self._cache_path:
-                    logger.info(
-                        f"Using file-based Hamilton cache at {self._cache_path}"
-                    )
+                    logger.info(f"Using file-based Hamilton cache at {self._cache_path}")
                     builder = builder.with_cache(path=str(self._cache_path))
 
         # Add execution tracker if enabled
@@ -227,7 +222,7 @@ class HamiltonPipeline:
         git_worktree: GitWorktreeInput,
         repo: RepoInput,
         build_run: BuildRunInput,
-        repo_config: Optional[RepoConfigInput] = None,
+        repo_config: Optional[FeatureConfigInput] = None,
         github_client: Optional[GitHubClientInput] = None,
         build_logs: Optional[BuildLogsInput] = None,
         features_filter: Optional[Set[str]] = None,
@@ -262,9 +257,7 @@ class HamiltonPipeline:
 
         # Filter features based on available resources
         if features_filter:
-            requested_features = (
-                features_filter | DEFAULT_FEATURES
-            ) & self._all_features
+            requested_features = (features_filter | DEFAULT_FEATURES) & self._all_features
         else:
             requested_features = self._all_features.copy()
 
@@ -301,7 +294,7 @@ class HamiltonPipeline:
         }
 
         if repo_config:
-            inputs["repo_config"] = repo_config
+            inputs["feature_config"] = repo_config
 
         if github_client:
             inputs["github_client"] = github_client

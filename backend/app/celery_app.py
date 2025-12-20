@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
-
-from app.config import settings
 from kombu import Exchange, Queue
 
+from app.config import settings
 
 celery_app = Celery(
     "buildguard",

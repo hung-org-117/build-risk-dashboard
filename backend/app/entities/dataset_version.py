@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from pydantic import Field
 
-from app.entities.base import BaseEntity
+from app.entities.repo_config_base import FeatureConfigBase
 
 
 class VersionStatus(str, Enum):
@@ -24,7 +24,20 @@ class VersionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class DatasetVersion(BaseEntity):
+class DatasetVersion(FeatureConfigBase):
+    """
+    Dataset version entity - inherits feature_configs from FeatureConfigBase.
+
+    feature_configs structure for datasets:
+    {
+        "lookback_days": 60,  # global config
+        "repos": {  # per-repo configs
+            "owner/repo1": {"source_languages": ["python"], "test_frameworks": ["pytest"]},
+            "owner/repo2": {"source_languages": ["javascript"], "test_frameworks": ["jest"]}
+        }
+    }
+    """
+
     class Config:
         collection_name = "dataset_versions"
         use_enum_values = True
@@ -38,6 +51,8 @@ class DatasetVersion(BaseEntity):
     selected_features: List[str] = Field(
         default_factory=list, description="List of selected feature names"
     )
+
+    # feature_configs is inherited from FeatureConfigBase
 
     status: VersionStatus = VersionStatus.PENDING
 
@@ -60,9 +75,7 @@ class DatasetVersion(BaseEntity):
         default="pending",
         description="Status of ingestion phase: pending, ingesting, completed, failed",
     )
-    ingestion_progress: int = Field(
-        default=0, description="Ingestion progress percentage (0-100)"
-    )
+    ingestion_progress: int = Field(default=0, description="Ingestion progress percentage (0-100)")
     repos_total: int = Field(default=0, description="Total repos to ingest")
     repos_ingested: int = Field(default=0, description="Repos successfully ingested")
     repos_failed: int = Field(default=0, description="Repos that failed ingestion")
@@ -139,3 +152,26 @@ class DatasetVersion(BaseEntity):
 
     def generate_default_name(self) -> str:
         return f"v{self.version_number}_{self.name}"
+
+    def get_repo_config(self, full_name: str) -> dict:
+        """
+        Get feature config for a specific repository.
+
+        Merges global configs with repo-specific configs.
+        Repo-specific configs override global configs.
+
+        Args:
+            full_name: Repository full name (e.g., "owner/repo")
+
+        Returns:
+            Dict with merged configs for this repo
+        """
+        # Start with global configs (exclude 'repos' key)
+        result = {k: v for k, v in self.feature_configs.items() if k != "repos"}
+
+        # Merge repo-specific configs
+        repos = self.feature_configs.get("repos", {})
+        if full_name in repos:
+            result.update(repos[full_name])
+
+        return result

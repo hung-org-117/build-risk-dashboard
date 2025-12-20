@@ -3,15 +3,16 @@ GitHub Actions CI Provider - Uses GitHubClient for rate limit tracking.
 """
 
 from __future__ import annotations
-from app.ci_providers.models import BuildConclusion
+
 import logging
 from datetime import datetime
 from typing import List, Optional
 
 from pymongo.database import Database
 
+from app.ci_providers.models import BuildConclusion
 from app.config import settings
-from app.utils.datetime import parse_datetime
+
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -100,8 +101,8 @@ class GitHubActionsProvider(CIProviderInterface):
         """
         from app.services.github.github_client import (
             GitHubClient,
-            get_public_github_client,
             get_app_github_client,
+            get_public_github_client,
         )
         from app.services.repository_service import is_org_repo
 
@@ -164,10 +165,7 @@ class GitHubActionsProvider(CIProviderInterface):
                     build_data.logs_available = logs_available
                     if not logs_available:
                         consecutive_unavailable += 1
-                        if (
-                            consecutive_unavailable
-                            >= settings.LOG_UNAVAILABLE_THRESHOLD
-                        ):
+                        if consecutive_unavailable >= settings.LOG_UNAVAILABLE_THRESHOLD:
                             logger.warning(
                                 f"Reached {consecutive_unavailable} consecutive unavailable logs "
                                 f"for {repo_name} - may be permission issue, stopping fetch"
@@ -261,9 +259,7 @@ class GitHubActionsProvider(CIProviderInterface):
                             )
                         )
                     except GithubLogsUnavailableError as e:
-                        logger.debug(
-                            f"Logs unavailable for job {job.job_id}: {e.reason}"
-                        )
+                        logger.debug(f"Logs unavailable for job {job.job_id}: {e.reason}")
                     except Exception as e:
                         logger.warning(f"Failed to fetch log for job {job.job_id}: {e}")
 
@@ -305,21 +301,15 @@ class GitHubActionsProvider(CIProviderInterface):
 
         created_at = None
         if run.get("created_at"):
-            created_at = datetime.fromisoformat(
-                run["created_at"].replace("Z", "+00:00")
-            )
+            created_at = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
 
         started_at = None
         if run.get("run_started_at"):
-            started_at = datetime.fromisoformat(
-                run["run_started_at"].replace("Z", "+00:00")
-            )
+            started_at = datetime.fromisoformat(run["run_started_at"].replace("Z", "+00:00"))
 
         completed_at = None
         if run.get("updated_at") and raw_status == "completed":
-            completed_at = datetime.fromisoformat(
-                run["updated_at"].replace("Z", "+00:00")
-            )
+            completed_at = datetime.fromisoformat(run["updated_at"].replace("Z", "+00:00"))
 
         duration = None
         if started_at and completed_at:
@@ -332,9 +322,7 @@ class GitHubActionsProvider(CIProviderInterface):
             branch=run.get("head_branch"),
             commit_sha=run.get("head_sha"),
             commit_message=(
-                run.get("head_commit", {}).get("message")
-                if run.get("head_commit")
-                else None
+                run.get("head_commit", {}).get("message") if run.get("head_commit") else None
             ),
             commit_author=(
                 run.get("head_commit", {}).get("author", {}).get("name")
@@ -357,15 +345,11 @@ class GitHubActionsProvider(CIProviderInterface):
         """Parse GitHub Actions job to JobData."""
         started_at = None
         if job.get("started_at"):
-            started_at = datetime.fromisoformat(
-                job["started_at"].replace("Z", "+00:00")
-            )
+            started_at = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
 
         completed_at = None
         if job.get("completed_at"):
-            completed_at = datetime.fromisoformat(
-                job["completed_at"].replace("Z", "+00:00")
-            )
+            completed_at = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
 
         duration = None
         if started_at and completed_at:
@@ -374,9 +358,7 @@ class GitHubActionsProvider(CIProviderInterface):
         return JobData(
             job_id=str(job["id"]),
             job_name=job.get("name", "unknown"),
-            status=self.normalize_status(
-                job.get("conclusion") or job.get("status", "unknown")
-            ),
+            status=self.normalize_status(job.get("conclusion") or job.get("status", "unknown")),
             started_at=started_at,
             completed_at=completed_at,
             duration_seconds=duration,
@@ -387,36 +369,3 @@ class GitHubActionsProvider(CIProviderInterface):
 
     def get_build_url(self, repo_name: str, build_id: str) -> str:
         return f"https://github.com/{repo_name}/actions/runs/{build_id}"
-
-    async def get_workflow_run(
-        self, repo_name: str, run_id: int, installation_id: Optional[str] = None
-    ) -> Optional[dict]:
-        """
-        Get a specific workflow run from GitHub API.
-        Datetime fields are normalized to naive UTC.
-        """
-        with self._get_github_client(repo_name, installation_id) as client:
-            try:
-                run = client.get_workflow_run(repo_name, run_id)
-                if run:
-                    # Normalize datetime fields to naive UTC
-                    run["created_at"] = parse_datetime(
-                        run.get("created_at"), default_now=False
-                    )
-                    run["updated_at"] = parse_datetime(
-                        run.get("updated_at"), default_now=False
-                    )
-                    run["run_started_at"] = parse_datetime(
-                        run.get("run_started_at"), default_now=False
-                    )
-                    return run
-                return None
-            except Exception as e:
-                logger.warning(
-                    f"Failed to get workflow run {run_id} for {repo_name}: {e}"
-                )
-                return None
-
-    def is_run_completed(self, run_data: dict) -> bool:
-        """Check if GitHub workflow run is completed."""
-        return run_data.get("status") == "completed"

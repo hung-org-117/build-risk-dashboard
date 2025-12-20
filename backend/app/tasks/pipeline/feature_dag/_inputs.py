@@ -6,14 +6,14 @@ They are passed directly to driver.execute(inputs={...}).
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.entities.raw_repository import RawRepository
 from app.entities.raw_build_run import RawBuildRun
-from app.entities.repo_config_base import RepoConfigBase
+from app.entities.raw_repository import RawRepository
 
 
 @dataclass
@@ -79,49 +79,69 @@ class RepoInput:
 
 
 @dataclass
-class RepoConfigInput:
-    """User-configurable repository settings from RepoConfigBase."""
+class FeatureConfigInput:
+    """
+    Dynamic feature configuration from user selections.
+
+    Supports multi-scope configs:
+    - Global configs: Applied to all builds (e.g., lookback_days)
+    - Repo configs: Applied per-repository (e.g., source_languages)
+
+    Structure:
+        {
+            "lookback_days": 60,  # global config
+            "repos": {  # repo-specific configs
+                "owner/repo1": {
+                    "source_languages": ["python"],
+                    "test_frameworks": ["pytest"]
+                }
+            }
+        }
+    """
 
     id: str
-    ci_provider: str
-    source_languages: List[str]
-    test_frameworks: List[str]
+    feature_configs: Dict[str, Any]
+    current_repo: Optional[str] = None  # Repository context for scope lookup
+
+    def get(self, key: str, default: Any = None, scope: str = "auto") -> Any:
+        """
+        Get config value with scope awareness.
+
+        Args:
+            key: Config field name
+            default: Default value if not found
+            scope: "global", "repo", or "auto" (checks repo first, then global)
+
+        Returns:
+            Config value from appropriate scope
+        """
+        # For repo scope or auto, try repo-specific config first
+        if scope in ("repo", "auto"):
+            if self.current_repo and "repos" in self.feature_configs:
+                repo_configs = self.feature_configs["repos"].get(self.current_repo, {})
+                if key in repo_configs:
+                    return repo_configs[key]
+
+        # For global scope or auto (fallback), check global level
+        if scope in ("global", "auto"):
+            if key in self.feature_configs and key != "repos":
+                return self.feature_configs[key]
+
+        return default
 
     @classmethod
-    def from_entity(cls, config: RepoConfigBase) -> RepoConfigInput:
-        """Create from ModelRepoConfig or DatasetRepoConfig entity."""
-        import logging
+    def from_entity(cls, config: Any, current_repo: Optional[str] = None) -> FeatureConfigInput:
+        """
+        Create from ModelRepoConfig or DatasetVersion entity.
 
-        logger = logging.getLogger(__name__)
-
-        # Debug logging
-        logger.info(
-            f"[DEBUG] config.ci_provider = {config.ci_provider!r}, type = {type(config.ci_provider)}"
-        )
-        logger.info(f"[DEBUG] config.test_frameworks = {config.test_frameworks!r}")
-        if config.test_frameworks:
-            for i, tf in enumerate(config.test_frameworks):
-                logger.info(f"[DEBUG] test_frameworks[{i}] = {tf!r}, type = {type(tf)}")
-
-        # Handle ci_provider - can be enum or string (due to use_enum_values=True)
-        ci_provider_value = config.ci_provider
-        if hasattr(ci_provider_value, "value"):
-            ci_provider_value = ci_provider_value.value
-        ci_provider_str = ci_provider_value if ci_provider_value else "github_actions"
-
-        # Handle test_frameworks - can be list of enums or strings
-        test_frameworks_list = []
-        for tf in config.test_frameworks or []:
-            if hasattr(tf, "value"):
-                test_frameworks_list.append(tf.value)
-            else:
-                test_frameworks_list.append(str(tf))
-
+        Args:
+            config: Entity with feature_configs field
+            current_repo: Optional repo full_name for repo-scoped lookups
+        """
         return cls(
             id=str(config.id),
-            ci_provider=ci_provider_str,
-            source_languages=config.source_languages or [],
-            test_frameworks=test_frameworks_list,
+            feature_configs=getattr(config, "feature_configs", {}) or {},
+            current_repo=current_repo,
         )
 
 
@@ -203,14 +223,14 @@ class HamiltonInputs:
     git_worktree: GitWorktreeInput
     repo: RepoInput
     build_run: BuildRunInput
-    repo_config: RepoConfigInput
+    feature_config: FeatureConfigInput
     is_commit_available: bool
     effective_sha: Optional[str] = None
 
 
 def build_hamilton_inputs(
     raw_repo: RawRepository,
-    repo_config: RepoConfigBase,
+    repo_config: Any,  # ModelRepoConfig or DatasetRepoConfig
     build_run: RawBuildRun,
     repo_path: Path,
     worktrees_base: Optional[Path] = None,
@@ -230,8 +250,8 @@ def build_hamilton_inputs(
     Returns:
         HamiltonInputs containing all input objects
     """
-    import subprocess
     import logging
+    import subprocess
 
     logger = logging.getLogger(__name__)
 
@@ -278,7 +298,8 @@ def build_hamilton_inputs(
 
     # Create input objects from entities
     repo_input = RepoInput.from_entity(raw_repo)
-    config_input = RepoConfigInput.from_entity(repo_config)
+    # Pass current_repo for repo-scoped config lookup
+    config_input = FeatureConfigInput.from_entity(repo_config, current_repo=raw_repo.full_name)
     build_run_input = BuildRunInput.from_entity(build_run)
 
     return HamiltonInputs(
@@ -286,7 +307,7 @@ def build_hamilton_inputs(
         git_worktree=git_worktree,
         repo=repo_input,
         build_run=build_run_input,
-        repo_config=config_input,
+        feature_config=config_input,
         is_commit_available=is_commit_available,
         effective_sha=effective_sha if is_commit_available else None,
     )

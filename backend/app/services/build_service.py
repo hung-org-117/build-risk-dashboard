@@ -13,6 +13,10 @@ from bson import ObjectId
 from pymongo.database import Database
 
 from app.dtos.build import BuildDetail, BuildListResponse, BuildSummary
+from app.repositories.model_repo_config import ModelRepoConfigRepository
+from app.repositories.model_training_build import ModelTrainingBuildRepository
+from app.repositories.raw_build_run import RawBuildRunRepository
+from app.repositories.raw_repository import RawRepositoryRepository
 
 
 class BuildService:
@@ -20,6 +24,10 @@ class BuildService:
 
     def __init__(self, db: Database):
         self.db = db
+        self.model_repo_config_repo = ModelRepoConfigRepository(db)
+        self.model_training_build_repo = ModelTrainingBuildRepository(db)
+        self.raw_build_run_repo = RawBuildRunRepository(db)
+        self.raw_repo_repo = RawRepositoryRepository(db)
 
     def get_builds_by_repo(
         self,
@@ -48,7 +56,7 @@ class BuildService:
         except Exception:
             return BuildListResponse(items=[], total=0, page=1, size=limit)
 
-        config = self.db.model_repo_configs.find_one({"_id": config_oid})
+        config = self.model_repo_config_repo.find_by_id(repo_id)
         if not config:
             return BuildListResponse(items=[], total=0, page=1, size=limit)
 
@@ -79,9 +87,7 @@ class BuildService:
         training_builds = list(training_cursor)
 
         if not training_builds:
-            return BuildListResponse(
-                items=[], total=total, page=skip // limit + 1, size=limit
-            )
+            return BuildListResponse(items=[], total=total, page=skip // limit + 1, size=limit)
 
         # Get corresponding RawBuildRuns for additional data
         raw_ids = [t["raw_build_run_id"] for t in training_builds]
@@ -96,14 +102,12 @@ class BuildService:
             items.append(
                 BuildSummary(
                     _id=str(training["raw_build_run_id"]),
-                    build_number=training.get("build_number")
-                    or raw.get("build_number"),
+                    build_number=training.get("build_number") or raw.get("build_number"),
                     build_id=raw.get("build_id", ""),
                     conclusion=raw.get("conclusion", "unknown"),
                     commit_sha=training.get("head_sha") or raw.get("commit_sha", ""),
                     branch=raw.get("branch", ""),
-                    created_at=training.get("build_created_at")
-                    or raw.get("created_at"),
+                    created_at=training.get("build_created_at") or raw.get("created_at"),
                     completed_at=raw.get("completed_at"),
                     duration_seconds=raw.get("duration_seconds"),
                     web_url=raw.get("web_url"),
@@ -138,47 +142,44 @@ class BuildService:
         except Exception:
             return None
 
-        raw = self.db.raw_build_runs.find_one({"_id": oid})
+        raw = self.raw_build_run_repo.find_by_id(oid)
         if not raw:
             return None
 
         # Get training data if exists
-        training = self.db.model_training_builds.find_one({"raw_build_run_id": oid})
+        training = self.model_training_build_repo.find_by_workflow_run(raw.raw_repo_id, oid)
+        training_dict = training.model_dump() if training else None
 
         return BuildDetail(
-            _id=str(raw["_id"]),
-            build_number=raw.get("build_number"),
-            build_id=raw.get("build_id", ""),
-            conclusion=raw.get("conclusion", "unknown"),
-            commit_sha=raw.get("commit_sha", ""),
-            branch=raw.get("branch", ""),
-            commit_message=raw.get("commit_message"),
-            commit_author=raw.get("commit_author"),
-            created_at=raw.get("created_at"),
-            started_at=raw.get("started_at"),
-            completed_at=raw.get("completed_at"),
-            duration_seconds=raw.get("duration_seconds"),
-            web_url=raw.get("web_url"),
-            provider=raw.get("provider", "github_actions"),
-            logs_available=raw.get("logs_available"),
-            logs_expired=raw.get("logs_expired", False),
+            _id=str(raw.id),
+            build_number=raw.build_number,
+            build_id=raw.build_id or "",
+            conclusion=raw.conclusion or "unknown",
+            commit_sha=raw.commit_sha or "",
+            branch=raw.branch or "",
+            commit_message=raw.commit_message,
+            commit_author=raw.commit_author,
+            created_at=raw.created_at,
+            started_at=raw.started_at,
+            completed_at=raw.completed_at,
+            duration_seconds=raw.duration_seconds,
+            web_url=raw.web_url,
+            provider=raw.provider or "github_actions",
+            logs_available=raw.logs_available,
+            logs_expired=raw.logs_expired or False,
             # Training enrichment
-            has_training_data=training is not None,
-            training_build_id=str(training["_id"]) if training else None,
-            extraction_status=training.get("extraction_status") if training else None,
-            feature_count=training.get("feature_count", 0) if training else 0,
-            extraction_error=training.get("extraction_error") if training else None,
-            features=training.get("features", {}) if training else {},
+            has_training_data=training_dict is not None,
+            training_build_id=str(training.id) if training else None,
+            extraction_status=training_dict.get("extraction_status") if training_dict else None,
+            feature_count=training_dict.get("feature_count", 0) if training_dict else 0,
+            extraction_error=training_dict.get("extraction_error") if training_dict else None,
+            features=training_dict.get("features", {}) if training_dict else {},
         )
 
-    def get_recent_builds(
-        self, limit: int = 10, current_user: dict = None
-    ) -> List[BuildSummary]:
+    def get_recent_builds(self, limit: int = 10, current_user: dict = None) -> List[BuildSummary]:
         """Get most recent builds across repos accessible to user."""
         user_role = current_user.get("role", "user") if current_user else "admin"
-        accessible_repos = (
-            current_user.get("github_accessible_repos", []) if current_user else []
-        )
+        accessible_repos = current_user.get("github_accessible_repos", []) if current_user else []
 
         # Build query filter based on RBAC
         # Admin and guest see all, user sees filtered by accessible repos
@@ -196,9 +197,7 @@ class BuildService:
                 return []
             query["raw_repo_id"] = {"$in": raw_repo_ids}
 
-        raw_cursor = (
-            self.db.raw_build_runs.find(query).sort("created_at", -1).limit(limit)
-        )
+        raw_cursor = self.db.raw_build_runs.find(query).sort("created_at", -1).limit(limit)
         raw_builds = list(raw_cursor)
 
         if not raw_builds:
@@ -206,9 +205,7 @@ class BuildService:
 
         # Get training data
         raw_ids = [b["_id"] for b in raw_builds]
-        training_cursor = self.db.model_training_builds.find(
-            {"raw_build_run_id": {"$in": raw_ids}}
-        )
+        training_cursor = self.db.model_training_builds.find({"raw_build_run_id": {"$in": raw_ids}})
         training_map = {doc["raw_build_run_id"]: doc for doc in training_cursor}
 
         items = []
@@ -230,37 +227,10 @@ class BuildService:
                     logs_expired=raw.get("logs_expired", False),
                     has_training_data=training is not None,
                     training_build_id=str(training["_id"]) if training else None,
-                    extraction_status=(
-                        training.get("extraction_status") if training else None
-                    ),
+                    extraction_status=(training.get("extraction_status") if training else None),
                     feature_count=training.get("feature_count", 0) if training else 0,
-                    extraction_error=(
-                        training.get("extraction_error") if training else None
-                    ),
-                    missing_resources=(
-                        training.get("missing_resources", []) if training else []
-                    ),
+                    extraction_error=(training.get("extraction_error") if training else None),
+                    missing_resources=(training.get("missing_resources", []) if training else []),
                 )
             )
         return items
-
-    def _resolve_raw_repo_id(self, repo_id: str) -> Optional[ObjectId]:
-        """
-        Resolve raw_repo_id from either ModelRepoConfig._id or direct raw_repo_id.
-        """
-        try:
-            oid = ObjectId(repo_id)
-        except Exception:
-            return None
-
-        # First try as ModelRepoConfig
-        config = self.db.model_repo_configs.find_one({"_id": oid})
-        if config:
-            return config.get("raw_repo_id")
-
-        # Fallback to direct raw_repo_id
-        raw_repo = self.db.raw_repositories.find_one({"_id": oid})
-        if raw_repo:
-            return oid
-
-        return None

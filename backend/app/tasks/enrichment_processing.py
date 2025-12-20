@@ -20,12 +20,11 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.entities.dataset_build import DatasetBuild
 from app.entities.dataset_enrichment_build import DatasetEnrichmentBuild
-from app.entities.dataset_repo_config import DatasetRepoConfig
+from app.entities.dataset_version import DatasetVersion
 from app.entities.enums import ExtractionStatus
 from app.entities.raw_repository import RawRepository
 from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
-from app.repositories.dataset_repo_config import DatasetRepoConfigRepository
 from app.repositories.dataset_repository import DatasetRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
@@ -53,11 +52,10 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
     version_repo = DatasetVersionRepository(self.db)
     dataset_build_repo = DatasetBuildRepository(self.db)
     dataset_repo = DatasetRepository(self.db)
-    repo_config_repo = DatasetRepoConfigRepository(self.db)
 
     # Load version
-    version = version_repo.find_by_id(version_id)
-    if not version:
+    dataset_version = version_repo.find_by_id(version_id)
+    if not dataset_version:
         logger.error(f"Version {version_id} not found")
         return {"status": "error", "error": "Version not found"}
 
@@ -66,38 +64,40 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
 
     try:
         # Load dataset
-        dataset = dataset_repo.find_by_id(version.dataset_id)
+        dataset = dataset_repo.find_by_id(dataset_version.dataset_id)
         if not dataset:
-            raise ValueError(f"Dataset {version.dataset_id} not found")
+            raise ValueError(f"Dataset {dataset_version.dataset_id} not found")
 
         # Get validated builds
-        validated_builds = dataset_build_repo.find_validated_builds(version.dataset_id)
+        validated_builds = dataset_build_repo.find_validated_builds(dataset_version.dataset_id)
 
         total_rows = len(validated_builds)
         if total_rows == 0:
             raise ValueError("No validated builds found. Please run validation first.")
 
-        # Get repos for this dataset - extract IDs to pass to next tasks
-        repo_configs = repo_config_repo.find_by_dataset(version.dataset_id)
-        repo_config_ids = [str(rc.id) for rc in repo_configs]
+        # Get validated repos from dataset (replaces DatasetRepoConfig)
+        validated_raw_repo_ids = dataset.validated_raw_repo_ids or []
 
         version_repo.update_one(
             version_id,
             {
                 "total_rows": total_rows,
-                "repos_total": len(repo_configs),
+                "repos_total": len(validated_raw_repo_ids),
                 "ingestion_status": "ingesting",
             },
         )
-        logger.info(f"Found {total_rows} validated builds, {len(repo_configs)} repos to ingest")
+        logger.info(
+            f"Found {total_rows} validated builds, "
+            f"{len(validated_raw_repo_ids)} repos to ingest"
+        )
 
         # Dispatch ingestion first, then enrichment
-        # Pass repo_config_ids to avoid re-querying DB
+        # Pass validated_raw_repo_ids instead of repo_config_ids
         workflow = chain(
             start_ingestion_for_version.s(
                 version_id=version_id,
-                dataset_id=str(version.dataset_id),
-                repo_config_ids=repo_config_ids,
+                dataset_id=str(dataset_version.dataset_id),
+                raw_repo_ids=[str(repo_id) for repo_id in validated_raw_repo_ids],
             ),
             dispatch_enrichment_batches.si(version_id=version_id),
         )
@@ -106,11 +106,11 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         return {
             "status": "dispatched",
             "total_builds": total_rows,
-            "repos": len(repo_configs),
+            "repos": len(validated_raw_repo_ids),
         }
 
-    except Exception as e:
-        error_msg = str(e)
+    except Exception as exc:
+        error_msg = str(exc)
         logger.error(f"Version enrichment start failed: {error_msg}")
         version_repo.mark_failed(version_id, error_msg)
         raise
@@ -129,7 +129,7 @@ def start_ingestion_for_version(
     self: PipelineTask,
     version_id: str,
     dataset_id: str,
-    repo_config_ids: List[str],
+    raw_repo_ids: List[str],
 ) -> Dict[str, Any]:
     """
     Run ingestion for all repos in a version with selected features.
@@ -137,22 +137,22 @@ def start_ingestion_for_version(
     Args:
         version_id: DatasetVersion ID
         dataset_id: Dataset ID (passed from caller to avoid re-query)
-        repo_config_ids: List of DatasetRepoConfig IDs (passed from caller)
+        raw_repo_ids: List of RawRepository IDs (from dataset.validated_raw_repo_ids)
 
     This is a synchronous task that dispatches per-repo ingestion tasks
     and waits for them to complete before returning.
     """
-    from app.tasks.dataset_ingestion import ingest_dataset_builds
+    from app.tasks.dataset_ingestion import ingest_dataset_builds_for_repo
 
     version_repo = DatasetVersionRepository(self.db)
-    repo_config_repo = DatasetRepoConfigRepository(self.db)
-    build_repo = DatasetBuildRepository(self.db)
+    raw_repo_repo = RawRepositoryRepository(self.db)
+    dataset_build_repo = DatasetBuildRepository(self.db)
 
-    version = version_repo.find_by_id(version_id)
-    if not version:
+    dataset_version = version_repo.find_by_id(version_id)
+    if not dataset_version:
         raise ValueError(f"Version {version_id} not found")
 
-    if not repo_config_ids:
+    if not raw_repo_ids:
         version_repo.update_one(
             version_id,
             {"ingestion_status": "completed", "ingestion_progress": 100},
@@ -162,44 +162,44 @@ def start_ingestion_for_version(
     repos_ingested = 0
     repos_failed = 0
 
-    for i, repo_config_id in enumerate(repo_config_ids):
-        # Lookup repo_config by ID (single query, not full dataset scan)
-        repo_config = repo_config_repo.find_by_id(repo_config_id)
-        if not repo_config:
-            logger.warning(f"RepoConfig {repo_config_id} not found, skipping")
+    for idx, raw_repo_id in enumerate(raw_repo_ids):
+        # Lookup RawRepository by ID
+        raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+        if not raw_repo:
+            logger.warning(f"RawRepository {raw_repo_id} not found, skipping")
+            repos_failed += 1
             continue
 
-        raw_repo_id = str(repo_config.raw_repo_id)
-
         # Get validated builds for this repo
-        builds = build_repo.find_found_builds_by_repo(dataset_id, raw_repo_id)
-        build_csv_ids = [str(b.build_id_from_csv) for b in builds]
+        dataset_builds = dataset_build_repo.find_found_builds_by_repo(dataset_id, raw_repo_id)
+        build_csv_ids = [str(build.build_id_from_csv) for build in dataset_builds]
 
         if not build_csv_ids:
             continue
 
         try:
             # Run ingestion synchronously for this repo
-            result = ingest_dataset_builds.apply(
+            ingestion_result = ingest_dataset_builds_for_repo.apply(
                 kwargs={
-                    "repo_config_id": str(repo_config.id),
+                    "version_id": version_id,
+                    "raw_repo_id": raw_repo_id,
                     "build_csv_ids": build_csv_ids,
-                    "features": version.selected_features,
+                    "features": dataset_version.selected_features,
                 }
             )
 
-            if result.successful():
+            if ingestion_result.successful():
                 repos_ingested += 1
             else:
                 repos_failed += 1
-                logger.error(f"Ingestion failed for repo {repo_config.full_name}")
+                logger.error(f"Ingestion failed for repo {raw_repo.full_name}")
 
-        except Exception as e:
+        except Exception as exc:
             repos_failed += 1
-            logger.error(f"Ingestion error for repo {repo_config.full_name}: {e}")
+            logger.error(f"Ingestion error for repo {raw_repo.full_name}: {exc}")
 
         # Update progress
-        progress = int(((i + 1) / len(repo_config_ids)) * 100)
+        progress = int(((idx + 1) / len(raw_repo_ids)) * 100)
         version_repo.update_one(
             version_id,
             {
@@ -245,14 +245,14 @@ def dispatch_enrichment_batches(self: PipelineTask, version_id: str) -> Dict[str
     dataset_repo = DatasetRepository(self.db)
     dataset_build_repo = DatasetBuildRepository(self.db)
 
-    version = version_repo.find_by_id(version_id)
-    if not version:
+    dataset_version = version_repo.find_by_id(version_id)
+    if not dataset_version:
         raise ValueError(f"Version {version_id} not found")
 
     # Get validated_raw_repo_ids from dataset (set during save_repos)
-    dataset = dataset_repo.find_by_id(version.dataset_id)
+    dataset = dataset_repo.find_by_id(dataset_version.dataset_id)
     if not dataset:
-        raise ValueError(f"Dataset {version.dataset_id} not found")
+        raise ValueError(f"Dataset {dataset_version.dataset_id} not found")
 
     validated_raw_repo_ids = dataset.validated_raw_repo_ids or []
     if not validated_raw_repo_ids:
@@ -267,22 +267,24 @@ def dispatch_enrichment_batches(self: PipelineTask, version_id: str) -> Dict[str
     # For each repo, get builds and split into batches
     for raw_repo_id in validated_raw_repo_ids:
         # Get validated builds for this repo (status='found')
-        builds = dataset_build_repo.find_found_builds_by_repo(version.dataset_id, str(raw_repo_id))
-        if not builds:
+        dataset_builds = dataset_build_repo.find_found_builds_by_repo(
+            dataset_version.dataset_id, str(raw_repo_id)
+        )
+        if not dataset_builds:
             continue
 
-        build_ids = [str(b.id) for b in builds]
+        build_ids = [str(build.id) for build in dataset_builds]
         total_builds += len(build_ids)
 
         # Split into chunks of batch_size
-        for i in range(0, len(build_ids), batch_size):
-            chunk = build_ids[i : i + batch_size]
+        for chunk_start in range(0, len(build_ids), batch_size):
+            chunk = build_ids[chunk_start : chunk_start + batch_size]
             batch_tasks.append(
                 process_enrichment_batch.s(
                     version_id=version_id,
                     raw_repo_id=str(raw_repo_id),
                     validated_build_ids=chunk,
-                    selected_features=version.selected_features,
+                    selected_features=dataset_version.selected_features,
                     batch_index=len(batch_tasks),
                     total_batches=0,  # Will be updated after loop
                 )
@@ -292,10 +294,10 @@ def dispatch_enrichment_batches(self: PipelineTask, version_id: str) -> Dict[str
         version_repo.mark_completed(version_id)
         return {"status": "completed", "message": "No builds to process"}
 
-    # Update total_batches in each task signature (workaround for immutable signatures)
+    # Log dispatch info
     total_batches = len(batch_tasks)
     logger.info(
-        f"Dispatching {total_batches} batches ({total_builds} builds) for version {version_id}"
+        f"Dispatching {total_batches} batches ({total_builds} builds) " f"for version {version_id}"
     )
 
     # Use chord to run all batches in parallel, then finalize
@@ -346,13 +348,12 @@ def process_enrichment_batch(
     """
     version_repo = DatasetVersionRepository(self.db)
     dataset_build_repo = DatasetBuildRepository(self.db)
-    enrichment_build = DatasetEnrichmentBuildRepository(self.db)
+    enrichment_build_repo = DatasetEnrichmentBuildRepository(self.db)
     raw_build_run_repo = RawBuildRunRepository(self.db)
-    repo_config_repo = DatasetRepoConfigRepository(self.db)
     raw_repo_repo = RawRepositoryRepository(self.db)
 
-    version = version_repo.find_by_id(version_id)
-    if not version:
+    dataset_version = version_repo.find_by_id(version_id)
+    if not dataset_version:
         return {"status": "error", "error": "Version not found"}
 
     # Lookup RawRepository once for this batch
@@ -361,113 +362,106 @@ def process_enrichment_batch(
         logger.error(f"RawRepository {raw_repo_id} not found")
         return {"status": "error", "error": "RawRepository not found"}
 
-    # Find DatasetRepoConfig by raw_repo_id
-    repo_config = repo_config_repo.find_by_dataset_and_repo(
-        ObjectId(version.dataset_id), ObjectId(raw_repo_id)
-    )
-    if not repo_config:
-        logger.error(f"DatasetRepoConfig not found for raw_repo {raw_repo_id}")
-        return {"status": "error", "error": "DatasetRepoConfig not found"}
+    enriched_count = 0
+    failed_count = 0
 
-    enriched = 0
-    failed = 0
-
-    for build_id in validated_build_ids:
-        build = dataset_build_repo.find_by_id(build_id)
-        if not build:
-            logger.warning(f"Build {build_id} not found")
-            failed += 1
+    for dataset_build_id in validated_build_ids:
+        dataset_build = dataset_build_repo.find_by_id(dataset_build_id)
+        if not dataset_build:
+            logger.warning(f"Build {dataset_build_id} not found")
+            failed_count += 1
             continue
 
         enrichment_build_id = None
         try:
-            existing = enrichment_build.find_by_dataset_build_id(
-                ObjectId(version.dataset_id), build.id
+            existing_enrichment = enrichment_build_repo.find_by_dataset_build_id(
+                ObjectId(dataset_version.dataset_id), dataset_build.id
             )
 
-            if existing:
-                enrichment_build_id = str(existing.id)
+            if existing_enrichment:
+                enrichment_build_id = str(existing_enrichment.id)
             else:
                 # Create pending build using raw_repo_id from batch params
-                new_build = DatasetEnrichmentBuild(
+                new_enrichment_build = DatasetEnrichmentBuild(
                     _id=None,
                     raw_repo_id=ObjectId(raw_repo_id),
-                    raw_build_run_id=ObjectId(build.workflow_run_id),
-                    dataset_id=ObjectId(version.dataset_id),
+                    raw_build_run_id=ObjectId(dataset_build.workflow_run_id),
+                    dataset_id=ObjectId(dataset_version.dataset_id),
                     dataset_version_id=ObjectId(version_id),
-                    dataset_repo_config_id=repo_config.id,
-                    dataset_build_id=build.id,
+                    dataset_build_id=dataset_build.id,
                     extraction_status=ExtractionStatus.PENDING,
                     extraction_error=None,
                     features={},
                     enriched_at=None,
                 )
-                saved_build = enrichment_build.insert_one(new_build)
-                enrichment_build_id = str(saved_build.id)
+                saved_enrichment = enrichment_build_repo.insert_one(new_enrichment_build)
+                enrichment_build_id = str(saved_enrichment.id)
 
-            # 2. Extract Features using passed repo_config and raw_repo
-            result = _extract_features_for_enrichment(
+            # Extract Features using DatasetVersion for config
+            extraction_result = _extract_features_for_enrichment(
                 db=self.db,
-                build=build,
+                dataset_build=dataset_build,
                 selected_features=selected_features,
                 raw_build_run_repo=raw_build_run_repo,
-                repo_config=repo_config,
+                dataset_version=dataset_version,
                 raw_repo=raw_repo,
             )
 
             # Determine extraction status from result
-            if result["status"] == "completed":
+            if extraction_result["status"] == "completed":
                 extraction_status = ExtractionStatus.COMPLETED
-            elif result["status"] == "partial":
+            elif extraction_result["status"] == "partial":
                 extraction_status = ExtractionStatus.PARTIAL
-            elif result["status"] == "failed":
+            elif extraction_result["status"] == "failed":
                 extraction_status = ExtractionStatus.FAILED
             else:
                 extraction_status = ExtractionStatus.PENDING
 
-            features = result["features"]
-            extraction_error = result["errors"][0] if result["errors"] else None
+            extracted_features = extraction_result["features"]
+            extraction_error = (
+                extraction_result["errors"][0] if extraction_result["errors"] else None
+            )
 
             # Build update dict with Graceful Degradation tracking
             update_data = {
                 "extraction_status": extraction_status,
                 "extraction_error": extraction_error,
-                "features": features,
+                "features": extracted_features,
                 "enriched_at": datetime.now(),
             }
 
             # Track missing resources and skipped features
-            if result.get("missing_resources"):
-                update_data["missing_resources"] = result["missing_resources"]
-            if result.get("skipped_features"):
-                update_data["skipped_features"] = result["skipped_features"]
+            if extraction_result.get("missing_resources"):
+                update_data["missing_resources"] = extraction_result["missing_resources"]
+            if extraction_result.get("skipped_features"):
+                update_data["skipped_features"] = extraction_result["skipped_features"]
 
-            enrichment_build.update_one(enrichment_build_id, update_data)
+            enrichment_build_repo.update_one(enrichment_build_id, update_data)
 
-            if result["status"] == "completed":
-                enriched += 1
+            if extraction_result["status"] == "completed":
+                enriched_count += 1
             else:
-                failed += 1
+                failed_count += 1
 
-        except Exception as e:
-            logger.warning(f"Failed to enrich build {build.build_id_from_csv}: {e}")
-            enrichment_build.update_extraction_status(
+        except Exception as exc:
+            logger.warning(f"Failed to enrich build {dataset_build.build_id_from_csv}: {exc}")
+            enrichment_build_repo.update_extraction_status(
                 ObjectId(enrichment_build_id),
                 ExtractionStatus.FAILED,
-                error=str(e),
+                error=str(exc),
             )
-            failed += 1
+            failed_count += 1
 
     logger.info(
         f"Batch {batch_index + 1}/{total_batches} completed: "
-        f"{enriched} enriched, {failed} failed"
+        f"{enriched_count} enriched, {failed_count} failed"
     )
 
     return {
         "batch_index": batch_index,
         "status": "completed",
-        "enriched": enriched,
-        "failed": failed,
+        "enriched": enriched_count,
+        "failed": failed_count,
         "total": len(validated_build_ids),
     }
 
@@ -494,10 +488,10 @@ def finalize_enrichment(
     total_failed = 0
     total_processed = 0
 
-    for result in batch_results:
-        total_enriched += result.get("enriched", 0)
-        total_failed += result.get("failed", 0)
-        total_processed += result.get("total", 0)
+    for batch_result in batch_results:
+        total_enriched += batch_result.get("enriched", 0)
+        total_failed += batch_result.get("failed", 0)
+        total_processed += batch_result.get("total", 0)
 
     # Update final progress
     version_repo.update_progress(
@@ -526,10 +520,10 @@ def finalize_enrichment(
 
 def _extract_features_for_enrichment(
     db,
-    build: DatasetBuild,
+    dataset_build: DatasetBuild,
     selected_features: List[str],
     raw_build_run_repo: RawBuildRunRepository,
-    repo_config: DatasetRepoConfig,
+    dataset_version: DatasetVersion,
     raw_repo: RawRepository,
 ) -> Dict[str, Any]:
     """
@@ -537,16 +531,16 @@ def _extract_features_for_enrichment(
 
     Args:
         db: Database connection
-        build: DatasetBuild entity
+        dataset_build: DatasetBuild entity
         selected_features: Features to extract
         raw_build_run_repo: Repository for RawBuildRun lookup
-        repo_config: DatasetRepoConfig (passed from caller, no lookup needed)
+        dataset_version: DatasetVersion entity (used for config via feature_configs)
         raw_repo: RawRepository (passed from caller, no lookup needed)
 
     Returns result dict with status, features, errors, warnings.
     """
-    if not build.workflow_run_id:
-        logger.warning(f"Build {build.build_id_from_csv} has no workflow_run_id")
+    if not dataset_build.workflow_run_id:
+        logger.warning(f"Build {dataset_build.build_id_from_csv} has no workflow_run_id")
         return {
             "status": "failed",
             "features": {},
@@ -554,9 +548,9 @@ def _extract_features_for_enrichment(
             "warnings": [],
         }
 
-    raw_build_run = raw_build_run_repo.find_by_id(str(build.workflow_run_id))
+    raw_build_run = raw_build_run_repo.find_by_id(str(dataset_build.workflow_run_id))
     if not raw_build_run:
-        logger.warning(f"RawBuildRun {build.workflow_run_id} not found")
+        logger.warning(f"RawBuildRun {dataset_build.workflow_run_id} not found")
         return {
             "status": "failed",
             "features": {},
@@ -564,11 +558,12 @@ def _extract_features_for_enrichment(
             "warnings": [],
         }
 
-    # Use shared helper for feature extraction (returns full result with status)
+    # Use shared helper for feature extraction
+    # DatasetVersion inherits from FeatureConfigBase, so it works as config source
     return extract_features_for_build(
         db=db,
         raw_repo=raw_repo,
-        repo_config=repo_config,
+        repo_config=dataset_version,  # DatasetVersion now has feature_configs
         raw_build_run=raw_build_run,
         selected_features=selected_features,
     )

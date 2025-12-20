@@ -1,17 +1,19 @@
 """
-Unified Notification Service - In-app and Gmail notifications.
+Unified Notification Service - In-app and Gmail API notifications.
 
 Channels:
 - In-app: Always sent, stored in MongoDB for UI display
-- Gmail: For summary/digest notifications (critical alerts only)
+- Gmail: Gmail API (OAuth2) for critical alerts only
 
-Gmail Setup:
-1. Enable 2-Step Verification in your Google Account
-2. Generate an App Password at https://myaccount.google.com/apppasswords
-3. Set environment variables:
-   - GMAIL_USER: your-email@gmail.com
-   - GMAIL_APP_PASSWORD: your-16-character-app-password
-   - GMAIL_RECIPIENTS: comma-separated list of recipients
+Gmail API Setup:
+1. Create a project in Google Cloud Console
+2. Enable Gmail API
+3. Create OAuth 2.0 credentials (Desktop app)
+4. Run: python -m app.services.gmail_api_service --setup
+5. Set environment variables:
+   - GOOGLE_CLIENT_ID: OAuth client ID
+   - GOOGLE_CLIENT_SECRET: OAuth client secret
+   - GMAIL_TOKEN_JSON: Token JSON from setup script
 
 Channel Usage Guidelines:
 ┌─────────────────────────────────┬─────────┬─────────┐
@@ -30,16 +32,12 @@ Channel Usage Guidelines:
 """
 
 import logging
-import smtplib
 from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from typing import List, Optional
 
 from bson import ObjectId
 from pymongo.database import Database
 
-from app.config import settings
 from app.entities.notification import Notification, NotificationType
 from app.repositories.notification import NotificationRepository
 from app.services.email_templates import render_email
@@ -58,34 +56,14 @@ class NotificationManager:
 
     Channels:
     - In-app: MongoDB stored notifications (always)
-    - Gmail: SMTP for critical alerts (optional)
+    - Gmail: Gmail API (OAuth2) for critical alerts (optional)
     """
 
     def __init__(
         self,
         db: Optional[Database] = None,
-        gmail_enabled: Optional[bool] = None,
-        gmail_user: Optional[str] = None,
-        gmail_app_password: Optional[str] = None,
-        gmail_recipients: Optional[List[str]] = None,
     ):
         self.db = db
-
-        # Gmail config (using App Password) - from settings or override
-        self.gmail_enabled = (
-            gmail_enabled
-            if gmail_enabled is not None
-            else settings.GMAIL_NOTIFICATIONS_ENABLED
-        )
-        self.gmail_user = gmail_user or settings.GMAIL_USER
-        self.gmail_app_password = gmail_app_password or settings.GMAIL_APP_PASSWORD
-        self.gmail_recipients = gmail_recipients or list(settings.GMAIL_RECIPIENTS)
-
-    def _parse_recipients(self, recipients_str: str) -> List[str]:
-        """Parse comma-separated email recipients."""
-        if not recipients_str:
-            return []
-        return [r.strip() for r in recipients_str.split(",") if r.strip()]
 
     # -------------------------------------------------------------------------
     # In-App Notifications (MongoDB)
@@ -124,98 +102,51 @@ class NotificationManager:
         self,
         subject: str,
         body: str,
+        to_recipients: List[str],
         html_body: Optional[str] = None,
-        recipients: Optional[List[str]] = None,
     ) -> bool:
         """
-        Send an email via Gmail.
-
-        Uses Gmail API (OAuth2) if available, otherwise falls back to SMTP.
+        Send an email via Gmail API (OAuth2).
 
         Args:
             subject: Email subject
             body: Plain text body
             html_body: Optional HTML body
-            recipients: List of email addresses to send to.
-                        If None, uses self.gmail_recipients from config.
+            to_recipients: List of email addresses to send to.
 
         Returns:
             True if sent successfully, False otherwise
         """
-        # Use provided recipients or fall back to config
-        to_recipients = recipients if recipients else self.gmail_recipients
-        if not to_recipients:
+        if len(to_recipients) == 0:
             logger.debug("No Gmail recipients specified")
             return False
 
-        # Try Gmail API first (OAuth2)
         try:
             from app.services.gmail_api_service import (
                 is_gmail_api_available,
                 send_email_via_gmail_api,
             )
 
-            if is_gmail_api_available():
-                return send_email_via_gmail_api(
-                    to=to_recipients,
-                    subject=subject,
-                    body=body,
-                    html_body=html_body,
-                )
+            if not is_gmail_api_available():
+                logger.warning("Gmail API is not configured or available")
+                return False
+
+            return send_email_via_gmail_api(
+                to=to_recipients,
+                subject=subject,
+                body=body,
+                html_body=html_body,
+            )
         except ImportError:
-            pass  # Gmail API not installed, try SMTP
-        except Exception as e:
-            logger.warning(f"Gmail API failed, falling back to SMTP: {e}")
-
-        # Fallback to SMTP with App Password
-        return self._send_gmail_smtp(subject, body, html_body, to_recipients)
-
-    def _send_gmail_smtp(
-        self,
-        subject: str,
-        body: str,
-        html_body: Optional[str],
-        recipients: List[str],
-    ) -> bool:
-        """Send email via SMTP with App Password (fallback method)."""
-        if not self.gmail_enabled or not self.gmail_user or not self.gmail_app_password:
-            logger.debug("Gmail SMTP not configured or disabled")
-            return False
-
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = f"[BuildGuard] {subject}"
-            msg["From"] = self.gmail_user
-            msg["To"] = ", ".join(recipients)
-
-            msg.attach(MIMEText(body, "plain", "utf-8"))
-            if html_body:
-                msg.attach(MIMEText(html_body, "html", "utf-8"))
-
-            # Gmail SMTP with TLS
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(self.gmail_user, self.gmail_app_password)
-                server.sendmail(self.gmail_user, recipients, msg.as_string())
-
-            logger.info(f"Gmail SMTP sent to {len(recipients)} recipients: {subject}")
-            return True
-        except smtplib.SMTPAuthenticationError as e:
             logger.error(
-                f"Gmail authentication failed. Make sure you're using an App Password, "
-                f"not your regular Google password. Error: {e}"
+                "Gmail API dependencies not installed. "
+                "Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib"
             )
             return False
         except Exception as e:
-            logger.error(f"Gmail SMTP error: {e}")
+            logger.error(f"Gmail API error: {e}")
             return False
 
-
-# =============================================================================
-# Singleton Instance
-# =============================================================================
 
 _manager: Optional[NotificationManager] = None
 

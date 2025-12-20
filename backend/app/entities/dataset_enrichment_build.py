@@ -51,10 +51,6 @@ class DatasetEnrichmentBuild(BaseEntity):
         None,
         description="Reference to dataset_versions table (if versioned enrichment)",
     )
-    dataset_repo_config_id: Optional[PyObjectId] = Field(
-        None,
-        description="Reference to dataset_repo_configs table",
-    )
     dataset_build_id: Optional[PyObjectId] = Field(
         None,
         description="Reference to dataset_builds table",

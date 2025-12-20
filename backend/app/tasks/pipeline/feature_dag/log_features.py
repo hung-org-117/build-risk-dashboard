@@ -14,13 +14,14 @@ from typing import Any, Dict, List, Optional, Set
 
 from hamilton.function_modifiers import extract_fields, tag
 
-from app.tasks.pipeline.feature_dag._inputs import BuildLogsInput, RepoConfigInput
+from app.tasks.pipeline.feature_dag._inputs import BuildLogsInput, FeatureConfigInput
 from app.tasks.pipeline.feature_dag._metadata import (
-    feature_metadata,
     FeatureCategory,
     FeatureDataType,
     FeatureResource,
     OutputFormat,
+    feature_metadata,
+    requires_config,
 )
 from app.tasks.pipeline.feature_dag.log_parsers.registry import TestLogParser
 
@@ -54,9 +55,25 @@ logger = logging.getLogger(__name__)
     },
 )
 @tag(group="build_log")
+@requires_config(
+    source_languages={
+        "type": "list",
+        "scope": "repo",
+        "required": False,
+        "description": "Programming languages used in the repository (for log parser hints)",
+        "default": [],
+    },
+    test_frameworks={
+        "type": "list",
+        "scope": "repo",
+        "required": False,
+        "description": "Test frameworks to detect (leave empty for auto-detection)",
+        "default": [],
+    },
+)
 def test_log_features(
     build_logs: BuildLogsInput,
-    repo_config: RepoConfigInput,
+    feature_config: FeatureConfigInput,
 ) -> Dict[str, Any]:
     """
     Parse CI build logs and extract test results.
@@ -82,8 +99,8 @@ def test_log_features(
     tests_ok_sum = 0
     test_duration_sum = 0.0
 
-    language_hints = _get_language_hints(repo_config)
-    allowed_frameworks = _get_allowed_frameworks(repo_config)
+    language_hints = _get_language_hints(feature_config)
+    allowed_frameworks = _get_allowed_frameworks(feature_config)
 
     for log_path_str in build_logs.log_files:
         try:
@@ -153,23 +170,21 @@ def _empty_test_results() -> Dict[str, Any]:
     }
 
 
-def _get_allowed_frameworks(repo_config: RepoConfigInput) -> Optional[List[str]]:
-    """Get allowed test frameworks from repo configuration."""
-    if not repo_config.test_frameworks:
+def _get_allowed_frameworks(feature_config: FeatureConfigInput) -> Optional[List[str]]:
+    """Get allowed test frameworks from config."""
+    test_frameworks = feature_config.get("test_frameworks", [])
+    if not test_frameworks:
         return None
-    return [
-        f.lower() if isinstance(f, str) else str(f).lower()
-        for f in repo_config.test_frameworks
-    ]
+    return [f.lower() if isinstance(f, str) else str(f).lower() for f in test_frameworks]
 
 
-def _get_language_hints(repo_config: RepoConfigInput) -> Optional[List[str]]:
-    """Get all source languages from repo config for parser hints."""
-    if not repo_config.source_languages:
+def _get_language_hints(feature_config: FeatureConfigInput) -> Optional[List[str]]:
+    """Get all source languages from config for parser hints."""
+    source_languages = feature_config.get("source_languages", [])
+    if not source_languages:
         return None
     return [
-        lang.lower() if isinstance(lang, str) else str(lang).lower()
-        for lang in repo_config.source_languages
+        lang.lower() if isinstance(lang, str) else str(lang).lower() for lang in source_languages
     ]
 
 

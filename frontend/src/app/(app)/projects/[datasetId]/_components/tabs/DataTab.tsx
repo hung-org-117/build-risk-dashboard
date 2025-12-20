@@ -58,7 +58,6 @@ interface BuildItem {
     started_at?: string;
     completed_at?: string;
     duration_seconds?: number;
-    jobs_count?: number;
     logs_available?: boolean;
     logs_expired?: boolean;
     web_url?: string;

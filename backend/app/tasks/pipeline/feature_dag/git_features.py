@@ -8,8 +8,8 @@ Features extracted from git history and repository operations:
 - Team membership
 """
 
-import re
 import logging
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,24 +17,25 @@ from typing import Any, Dict, List, Optional, Set
 
 from hamilton.function_modifiers import extract_fields, tag
 
+from app.tasks.pipeline.feature_dag._inputs import (
+    BuildRunInput,
+    FeatureConfigInput,
+    GitHistoryInput,
+    RepoInput,
+)
+from app.tasks.pipeline.feature_dag._metadata import (
+    FeatureCategory,
+    FeatureDataType,
+    FeatureResource,
+    OutputFormat,
+    feature_metadata,
+    requires_config,
+)
 from app.tasks.pipeline.feature_dag.analyzers import (
     _count_test_cases,
     _is_doc_file,
     _is_source_file,
     _is_test_file,
-)
-from app.tasks.pipeline.feature_dag._inputs import (
-    GitHistoryInput,
-    RepoConfigInput,
-    RepoInput,
-    BuildRunInput,
-)
-from app.tasks.pipeline.feature_dag._metadata import (
-    feature_metadata,
-    FeatureCategory,
-    FeatureDataType,
-    FeatureResource,
-    OutputFormat,
 )
 from app.tasks.pipeline.utils.git_utils import (
     get_author_name,
@@ -132,9 +133,7 @@ def git_commit_info(
         last_commit_sha = hexsha
 
         # Check if this commit has a build in DB
-        existing_build = raw_build_runs.find_one(
-            {"head_sha": hexsha, "repo_id": repo.id}
-        )
+        existing_build = raw_build_runs.find_one({"head_sha": hexsha, "repo_id": repo.id})
 
         if existing_build:
             status = "build_found"
@@ -171,9 +170,18 @@ def git_commit_info(
     }
 )
 @tag(group="git")
+@requires_config(
+    source_languages={
+        "type": "list",
+        "scope": "repo",
+        "required": True,
+        "description": "Main source programming languages used in the repository",
+        "default": [],
+    }
+)
 def git_diff_features(
     git_history: GitHistoryInput,
-    repo_config: RepoConfigInput,
+    feature_config: FeatureConfigInput,
     git_all_built_commits: List[str],
     git_prev_built_commit: Optional[str],
 ) -> Dict[str, Any]:
@@ -184,8 +192,10 @@ def git_diff_features(
     repo_path = git_history.path
     effective_sha = git_history.effective_sha
 
-    # Normalize languages
-    languages = [lang.lower() for lang in repo_config.source_languages] or [""]
+    # Normalize languages - repo-scoped config
+    languages = [
+        lang.lower() for lang in feature_config.get("source_languages", [], scope="repo")
+    ] or [""]
 
     stats = _empty_diff_result()
 
@@ -197,9 +207,7 @@ def git_diff_features(
 
         # File status changes
         try:
-            name_status_out = _run_git(
-                repo_path, ["diff", "--name-status", parent, sha]
-            )
+            name_status_out = _run_git(repo_path, ["diff", "--name-status", parent, sha])
             for line in name_status_out.splitlines():
                 parts = line.split("\t")
                 if len(parts) < 2:
@@ -255,9 +263,7 @@ def git_diff_features(
     # Test case diff (prev built commit vs current)
     if git_prev_built_commit and effective_sha:
         try:
-            patch_out = _run_git(
-                repo_path, ["diff", git_prev_built_commit, effective_sha]
-            )
+            patch_out = _run_git(repo_path, ["diff", git_prev_built_commit, effective_sha])
             total_added = 0
             total_deleted = 0
             for lang in languages:
@@ -314,18 +320,28 @@ CHUNK_SIZE = 50
 
 @feature_metadata(
     display_name="Commits on Files Touched",
-    description="Number of commits that touched files modified in this build (last 90 days)",
+    description="Number of commits that touched files modified in this build (last N days)",
     category=FeatureCategory.GIT_HISTORY,
     data_type=FeatureDataType.INTEGER,
     required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.BUILD_RUN],
 )
 @tag(group="git")
+@requires_config(
+    lookback_days={
+        "type": "integer",
+        "scope": "global",
+        "required": False,
+        "description": "Number of days to look back for commit history analysis",
+        "default": 90,
+    }
+)
 def gh_num_commits_on_files_touched(
     git_history: GitHistoryInput,
     build_run: BuildRunInput,
+    feature_config: FeatureConfigInput,
     git_all_built_commits: List[str],
 ) -> int:
-    """Count commits that touched files modified in this build (last 90 days)."""
+    """Count commits that touched files modified in this build (last N days)."""
     if not git_history.is_commit_available:
         return 0
 
@@ -334,6 +350,9 @@ def gh_num_commits_on_files_touched(
 
     repo_path = git_history.path
     effective_sha = git_history.effective_sha
+
+    # Get lookback days from config (global scope)
+    lookback_days = feature_config.get("lookback_days", 90, scope="global")
 
     # Get reference date
     ref_date = build_run.created_at
@@ -347,7 +366,7 @@ def gh_num_commits_on_files_touched(
     if ref_date.tzinfo is None:
         ref_date = ref_date.replace(tzinfo=timezone.utc)
 
-    start_date = ref_date - timedelta(days=LOOKBACK_DAYS)
+    start_date = ref_date - timedelta(days=lookback_days)
 
     # Collect files touched by this build
     files_touched: Set[str] = set()
@@ -492,9 +511,7 @@ def gh_by_core_team_member(
     return False
 
 
-def _get_direct_committers(
-    repo_path: Path, start_date: datetime, end_date: datetime
-) -> Set[str]:
+def _get_direct_committers(repo_path: Path, start_date: datetime, end_date: datetime) -> Set[str]:
     """Get names of users who pushed directly (not via PR)."""
     pr_pattern = re.compile(r"\s\(#\d+\)")
 
@@ -508,9 +525,7 @@ def _get_direct_committers(
             f"--until={end_date.isoformat()}",
             "--format=%H|%an|%s",
         ]
-        result = subprocess.run(
-            cmd, cwd=str(repo_path), capture_output=True, text=True, check=True
-        )
+        result = subprocess.run(cmd, cwd=str(repo_path), capture_output=True, text=True, check=True)
         output = result.stdout.strip()
     except subprocess.CalledProcessError:
         return set()

@@ -7,12 +7,12 @@ from pymongo.database import Database
 
 from app.entities.oauth_identity import OAuthIdentity
 from app.entities.user import User
+
 from .base import BaseRepository
 from .user import UserRepository
 
 
 class OAuthIdentityRepository(BaseRepository[OAuthIdentity]):
-
     def __init__(self, db: Database):
         super().__init__(db, "oauth_identities", OAuthIdentity)
         self.user_repo = UserRepository(db)
@@ -20,14 +20,18 @@ class OAuthIdentityRepository(BaseRepository[OAuthIdentity]):
     def find_by_provider_and_external_id(
         self, provider: str, external_user_id: str
     ) -> Optional[OAuthIdentity]:
-        return self.find_one(
-            {"provider": provider, "external_user_id": external_user_id}
-        )
+        return self.find_one({"provider": provider, "external_user_id": external_user_id})
 
-    def find_by_user_id_and_provider(
-        self, user_id, provider: str
-    ) -> Optional[OAuthIdentity]:
+    def find_by_user_id_and_provider(self, user_id, provider: str) -> Optional[OAuthIdentity]:
         return self.find_one({"user_id": user_id, "provider": provider})
+
+    def delete_by_user_id(self, user_id) -> int:
+        """Delete all OAuth identities for a user."""
+        from bson import ObjectId
+
+        uid = user_id if isinstance(user_id, ObjectId) else ObjectId(user_id)
+        result = self.collection.delete_many({"user_id": uid})
+        return result.deleted_count
 
     def mark_token_invalid(self, identity_id, reason: str = "invalid") -> None:
         self.update_one(
@@ -77,9 +81,7 @@ class OAuthIdentityRepository(BaseRepository[OAuthIdentity]):
     ) -> Tuple[User, OAuthIdentity]:
         """Upsert a GitHub identity and associated user"""
         provider = "github"
-        existing_identity = self.find_by_provider_and_external_id(
-            provider, github_user_id
-        )
+        existing_identity = self.find_by_provider_and_external_id(provider, github_user_id)
 
         now = datetime.now(timezone.utc)
 

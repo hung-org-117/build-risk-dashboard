@@ -14,6 +14,7 @@ from typing import List, Optional
 import httpx
 
 from app.config import settings
+
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -64,9 +65,7 @@ class CircleCIProvider(CIProviderInterface):
         return self.config.base_url or CIRCLECI_API_BASE
 
     def _get_project_slug(self, repo_name: str) -> str:
-        if "/" in repo_name and not repo_name.startswith(
-            ("gh/", "bb/", "github/", "bitbucket/")
-        ):
+        if "/" in repo_name and not repo_name.startswith(("gh/", "bb/", "github/", "bitbucket/")):
             return f"gh/{repo_name}"
         return repo_name
 
@@ -122,9 +121,7 @@ class CircleCIProvider(CIProviderInterface):
                         break
 
                     for pipeline in items:
-                        build_data = await self._parse_pipeline(
-                            client, pipeline, repo_name
-                        )
+                        build_data = await self._parse_pipeline(client, pipeline, repo_name)
 
                         if only_completed and build_data.status in [
                             BuildStatus.PENDING.value,
@@ -140,11 +137,7 @@ class CircleCIProvider(CIProviderInterface):
                         if exclude_bots and is_bot:
                             continue
 
-                        if (
-                            since
-                            and build_data.created_at
-                            and build_data.created_at < since
-                        ):
+                        if since and build_data.created_at and build_data.created_at < since:
                             continue
 
                         if only_with_logs:
@@ -154,10 +147,7 @@ class CircleCIProvider(CIProviderInterface):
                             build_data.logs_available = logs_available
                             if not logs_available:
                                 consecutive_unavailable += 1
-                                if (
-                                    consecutive_unavailable
-                                    >= settings.LOG_UNAVAILABLE_THRESHOLD
-                                ):
+                                if consecutive_unavailable >= settings.LOG_UNAVAILABLE_THRESHOLD:
                                     logger.warning(
                                         f"Reached {consecutive_unavailable} consecutive unavailable logs "
                                         f"for {repo_name} - may be permission issue, stopping fetch"
@@ -180,9 +170,7 @@ class CircleCIProvider(CIProviderInterface):
 
         return builds[:limit] if limit else builds
 
-    async def _check_logs_available(
-        self, client: httpx.AsyncClient, pipeline_id: str
-    ) -> bool:
+    async def _check_logs_available(self, client: httpx.AsyncClient, pipeline_id: str) -> bool:
         """Check if logs are still available for a pipeline."""
         base_url = self._get_base_url()
         # Get workflows for pipeline
@@ -216,6 +204,10 @@ class CircleCIProvider(CIProviderInterface):
 
     async def fetch_build_details(self, build_id: str) -> Optional[BuildData]:
         """Fetch details for a specific pipeline."""
+        # Handle repo_name:build_id format (extract just the build_id)
+        if ":" in build_id:
+            _, build_id = build_id.rsplit(":", 1)
+
         base_url = self._get_base_url()
         url = f"{base_url}/pipeline/{build_id}"
 
@@ -299,9 +291,7 @@ class CircleCIProvider(CIProviderInterface):
 
         return logs
 
-    async def _fetch_job_log(
-        self, client: httpx.AsyncClient, job_id: str
-    ) -> Optional[LogFile]:
+    async def _fetch_job_log(self, client: httpx.AsyncClient, job_id: str) -> Optional[LogFile]:
         """Fetch log content for a specific job."""
         base_url = self._get_base_url()
 
@@ -378,10 +368,10 @@ class CircleCIProvider(CIProviderInterface):
         """Parse CircleCI pipeline to BuildData."""
         # Parse timestamps
         created_at = None
+        started_at = None
+        stopped_at = None
         if pipeline.get("created_at"):
-            created_at = datetime.fromisoformat(
-                pipeline["created_at"].replace("Z", "+00:00")
-            )
+            created_at = datetime.fromisoformat(pipeline["created_at"].replace("Z", "+00:00"))
 
         # Get overall status from workflows
         base_url = self._get_base_url()
@@ -397,13 +387,34 @@ class CircleCIProvider(CIProviderInterface):
             if response.status_code == 200:
                 workflows = response.json().get("items", [])
                 if workflows:
-                    # Use status of first workflow
                     status = workflows[0].get("status", "unknown")
+                    if workflows[0].get("started_at"):
+                        started_at = datetime.fromisoformat(
+                            workflows[0]["started_at"].replace("Z", "+00:00")
+                        )
+                    if workflows[0].get("stopped_at"):
+                        stopped_at = datetime.fromisoformat(
+                            workflows[0]["stopped_at"].replace("Z", "+00:00")
+                        )
         except Exception:
             pass
 
+        # Calculate duration
+        duration_seconds = None
+        if started_at and stopped_at:
+            duration_seconds = (stopped_at - started_at).total_seconds()
+
         # Get commit info
         vcs = pipeline.get("vcs", {})
+
+        # Build web URL
+        project_slug = pipeline.get("project_slug", "")
+        pipeline_number = pipeline.get("number", "")
+        web_url = (
+            f"https://app.circleci.com/pipelines/{project_slug}/{pipeline_number}"
+            if project_slug
+            else None
+        )
 
         return BuildData(
             build_id=pipeline.get("id"),
@@ -411,17 +422,17 @@ class CircleCIProvider(CIProviderInterface):
             repo_name=repo_name,
             branch=vcs.get("branch"),
             commit_sha=vcs.get("revision"),
-            commit_message=(
-                vcs.get("commit", {}).get("subject") if vcs.get("commit") else None
-            ),
+            commit_message=(vcs.get("commit", {}).get("subject") if vcs.get("commit") else None),
             commit_author=(
-                vcs.get("commit", {}).get("author", {}).get("name")
-                if vcs.get("commit")
-                else None
+                vcs.get("commit", {}).get("author", {}).get("name") if vcs.get("commit") else None
             ),
             status=self.normalize_status(status),
             conclusion=self.normalize_conclusion(status),
             created_at=created_at,
+            started_at=started_at,
+            completed_at=stopped_at,
+            duration_seconds=duration_seconds,
+            web_url=web_url,
             provider=CIProvider.CIRCLECI,
             raw_data=pipeline,
         )
@@ -430,15 +441,11 @@ class CircleCIProvider(CIProviderInterface):
         """Parse CircleCI job to JobData."""
         started_at = None
         if job.get("started_at"):
-            started_at = datetime.fromisoformat(
-                job["started_at"].replace("Z", "+00:00")
-            )
+            started_at = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
 
         stopped_at = None
         if job.get("stopped_at"):
-            stopped_at = datetime.fromisoformat(
-                job["stopped_at"].replace("Z", "+00:00")
-            )
+            stopped_at = datetime.fromisoformat(job["stopped_at"].replace("Z", "+00:00"))
 
         duration = None
         if started_at and stopped_at:
@@ -459,58 +466,3 @@ class CircleCIProvider(CIProviderInterface):
     def get_build_url(self, repo_name: str, build_id: str) -> str:
         project_slug = self._get_project_slug(repo_name)
         return f"https://app.circleci.com/pipelines/{project_slug}/{build_id}"
-
-    async def get_workflow_run(self, repo_name: str, run_id: int) -> Optional[dict]:
-        """Get a specific pipeline from CircleCI."""
-        from app.utils.datetime import parse_datetime
-
-        base_url = self._get_base_url()
-        url = f"{base_url}/pipeline/{run_id}"
-
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    url,
-                    headers=self._get_headers(),
-                    timeout=30.0,
-                )
-                if response.status_code == 404:
-                    return None
-                response.raise_for_status()
-                data = response.json()
-                # Normalize datetime fields to naive UTC
-                data["created_at"] = parse_datetime(
-                    data.get("created_at"), default_now=False
-                )
-                data["updated_at"] = parse_datetime(
-                    data.get("updated_at"), default_now=False
-                )
-                return data
-            except Exception as e:
-                logger.warning(f"Failed to get pipeline {run_id}: {e}")
-                return None
-
-    def is_run_completed(self, run_data: dict) -> bool:
-        """Check if CircleCI pipeline is completed."""
-        # For pipeline object, need to check its workflows or use internal state logic
-        # Here we assume validation logic passes the full pipeline object
-        # which doesn't have a direct 'status' field in v2 API response for get pipeline.
-        # But our fetch_builds returns BuildData with status.
-        # However, dataset_validation passes raw API response from get_workflow_run.
-        # For CircleCI, get_workflow_run returns pipeline data.
-        # Pipeline data has "state" which can be "created", "errored", "setup", "pending"
-        # but completion is best judged by workflows.
-        # But to keep it simple and based on what we have:
-        state = run_data.get("state")
-        return state in ["errored", "setup"] or (
-            # CircleCI pipelines don't have a simple "completed" state at top level easily
-            # without checking workflows. But if we must rely on what we have:
-            # Actually, let's check if we can rely on 'state'.
-            # Based on docs, 'state' can be: created, errored, setup, pending
-            # This seems insufficient. Let's look at how we implemented fetch_builds.
-            # In fetch_builds we fetch workflows to determine status.
-            # But here we only have the pipeline object.
-            # Let's assume for validation purposes, if it's not pending/created, it's done.
-            state
-            not in ["created", "pending", "setup"]
-        )

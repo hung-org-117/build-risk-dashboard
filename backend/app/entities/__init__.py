@@ -1,54 +1,53 @@
 """Database entity models - represents the actual structure stored in MongoDB"""
 
+# CI Provider
+from app.ci_providers.models import CIProvider
+
 from .base import BaseEntity, PyObjectId
+
+# Dataset entities
+from .dataset import (
+    DatasetMapping,
+    DatasetProject,
+    DatasetStats,
+    DatasetValidationStatus,
+    ValidationStats,
+)
+from .dataset_build import DatasetBuild, DatasetBuildStatus
+
+# Dataset enrichment flow entities
+from .dataset_enrichment_build import DatasetEnrichmentBuild
+from .dataset_template import DatasetTemplate
 
 # Shared enums
 from .enums import (
-    TestFramework,
+    DatasetRepoValidationStatus,
     ExtractionStatus,
     ModelImportStatus,
     ModelSyncStatus,
-    DatasetRepoValidationStatus,
+    TestFramework,
 )
-
-# Raw data entities (shared across flows)
-from .raw_repository import RawRepository
-from .raw_build_run import RawBuildRun
+from .export_job import ExportFormat, ExportJob, ExportStatus
 
 # Model training flow entities
 from .model_repo_config import ModelRepoConfig
 from .model_training_build import ModelTrainingBuild
-
-# Dataset enrichment flow entities
-from .dataset_repo_config import DatasetRepoConfig
-from .dataset_enrichment_build import DatasetEnrichmentBuild
-
-# Dataset entities
-from .dataset import (
-    DatasetProject,
-    DatasetMapping,
-    DatasetStats,
-    ValidationStats,
-    DatasetValidationStatus,
-)
-from .dataset_build import DatasetBuild, DatasetBuildStatus
+from .notification import Notification, NotificationType
 
 # Other entities
 # from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
-from .user import User
-from .dataset_template import DatasetTemplate
 from .pipeline_run import (
-    PipelineRun,
     NodeExecutionResult,
-    PipelineRunStatus,
     NodeExecutionStatus,
+    PipelineRun,
+    PipelineRunStatus,
 )
-from .export_job import ExportJob, ExportStatus, ExportFormat
-from .notification import Notification, NotificationType
+from .raw_build_run import RawBuildRun
 
-# CI Provider
-from app.ci_providers.models import CIProvider
+# Raw data entities (shared across flows)
+from .raw_repository import RawRepository
+from .user import User
 
 __all__ = [
     # Base
@@ -68,7 +67,6 @@ __all__ = [
     "ModelRepoConfig",
     "ModelTrainingBuild",
     # Dataset enrichment flow
-    "DatasetRepoConfig",
     "DatasetEnrichmentBuild",
     # Dataset
     "DatasetProject",

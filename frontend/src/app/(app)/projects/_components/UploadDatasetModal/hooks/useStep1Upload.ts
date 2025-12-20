@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import Papa from "papaparse";
-import type { CSVPreview, MappingKey } from "../types";
+import type { CSVPreview, MappingKey, CIProviderMode } from "../types";
 
 interface UseStep1UploadReturn {
     file: File | null;
@@ -11,11 +11,17 @@ interface UseStep1UploadReturn {
     error: string | null;
     name: string;
     description: string;
+    ciProvider: string;
+    ciProviderMode: CIProviderMode;
+    ciProviderColumn: string;
     mappings: Record<MappingKey, string>;
     isMappingValid: boolean;
     fileInputRef: React.RefObject<HTMLInputElement | null>;
     setName: (name: string) => void;
     setDescription: (description: string) => void;
+    setCiProvider: (provider: string) => void;
+    setCiProviderMode: (mode: CIProviderMode) => void;
+    setCiProviderColumn: (column: string) => void;
     setError: (error: string | null) => void;
     handleFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
     handleMappingChange: (field: MappingKey, value: string) => void;
@@ -31,6 +37,7 @@ interface UseStep1UploadReturn {
         size_bytes?: number;
         preview?: Record<string, unknown>[];
         mapped_fields?: { build_id?: string | null; repo_name?: string | null };
+        ci_provider?: string;
     }) => void;
 }
 
@@ -45,6 +52,9 @@ export function useStep1Upload(): UseStep1UploadReturn {
         build_id: "",
         repo_name: "",
     });
+    const [ciProvider, setCiProvider] = useState("github_actions");
+    const [ciProviderMode, setCiProviderMode] = useState<CIProviderMode>("single");
+    const [ciProviderColumn, setCiProviderColumn] = useState("");
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,6 +68,9 @@ export function useStep1Upload(): UseStep1UploadReturn {
         setName("");
         setDescription("");
         setMappings({ build_id: "", repo_name: "" });
+        setCiProvider("github_actions");
+        setCiProviderMode("single");
+        setCiProviderColumn("");
     }, []);
 
     const resetMappings = useCallback(() => {
@@ -169,6 +182,7 @@ export function useStep1Upload(): UseStep1UploadReturn {
             size_bytes?: number;
             preview?: Record<string, unknown>[];
             mapped_fields?: { build_id?: string | null; repo_name?: string | null };
+            ci_provider?: string;
         }) => {
             setName(dataset.name || "");
             setDescription(dataset.description || "");
@@ -178,6 +192,10 @@ export function useStep1Upload(): UseStep1UploadReturn {
                     build_id: dataset.mapped_fields.build_id || "",
                     repo_name: dataset.mapped_fields.repo_name || "",
                 });
+            }
+
+            if (dataset.ci_provider) {
+                setCiProvider(dataset.ci_provider);
             }
 
             if (dataset.columns?.length) {
@@ -207,11 +225,17 @@ export function useStep1Upload(): UseStep1UploadReturn {
         error,
         name,
         description,
+        ciProvider,
+        ciProviderMode,
+        ciProviderColumn,
         mappings,
         isMappingValid,
         fileInputRef,
         setName,
         setDescription,
+        setCiProvider,
+        setCiProviderMode,
+        setCiProviderColumn,
         setError,
         handleFileSelect,
         handleMappingChange,

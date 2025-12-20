@@ -43,9 +43,7 @@ class BuildData(BaseModel):
 
     # Identifiers
     build_id: str = Field(..., description="Unique build identifier from CI")
-    build_number: Optional[int] = Field(
-        None, description="Sequential build number if available"
-    )
+    build_number: Optional[int] = Field(None, description="Sequential build number if available")
 
     # Repository info
     repo_name: str = Field(..., description="Full repository name (owner/repo)")
@@ -57,12 +55,8 @@ class BuildData(BaseModel):
     commit_author: Optional[str] = None
 
     # Status and Conclusion (separate concepts)
-    status: BuildStatus = (
-        BuildStatus.UNKNOWN
-    )  # Current state: pending/running/completed
-    conclusion: BuildConclusion = (
-        BuildConclusion.NONE
-    )  # Final result: success/failure/etc
+    status: BuildStatus = BuildStatus.UNKNOWN  # Current state: pending/running/completed
+    conclusion: BuildConclusion = BuildConclusion.NONE  # Final result: success/failure/etc
 
     # Timing
     created_at: Optional[datetime] = None

@@ -2,7 +2,6 @@
 
 from typing import List, Optional
 
-
 from app.entities.raw_repository import RawRepository
 from app.repositories.base import BaseRepository
 

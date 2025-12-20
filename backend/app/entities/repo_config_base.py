@@ -10,41 +10,22 @@ Design:
 - Contains only shared configuration fields
 """
 
-from typing import List
+from typing import Any, Dict
 
 from pydantic import Field
 
-from app.ci_providers.models import CIProvider
 from app.entities.base import BaseEntity
-from app.entities.enums import TestFramework
 
 
-class RepoConfigBase(BaseEntity):
+class FeatureConfigBase(BaseEntity):
     """
-    Common configuration for repository-related entities.
+    Common configuration for feature extraction.
 
     Includes shared, user-configurable settings such as languages,
     test frameworks, and CI provider.
     """
 
-    # Repository identification
-    full_name: str = Field(
-        ...,
-        description="Full repository name (e.g., 'owner/repo')",
-    )
-
-    # User-configurable settings
-    source_languages: List[str] = Field(
-        default_factory=list,
-        description="Programming languages for this repository",
-    )
-
-    test_frameworks: List[TestFramework] = Field(
-        default_factory=list,
-        description="Test frameworks",
-    )
-
-    ci_provider: CIProvider = Field(
-        default=CIProvider.GITHUB_ACTIONS,
-        description="CI/CD provider",
+    feature_configs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Feature extractors to run",
     )

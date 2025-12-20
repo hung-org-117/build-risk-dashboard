@@ -79,6 +79,29 @@ class CIProviderRegistry:
         return list(cls._providers.keys())
 
     @classmethod
+    def get_label(cls, provider_type: CIProvider) -> str:
+        """Get the human-readable label for a provider type from registered class."""
+        if provider_type not in cls._providers:
+            return provider_type.value
+
+        provider_class = cls._providers[provider_type]
+        # Create a minimal instance to get name property
+        config = ProviderConfig(provider=provider_type)
+        try:
+            instance = provider_class(config)
+            return instance.name
+        except Exception:
+            return provider_type.value
+
+    @classmethod
+    def get_all_with_labels(cls) -> list[dict[str, str]]:
+        """Get all registered providers with their labels."""
+        return [
+            {"value": provider.value, "label": cls.get_label(provider)}
+            for provider in cls._providers.keys()
+        ]
+
+    @classmethod
     def is_registered(cls, provider_type: CIProvider) -> bool:
         """Check if a provider type is registered."""
         return provider_type in cls._providers

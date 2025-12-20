@@ -200,7 +200,6 @@ def list_dataset_builds(
                         "started_at": raw_build.started_at,
                         "completed_at": raw_build.completed_at,
                         "duration_seconds": raw_build.duration_seconds,
-                        "jobs_count": raw_build.jobs_count,
                         "logs_available": raw_build.logs_available,
                         "web_url": raw_build.web_url,
                     }

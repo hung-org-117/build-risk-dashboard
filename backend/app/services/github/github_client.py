@@ -2,26 +2,25 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterator, List, Optional, Callable
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from bson import ObjectId
 import httpx
+from bson import ObjectId
 from pymongo.database import Database
 
-from app.services.github.redis_token_pool import RedisTokenPool
 from app.config import settings
 from app.services.github.exceptions import (
+    GithubAllRateLimitError,
     GithubConfigurationError,
     GithubRateLimitError,
     GithubRetryableError,
-    GithubAllRateLimitError,
     GithubSecondaryRateLimitError,
 )
 from app.services.github.github_app import (
-    github_app_configured,
     get_installation_token,
+    github_app_configured,
 )
-
+from app.services.github.redis_token_pool import RedisTokenPool
 
 API_PREVIEW_HEADERS = {
     "Accept": "application/vnd.github+json",
@@ -56,9 +55,7 @@ class GitHubClient:
 
         self._api_url = (api_url or settings.GITHUB_API_URL).rstrip("/")
         transport = httpx.HTTPTransport(retries=3)
-        self._rest = httpx.Client(
-            base_url=self._api_url, timeout=120, transport=transport
-        )
+        self._rest = httpx.Client(base_url=self._api_url, timeout=120, transport=transport)
 
     def _headers(self) -> Dict[str, str]:
         headers = {
@@ -83,11 +80,7 @@ class GitHubClient:
                         self._current_token_key,
                         int(remaining),
                         int(limit) if limit else 5000,
-                        (
-                            datetime.fromtimestamp(int(reset), tz=timezone.utc)
-                            if reset
-                            else None
-                        ),
+                        (datetime.fromtimestamp(int(reset), tz=timezone.utc) if reset else None),
                     )
                 except (TypeError, ValueError):
                     pass
@@ -127,16 +120,12 @@ class GitHubClient:
             try:
                 reset_dt = None
                 if reset_header:
-                    reset_dt = datetime.fromtimestamp(
-                        float(reset_header), tz=timezone.utc
-                    )
+                    reset_dt = datetime.fromtimestamp(float(reset_header), tz=timezone.utc)
                 self._redis_pool.mark_rate_limited(self._current_token_key, reset_dt)
             except (TypeError, ValueError):
                 pass
 
-        raise GithubRateLimitError(
-            "GitHub rate limit reached", retry_after=wait_seconds
-        )
+        raise GithubRateLimitError("GitHub rate limit reached", retry_after=wait_seconds)
 
     def _handle_secondary_rate_limit(self, response: httpx.Response) -> None:
         """
@@ -174,9 +163,7 @@ class GitHubClient:
             retry_after=wait_seconds,
         )
 
-    def _retry_on_rate_limit(
-        self, request_func: Callable[[], httpx.Response]
-    ) -> httpx.Response:
+    def _retry_on_rate_limit(self, request_func: Callable[[], httpx.Response]) -> httpx.Response:
         """Execute request. Rate limit errors are raised to caller."""
         response = request_func()
         return self._handle_response(response)
@@ -336,9 +323,7 @@ class GitHubClient:
             return self._get_with_cache(f"/repos/{full_name}/languages", ttl=86400)
         return self._rest_request("GET", f"/repos/{full_name}/languages")
 
-    def list_authenticated_repositories(
-        self, per_page: int = 10
-    ) -> List[Dict[str, Any]]:
+    def list_authenticated_repositories(self, per_page: int = 10) -> List[Dict[str, Any]]:
         params = {
             "per_page": per_page,
             "sort": "updated",
@@ -350,14 +335,10 @@ class GitHubClient:
     def list_user_installations(self) -> List[Dict[str, Any]]:
         """List installations accessible to the user access token."""
         response = self._rest_request("GET", "/user/installations")
-        installations = (
-            response.get("installations", []) if isinstance(response, dict) else []
-        )
+        installations = response.get("installations", []) if isinstance(response, dict) else []
         return installations
 
-    def search_repositories(
-        self, query: str, per_page: int = 10
-    ) -> List[Dict[str, Any]]:
+    def search_repositories(self, query: str, per_page: int = 10) -> List[Dict[str, Any]]:
         params = {"q": query, "per_page": per_page}
         response = self._rest_request("GET", "/search/repositories", params=params)
         items = response.get("items", []) if isinstance(response, dict) else []
@@ -376,9 +357,7 @@ class GitHubClient:
         Returns:
             Dict with 'workflow_runs' list and 'total_count'
         """
-        return self._rest_request(
-            "GET", f"/repos/{full_name}/actions/runs", params=params
-        )
+        return self._rest_request("GET", f"/repos/{full_name}/actions/runs", params=params)
 
     def paginate_workflow_runs(
         self, full_name: str, params: Optional[Dict[str, Any]] = None
@@ -441,9 +420,7 @@ class GitHubClient:
         return self._rest_request("GET", f"/repos/{full_name}/actions/runs/{run_id}")
 
     def list_workflow_jobs(self, full_name: str, run_id: int) -> List[Dict[str, Any]]:
-        jobs = self._rest_request(
-            "GET", f"/repos/{full_name}/actions/runs/{run_id}/jobs"
-        )
+        jobs = self._rest_request("GET", f"/repos/{full_name}/actions/runs/{run_id}/jobs")
         return jobs.get("jobs", [])
 
     def get_pull_request(self, full_name: str, pr_number: int) -> Dict[str, Any]:
@@ -473,17 +450,11 @@ class GitHubClient:
         """List comments on a commit with pagination."""
         return list(self._paginate(f"/repos/{full_name}/commits/{sha}/comments"))
 
-    def list_issue_comments(
-        self, full_name: str, issue_number: int
-    ) -> List[Dict[str, Any]]:
+    def list_issue_comments(self, full_name: str, issue_number: int) -> List[Dict[str, Any]]:
         """List issue/PR discussion comments with pagination."""
-        return list(
-            self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments")
-        )
+        return list(self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments"))
 
-    def list_review_comments(
-        self, full_name: str, pr_number: int
-    ) -> List[Dict[str, Any]]:
+    def list_review_comments(self, full_name: str, pr_number: int) -> List[Dict[str, Any]]:
         """List PR code review comments with pagination."""
         return list(self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments"))
 
@@ -575,19 +546,14 @@ class GitHubClient:
                         f"/repos/{full_name}/actions/runs/{run_id}/logs",
                         headers=self._headers(),
                     )
-                    if (
-                        response.status_code == 403
-                        and "rate limit" in response.text.lower()
-                    ):
+                    if response.status_code == 403 and "rate limit" in response.text.lower():
                         self._handle_rate_limit(response)
                     break
                 except GithubRateLimitError:
                     if not self._redis_pool:
                         raise
                     self._current_token_key = self._redis_pool.acquire_token()
-                    self._token = self._redis_pool.get_raw_token(
-                        self._current_token_key
-                    )
+                    self._token = self._redis_pool.get_raw_token(self._current_token_key)
                     continue
 
         except httpx.RequestError:  # pragma: no cover - network hiccup
@@ -621,13 +587,9 @@ def get_user_github_client(db: Database, user_id: str) -> GitHubClient:
     if not user_id:
         raise GithubConfigurationError("user_id is required for user auth")
 
-    identity = db.oauth_identities.find_one(
-        {"user_id": ObjectId(user_id), "provider": "github"}
-    )
+    identity = db.oauth_identities.find_one({"user_id": ObjectId(user_id), "provider": "github"})
     if not identity or not identity.get("access_token"):
-        raise GithubConfigurationError(
-            f"No GitHub OAuth token found for user {user_id}"
-        )
+        raise GithubConfigurationError(f"No GitHub OAuth token found for user {user_id}")
     return GitHubClient(token=identity["access_token"])
 
 

@@ -1,5 +1,3 @@
-"use client";
-
 import {
     AlertCircle,
     CheckCircle2,
@@ -13,6 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 import { ColumnSelector } from "./ColumnSelector";
 import type { StepUploadProps, MappingKey } from "./types";
@@ -22,6 +27,10 @@ export function StepUpload({
     uploading,
     name,
     description,
+    ciProvider,
+    ciProviderMode,
+    ciProviderColumn,
+    ciProviders,
     mappings,
     isMappingValid,
     isDatasetCreated,
@@ -29,6 +38,9 @@ export function StepUpload({
     onFileSelect,
     onNameChange,
     onDescriptionChange,
+    onCiProviderChange,
+    onCiProviderModeChange,
+    onCiProviderColumnChange,
     onMappingChange,
     onClearFile,
 }: StepUploadProps) {
@@ -137,6 +149,70 @@ export function StepUpload({
                         />
                     </div>
                 </div>
+            </div>
+
+            {/* CI Provider Selection */}
+            <div className="space-y-3">
+                <Label className="text-base font-semibold">CI Provider</Label>
+
+                {/* Mode Toggle */}
+                <div className="flex gap-2">
+                    <Button
+                        type="button"
+                        variant={ciProviderMode === "single" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => onCiProviderModeChange("single")}
+                    >
+                        Single Provider
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={ciProviderMode === "column" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => onCiProviderModeChange("column")}
+                    >
+                        Map from Column
+                    </Button>
+                </div>
+
+                {/* Mode-specific UI */}
+                {ciProviderMode === "single" ? (
+                    <div className="max-w-xs">
+                        <Select
+                            value={ciProvider}
+                            onValueChange={onCiProviderChange}
+                        >
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select CI Provider" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {ciProviders.map((provider) => (
+                                    <SelectItem key={provider.value} value={provider.value}>
+                                        {provider.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                            All builds in this dataset use the selected CI provider
+                        </p>
+                    </div>
+                ) : (
+                    <div className="max-w-xs space-y-1.5">
+                        <Label className="text-xs uppercase text-muted-foreground">
+                            CI Provider Column
+                        </Label>
+                        <ColumnSelector
+                            value={ciProviderColumn}
+                            columns={preview.columns}
+                            onChange={onCiProviderColumnChange}
+                            placeholder="Select column..."
+                        />
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                            Each row specifies its CI provider (github_actions, travis_ci, etc.)
+                        </p>
+                    </div>
+                )}
             </div>
 
             {/* Preview */}

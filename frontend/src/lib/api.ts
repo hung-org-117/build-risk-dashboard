@@ -364,9 +364,17 @@ export const datasetsApi = {
   delete: async (datasetId: string) => {
     await api.delete(`/datasets/${datasetId}`);
   },
-  listRepoConfigs: async (datasetId: string): Promise<DatasetRepoConfigDto[]> => {
-    const response = await api.get<{ items: DatasetRepoConfigDto[]; total: number }>(`/datasets/${datasetId}/repos`);
-    return response.data.items;
+  cancelValidation: async (datasetId: string) => {
+    const response = await api.delete<{ message: string; can_resume: boolean }>(
+      `/datasets/${datasetId}/validation`
+    );
+    return response.data;
+  },
+  startValidation: async (datasetId: string) => {
+    const response = await api.post<{ task_id: string; message: string }>(
+      `/datasets/${datasetId}/validate`
+    );
+    return response.data;
   },
 };
 
@@ -392,7 +400,22 @@ export const featuresApi = {
       languages: string[];
       frameworks: string[];
       frameworks_by_language: Record<string, string[]>;
+      ci_providers: Array<{ value: string; label: string }>;
     }>("/features/config");
+    return response.data;
+  },
+  getConfigRequirements: async (selectedFeatures: string[]) => {
+    const response = await api.post<{
+      fields: Array<{
+        name: string;
+        type: string;
+        scope: string;
+        required: boolean;
+        description: string;
+        default: unknown;
+        options: string[] | null;
+      }>;
+    }>("/features/config-requirements", { selected_features: selectedFeatures });
     return response.data;
   },
 };

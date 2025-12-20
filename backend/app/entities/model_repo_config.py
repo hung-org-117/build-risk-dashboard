@@ -12,13 +12,19 @@ from pydantic import Field
 
 from app.entities.base import PyObjectId
 from app.entities.enums import ModelImportStatus, ModelSyncStatus
-from app.entities.repo_config_base import RepoConfigBase
+from app.entities.repo_config_base import FeatureConfigBase
 
 
-class ModelRepoConfig(RepoConfigBase):
+class ModelRepoConfig(FeatureConfigBase):
     class Config:
         collection = "model_repo_configs"
         use_enum_values = True
+
+    # Repository identification (needed for querying)
+    full_name: str = Field(
+        ...,
+        description="Full repository name (e.g., 'owner/repo')",
+    )
 
     # User ownership
     user_id: PyObjectId = Field(

@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-
 from bson import ObjectId
 from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.dtos.admin_user import (
-    AdminUserResponse,
-    AdminUserListResponse,
     AdminUserCreateRequest,
+    AdminUserListResponse,
+    AdminUserResponse,
     AdminUserUpdateRequest,
 )
+from app.repositories.oauth_identity import OAuthIdentityRepository
 from app.repositories.user import UserRepository
 
 
@@ -22,6 +22,7 @@ class AdminUserService:
     def __init__(self, db: Database):
         self.db = db
         self.user_repo = UserRepository(db)
+        self.oauth_identity_repo = OAuthIdentityRepository(db)
 
     def _to_response(self, user) -> AdminUserResponse:
         """Convert User entity to AdminUserResponse."""
@@ -68,11 +69,7 @@ class AdminUserService:
         )
         return self._to_response(user)
 
-    def update_user(
-        self, user_id: str, payload: AdminUserUpdateRequest
-    ) -> AdminUserResponse:
-        """Update user profile (UC3: Update User Profile)."""
-        # Build updates dict excluding None values
+    def update_user(self, user_id: str, payload: AdminUserUpdateRequest) -> AdminUserResponse:
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
             raise HTTPException(
@@ -136,4 +133,4 @@ class AdminUserService:
             )
 
         # Also clean up OAuth identities for this user
-        self.db.oauth_identities.delete_many({"user_id": ObjectId(user_id)})
+        self.oauth_identity_repo.delete_by_user_id(ObjectId(user_id))

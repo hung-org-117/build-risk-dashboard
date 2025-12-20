@@ -5,29 +5,14 @@ from pymongo.database import Database
 
 from app.database.mongo import get_db
 from app.dtos.dataset_validation import (
-    ValidationStatusResponse,
-    StartValidationResponse,
     RepoValidationResult,
+    StartValidationResponse,
+    ValidationStatusResponse,
     ValidationSummaryResponse,
-    SaveReposRequest,
-    SaveReposResponse,
 )
 from app.services.dataset_validation_service import DatasetValidationService
 
-
 router = APIRouter(prefix="/datasets", tags=["dataset-validation"])
-
-
-@router.post("/{dataset_id}/repos", response_model=SaveReposResponse)
-async def save_repos(
-    dataset_id: str,
-    request: SaveReposRequest,
-    db: Database = Depends(get_db),
-):
-    """Update repository configs from Step 2."""
-    service = DatasetValidationService(db)
-    result = service.save_repos(dataset_id, request.repos)
-    return SaveReposResponse(**result)
 
 
 @router.post("/{dataset_id}/validate", response_model=StartValidationResponse)
@@ -62,9 +47,7 @@ async def cancel_validation(
     return await service.cancel_validation(dataset_id)
 
 
-@router.get(
-    "/{dataset_id}/validation-summary", response_model=ValidationSummaryResponse
-)
+@router.get("/{dataset_id}/validation-summary", response_model=ValidationSummaryResponse)
 async def get_validation_summary(
     dataset_id: str,
     db: Database = Depends(get_db),

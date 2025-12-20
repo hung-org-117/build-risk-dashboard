@@ -4,11 +4,13 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.ci_providers.models import CIProvider
+
 from .base import BaseEntity, PyObjectId
 
 
 class DatasetValidationStatus(str, Enum):
-    """Dataset validation status (for build validation - Step 3)."""
+    """Dataset validation status (unified validation)."""
 
     PENDING = "pending"
     VALIDATING = "validating"
@@ -17,20 +19,12 @@ class DatasetValidationStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class RepoValidationStatus(str, Enum):
-    """Repository validation status (during upload - before Step 2)."""
-
-    PENDING = "pending"
-    VALIDATING = "validating"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
 class DatasetMapping(BaseModel):
     """Mappings from dataset columns to required build identifiers."""
 
     build_id: Optional[str] = None
     repo_name: Optional[str] = None
+    ci_provider: Optional[str] = None  # Column name for CI provider (multi-provider mode)
 
 
 class DatasetStats(BaseModel):
@@ -39,6 +33,17 @@ class DatasetStats(BaseModel):
     missing_rate: float = 0.0
     duplicate_rate: float = 0.0
     build_coverage: float = 0.0
+
+
+class RepoValidationStats(BaseModel):
+    """Per-repository validation statistics."""
+
+    full_name: str
+    builds_total: int = 0
+    builds_found: int = 0
+    builds_not_found: int = 0
+    is_valid: bool = True
+    error: Optional[str] = None
 
 
 class ValidationStats(BaseModel):
@@ -51,6 +56,16 @@ class ValidationStats(BaseModel):
     builds_total: int = 0
     builds_found: int = 0
     builds_not_found: int = 0
+    repo_stats: List[RepoValidationStats] = Field(default_factory=list)
+
+
+class BuildValidationFilters(BaseModel):
+    """Filters applied during build validation."""
+
+    exclude_bots: bool = False
+    exclude_cancelled: bool = True
+    exclude_errored: bool = False
+    only_completed: bool = True
 
 
 class DatasetProject(BaseEntity):
@@ -69,6 +84,16 @@ class DatasetProject(BaseEntity):
     stats: DatasetStats = Field(default_factory=DatasetStats)
     preview: List[Dict[str, Any]] = Field(default_factory=list)
 
+    # CI Provider configuration
+    ci_provider: Optional[CIProvider] = Field(
+        default=CIProvider.GITHUB_ACTIONS,
+        description="CI provider for the dataset (None if using column mapping)",
+    )
+    build_filters: BuildValidationFilters = Field(
+        default_factory=BuildValidationFilters,
+        description="Filters applied during build validation",
+    )
+
     # Validation status
     validation_status: DatasetValidationStatus = DatasetValidationStatus.PENDING
     validation_task_id: Optional[str] = None
@@ -79,13 +104,12 @@ class DatasetProject(BaseEntity):
     validation_error: Optional[str] = None
 
     validated_raw_repo_ids: List[PyObjectId] = Field(default_factory=list)
+    repo_ci_providers: Dict[PyObjectId, CIProvider] = Field(
+        default_factory=dict,
+        description="CI provider per repo: {raw_repo_id: ci_provider}",
+    )
 
-    # Repo validation status (during upload, before Step 2)
-    repo_validation_status: RepoValidationStatus = RepoValidationStatus.PENDING
-    repo_validation_task_id: Optional[str] = None
-    repo_validation_error: Optional[str] = None
-
-    # Setup progress tracking (1=uploaded, 2=configured, 3=validated)
+    # Setup progress tracking (1=uploaded, 2=validated)
     setup_step: int = 1
 
     # Enrichment tracking

@@ -12,12 +12,12 @@ Key design principles:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import Field
 
+from app.ci_providers.models import BuildConclusion, BuildStatus, CIProvider
 from app.entities.base import BaseEntity, PyObjectId
-from app.ci_providers.models import CIProvider, BuildStatus, BuildConclusion
 
 
 class RawBuildRun(BaseEntity):
@@ -57,18 +57,18 @@ class RawBuildRun(BaseEntity):
 
     # Repository info
     repo_name: str = Field(
-        ...,
+        default="",
         description="Full repository name (owner/repo)",
     )
 
     branch: str = Field(
-        ...,
+        default="",
         description="Branch name",
     )
 
     # Commit info
     commit_sha: str = Field(
-        ...,
+        default="",
         description="Git commit SHA that triggered this run",
     )
 
@@ -127,22 +127,6 @@ class RawBuildRun(BaseEntity):
     web_url: Optional[str] = Field(
         None,
         description="URL to view the build in CI provider UI",
-    )
-
-    logs_url: Optional[str] = Field(
-        None,
-        description="URL to build logs",
-    )
-
-    # Jobs information
-    jobs_count: int = Field(
-        default=0,
-        description="Number of jobs in this run",
-    )
-
-    jobs_metadata: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="List of jobs with their status/conclusion",
     )
 
     # Log storage

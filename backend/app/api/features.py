@@ -2,18 +2,20 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query
 
-from app.services.feature_service import FeatureService
 from app.dtos.feature import (
+    ConfigFieldSpec,
+    ConfigRequirementsRequest,
+    ConfigRequirementsResponse,
+    DAGEdgeResponse,
+    DAGNodeResponse,
+    DAGResponse,
+    ExecutionLevelResponse,
     FeatureDefinitionResponse,
     FeatureListResponse,
     FeatureSummaryResponse,
     ValidationResponse,
-    DAGNodeResponse,
-    DAGEdgeResponse,
-    ExecutionLevelResponse,
-    DAGResponse,
 )
-
+from app.services.feature_service import FeatureService
 
 router = APIRouter(prefix="/features", tags=["Feature Definitions"])
 service = FeatureService()
@@ -21,17 +23,13 @@ service = FeatureService()
 
 @router.get("/dag", response_model=DAGResponse)
 def get_feature_dag(
-    selected_features: Optional[List[str]] = Query(
-        None, description="Filter to specific features"
-    ),
+    selected_features: Optional[List[str]] = Query(None, description="Filter to specific features"),
 ):
     result = service.get_feature_dag(selected_features)
     return DAGResponse(
         nodes=[DAGNodeResponse(**n) for n in result["nodes"]],
         edges=[DAGEdgeResponse(**e) for e in result["edges"]],
-        execution_levels=[
-            ExecutionLevelResponse(**l) for l in result["execution_levels"]
-        ],
+        execution_levels=[ExecutionLevelResponse(**l) for l in result["execution_levels"]],
         total_features=result["total_features"],
         total_nodes=result["total_nodes"],
     )
@@ -78,17 +76,20 @@ def list_features(
 @router.get("/config")
 def get_feature_config():
     """
-    Get configuration for feature extraction including supported languages and test frameworks.
+    Get configuration for feature extraction including supported languages,
+    test frameworks, and CI providers.
 
     Returns:
         - languages: List of supported programming languages
         - frameworks: List of all supported test framework names
         - frameworks_by_language: Test frameworks grouped by language
+        - ci_providers: List of supported CI providers with labels
 
-    Use this to drive UI selection for source languages and test frameworks.
+    Use this to drive UI selection for source languages, test frameworks, and CI providers.
     """
-    from app.tasks.pipeline.feature_dag.log_parsers import LogParserRegistry
+    from app.ci_providers.factory import CIProviderRegistry
     from app.tasks.pipeline.feature_dag.languages.registry import LanguageRegistry
+    from app.tasks.pipeline.feature_dag.log_parsers import LogParserRegistry
 
     log_parser_registry = LogParserRegistry()
 
@@ -96,6 +97,7 @@ def get_feature_config():
         "languages": LanguageRegistry.get_supported_languages(),
         "frameworks": log_parser_registry.get_supported_frameworks(),
         "frameworks_by_language": log_parser_registry.get_frameworks_by_language(),
+        "ci_providers": CIProviderRegistry.get_all_with_labels(),
     }
 
 
@@ -131,3 +133,68 @@ def get_feature_summary():
 def validate_features():
     result = service.validate_features()
     return ValidationResponse(**result)
+
+
+@router.post("/config-requirements", response_model=ConfigRequirementsResponse)
+def get_config_requirements(request: ConfigRequirementsRequest):
+    """
+    Get required config inputs for selected features.
+
+    Given a list of selected features, this endpoint analyzes which Hamilton
+    feature functions are needed and returns all config fields they require.
+
+    Example request:
+        {
+            "selected_features": ["git_diff_src_churn", "tr_log_frameworks", ...]
+        }
+
+    Example response:
+        {
+            "fields": [
+                {
+                    "name": "source_languages",
+                    "type": "list",
+                    "required": true,
+                    "description": "Main programming languages",
+                    "default": [],
+                    "options": ["python", "javascript", "java", ...]
+                }
+            ]
+        }
+    """
+    from app.tasks.pipeline.constants import HAMILTON_MODULES
+    from app.tasks.pipeline.feature_dag._metadata import collect_config_requirements
+    from app.tasks.pipeline.feature_dag.languages.registry import LanguageRegistry
+    from app.tasks.pipeline.feature_dag.log_parsers import LogParserRegistry
+
+    # Collect requirements from features
+    requirements = collect_config_requirements(request.selected_features, HAMILTON_MODULES)
+
+    # Build response with enhanced options from registries
+    fields = []
+    log_parser_registry = LogParserRegistry()
+
+    for field_name, spec in requirements.items():
+        field_spec = ConfigFieldSpec(
+            name=field_name,
+            type=spec["type"],
+            scope=spec.get("scope", "repo"),  # Include scope
+            required=spec["required"],
+            description=spec["description"],
+            default=spec.get("default"),
+            options=None,
+        )
+
+        # Add options for known fields
+        if field_name == "source_languages":
+            field_spec.options = LanguageRegistry.get_supported_languages()
+        elif field_name == "test_frameworks":
+            field_spec.options = log_parser_registry.get_supported_frameworks()
+        elif field_name == "ci_provider":
+            from app.ci_providers.factory import CIProviderRegistry
+
+            field_spec.options = [p.value for p in CIProviderRegistry.get_all_types()]
+
+        fields.append(field_spec)
+
+    return ConfigRequirementsResponse(fields=fields)

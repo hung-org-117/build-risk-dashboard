@@ -19,11 +19,16 @@ import {
     ViewToggle,
     TemplateSelector,
 } from "@/components/features/FeatureSelection";
+import { FeatureConfigForm } from "./FeatureConfigForm";
 
 interface FeatureSelectionCardProps {
     datasetId: string;
     rowCount: number;
-    onCreateVersion: (features: string[], name?: string) => Promise<void>;
+    onCreateVersion: (
+        features: string[],
+        featureConfigs: Record<string, unknown>,
+        name?: string
+    ) => Promise<void>;
     isCreating: boolean;
     hasActiveVersion: boolean;
 }
@@ -37,6 +42,7 @@ export function FeatureSelectionCard({
 }: FeatureSelectionCardProps) {
     const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
     const [versionName, setVersionName] = useState("");
+    const [featureConfigs, setFeatureConfigs] = useState<Record<string, unknown>>({});
 
     const {
         extractorNodes,
@@ -75,8 +81,13 @@ export function FeatureSelectionCard({
     // Handle create version
     const handleCreateVersion = async () => {
         if (selectedFeatures.size === 0) return;
-        await onCreateVersion(Array.from(selectedFeatures), versionName || undefined);
+        await onCreateVersion(
+            Array.from(selectedFeatures),
+            featureConfigs,
+            versionName || undefined
+        );
         setVersionName("");
+        setFeatureConfigs({});
     };
 
     const isDisabled = isCreating || hasActiveVersion || selectedFeatures.size === 0;
@@ -135,6 +146,13 @@ export function FeatureSelectionCard({
                     onRemoveFeature={toggleFeature}
                     onClearAll={clearSelection}
                     rowCount={rowCount}
+                />
+
+                {/* Feature Configuration Form */}
+                <FeatureConfigForm
+                    selectedFeatures={selectedFeatures}
+                    onChange={setFeatureConfigs}
+                    disabled={isDisabled}
                 />
 
                 {/* Version Name and Create Button */}

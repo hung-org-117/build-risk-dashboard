@@ -51,6 +51,7 @@ def upsert_github_identity(
 class UserService:
     def __init__(self, db: Database):
         self.db = db
+        self.user_repo = UserRepository(db)
 
     def list_users(self) -> List[UserResponse]:
         """List all users"""
@@ -60,15 +61,15 @@ class UserService:
 
     def get_user_by_id(self, user_id: str) -> UserResponse:
         """Get user by ID"""
-        user_doc = self.db.users.find_one({"_id": ObjectId(user_id)})
+        user = self.user_repo.find_by_id(ObjectId(user_id))
 
-        if not user_doc:
+        if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found",
             )
 
-        return UserResponse.model_validate(user_doc)
+        return UserResponse.model_validate(user.model_dump(by_alias=True))
 
     def update_user(self, user_id: str, update_data: UserUpdate) -> UserResponse:
         """Update user details"""

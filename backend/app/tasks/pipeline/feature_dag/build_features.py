@@ -11,16 +11,17 @@ from typing import List, Optional
 from hamilton.function_modifiers import tag
 
 from app.tasks.pipeline.feature_dag._inputs import (
-    RepoInput,
     BuildRunInput,
-    RepoConfigInput,
+    FeatureConfigInput,
+    RepoInput,
 )
 from app.tasks.pipeline.feature_dag._metadata import (
-    feature_metadata,
     FeatureCategory,
     FeatureDataType,
     FeatureResource,
     OutputFormat,
+    feature_metadata,
+    requires_config,
 )
 
 
@@ -135,9 +136,18 @@ def tr_duration(build_run: BuildRunInput) -> float:
     output_format=OutputFormat.COMMA_SEPARATED,
 )
 @tag(group="build_log")
-def tr_log_lan_all(repo_config: RepoConfigInput) -> List[str]:
+@requires_config(
+    source_languages={
+        "type": "list",
+        "scope": "repo",
+        "required": False,
+        "description": "Programming languages used in the repository",
+        "default": [],
+    }
+)
+def tr_log_lan_all(feature_config: FeatureConfigInput) -> List[str]:
     """All source languages for the repository."""
-    return repo_config.source_languages
+    return feature_config.get("source_languages", [], scope="repo")
 
 
 @feature_metadata(
@@ -175,9 +185,18 @@ def gh_lang(repo: RepoInput) -> Optional[str]:
     required_resources=[FeatureResource.REPO_CONFIG],
 )
 @tag(group="metadata")
-def ci_provider(repo_config: RepoConfigInput) -> str:
+@requires_config(
+    ci_provider={
+        "type": "string",
+        "scope": "repo",
+        "required": True,
+        "description": "CI/CD provider (e.g., github_actions, travis_ci)",
+        "default": "github_actions",
+    }
+)
+def ci_provider(feature_config: FeatureConfigInput) -> str:
     """CI/CD provider name."""
-    return repo_config.ci_provider
+    return feature_config.get("ci_provider", "github_actions", scope="repo")
 
 
 @feature_metadata(

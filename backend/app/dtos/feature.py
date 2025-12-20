@@ -1,6 +1,6 @@
 """Feature-related DTOs (Data Transfer Objects)."""
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -92,3 +92,28 @@ class DAGResponse(BaseModel):
     execution_levels: List[ExecutionLevelResponse]
     total_features: int
     total_nodes: int
+
+
+# Config Requirements DTOs
+class ConfigFieldSpec(BaseModel):
+    """Specification for a single config field required by features."""
+
+    name: str
+    type: str  # "string", "list", "boolean", "integer"
+    scope: str  # "global" or "repo"
+    required: bool
+    description: str
+    default: Optional[Any] = None
+    options: Optional[List[str]] = None  # For dropdowns (e.g., list of languages)
+
+
+class ConfigRequirementsRequest(BaseModel):
+    """Request to get config requirements for selected features."""
+
+    selected_features: List[str]
+
+
+class ConfigRequirementsResponse(BaseModel):
+    """Response containing all required config fields for selected features."""
+
+    fields: List[ConfigFieldSpec]

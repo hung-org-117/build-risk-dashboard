@@ -80,6 +80,7 @@ class DatasetVersionService:
         user_id: str,
         role: str,
         selected_features: List[str],
+        feature_configs: Optional[dict] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
     ) -> DatasetVersion:
@@ -139,6 +140,7 @@ class DatasetVersionService:
                 name=name or "",
                 description=description,
                 selected_features=selected_features,
+                feature_configs=feature_configs or {},
                 total_rows=dataset.rows or 0,
                 status=VersionStatus.PENDING,
             )

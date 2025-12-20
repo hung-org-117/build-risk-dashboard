@@ -19,8 +19,18 @@ class DatasetStatsDto(BaseModel):
     build_coverage: float = 0.0
 
 
-class ValidationStatsDto(BaseModel):
+class RepoValidationStatsDto(BaseModel):
+    """Per-repository validation statistics."""
 
+    full_name: str
+    builds_total: int = 0
+    builds_found: int = 0
+    builds_not_found: int = 0
+    is_valid: bool = True
+    error: Optional[str] = None
+
+
+class ValidationStatsDto(BaseModel):
     repos_total: int = 0
     repos_valid: int = 0
     repos_invalid: int = 0
@@ -28,6 +38,7 @@ class ValidationStatsDto(BaseModel):
     builds_total: int = 0
     builds_found: int = 0
     builds_not_found: int = 0
+    repo_stats: List[RepoValidationStatsDto] = Field(default_factory=list)
 
 
 class DatasetResponse(BaseModel):
@@ -47,7 +58,7 @@ class DatasetResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    # Validation status fields (build validation - Step 3)
+    # Validation status fields (unified validation)
     validation_status: str = "pending"
     validation_task_id: Optional[str] = None
     validation_started_at: Optional[datetime] = None
@@ -56,12 +67,7 @@ class DatasetResponse(BaseModel):
     validation_stats: ValidationStatsDto = Field(default_factory=ValidationStatsDto)
     validation_error: Optional[str] = None
 
-    # Repo validation status (during upload - before Step 2)
-    repo_validation_status: str = "pending"
-    repo_validation_task_id: Optional[str] = None
-    repo_validation_error: Optional[str] = None
-
-    # Setup progress tracking (1=uploaded, 2=configured, 3=validated)
+    # Setup progress tracking (1=uploaded, 2=validated)
     setup_step: int = 1
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)

@@ -32,6 +32,7 @@ interface VersionListResponse {
 
 interface CreateVersionRequest {
     selected_features: string[];
+    feature_configs?: Record<string, unknown>;
     name?: string;
     description?: string;
 }
