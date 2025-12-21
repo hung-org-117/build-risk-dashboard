@@ -25,8 +25,9 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronDown, ChevronUp, Settings, Globe, Folder, AlertCircle } from "lucide-react";
-import { featuresApi } from "@/lib/api";
+import { ChevronDown, ChevronUp, Settings, Globe, AlertCircle } from "lucide-react";
+import { featuresApi, datasetsApi } from "@/lib/api";
+import { RepoConfigSection } from "./RepoConfigSection";
 
 /** Config field spec from API */
 interface ConfigFieldSpec {
@@ -39,34 +40,90 @@ interface ConfigFieldSpec {
     options: string[] | null;
 }
 
+interface RepoInfo {
+    repo_name: string;
+    validation_status: string;
+}
+
+interface RepoConfig {
+    source_languages: string[];
+    test_frameworks: string[];
+}
+
+/** Structure for configs: { global: {...}, repos: {...} } */
+interface FeatureConfigsData {
+    global: Record<string, unknown>;
+    repos: Record<string, RepoConfig>;
+}
+
 interface FeatureConfigFormProps {
+    datasetId: string;
     selectedFeatures: Set<string>;
-    onChange: (configs: Record<string, unknown>) => void;
+    onChange: (configs: FeatureConfigsData) => void;
     disabled?: boolean;
 }
 
 export function FeatureConfigForm({
+    datasetId,
     selectedFeatures,
     onChange,
     disabled = false,
 }: FeatureConfigFormProps) {
     const [isOpen, setIsOpen] = useState(false);
-    const [configs, setConfigs] = useState<Record<string, unknown>>({});
+    const [globalConfigs, setGlobalConfigs] = useState<Record<string, unknown>>({});
+    const [repoConfigs, setRepoConfigs] = useState<Record<string, RepoConfig>>({});
     const [configFields, setConfigFields] = useState<ConfigFieldSpec[]>([]);
+    const [repos, setRepos] = useState<RepoInfo[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingRepos, setIsLoadingRepos] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Memoize selected features array to prevent unnecessary API calls
+    // Memoize selected features array
     const selectedFeaturesArray = useMemo(
         () => Array.from(selectedFeatures),
         [selectedFeatures]
     );
 
-    // Fetch config requirements from API when selected features change
+    // Separate fields by scope
+    const { globalFields, repoFields } = useMemo(() => {
+        const global = configFields.filter(f => f.scope === "global");
+        const repo = configFields.filter(f => f.scope === "repo");
+        return { globalFields: global, repoFields: repo };
+    }, [configFields]);
+
+    // Fetch repos from dataset
+    useEffect(() => {
+        if (!datasetId) return;
+
+        let isCancelled = false;
+
+        async function fetchRepos() {
+            setIsLoadingRepos(true);
+            try {
+                const summary = await datasetsApi.getValidationSummary(datasetId);
+                if (!isCancelled && summary.repos) {
+                    setRepos(summary.repos.map(r => ({
+                        repo_name: r.repo_name,
+                        validation_status: r.validation_status,
+                    })));
+                }
+            } catch (err) {
+                console.error("Failed to fetch repos:", err);
+                // Non-blocking error - repos section just won't show
+            } finally {
+                if (!isCancelled) setIsLoadingRepos(false);
+            }
+        }
+
+        fetchRepos();
+        return () => { isCancelled = true; };
+    }, [datasetId]);
+
+    // Fetch config requirements when selected features change
     useEffect(() => {
         if (selectedFeaturesArray.length === 0) {
             setConfigFields([]);
-            setConfigs({});
+            setGlobalConfigs({});
             return;
         }
 
@@ -82,16 +139,18 @@ export function FeatureConfigForm({
                 if (!isCancelled) {
                     setConfigFields(response.fields);
 
-                    // Initialize configs with defaults
-                    const defaultConfigs: Record<string, unknown> = {};
-                    response.fields.forEach((field) => {
-                        if (field.default !== null && field.default !== undefined) {
-                            defaultConfigs[field.name] = field.default;
-                        } else if (field.type === "list") {
-                            defaultConfigs[field.name] = [];
-                        }
-                    });
-                    setConfigs((prev) => ({ ...defaultConfigs, ...prev }));
+                    // Initialize global configs with defaults
+                    const defaultGlobal: Record<string, unknown> = {};
+                    response.fields
+                        .filter(f => f.scope === "global")
+                        .forEach((field) => {
+                            if (field.default !== null && field.default !== undefined) {
+                                defaultGlobal[field.name] = field.default;
+                            } else if (field.type === "list") {
+                                defaultGlobal[field.name] = [];
+                            }
+                        });
+                    setGlobalConfigs((prev) => ({ ...defaultGlobal, ...prev }));
                 }
             } catch (err) {
                 if (!isCancelled) {
@@ -105,7 +164,6 @@ export function FeatureConfigForm({
             }
         }
 
-        // Debounce API call slightly
         const timeoutId = setTimeout(fetchConfigRequirements, 300);
 
         return () => {
@@ -116,15 +174,23 @@ export function FeatureConfigForm({
 
     // Update parent when configs change
     useEffect(() => {
-        onChange(configs);
-    }, [configs, onChange]);
+        onChange({
+            global: globalConfigs,
+            repos: repoConfigs,
+        });
+    }, [globalConfigs, repoConfigs, onChange]);
 
-    // Handle config value change
-    const handleConfigChange = useCallback((key: string, value: unknown) => {
-        setConfigs((prev) => ({
+    // Handle global config value change
+    const handleGlobalConfigChange = useCallback((key: string, value: unknown) => {
+        setGlobalConfigs((prev) => ({
             ...prev,
             [key]: value,
         }));
+    }, []);
+
+    // Handle repo configs change
+    const handleRepoConfigsChange = useCallback((configs: Record<string, RepoConfig>) => {
+        setRepoConfigs(configs);
     }, []);
 
     // Parse comma-separated string to array
@@ -135,77 +201,12 @@ export function FeatureConfigForm({
             .filter((v) => v.length > 0);
     };
 
-    // Render input based on field type and options
-    const renderConfigInput = (field: ConfigFieldSpec) => {
-        const currentValue = configs[field.name] ?? field.default ?? "";
-
-        // If options are available, use Select
-        if (field.options && field.options.length > 0) {
-            if (field.type === "list") {
-                // Multi-select with clickable badges
-                const arrayValue = (currentValue as string[]) || [];
-
-                const toggleOption = (option: string) => {
-                    if (disabled) return;
-                    const lowerOption = option.toLowerCase();
-                    const newValue = arrayValue.includes(lowerOption)
-                        ? arrayValue.filter((v) => v !== lowerOption)
-                        : [...arrayValue, lowerOption];
-                    handleConfigChange(field.name, newValue);
-                };
-
-                return (
-                    <div className="flex flex-col gap-2">
-                        {/* Option badges grid */}
-                        <div className="flex flex-wrap gap-1.5">
-                            {field.options.map((option) => {
-                                const isSelected = arrayValue.includes(option.toLowerCase());
-                                return (
-                                    <Badge
-                                        key={option}
-                                        variant={isSelected ? "default" : "outline"}
-                                        className={`cursor-pointer transition-colors ${disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-primary/80"
-                                            } ${isSelected ? "" : "hover:bg-muted"}`}
-                                        onClick={() => toggleOption(option)}
-                                    >
-                                        {option}
-                                    </Badge>
-                                );
-                            })}
-                        </div>
-                        {/* Selected count */}
-                        {arrayValue.length > 0 && (
-                            <span className="text-xs text-muted-foreground">
-                                {arrayValue.length} selected: {arrayValue.join(", ")}
-                            </span>
-                        )}
-                    </div>
-                );
-            } else {
-                // Single select
-                return (
-                    <Select
-                        value={String(currentValue || "")}
-                        onValueChange={(value) => handleConfigChange(field.name, value)}
-                        disabled={disabled}
-                    >
-                        <SelectTrigger className="flex-1">
-                            <SelectValue placeholder="Select..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {field.options.map((option) => (
-                                <SelectItem key={option} value={option}>
-                                    {option}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                );
-            }
-        }
+    // Render input for global fields
+    const renderGlobalConfigInput = (field: ConfigFieldSpec) => {
+        const currentValue = globalConfigs[field.name] ?? field.default ?? "";
 
         // Number input
-        if (field.type === "int" || field.type === "number") {
+        if (field.type === "int" || field.type === "integer" || field.type === "number") {
             return (
                 <Input
                     type="number"
@@ -213,7 +214,7 @@ export function FeatureConfigForm({
                     max={365}
                     value={currentValue as number}
                     onChange={(e) =>
-                        handleConfigChange(
+                        handleGlobalConfigChange(
                             field.name,
                             parseInt(e.target.value) || field.default || 0
                         )
@@ -221,6 +222,28 @@ export function FeatureConfigForm({
                     disabled={disabled}
                     className="w-24"
                 />
+            );
+        }
+
+        // Boolean/Select
+        if (field.options && field.options.length > 0 && field.type !== "list") {
+            return (
+                <Select
+                    value={String(currentValue || "")}
+                    onValueChange={(value) => handleGlobalConfigChange(field.name, value)}
+                    disabled={disabled}
+                >
+                    <SelectTrigger className="w-40">
+                        <SelectValue placeholder="Select..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {field.options.map((option) => (
+                            <SelectItem key={option} value={option}>
+                                {option}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
             );
         }
 
@@ -233,7 +256,7 @@ export function FeatureConfigForm({
                     placeholder="Enter values separated by commas"
                     value={arrayValue.join(", ")}
                     onChange={(e) =>
-                        handleConfigChange(field.name, parseArrayValue(e.target.value))
+                        handleGlobalConfigChange(field.name, parseArrayValue(e.target.value))
                     }
                     disabled={disabled}
                     className="flex-1"
@@ -246,7 +269,7 @@ export function FeatureConfigForm({
             <Input
                 type="text"
                 value={String(currentValue)}
-                onChange={(e) => handleConfigChange(field.name, e.target.value)}
+                onChange={(e) => handleGlobalConfigChange(field.name, e.target.value)}
                 disabled={disabled}
                 className="flex-1"
             />
@@ -257,6 +280,9 @@ export function FeatureConfigForm({
     if (selectedFeaturesArray.length === 0 || (!isLoading && configFields.length === 0)) {
         return null;
     }
+
+    const hasGlobalFields = globalFields.length > 0;
+    const hasRepoFields = repoFields.length > 0;
 
     return (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -294,7 +320,7 @@ export function FeatureConfigForm({
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
-                    <CardContent className="pt-0 space-y-4">
+                    <CardContent className="pt-0 space-y-6">
                         {error && (
                             <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 text-destructive text-sm">
                                 <AlertCircle className="h-4 w-4" />
@@ -309,46 +335,50 @@ export function FeatureConfigForm({
                             </div>
                         ) : (
                             <>
-                                {/* Global Configs Section */}
-                                <div className="space-y-3">
-                                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                                        <Globe className="h-4 w-4" />
-                                        Global Settings
-                                    </div>
-
-                                    {configFields.map((field) => (
-                                        <div
-                                            key={field.name}
-                                            className="grid grid-cols-[140px_1fr] gap-3 items-start"
-                                        >
-                                            <Label
-                                                htmlFor={field.name}
-                                                className="text-sm pt-2 flex items-center gap-1"
-                                            >
-                                                {field.name.replace(/_/g, " ")}
-                                                {field.required && (
-                                                    <span className="text-destructive">*</span>
-                                                )}
-                                            </Label>
-                                            <div className="flex flex-col gap-1">
-                                                {renderConfigInput(field)}
-                                                <span className="text-xs text-muted-foreground">
-                                                    {field.description}
-                                                </span>
-                                            </div>
+                                {/* Global Settings Section */}
+                                {hasGlobalFields && (
+                                    <div className="space-y-3">
+                                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                                            <Globe className="h-4 w-4" />
+                                            Global Settings
                                         </div>
-                                    ))}
-                                </div>
 
-                                {/* Info about per-repo configs */}
-                                <div className="flex items-start gap-2 p-3 rounded-md bg-muted/50 text-xs text-muted-foreground">
-                                    <Folder className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                                    <div>
-                                        <strong>Note:</strong> These are global settings applied to
-                                        all repositories. Per-repository overrides are not yet
-                                        supported in the UI.
+                                        {globalFields.map((field) => (
+                                            <div
+                                                key={field.name}
+                                                className="grid grid-cols-[140px_1fr] gap-3 items-start"
+                                            >
+                                                <Label
+                                                    htmlFor={field.name}
+                                                    className="text-sm pt-2 flex items-center gap-1"
+                                                >
+                                                    {field.name.replace(/_/g, " ")}
+                                                    {field.required && (
+                                                        <span className="text-destructive">*</span>
+                                                    )}
+                                                </Label>
+                                                <div className="flex flex-col gap-1">
+                                                    {renderGlobalConfigInput(field)}
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {field.description}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                </div>
+                                )}
+
+                                {/* Repository Settings Section */}
+                                {hasRepoFields && (
+                                    <RepoConfigSection
+                                        repos={repos}
+                                        repoFields={repoFields}
+                                        repoConfigs={repoConfigs}
+                                        onChange={handleRepoConfigsChange}
+                                        disabled={disabled}
+                                        isLoading={isLoadingRepos}
+                                    />
+                                )}
                             </>
                         )}
                     </CardContent>

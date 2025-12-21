@@ -8,14 +8,32 @@ Tools:
 - Trivy: Vulnerability scanning (sync)
 """
 
-from .base import IntegrationTool, ToolType, ScanMode
-from .registry import tool_registry, get_tool, get_available_tools
+from .base import (
+    IntegrationTool,
+    MetricCategory,
+    MetricDataType,
+    MetricDefinition,
+    ScanMode,
+    ToolType,
+)
+from .registry import (
+    get_all_metrics_grouped,
+    get_all_tools,
+    get_available_tools,
+    get_tool,
+    tool_registry,
+)
 
 __all__ = [
     "IntegrationTool",
     "ToolType",
     "ScanMode",
+    "MetricCategory",
+    "MetricDataType",
+    "MetricDefinition",
     "tool_registry",
     "get_tool",
     "get_available_tools",
+    "get_all_tools",
+    "get_all_metrics_grouped",
 ]

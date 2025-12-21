@@ -132,15 +132,41 @@ class FeatureConfigInput:
     @classmethod
     def from_entity(cls, config: Any, current_repo: Optional[str] = None) -> FeatureConfigInput:
         """
-        Create from ModelRepoConfig or DatasetVersion entity.
+        Create from ModelRepoConfig, DatasetVersion entity, or direct feature_configs dict.
 
         Args:
-            config: Entity with feature_configs field
+            config: Entity with feature_configs field, OR feature_configs dict directly
+            current_repo: Optional repo full_name for repo-scoped lookups
+        """
+        # Support direct dict input (for simpler API)
+        if isinstance(config, dict):
+            return cls(
+                id="direct",
+                feature_configs=config,
+                current_repo=current_repo,
+            )
+
+        # Entity input - extract feature_configs from entity
+        return cls(
+            id=str(getattr(config, "id", "unknown")),
+            feature_configs=getattr(config, "feature_configs", {}) or {},
+            current_repo=current_repo,
+        )
+
+    @classmethod
+    def from_dict(
+        cls, feature_configs: Dict[str, Any], current_repo: Optional[str] = None
+    ) -> FeatureConfigInput:
+        """
+        Create directly from feature_configs dict.
+
+        Args:
+            feature_configs: The configuration dict
             current_repo: Optional repo full_name for repo-scoped lookups
         """
         return cls(
-            id=str(config.id),
-            feature_configs=getattr(config, "feature_configs", {}) or {},
+            id="dict",
+            feature_configs=feature_configs or {},
             current_repo=current_repo,
         )
 
@@ -224,28 +250,31 @@ class HamiltonInputs:
     repo: RepoInput
     build_run: BuildRunInput
     feature_config: FeatureConfigInput
+    build_logs: BuildLogsInput
     is_commit_available: bool
     effective_sha: Optional[str] = None
 
 
 def build_hamilton_inputs(
     raw_repo: RawRepository,
-    repo_config: Any,  # ModelRepoConfig or DatasetRepoConfig
+    feature_config: Dict[str, Any],
     build_run: RawBuildRun,
     repo_path: Path,
     worktrees_base: Optional[Path] = None,
+    logs_base: Optional[Path] = None,
 ) -> HamiltonInputs:
     """
     Build all Hamilton input objects from entities.
 
-    Uses effective_sha from DB if available (set during ingestion for fork commits).
+    Consolidates ALL input construction in one place for consistency.
 
     Args:
         raw_repo: RawRepository entity from DB
-        repo_config: ModelRepoConfig or DatasetRepoConfig entity
+        feature_config: Feature configuration dict
         build_run: RawBuildRun entity (with effective_sha if fork was replayed)
         repo_path: Path to the git repository (bare repo)
         worktrees_base: Optional base path for worktrees
+        logs_base: Optional base path for build logs (LOGS_DIR)
 
     Returns:
         HamiltonInputs containing all input objects
@@ -261,8 +290,11 @@ def build_hamilton_inputs(
     is_commit_available = False
     worktree_path: Optional[Path] = None
 
-    # Check commit availability using effective_sha
-    if repo_path.exists():
+    # Check repo path exists
+    if not repo_path.exists():
+        logger.warning(f"Repo path not found: {repo_path}")
+    else:
+        # Check commit availability using effective_sha
         try:
             subprocess.run(
                 ["git", "cat-file", "-e", effective_sha],
@@ -273,12 +305,13 @@ def build_hamilton_inputs(
             )
             is_commit_available = True
         except subprocess.CalledProcessError:
-            logger.warning(f"Commit {effective_sha[:8]} not found in repo")
+            logger.warning(f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}")
 
-    # Use pre-created worktree from ingestion
+    # Check worktree availability
     if is_commit_available and worktrees_base:
         worktree_path = worktrees_base / effective_sha[:12]
         if not worktree_path.exists():
+            logger.warning(f"Worktree not found: {worktree_path}")
             worktree_path = None
 
     # Create GitHistoryInput
@@ -299,8 +332,24 @@ def build_hamilton_inputs(
     # Create input objects from entities
     repo_input = RepoInput.from_entity(raw_repo)
     # Pass current_repo for repo-scoped config lookup
-    config_input = FeatureConfigInput.from_entity(repo_config, current_repo=raw_repo.full_name)
+    config_input = FeatureConfigInput.from_entity(feature_config, current_repo=raw_repo.full_name)
     build_run_input = BuildRunInput.from_entity(build_run)
+
+    # Create BuildLogsInput
+    logs_dir: Optional[Path] = None
+    if build_run.logs_path:
+        logs_dir = Path(build_run.logs_path)
+    elif logs_base:
+        logs_dir = logs_base / str(raw_repo.id) / str(build_run.ci_run_id)
+    build_logs = BuildLogsInput.from_path(logs_dir)
+
+    # Log warnings for unavailable inputs
+    if not is_commit_available:
+        logger.warning(f"[INPUT] git_history unavailable for commit {original_sha[:8]}")
+    if not git_worktree.is_ready:
+        logger.warning(f"[INPUT] git_worktree not ready for commit {original_sha[:8]}")
+    if not build_logs.is_available:
+        logger.warning(f"[INPUT] build_logs not found at {logs_dir}")
 
     return HamiltonInputs(
         git_history=git_history,
@@ -308,6 +357,7 @@ def build_hamilton_inputs(
         repo=repo_input,
         build_run=build_run_input,
         feature_config=config_input,
+        build_logs=build_logs,
         is_commit_available=is_commit_available,
         effective_sha=effective_sha if is_commit_available else None,
     )

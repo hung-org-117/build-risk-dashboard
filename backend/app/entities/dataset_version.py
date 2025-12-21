@@ -52,6 +52,18 @@ class DatasetVersion(FeatureConfigBase):
         default_factory=list, description="List of selected feature names"
     )
 
+    # Scan metrics to include in features (from SonarQube/Trivy)
+    scan_metrics: dict = Field(
+        default_factory=lambda: {"sonarqube": [], "trivy": []},
+        description="Selected scan metrics: {'sonarqube': [...], 'trivy': [...]}",
+    )
+
+    # Scan tool configuration (SonarQube/Trivy settings)
+    scan_config: dict = Field(
+        default_factory=lambda: {"sonarqube": {}, "trivy": {}},
+        description="Scan tool config: {'sonarqube': {...}, 'trivy': {...}}",
+    )
+
     # feature_configs is inherited from FeatureConfigBase
 
     status: VersionStatus = VersionStatus.PENDING

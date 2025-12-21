@@ -48,9 +48,7 @@ class SonarWebhookService:
 
         # Check for HMAC signature
         if signature:
-            computed = hmac.new(
-                secret.encode("utf-8"), body, hashlib.sha256
-            ).hexdigest()
+            computed = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(computed, signature):
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
         else:
@@ -123,18 +121,12 @@ class SonarWebhookService:
         return {
             "component_key": component_key,
             "status": (
-                pending.status.value
-                if hasattr(pending.status, "value")
-                else pending.status
+                pending.status.value if hasattr(pending.status, "value") else pending.status
             ),
             "build_id": str(pending.build_id),
             "build_type": pending.build_type,
-            "started_at": (
-                pending.started_at.isoformat() if pending.started_at else None
-            ),
-            "completed_at": (
-                pending.completed_at.isoformat() if pending.completed_at else None
-            ),
+            "started_at": (pending.started_at.isoformat() if pending.started_at else None),
+            "completed_at": (pending.completed_at.isoformat() if pending.completed_at else None),
             "has_metrics": pending.metrics is not None,
             "error_message": pending.error_message,
         }
@@ -149,16 +141,8 @@ class SonarWebhookService:
         Returns:
             Dict with list of pending scans.
         """
-        # Get all pending scans for enrichment builds
-        pending_scans = list(
-            self.pending_repo.collection.find(
-                {
-                    "build_type": "enrichment",
-                }
-            )
-            .sort("started_at", -1)
-            .limit(50)
-        )
+        # Get all pending scans (all are enrichment scans now)
+        pending_scans = list(self.pending_repo.collection.find({}).sort("started_at", -1).limit(50))
 
         items = []
         for scan in pending_scans:
@@ -168,14 +152,10 @@ class SonarWebhookService:
                     "status": scan.get("status"),
                     "build_id": str(scan.get("build_id")),
                     "started_at": (
-                        scan.get("started_at").isoformat()
-                        if scan.get("started_at")
-                        else None
+                        scan.get("started_at").isoformat() if scan.get("started_at") else None
                     ),
                     "completed_at": (
-                        scan.get("completed_at").isoformat()
-                        if scan.get("completed_at")
-                        else None
+                        scan.get("completed_at").isoformat() if scan.get("completed_at") else None
                     ),
                     "has_metrics": scan.get("metrics") is not None,
                     "error_message": scan.get("error_message"),

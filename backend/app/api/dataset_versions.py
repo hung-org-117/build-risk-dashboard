@@ -74,6 +74,8 @@ async def create_version(
         role=role,
         selected_features=request.selected_features,
         feature_configs=request.feature_configs,
+        scan_metrics=request.scan_metrics,
+        scan_config=request.scan_config,
         name=request.name,
         description=request.description,
     )
@@ -196,3 +198,89 @@ async def cancel_version(
         dataset_id, version_id, str(current_user["_id"]), role=current_user.get("role", "user")
     )
     return _to_response(version)
+
+
+@router.get("/{version_id}/scan-status")
+async def get_scan_status(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get scan status summary for a version.
+
+    Returns counts of builds with sonar/trivy features.
+    """
+    service = DatasetVersionService(db)
+    return service.get_scan_status(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        role=current_user.get("role", "user"),
+    )
+
+
+@router.post("/{version_id}/retry-scan")
+async def retry_version_scans(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Retry failed scans for a version.
+
+    Re-dispatches scans for commits that had scan failures.
+    """
+    service = DatasetVersionService(db)
+    return service.retry_scans(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        role=current_user.get("role", "user"),
+    )
+
+
+@router.get("/{version_id}/commit-scans")
+async def get_commit_scans(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get detailed commit scan status for a version.
+
+    Returns separate lists for Trivy and SonarQube scans with status per commit.
+    """
+    service = DatasetVersionService(db)
+    return service.get_commit_scans(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        role=current_user.get("role", "user"),
+    )
+
+
+@router.post("/{version_id}/commits/{commit_sha}/retry/{tool_type}")
+async def retry_commit_scan(
+    dataset_id: str,
+    version_id: str,
+    commit_sha: str,
+    tool_type: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Retry a specific commit scan for a tool (trivy or sonarqube).
+    """
+    service = DatasetVersionService(db)
+    return service.retry_commit_scan(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        commit_sha=commit_sha,
+        tool_type=tool_type,
+        user_id=str(current_user["_id"]),
+        role=current_user.get("role", "user"),
+    )

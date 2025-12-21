@@ -13,6 +13,14 @@ class CreateVersionRequest(BaseModel):
         default_factory=dict,
         description="Feature configuration values (global and per-repo)",
     )
+    scan_metrics: Optional[Dict[str, List[str]]] = Field(
+        default=None,
+        description="Scan metrics to include: {'sonarqube': [...], 'trivy': [...]}",
+    )
+    scan_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Scan tool configuration: {'sonarqube': {...}, 'trivy': {...}}",
+    )
     name: Optional[str] = Field(None, description="Optional version name")
     description: Optional[str] = Field(None, description="Optional description")
 

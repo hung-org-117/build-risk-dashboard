@@ -160,6 +160,8 @@ async def startup_event():
         db = get_database()
         pipeline = HamiltonPipeline(db)
         feature_count = len(pipeline.get_active_features())
-        logger.info(f"Loaded {feature_count} feature definitions from Hamilton pipeline")
+        logger.info(
+            f"Loaded {feature_count} feature definitions from Hamilton pipeline: {pipeline.get_active_features()}"
+        )
     except Exception as e:
         logger.warning(f"Failed to load feature definitions: {e}")

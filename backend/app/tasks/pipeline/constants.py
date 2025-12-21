@@ -16,18 +16,14 @@ HAMILTON_MODULES = [
     log_features,
 ]
 
-# Input resource names that should NOT be stored as features
-# These are Hamilton DAG inputs, not actual feature values
-# Must match the keys used in HamiltonPipeline.run() inputs dict
-INPUT_RESOURCE_NAMES = frozenset(
-    [
-        "git_history",
-        "git_worktree",
-        "repo",
-        "repo_config",
-        "build_run",
-        "github_client",
-        "build_logs",
-        "raw_build_runs",
-    ]
-)
+
+def get_input_resource_names() -> frozenset:
+    """
+    Get all input resource names that should NOT be stored as features.
+
+    These are Hamilton DAG inputs, not actual feature values.
+    Derived from INPUT_REGISTRY for single source of truth.
+    """
+    from app.tasks.pipeline.shared.resources import get_input_resource_names as _get_names
+
+    return _get_names()

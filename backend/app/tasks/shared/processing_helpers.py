@@ -18,10 +18,7 @@ from app.entities.pipeline_run import (
 )
 from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository
-from app.entities.repo_config_base import FeatureConfigBase
-from app.paths import LOGS_DIR, REPOS_DIR
 from app.repositories.pipeline_run import PipelineRunRepository
-from app.tasks.pipeline.feature_dag._inputs import BuildLogsInput, build_hamilton_inputs
 from app.tasks.pipeline.feature_dag._metadata import format_features_for_storage
 from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
 
@@ -125,9 +122,9 @@ def _save_pipeline_run(
 def extract_features_for_build(
     db,
     raw_repo: RawRepository,
-    repo_config: FeatureConfigBase,  # Can be ModelRepoConfig or DatasetRepoConfig
+    feature_config: Dict[str, Any],
     raw_build_run: RawBuildRun,
-    selected_features: List[str] = [],
+    selected_features: List[str],
     github_client=None,
     save_run: bool = True,
     category: PipelineCategory = PipelineCategory.MODEL_TRAINING,
@@ -147,67 +144,34 @@ def extract_features_for_build(
     Args:
         db: Database session
         raw_repo: RawRepository entity
-        repo_config: ModelRepoConfig or DatasetRepoConfig entity
+        feature_config: Feature configuration dict
         raw_build_run: RawBuildRun entity
-        selected_features: Optional list of features to extract
+        selected_features: List of features to extract
         github_client: Optional GitHub client for API calls
         save_run: Whether to save pipeline run to database (default: True)
         category: Pipeline category for tracking (default: MODEL_TRAINING)
-        output_build_id: ID of the output entity (ModelTrainingBuild or DatasetEnrichmentBuild)
+        output_build_id: ID of the output entity
 
     Returns:
         Dictionary with status, features, errors, warnings, etc.
     """
-    repo_path = REPOS_DIR / str(raw_repo.id)
+    from app.tasks.pipeline.input_preparer import prepare_pipeline_input
+
     pipeline = None
 
     try:
-        # Build all Hamilton inputs using helper function
-        # Pass worktrees_base so GIT_WORKTREE resource is available
-        from app.paths import WORKTREES_DIR
-
-        worktrees_base = WORKTREES_DIR / str(raw_repo.id)
-
-        inputs = build_hamilton_inputs(
+        # Prepare all inputs and filter features by available resources
+        prepared = prepare_pipeline_input(
             raw_repo=raw_repo,
-            repo_config=repo_config,
-            build_run=raw_build_run,
-            repo_path=repo_path,
-            worktrees_base=worktrees_base,
-        )
-
-        # Execute Hamilton pipeline with tracking enabled
-        pipeline = HamiltonPipeline(db=db, enable_tracking=True)
-
-        # Build logs input - check logs_path from entity first, then fallback to expected path
-        # Logs are stored at LOGS_DIR/{raw_repo_id}/{build_id} (CI provider build ID, NOT MongoDB ObjectId)
-        if raw_build_run.logs_path:
-            # Use the path stored when logs were downloaded
-            from pathlib import Path
-
-            logs_dir = Path(raw_build_run.logs_path)
-            logger.info(f"[DEBUG] Using logs_path from entity: {logs_dir}")
-        else:
-            # Fallback: construct path using build_id (from CI provider)
-            logs_dir = LOGS_DIR / str(raw_repo.id) / str(raw_build_run.ci_run_id)
-            logger.info(f"[DEBUG] Using fallback logs path: {logs_dir}")
-
-        build_logs_input = BuildLogsInput.from_path(logs_dir)
-        logger.info(
-            f"[DEBUG] BuildLogsInput: is_available={build_logs_input.is_available}, "
-            f"logs_dir_exists={logs_dir.exists()}, log_files={list(logs_dir.glob('*.log')) if logs_dir.exists() else []}"
-        )
-
-        features = pipeline.run(
-            git_history=inputs.git_history,
-            git_worktree=inputs.git_worktree,
-            repo=inputs.repo,
-            build_run=inputs.build_run,
-            repo_config=inputs.feature_config,
+            feature_config=feature_config,
+            raw_build_run=raw_build_run,
+            selected_features=selected_features if selected_features else None,
             github_client=github_client,
-            build_logs=build_logs_input,
-            features_filter=set(selected_features) if selected_features else None,
         )
+
+        # Execute Hamilton pipeline
+        pipeline = HamiltonPipeline(db=db, enable_tracking=True)
+        features = pipeline.execute(prepared)
 
         formatted_features = format_features_for_storage(features)
 
@@ -221,7 +185,7 @@ def extract_features_for_build(
             "feature_count": len(formatted_features),
             "errors": [],
             "warnings": [],
-            "is_missing_commit": not inputs.is_commit_available,
+            "is_missing_commit": not prepared.is_commit_available,
             "skipped_features": skipped_features,
             "missing_resources": missing_resources,
         }
@@ -233,7 +197,7 @@ def extract_features_for_build(
                 f"Skipped {len(skipped_features)} features due to missing resources"
             )
 
-        if not inputs.is_commit_available:
+        if not prepared.is_commit_available:
             result["warnings"].append(f"Commit {raw_build_run.commit_sha} not found in repo")
 
         # Save pipeline run to database

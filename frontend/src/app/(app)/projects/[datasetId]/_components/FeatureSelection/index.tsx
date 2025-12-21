@@ -20,13 +20,37 @@ import {
     TemplateSelector,
 } from "@/components/features/FeatureSelection";
 import { FeatureConfigForm } from "./FeatureConfigForm";
+import {
+    ScanConfigPanel,
+    DEFAULT_SCAN_CONFIG,
+    type ScanConfig,
+} from "@/components/sonar/scan-config-panel";
+
+/** Structure for configs from FeatureConfigForm */
+interface FeatureConfigsData {
+    global: Record<string, unknown>;
+    repos: Record<string, { source_languages: string[]; test_frameworks: string[] }>;
+}
+
+/** Scan metrics selection */
+interface ScanMetricsData {
+    sonarqube: string[];
+    trivy: string[];
+}
+
+/** Full scan data including metrics and config */
+interface ScanData {
+    metrics: ScanMetricsData;
+    config: ScanConfig;
+}
 
 interface FeatureSelectionCardProps {
     datasetId: string;
     rowCount: number;
     onCreateVersion: (
         features: string[],
-        featureConfigs: Record<string, unknown>,
+        featureConfigs: FeatureConfigsData,
+        scanData: ScanData,
         name?: string
     ) => Promise<void>;
     isCreating: boolean;
@@ -42,7 +66,15 @@ export function FeatureSelectionCard({
 }: FeatureSelectionCardProps) {
     const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
     const [versionName, setVersionName] = useState("");
-    const [featureConfigs, setFeatureConfigs] = useState<Record<string, unknown>>({});
+    const [featureConfigs, setFeatureConfigs] = useState<FeatureConfigsData>({
+        global: {},
+        repos: {},
+    });
+    const [scanMetrics, setScanMetrics] = useState<ScanMetricsData>({
+        sonarqube: [],
+        trivy: [],
+    });
+    const [scanConfig, setScanConfig] = useState<ScanConfig>(DEFAULT_SCAN_CONFIG);
 
     const {
         extractorNodes,
@@ -84,10 +116,13 @@ export function FeatureSelectionCard({
         await onCreateVersion(
             Array.from(selectedFeatures),
             featureConfigs,
+            { metrics: scanMetrics, config: scanConfig },
             versionName || undefined
         );
         setVersionName("");
-        setFeatureConfigs({});
+        setFeatureConfigs({ global: {}, repos: {} });
+        setScanMetrics({ sonarqube: [], trivy: [] });
+        setScanConfig(DEFAULT_SCAN_CONFIG);
     };
 
     const isDisabled = isCreating || hasActiveVersion || selectedFeatures.size === 0;
@@ -150,8 +185,24 @@ export function FeatureSelectionCard({
 
                 {/* Feature Configuration Form */}
                 <FeatureConfigForm
+                    datasetId={datasetId}
                     selectedFeatures={selectedFeatures}
                     onChange={setFeatureConfigs}
+                    disabled={isDisabled}
+                />
+
+                {/* Scan Configuration & Metrics Selection */}
+                <ScanConfigPanel
+                    selectedSonarMetrics={scanMetrics.sonarqube}
+                    selectedTrivyMetrics={scanMetrics.trivy}
+                    onSonarMetricsChange={(metrics) =>
+                        setScanMetrics((prev) => ({ ...prev, sonarqube: metrics }))
+                    }
+                    onTrivyMetricsChange={(metrics) =>
+                        setScanMetrics((prev) => ({ ...prev, trivy: metrics }))
+                    }
+                    scanConfig={scanConfig}
+                    onScanConfigChange={setScanConfig}
                     disabled={isDisabled}
                 />
 
@@ -192,3 +243,5 @@ export function FeatureSelectionCard({
         </Card>
     );
 }
+
+

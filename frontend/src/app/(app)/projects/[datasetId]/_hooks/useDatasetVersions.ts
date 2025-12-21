@@ -33,9 +33,28 @@ interface VersionListResponse {
 interface CreateVersionRequest {
     selected_features: string[];
     feature_configs?: Record<string, unknown>;
+    scan_metrics?: {
+        sonarqube: string[];
+        trivy: string[];
+    };
+    scan_config?: {
+        sonarqube?: {
+            projectKey?: string;
+            sonarToken?: string;
+            sonarUrl?: string;
+            extraProperties?: string;
+        };
+        trivy?: {
+            severity?: string;
+            scanners?: string;
+            extraArgs?: string;
+        };
+    };
     name?: string;
     description?: string;
 }
+
+
 
 export interface UseDatasetVersionsReturn {
     versions: DatasetVersion[];
@@ -206,3 +225,45 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
         downloadVersion,
     };
 }
+
+
+// Scan status types
+export interface ScanStatusCounts {
+    pending: number;
+    scanning: number;
+    completed: number;
+    failed: number;
+    skipped: number;
+}
+
+export interface ScanStatus {
+    total: number;
+    status_counts: ScanStatusCounts;
+    has_pending: boolean;
+}
+
+// Helper functions for scan status (used by VersionHistory component)
+export async function getScanStatus(datasetId: string, versionId: string): Promise<ScanStatus | null> {
+    try {
+        const response = await api.get<ScanStatus>(
+            `/datasets/${datasetId}/versions/${versionId}/scan-status`
+        );
+        return response.data;
+    } catch (err) {
+        console.error("Failed to get scan status:", err);
+        return null;
+    }
+}
+
+export async function retryScan(datasetId: string, versionId: string): Promise<{ status: string; task_id?: string } | null> {
+    try {
+        const response = await api.post<{ status: string; task_id?: string; message?: string }>(
+            `/datasets/${datasetId}/versions/${versionId}/retry-scan`
+        );
+        return response.data;
+    } catch (err) {
+        console.error("Failed to retry scan:", err);
+        return null;
+    }
+}
+

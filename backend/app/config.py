@@ -64,7 +64,6 @@ class Settings(BaseSettings):
     CELERY_BROKER_HEARTBEAT: int = 30
 
     # Pipeline Configurations
-    VALIDATION_BATCH_SIZE: int = 50  # Builds per validation chunk
     ENRICHMENT_BATCH_SIZE: int = 50  # Builds per enrichment batch
     ENRICHMENT_MAX_RETRIES: int = 3  # Auto-retry count for enrichment
     MAX_LOG_SIZE_MB: int = 10  # Skip logs larger than this size

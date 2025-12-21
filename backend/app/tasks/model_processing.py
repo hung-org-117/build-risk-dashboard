@@ -4,28 +4,27 @@ Build Processing Tasks using the new DAG-based Feature Pipeline.
 This module uses the Hamilton-based pipeline directly for feature extraction.
 """
 
-from typing import List
-from app.entities.model_training_build import ModelTrainingBuild
-from app.entities.enums import ExtractionStatus
-import logging
-from typing import Any, Dict, Optional
-
-from bson import ObjectId
-import redis
 import json
+import logging
+from typing import Any, Dict, List, Optional
+
+import redis
+from bson import ObjectId
 
 from app.celery_app import celery_app
-from app.repositories.model_training_build import ModelTrainingBuildRepository
+from app.config import settings
+from app.entities.enums import ExtractionStatus
+from app.entities.model_training_build import ModelTrainingBuild
+from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
+from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
-from app.tasks.shared import extract_features_for_build
-from app.config import settings
 from app.tasks.pipeline.feature_dag._metadata import (
     format_features_for_storage,
 )
-from app.repositories.dataset_template_repository import DatasetTemplateRepository
+from app.tasks.shared import extract_features_for_build
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +92,9 @@ def start_model_processing(
 
     Flow: start_model_processing -> ingest_model_builds -> dispatch_build_processing
     """
-    from app.tasks.model_ingestion import ingest_model_builds
-    from app.repositories.model_repo_config import ModelRepoConfigRepository
     from app.entities.enums import ModelImportStatus
+    from app.repositories.model_repo_config import ModelRepoConfigRepository
+    from app.tasks.model_ingestion import ingest_model_builds
 
     model_repo_config_repo = ModelRepoConfigRepository(self.db)
 
@@ -167,11 +166,13 @@ def dispatch_build_processing(
     2. Dispatch process_workflow_run tasks in batches
     """
     import time
+
     from celery import group
-    from app.repositories.model_training_build import ModelTrainingBuildRepository
-    from app.repositories.model_repo_config import ModelRepoConfigRepository
-    from app.repositories.raw_build_run import RawBuildRunRepository
+
     from app.entities.enums import ExtractionStatus, ModelImportStatus
+    from app.repositories.model_repo_config import ModelRepoConfigRepository
+    from app.repositories.model_training_build import ModelTrainingBuildRepository
+    from app.repositories.raw_build_run import RawBuildRunRepository
 
     if batch_size is None:
         batch_size = settings.PROCESSING_BATCH_SIZE
@@ -223,9 +224,7 @@ def dispatch_build_processing(
         model_build_ids.append(inserted.id)
         created_count += 1
 
-    logger.info(
-        f"Created {created_count} ModelTrainingBuild documents for repo {repo_config_id}"
-    )
+    logger.info(f"Created {created_count} ModelTrainingBuild documents for repo {repo_config_id}")
 
     publish_status(
         repo_config_id,
@@ -270,9 +269,7 @@ def dispatch_build_processing(
         },
     )
 
-    publish_status(
-        repo_config_id, "imported", f"Dispatched {dispatched} builds for processing"
-    )
+    publish_status(repo_config_id, "imported", f"Dispatched {dispatched} builds for processing")
 
     return {
         "repo_config_id": repo_config_id,
@@ -361,9 +358,7 @@ def process_workflow_run(
             from app.tasks.pipeline.feature_dag._inputs import GitHubClientInput
 
             client = get_public_github_client()
-            github_client_input = GitHubClientInput(
-                client=client, full_name=raw_repo.full_name
-            )
+            github_client_input = GitHubClientInput(client=client, full_name=raw_repo.full_name)
         except Exception as e:
             logger.warning(f"Failed to create GitHub client: {e}")
 
@@ -371,7 +366,7 @@ def process_workflow_run(
         result = extract_features_for_build(
             db=self.db,
             raw_repo=raw_repo,
-            repo_config=repo_config,
+            feature_config=repo_config.feature_configs,
             raw_build_run=raw_build_run,
             selected_features=feature_names,
             github_client=github_client_input,
@@ -411,9 +406,7 @@ def process_workflow_run(
             ExtractionStatus.COMPLETED.value,
             ExtractionStatus.PARTIAL.value,
         ):
-            updated_config = repo_config_repo.increment_builds_processed(
-                ObjectId(repo_config_id)
-            )
+            updated_config = repo_config_repo.increment_builds_processed(ObjectId(repo_config_id))
             stats = None
             if updated_config:
                 stats = {
@@ -429,13 +422,8 @@ def process_workflow_run(
                 f"Build {build_id[:8]} completed",
                 stats=stats,
             )
-        elif (
-            not is_reprocess
-            and updates["extraction_status"] == ExtractionStatus.FAILED.value
-        ):
-            updated_config = repo_config_repo.increment_builds_failed(
-                ObjectId(repo_config_id)
-            )
+        elif not is_reprocess and updates["extraction_status"] == ExtractionStatus.FAILED.value:
+            updated_config = repo_config_repo.increment_builds_failed(ObjectId(repo_config_id))
             stats = None
             if updated_config:
                 stats = {
@@ -480,9 +468,7 @@ def process_workflow_run(
         )
 
         # Increment failed count
-        updated_config = repo_config_repo.increment_builds_failed(
-            ObjectId(repo_config_id)
-        )
+        updated_config = repo_config_repo.increment_builds_failed(ObjectId(repo_config_id))
         stats = None
         if updated_config:
             stats = {
@@ -576,9 +562,7 @@ def reprocess_repo_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, 
         return {"status": "error", "message": "Repository Config not found"}
 
     # Find all builds for this repository
-    builds, _ = model_build_repo.list_by_repo(
-        repo_config_id, limit=0
-    )  # limit=0 means all
+    builds, _ = model_build_repo.list_by_repo(repo_config_id, limit=0)  # limit=0 means all
     if not builds:
         logger.info(f"No builds found for repository {repo_config_id}")
         return {
@@ -604,9 +588,7 @@ def reprocess_repo_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, 
         except Exception as e:
             logger.warning(f"Failed to queue build {build.id} for reprocessing: {e}")
 
-    logger.info(
-        f"Queued {queued_count} builds for reprocessing in repository {repo_config_id}"
-    )
+    logger.info(f"Queued {queued_count} builds for reprocessing in repository {repo_config_id}")
 
     return {
         "status": "queued",

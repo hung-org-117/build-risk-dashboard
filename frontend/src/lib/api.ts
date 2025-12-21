@@ -376,6 +376,20 @@ export const datasetsApi = {
     );
     return response.data;
   },
+  getValidationSummary: async (datasetId: string) => {
+    const response = await api.get<{
+      dataset_id: string;
+      status: string;
+      stats: Record<string, number>;
+      repos: Array<{
+        repo_name: string;
+        validation_status: string;
+        builds_in_csv: number;
+        builds_found: number;
+      }>;
+    }>(`/datasets/${datasetId}/validation-summary`);
+    return response.data;
+  },
 };
 
 export const featuresApi = {

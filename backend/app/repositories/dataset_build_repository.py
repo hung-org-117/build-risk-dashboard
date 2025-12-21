@@ -74,3 +74,38 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
     ) -> list[DatasetBuild]:
         """Find builds matching query with pagination and sorting."""
         return self.find_many(query, sort=[(sort_by, sort_order)], skip=skip, limit=limit)
+
+    def get_validated_repo_names(self, dataset_id: str) -> list[dict]:
+        """Get unique validated repo names using MongoDB aggregation.
+
+        Returns list of dicts with repo_name, builds_in_csv, builds_found.
+        Only includes repos that have at least one 'found' build.
+        """
+        oid = self._to_object_id(dataset_id)
+        if not oid:
+            return []
+
+        pipeline = [
+            {"$match": {"dataset_id": oid}},
+            {
+                "$group": {
+                    "_id": "$repo_name_from_csv",
+                    "builds_in_csv": {"$sum": 1},
+                    "builds_found": {"$sum": {"$cond": [{"$eq": ["$status", "found"]}, 1, 0]}},
+                }
+            },
+            # Only repos with at least one found build
+            {"$match": {"builds_found": {"$gt": 0}}},
+            {"$sort": {"_id": 1}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "repo_name": "$_id",
+                    "builds_in_csv": 1,
+                    "builds_found": 1,
+                    "validation_status": {"$literal": "valid"},
+                }
+            },
+        ]
+
+        return list(self.collection.aggregate(pipeline))

@@ -63,6 +63,37 @@ class DatasetValidationService:
             "stats": dataset.validation_stats,
         }
 
+    def get_validation_summary(self, dataset_id: str) -> dict:
+        """Get detailed validation summary including repo breakdown.
+
+        Returns dataset validation status with per-repository results
+        from validation_stats.repo_stats.
+        """
+        dataset = self._get_dataset_or_404(dataset_id)
+
+        repo_stats = dataset.validation_stats.repo_stats if dataset.validation_stats else []
+
+        repos_list = [
+            {
+                "id": str(stat.full_name),  # Use full_name as id since we don't have separate id
+                "full_name": stat.full_name,
+                "repo_name": stat.full_name,  # Keep for frontend compatibility
+                "validation_status": "valid",
+                "builds_in_csv": stat.builds_total,
+                "builds_found": stat.builds_found,
+                "builds_not_found": stat.builds_not_found,
+            }
+            for stat in repo_stats
+            if stat.is_valid
+        ]
+
+        return {
+            "dataset_id": dataset_id,
+            "status": dataset.validation_status or DatasetValidationStatus.PENDING,
+            "stats": dataset.validation_stats or {},
+            "repos": repos_list,
+        }
+
     async def cancel_validation(self, dataset_id: str) -> dict:
         """Cancel ongoing validation (resumable)."""
         dataset = self._get_dataset_or_404(dataset_id)

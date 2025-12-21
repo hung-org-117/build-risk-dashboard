@@ -48,18 +48,37 @@ export function EnrichmentTab({
     // Handle create version
     const handleCreateVersion = async (
         features: string[],
-        featureConfigs: Record<string, unknown>,
+        featureConfigs: {
+            global: Record<string, unknown>;
+            repos: Record<string, { source_languages: string[]; test_frameworks: string[] }>;
+        },
+        scanData: {
+            metrics: { sonarqube: string[]; trivy: string[] };
+            config: {
+                sonarqube: { projectKey?: string; sonarToken?: string; sonarUrl?: string; extraProperties?: string };
+                trivy: { severity?: string; scanners?: string; extraArgs?: string };
+            };
+        },
         name?: string
     ) => {
+        // Flatten configs for API: merge global + repos into single object
+        const flatConfigs: Record<string, unknown> = {
+            ...featureConfigs.global,
+            repo_configs: featureConfigs.repos,
+        };
         const version = await createVersion({
             selected_features: features,
-            feature_configs: featureConfigs,
+            feature_configs: flatConfigs,
+            scan_metrics: scanData.metrics,
+            scan_config: scanData.config,
             name,
         });
         if (version) {
             notifyParent();
         }
     };
+
+
 
     // Handle cancel
     const handleCancel = async (versionId: string) => {

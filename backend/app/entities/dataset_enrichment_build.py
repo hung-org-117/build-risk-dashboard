@@ -78,22 +78,26 @@ class DatasetEnrichmentBuild(BaseEntity):
         description="Features skipped due to missing resources",
     )
 
-    # ** FEATURES - The actual extracted feature values **
+    # ** FEATURES - DAG features + scan metrics merged together **
     features: Dict[str, Any] = Field(
         default_factory=dict,
         description="""
-        Extracted features as key-value pairs.
-        This is the main data payload for dataset enrichment.
+        All extracted features as key-value pairs.
+        Includes: DAG features (gh_*, tr_*) + scan metrics (sonar_*, trivy_*).
+        This is the main data payload for dataset enrichment/export.
         """,
     )
 
-    # Feature metadata
+    # Feature metadata - counts ALL features (DAG + scan metrics)
     feature_count: int = Field(
         default=0,
-        description="Number of features extracted",
+        description="Total number of features (DAG features + scan metrics)",
     )
 
     enriched_at: Optional[datetime] = Field(
         None,
         description="Timestamp when features were extracted",
     )
+
+    # NOTE: Raw scan results are stored in dataset_scan_results table,
+    # not duplicated here. Scan metrics are merged into features dict above.

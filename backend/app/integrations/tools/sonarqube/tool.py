@@ -5,18 +5,18 @@ Provides code quality analysis via SonarQube.
 Uses async scan mode - results are delivered via webhook after scan completes.
 """
 
-from typing import Any, Dict, List, Optional
 import logging
+from typing import Any, Dict, List, Optional
 
+from app.config import settings
 from app.integrations.base import (
     IntegrationTool,
-    ToolType,
-    ScanMode,
-    MetricDefinition,
     MetricCategory,
     MetricDataType,
+    MetricDefinition,
+    ScanMode,
+    ToolType,
 )
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -593,8 +593,7 @@ class SonarQubeTool(IntegrationTool):
     def is_available(self) -> bool:
         """Check if SonarQube is configured."""
         return bool(
-            getattr(settings, "SONAR_HOST_URL", None)
-            and getattr(settings, "SONAR_TOKEN", None)
+            getattr(settings, "SONAR_HOST_URL", None) and getattr(settings, "SONAR_TOKEN", None)
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -624,9 +623,7 @@ class SonarQubeTool(IntegrationTool):
         """Return list of metric keys."""
         return [m.key for m in self._metrics]
 
-    def get_metrics_by_category(
-        self, category: MetricCategory
-    ) -> List[MetricDefinition]:
+    def get_metrics_by_category(self, category: MetricCategory) -> List[MetricDefinition]:
         """Get metrics filtered by category."""
         return [m for m in self._metrics if m.category == category]
 

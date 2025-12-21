@@ -1,7 +1,7 @@
 """Repository for DatasetEnrichmentBuild entities (builds for dataset enrichment)."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Iterator
+from typing import Any, Dict, Iterator, List, Optional
 
 from bson import ObjectId
 
@@ -54,9 +54,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         """List builds for a dataset with pagination."""
         query: Dict[str, Any] = {"dataset_id": dataset_id}
         if status:
-            query["extraction_status"] = (
-                status.value if hasattr(status, "value") else status
-            )
+            query["extraction_status"] = status.value if hasattr(status, "value") else status
 
         return self.paginate(query, sort=[("_id", 1)], skip=skip, limit=limit)
 
@@ -116,9 +114,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         """Count builds for a dataset, optionally filtered by status."""
         query: Dict[str, Any] = {"dataset_id": dataset_id}
         if status:
-            query["extraction_status"] = (
-                status.value if hasattr(status, "value") else status
-            )
+            query["extraction_status"] = status.value if hasattr(status, "value") else status
         return self.collection.count_documents(query)
 
     def get_enriched_for_export(
@@ -146,9 +142,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
 
     def delete_by_version(self, version_id: str) -> int:
         """Delete all builds for a version."""
-        result = self.collection.delete_many(
-            {"dataset_version_id": ObjectId(version_id)}
-        )
+        result = self.collection.delete_many({"dataset_version_id": ObjectId(version_id)})
         return result.deleted_count
 
     def get_feature_stats(
@@ -244,3 +238,168 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
             stats[feature] = feat_stat
 
         return stats
+
+    def backfill_scan_features(
+        self,
+        build_id: ObjectId,
+        scan_features: Dict[str, Any],
+        prefix: str = "sonar_",
+    ) -> None:
+        """
+        Merge scan features into existing features using $set.
+
+        This avoids overwriting existing features by only setting
+        specific keys like features.sonar_* or features.trivy_*.
+
+        Args:
+            build_id: DatasetEnrichmentBuild ID
+            scan_features: Raw metrics from scan tool
+            prefix: Feature prefix ('sonar_' or 'trivy_')
+        """
+        set_ops = {f"features.{prefix}{k}": v for k, v in scan_features.items()}
+        set_ops["updated_at"] = datetime.utcnow()
+
+        self.collection.update_one({"_id": build_id}, {"$set": set_ops})
+
+        # Update feature_count to include new scan metrics
+        self._update_feature_count(build_id)
+
+    def backfill_by_commit_in_version(
+        self,
+        version_id: ObjectId,
+        commit_sha: str,
+        scan_features: Dict[str, Any],
+        prefix: str = "sonar_",
+    ) -> int:
+        """
+        Backfill scan features to ALL builds in a version matching commit_sha.
+
+        This is called when a scan completes to update all enrichment builds
+        in the same version that were triggered by the same commit.
+
+        Args:
+            version_id: DatasetVersion ID
+            commit_sha: Git commit SHA
+            scan_features: Filtered metrics to add
+            prefix: Feature prefix ('sonar_' or 'trivy_')
+
+        Returns:
+            Number of documents updated.
+        """
+
+        # Find all enrichment builds in this version
+        pipeline = [
+            {"$match": {"dataset_version_id": version_id}},
+            {
+                "$lookup": {
+                    "from": "raw_build_runs",
+                    "localField": "raw_build_run_id",
+                    "foreignField": "_id",
+                    "as": "build_run",
+                }
+            },
+            {"$unwind": "$build_run"},
+            {"$match": {"build_run.commit_sha": commit_sha}},
+            {"$project": {"_id": 1}},
+        ]
+
+        matching_ids = [doc["_id"] for doc in self.collection.aggregate(pipeline)]
+
+        if not matching_ids:
+            return 0
+
+        set_ops = {f"features.{prefix}{k}": v for k, v in scan_features.items()}
+        set_ops["updated_at"] = datetime.utcnow()
+
+        result = self.collection.update_many(
+            {"_id": {"$in": matching_ids}},
+            {"$set": set_ops},
+        )
+
+        # Update feature_count for all affected builds
+        for build_id in matching_ids:
+            self._update_feature_count(build_id)
+
+        return result.modified_count
+
+    def _update_feature_count(self, build_id: ObjectId) -> None:
+        """Recalculate feature_count based on features dict size."""
+        doc = self.collection.find_one({"_id": build_id}, {"features": 1})
+        if doc:
+            feature_count = len(doc.get("features", {}))
+            self.collection.update_one(
+                {"_id": build_id},
+                {"$set": {"feature_count": feature_count}},
+            )
+
+    def get_scan_status_by_version(
+        self,
+        version_id: ObjectId,
+    ) -> Dict[str, Any]:
+        """
+        Get scan metrics status for a version.
+
+        Counts builds by presence of sonar_*/trivy_* features.
+        """
+        pipeline = [
+            {"$match": {"dataset_version_id": version_id}},
+            {
+                "$project": {
+                    "has_sonar": {
+                        "$gt": [
+                            {
+                                "$size": {
+                                    "$filter": {
+                                        "input": {"$objectToArray": "$features"},
+                                        "cond": {
+                                            "$regexMatch": {"input": "$$this.k", "regex": "^sonar_"}
+                                        },
+                                    }
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                    "has_trivy": {
+                        "$gt": [
+                            {
+                                "$size": {
+                                    "$filter": {
+                                        "input": {"$objectToArray": "$features"},
+                                        "cond": {
+                                            "$regexMatch": {"input": "$$this.k", "regex": "^trivy_"}
+                                        },
+                                    }
+                                }
+                            },
+                            0,
+                        ]
+                    },
+                    "extraction_status": 1,
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "total": {"$sum": 1},
+                    "with_sonar": {"$sum": {"$cond": ["$has_sonar", 1, 0]}},
+                    "with_trivy": {"$sum": {"$cond": ["$has_trivy", 1, 0]}},
+                    "completed": {
+                        "$sum": {"$cond": [{"$eq": ["$extraction_status", "completed"]}, 1, 0]}
+                    },
+                }
+            },
+        ]
+
+        results = list(self.collection.aggregate(pipeline))
+        if not results:
+            return {"total": 0, "with_sonar": 0, "with_trivy": 0, "completed": 0}
+
+        data = results[0]
+        return {
+            "total": data.get("total", 0),
+            "with_sonar": data.get("with_sonar", 0),
+            "with_trivy": data.get("with_trivy", 0),
+            "completed": data.get("completed", 0),
+            "scan_complete": data.get("with_sonar", 0) > 0 or data.get("with_trivy", 0) > 0,
+        }

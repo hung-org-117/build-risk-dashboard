@@ -35,7 +35,7 @@ from app.tasks.shared import extract_features_for_build
 logger = logging.getLogger(__name__)
 
 
-# Task 1: Orchestrator - starts ingestion then enrichment
+# Task 1: Orchestrator - starts ingestion AND scans in parallel
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -44,10 +44,14 @@ logger = logging.getLogger(__name__)
 )
 def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
     """
-    Orchestrator: Start ingestion for version, then dispatch enrichment.
+    Orchestrator: Start ingestion AND scans in PARALLEL for version.
 
-    Flow: start_enrichment -> start_ingestion_for_version -> dispatch_enrichment_batches
-          -> chord([process_enrichment_batch x N]) -> finalize_enrichment
+    Flow:
+        start_enrichment
+            ├── [Parallel Group]
+            │     ├── start_ingestion_for_version → dispatch_enrichment_batches
+            │     └── dispatch_version_scans (if scan_metrics selected)
+            └── finalize_enrichment (via chord callback)
     """
     version_repo = DatasetVersionRepository(self.db)
     dataset_build_repo = DatasetBuildRepository(self.db)
@@ -75,7 +79,7 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         if total_rows == 0:
             raise ValueError("No validated builds found. Please run validation first.")
 
-        # Get validated repos from dataset (replaces DatasetRepoConfig)
+        # Get validated repos from dataset
         validated_raw_repo_ids = list(dataset.repo_ci_providers.keys())
 
         version_repo.update_one(
@@ -91,9 +95,9 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
             f"{len(validated_raw_repo_ids)} repos to ingest"
         )
 
-        # Dispatch ingestion first, then enrichment
-        # Pass raw_repo_ids from repo_ci_providers
-        workflow = chain(
+        # Build PARALLEL workflow: ingestion + scans run simultaneously
+        # Ingestion chain
+        ingestion_chain = chain(
             start_ingestion_for_version.s(
                 version_id=version_id,
                 dataset_id=str(dataset_version.dataset_id),
@@ -101,12 +105,27 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
             ),
             dispatch_enrichment_batches.si(version_id=version_id),
         )
-        workflow.apply_async()
+
+        # Check if scans are needed
+        has_sonar = bool(dataset_version.scan_metrics.get("sonarqube"))
+        has_trivy = bool(dataset_version.scan_metrics.get("trivy"))
+
+        if has_sonar or has_trivy:
+            # Dispatch scans in parallel with ingestion
+            logger.info(
+                f"Dispatching scans for version {version_id}: "
+                f"sonar={has_sonar}, trivy={has_trivy}"
+            )
+            dispatch_version_scans.delay(version_id)
+
+        # Start ingestion workflow (scans are independent)
+        ingestion_chain.apply_async()
 
         return {
             "status": "dispatched",
             "total_builds": total_rows,
             "repos": len(validated_raw_repo_ids),
+            "scans_dispatched": has_sonar or has_trivy,
         }
 
     except Exception as exc:
@@ -439,6 +458,9 @@ def process_enrichment_batch(
 
             enrichment_build_repo.update_one(enrichment_build_id, update_data)
 
+            # NOTE: Scans are now dispatched in PARALLEL via dispatch_version_scans
+            # called from start_enrichment, not per-build in process_enrichment_batch
+
             if extraction_result["status"] == "completed":
                 enriched_count += 1
             else:
@@ -564,7 +586,101 @@ def _extract_features_for_enrichment(
     return extract_features_for_build(
         db=db,
         raw_repo=raw_repo,
-        repo_config=dataset_version,  # DatasetVersion now has feature_configs
+        feature_config=dataset_version.feature_configs,
         raw_build_run=raw_build_run,
         selected_features=selected_features,
     )
+
+
+# NOTE: Removed _merge_existing_scan_results - now using version-scoped scans
+# See enrichment_scan_helpers.py for new implementation
+
+
+# Task 4: Dispatch version scans (runs in parallel with ingestion)
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.version_enrichment.dispatch_version_scans",
+    queue="processing",
+)
+def dispatch_version_scans(self: PipelineTask, version_id: str) -> Dict[str, Any]:
+    """
+    Dispatch scans for all unique commits in version's validated builds.
+
+    This task runs in PARALLEL with ingestion chain.
+    Scans are dispatched per unique commit (not per build).
+    Results are backfilled to all builds sharing the same commit.
+    """
+    from app.repositories.dataset_build_repository import DatasetBuildRepository
+
+    version_repo = DatasetVersionRepository(self.db)
+    dataset_build_repo = DatasetBuildRepository(self.db)
+    raw_build_run_repo = RawBuildRunRepository(self.db)
+    raw_repo_repo = RawRepositoryRepository(self.db)
+
+    version = version_repo.find_by_id(version_id)
+    if not version:
+        return {"status": "error", "error": "Version not found"}
+
+    has_sonar = bool(version.scan_metrics.get("sonarqube"))
+    has_trivy = bool(version.scan_metrics.get("trivy"))
+
+    if not has_sonar and not has_trivy:
+        return {"status": "skipped", "reason": "No scan metrics selected"}
+
+    # Get validated builds and group by commit
+    validated_builds = dataset_build_repo.find_validated_builds(version.dataset_id)
+
+    # Group by (repo_id, commit_sha) to avoid duplicate scans
+    commits_to_scan = {}  # {(repo_id, commit_sha): build_info}
+    for build in validated_builds:
+        if not build.workflow_run_id:
+            continue
+        raw_build_run = raw_build_run_repo.find_by_id(str(build.workflow_run_id))
+        if not raw_build_run:
+            continue
+
+        key = (str(raw_build_run.raw_repo_id), raw_build_run.commit_sha)
+        if key not in commits_to_scan:
+            commits_to_scan[key] = {
+                "raw_repo_id": str(raw_build_run.raw_repo_id),
+                "commit_sha": raw_build_run.commit_sha,
+            }
+
+    logger.info(f"Dispatching scans for {len(commits_to_scan)} unique commits")
+
+    scan_tasks = []
+    for commit_info in commits_to_scan.values():
+        raw_repo = raw_repo_repo.find_by_id(commit_info["raw_repo_id"])
+        if not raw_repo:
+            continue
+
+        worktree_path = (
+            f"{settings.REPO_DATA_DIR}/repos/{raw_repo.full_name}/worktrees"
+            f"/{commit_info['commit_sha'][:12]}"
+        )
+
+        # Dispatch scan task
+        from app.tasks.enrichment_scan_helpers import dispatch_scan_for_commit
+
+        scan_tasks.append(
+            dispatch_scan_for_commit.s(
+                version_id=version_id,
+                raw_repo_id=commit_info["raw_repo_id"],
+                commit_sha=commit_info["commit_sha"],
+                repo_full_name=raw_repo.full_name,
+                repo_url=raw_repo.clone_url,
+                worktree_path=worktree_path,
+            )
+        )
+
+    # Execute scan tasks as group
+    if scan_tasks:
+        group(scan_tasks).apply_async()
+
+    return {
+        "status": "dispatched",
+        "commits": len(commits_to_scan),
+        "has_sonar": has_sonar,
+        "has_trivy": has_trivy,
+    }

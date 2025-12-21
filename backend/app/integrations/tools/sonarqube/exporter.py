@@ -1,14 +1,13 @@
-import requests
+import logging
+from pathlib import Path
 from typing import Dict, List
+
+import requests
+import yaml
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.config import settings
-
-
-import yaml
-from pathlib import Path
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +41,7 @@ class MetricsExporter:
             config_path = Path(__file__).resolve().parents[5] / "sonar_metrics.yml"
 
             if not config_path.exists():
-                logger.warning(
-                    f"Metrics config not found at {config_path}, using defaults"
-                )
+                logger.warning(f"Metrics config not found at {config_path}, using defaults")
                 return default_metrics
 
             with open(config_path, "r") as f:

@@ -1,9 +1,9 @@
 """
-SonarQube Celery Tasks.
+SonarQube Celery Tasks for Enrichment Scans.
 
 Tasks:
-- start_sonar_scan: Start async SonarQube scan (CPU-intensive, dedicated queue)
-- export_metrics_from_webhook: Handle webhook callback when scan completes
+- start_sonar_scan_for_version_commit: Start async scan (dedicated queue)
+- export_metrics_from_webhook: Handle webhook when scan completes
 """
 
 import logging
@@ -12,108 +12,105 @@ from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.database.mongo import get_database
-from app.entities.sonar_scan_pending import SonarScanPending, ScanPendingStatus
-from app.repositories.sonar_scan_pending import SonarScanPendingRepository
-from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
-from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.integrations.tools.sonarqube.exporter import MetricsExporter
 from app.integrations.tools.sonarqube.runner import SonarCommitRunner
+from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+from app.repositories.dataset_version import DatasetVersionRepository
+from app.repositories.sonar_scan_pending import SonarScanPendingRepository
 
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# SCAN TASK - Runs on dedicated sonar_scan queue
+# =============================================================================
+
+
 @celery_app.task(
     bind=True,
-    name="app.tasks.sonar.start_sonar_scan",
-    queue="sonar_scan",  # Dedicated CPU-intensive queue
-    soft_time_limit=1800,  # 30 min soft limit
-    time_limit=2100,  # 35 min hard limit
+    name="app.tasks.sonar.start_sonar_scan_for_version_commit",
+    queue="sonar_scan",
+    soft_time_limit=1800,
+    time_limit=2100,
 )
-def start_sonar_scan(
+def start_sonar_scan_for_version_commit(
     self,
-    build_id: str,
-    build_type: str,
-    repo_url: str,
+    version_id: str,
     commit_sha: str,
+    repo_full_name: str,
+    repo_url: str,
     component_key: str,
     config_content: str = None,
     shared_worktree_path: str = None,
     raw_repo_id: str = None,
-    full_name: str = None,
 ):
     """
-    Start SonarQube scan for a commit (CPU-intensive).
+    Start SonarQube scan for a commit in a dataset version.
 
-    This task:
-    1. Creates a pending scan record
-    2. Runs sonar-scanner
-    3. Webhook will handle metrics export when done
+    Creates/updates SonarScanPending record for tracking.
+    Webhook will backfill results to all builds with matching commit.
 
     Args:
-        build_id: Build ID (ModelBuild or EnrichmentBuild)
-        build_type: "model" or "enrichment"
-        repo_url: Repository URL to clone
+        version_id: DatasetVersion ID
         commit_sha: Commit SHA to scan
-        component_key: SonarQube component key
+        repo_full_name: Repository full name (owner/repo)
+        repo_url: Repository URL for checkout
+        component_key: SonarQube project key (format: reponame_commithash)
         config_content: Optional sonar-project.properties content
-        shared_worktree_path: Optional path to shared worktree from pipeline
-        raw_repo_id: Optional raw repo ID for shared worktree lookup
-        full_name: Optional repo full name (owner/repo)
+        shared_worktree_path: Optional path to existing worktree
+        raw_repo_id: Optional RawRepository ID for worktree lookup
     """
-    logger.info(f"Starting SonarQube scan for {component_key}")
+    logger.info(f"Starting SonarQube scan for commit {commit_sha[:8]} in version {version_id[:8]}")
 
     db = get_database()
     pending_repo = SonarScanPendingRepository(db)
 
-    # Check if already pending
-    existing = pending_repo.find_pending_by_component_key(component_key)
-    if existing:
-        logger.info(f"Scan already in progress for {component_key}")
-        return {"status": "already_pending", "component_key": component_key}
-
-    # Create pending record
-    pending = SonarScanPending(
-        build_id=ObjectId(build_id),
-        build_type=build_type,
-        component_key=component_key,
+    # Create or get scan record
+    scan_record = pending_repo.create_or_get(
+        version_id=ObjectId(version_id),
         commit_sha=commit_sha,
+        repo_full_name=repo_full_name,
+        component_key=component_key,
         repo_url=repo_url,
-        status=ScanPendingStatus.SCANNING,
     )
-    pending = pending_repo.insert_one(pending)
+
+    # Check if already scanning
+    if scan_record.status.value == "scanning":
+        logger.info(f"Scan already in progress for {component_key}")
+        return {"status": "already_scanning", "component_key": component_key}
+
+    # Mark as scanning
+    pending_repo.mark_scanning(scan_record.id)
 
     try:
-        # Get project key from component key (component_key = project_key_commit_sha)
         project_key = component_key.rsplit("_", 1)[0]
-
-        # Run scanner (pass raw_repo_id for shared worktree support)
         runner = SonarCommitRunner(project_key, raw_repo_id=raw_repo_id)
         runner.scan_commit(
             repo_url,
             commit_sha,
             sonar_config_content=config_content,
             shared_worktree_path=shared_worktree_path,
-            full_name=full_name,
+            full_name=repo_full_name,
         )
 
-        logger.info(
-            f"SonarQube scan completed for {component_key}, waiting for webhook"
-        )
+        logger.info(f"SonarQube scan initiated for {component_key}, waiting for webhook")
         return {"status": "scanning", "component_key": component_key}
 
-    except Exception as e:
-        error_msg = str(e)
+    except Exception as exc:
+        error_msg = str(exc)
         logger.error(f"SonarQube scan failed for {component_key}: {error_msg}")
+        pending_repo.mark_failed(scan_record.id, error_msg)
 
-        # Mark as failed
-        pending_repo.mark_failed(pending.id, error_msg)
-
-        # Retry with exponential backoff
         raise self.retry(
-            exc=e,
+            exc=exc,
             countdown=min(60 * (2**self.request.retries), 1800),
             max_retries=2,
-        )
+        ) from exc
+
+
+# =============================================================================
+# WEBHOOK HANDLER - Processes results when SonarQube analysis completes
+# =============================================================================
 
 
 @celery_app.task(
@@ -121,70 +118,99 @@ def start_sonar_scan(
     name="app.tasks.sonar.export_metrics_from_webhook",
     queue="processing",
 )
-def export_metrics_from_webhook(self, component_key: str, build_id: str = None):
+def export_metrics_from_webhook(
+    self,
+    component_key: str,
+    analysis_status: str,
+):
     """
-    Handle SonarQube webhook callback when scan completes.
+    Handle SonarQube webhook callback when analysis completes.
 
-    This is called by the webhook handler when SonarQube finishes analysis.
-    Fetches metrics and updates the associated build.
+    Fetches metrics, filters by version config, and backfills to builds.
 
     Args:
-        component_key: SonarQube project/component key
-        build_id: Optional build ID to update (deprecated, use pending record)
+        component_key: SonarQube component/project key
+        analysis_status: Status from webhook ("SUCCESS", "FAILED", etc.)
     """
-    logger.info(f"Exporting metrics for {component_key} from webhook")
+    logger.info(f"Processing SonarQube webhook for {component_key}, status={analysis_status}")
 
     db = get_database()
     pending_repo = SonarScanPendingRepository(db)
+    version_repo = DatasetVersionRepository(db)
+    enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
 
-    # Find pending scan
-    pending = pending_repo.find_pending_by_component_key(component_key)
+    # Find pending scan record
+    pending = pending_repo.find_by_component_key(component_key)
+    if not pending:
+        logger.warning(f"No pending scan found for {component_key}")
+        return {"status": "no_pending", "component_key": component_key}
 
     try:
+        # Handle failed analysis
+        if analysis_status != "SUCCESS":
+            pending_repo.mark_failed(pending.id, f"Analysis failed: {analysis_status}")
+            return {"status": "failed", "component_key": component_key}
+
         # Export metrics from SonarQube API
         exporter = MetricsExporter()
-        metrics = exporter.collect_metrics(component_key)
+        raw_metrics = exporter.collect_metrics(component_key)
 
-        if not metrics:
+        if not raw_metrics:
             logger.warning(f"No metrics available for {component_key}")
-            if pending:
-                pending_repo.mark_failed(pending.id, "No metrics available")
+            pending_repo.mark_failed(pending.id, "No metrics available")
             return {"status": "no_metrics", "component_key": component_key}
 
-        # Convert to sonar_* feature format
-        sonar_features = {f"sonar_{k}": v for k, v in metrics.items()}
+        # Get version to filter metrics
+        version = version_repo.find_by_id(str(pending.dataset_version_id))
+        if not version:
+            logger.error(f"Version {pending.dataset_version_id} not found")
+            pending_repo.mark_failed(pending.id, "Version not found")
+            return {"status": "version_not_found", "component_key": component_key}
 
-        # Update build features if pending record exists
-        if pending:
-            if pending.build_type == "enrichment":
-                build_repo = DatasetEnrichmentBuildRepository(db)
-            else:
-                build_repo = ModelTrainingBuildRepository(db)
+        # Filter metrics based on user selection
+        selected_metrics = version.scan_metrics.get("sonarqube", [])
+        filtered_metrics = _filter_metrics_by_selection(raw_metrics, selected_metrics)
 
-            # Update build with sonar features
-            build_repo.update_one(
-                str(pending.build_id),
-                {
-                    "features": sonar_features,
-                    "extraction_status": "completed",
-                },
-            )
+        # Backfill to all builds in version with matching commit
+        updated_count = enrichment_build_repo.backfill_by_commit_in_version(
+            version_id=pending.dataset_version_id,
+            commit_sha=pending.commit_sha,
+            scan_features=filtered_metrics,
+            prefix="sonar_",
+        )
 
-            # Mark pending as completed
-            pending_repo.mark_completed(pending.id, metrics)
+        # Mark pending as completed
+        pending_repo.mark_completed(pending.id, raw_metrics, updated_count)
 
-            logger.info(
-                f"Updated {pending.build_type} build {pending.build_id} with "
-                f"{len(metrics)} sonar features"
-            )
-        else:
-            logger.warning(f"No pending scan found for {component_key}")
+        logger.info(
+            f"SonarQube metrics backfilled to {updated_count} builds "
+            f"for commit {pending.commit_sha[:8]} ({len(filtered_metrics)} metrics)"
+        )
 
-        logger.info(f"Successfully exported {len(metrics)} metrics for {component_key}")
-        return {"status": "success", "metrics_count": len(metrics)}
+        return {
+            "status": "success",
+            "builds_updated": updated_count,
+            "metrics_count": len(filtered_metrics),
+        }
 
-    except Exception as e:
-        logger.error(f"Failed to export metrics for {component_key}: {e}")
-        if pending:
-            pending_repo.mark_failed(pending.id, str(e))
+    except Exception as exc:
+        logger.error(f"Failed to export metrics for {component_key}: {exc}")
+        pending_repo.mark_failed(pending.id, str(exc))
         raise
+
+
+def _filter_metrics_by_selection(
+    raw_metrics: dict,
+    selected_metrics: list,
+) -> dict:
+    """Filter raw metrics based on user's selected metric list."""
+    if not selected_metrics:
+        return raw_metrics
+
+    filtered = {}
+    for key, value in raw_metrics.items():
+        if key in selected_metrics or f"sonar_{key}" in selected_metrics:
+            filtered[key] = value
+
+    logger.debug(f"Filtered {len(raw_metrics)} -> {len(filtered)} metrics")
+    return filtered

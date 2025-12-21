@@ -81,6 +81,8 @@ class DatasetVersionService:
         role: str,
         selected_features: List[str],
         feature_configs: Optional[dict] = None,
+        scan_metrics: Optional[dict] = None,
+        scan_config: Optional[dict] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
     ) -> DatasetVersion:
@@ -92,7 +94,10 @@ class DatasetVersionService:
         if role not in ("admin", "guest"):
             raise HTTPException(
                 status_code=403,
-                detail="You don't have permission to create dataset versions. Admins and guests can create versions.",
+                detail=(
+                    "You don't have permission to create dataset versions. "
+                    "Admins and guests can create versions."
+                ),
             )
 
         dataset = self._verify_dataset_access(dataset_id, user_id, role=role)
@@ -125,13 +130,27 @@ class DatasetVersionService:
                         remaining = int(cooldown_ts - now_ts)
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Please wait {remaining} seconds before creating a new version. "
-                            "Previous version is cleaning up.",
+                            detail=(
+                                f"Please wait {remaining} seconds before creating a new version. "
+                                "Previous version is cleaning up."
+                            ),
                         )
                 except (ValueError, TypeError):
                     pass  # Invalid cooldown value, ignore
 
             version_number = self._repo.get_next_version_number(dataset_id)
+
+            # Normalize scan_metrics
+            normalized_scan_metrics = {"sonarqube": [], "trivy": []}
+            if scan_metrics:
+                normalized_scan_metrics["sonarqube"] = scan_metrics.get("sonarqube", [])
+                normalized_scan_metrics["trivy"] = scan_metrics.get("trivy", [])
+
+            # Normalize scan_config
+            normalized_scan_config = {"sonarqube": {}, "trivy": {}}
+            if scan_config:
+                normalized_scan_config["sonarqube"] = scan_config.get("sonarqube", {})
+                normalized_scan_config["trivy"] = scan_config.get("trivy", {})
 
             version = DatasetVersion(
                 dataset_id=dataset_id,
@@ -141,6 +160,8 @@ class DatasetVersionService:
                 description=description,
                 selected_features=selected_features,
                 feature_configs=feature_configs or {},
+                scan_metrics=normalized_scan_metrics,
+                scan_config=normalized_scan_config,
                 total_rows=dataset.rows or 0,
                 status=VersionStatus.PENDING,
             )
@@ -536,3 +557,201 @@ class DatasetVersionService:
             from app.celery_app import celery_app
 
             celery_app.control.revoke(task_id, terminate=True)
+
+    def get_scan_status(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+        role: str = "user",
+    ) -> dict:
+        """
+        Get scan metrics status for a version.
+
+        Returns counts of builds with sonar/trivy features.
+        """
+        self._verify_dataset_access(dataset_id, user_id, role)
+        self._get_version(dataset_id, version_id)  # Verify exists
+
+        from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+
+        enrichment_repo = DatasetEnrichmentBuildRepository(self._repo.db)
+        return enrichment_repo.get_scan_status_by_version(ObjectId(version_id))
+
+    def retry_scans(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+        role: str = "user",
+    ) -> dict:
+        """
+        Retry scans for a version.
+
+        Re-dispatches scan tasks for all unique commits in the version.
+        """
+        self._verify_dataset_access(dataset_id, user_id, role)
+        version = self._get_version(dataset_id, version_id)
+
+        if version.status not in ["completed", "failed"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Can only retry scans for completed or failed versions",
+            )
+
+        from app.tasks.enrichment_processing import dispatch_version_scans
+
+        task = dispatch_version_scans.delay(version_id)
+
+        return {
+            "status": "dispatched",
+            "task_id": task.id,
+            "message": "Scan retry dispatched",
+        }
+
+    def get_commit_scans(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+        role: str = "user",
+    ) -> dict:
+        """
+        Get detailed commit scan status for a version.
+
+        Returns separate lists for Trivy and SonarQube scans.
+        """
+        self._verify_dataset_access(dataset_id, user_id, role)
+        self._get_version(dataset_id, version_id)
+
+        from app.repositories.sonar_scan_pending import SonarScanPendingRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
+        trivy_repo = TrivyCommitScanRepository(self._repo.db)
+        sonar_repo = SonarScanPendingRepository(self._repo.db)
+
+        version_oid = ObjectId(version_id)
+
+        trivy_scans = trivy_repo.find_by_version(version_oid)
+        sonar_scans = sonar_repo.find_by_version(version_oid)
+
+        return {
+            "trivy": [
+                {
+                    "id": str(s.id),
+                    "commit_sha": s.commit_sha,
+                    "repo_full_name": s.repo_full_name,
+                    "status": s.status.value,
+                    "error_message": s.error_message,
+                    "builds_affected": s.builds_affected,
+                    "retry_count": s.retry_count,
+                    "started_at": s.started_at.isoformat() if s.started_at else None,
+                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                }
+                for s in trivy_scans
+            ],
+            "sonarqube": [
+                {
+                    "id": str(s.id),
+                    "commit_sha": s.commit_sha,
+                    "repo_full_name": s.repo_full_name,
+                    "component_key": s.component_key,
+                    "status": s.status.value,
+                    "error_message": s.error_message,
+                    "builds_affected": s.builds_affected,
+                    "retry_count": s.retry_count,
+                    "started_at": s.started_at.isoformat() if s.started_at else None,
+                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                }
+                for s in sonar_scans
+            ],
+        }
+
+    def retry_commit_scan(
+        self,
+        dataset_id: str,
+        version_id: str,
+        commit_sha: str,
+        tool_type: str,
+        user_id: str,
+        role: str = "user",
+        config_override: dict = None,
+    ) -> dict:
+        """
+        Retry a specific commit scan for a tool.
+
+        Args:
+            tool_type: "trivy" or "sonarqube"
+            config_override: Optional new config to use
+        """
+        self._verify_dataset_access(dataset_id, user_id, role)
+        self._get_version(dataset_id, version_id)  # Verify exists
+
+        from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+        from app.repositories.sonar_scan_pending import SonarScanPendingRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
+        version_oid = ObjectId(version_id)
+        enrichment_repo = DatasetEnrichmentBuildRepository(self._repo.db)
+
+        # Get worktree path and repo info from a build with this commit
+        builds = enrichment_repo.find_by_version_and_commit(version_oid, commit_sha)
+        if not builds:
+            raise HTTPException(status_code=404, detail="No builds found for this commit")
+
+        sample_build = builds[0]
+        worktree_path = sample_build.worktree_path or ""
+        repo_full_name = sample_build.repo_full_name or ""
+        repo_url = sample_build.repo_url or ""
+
+        if tool_type == "trivy":
+            trivy_repo = TrivyCommitScanRepository(self._repo.db)
+            scan = trivy_repo.find_by_version_and_commit(version_oid, commit_sha)
+
+            if not scan:
+                raise HTTPException(status_code=404, detail="Trivy scan not found")
+
+            # Increment retry count
+            trivy_repo.increment_retry(scan.id)
+
+            # Use override config or existing
+            trivy_config = config_override or scan.scan_config or {}
+            selected_metrics = scan.selected_metrics or []
+
+            from app.tasks.trivy import start_trivy_scan_for_version_commit
+
+            task = start_trivy_scan_for_version_commit.delay(
+                version_id=version_id,
+                commit_sha=commit_sha,
+                repo_full_name=repo_full_name,
+                worktree_path=worktree_path,
+                trivy_config=trivy_config,
+                selected_metrics=selected_metrics,
+            )
+
+            return {"status": "dispatched", "task_id": task.id, "tool": "trivy"}
+
+        elif tool_type == "sonarqube":
+            sonar_repo = SonarScanPendingRepository(self._repo.db)
+            scan = sonar_repo.find_by_version_and_commit(version_oid, commit_sha)
+
+            if not scan:
+                raise HTTPException(status_code=404, detail="SonarQube scan not found")
+
+            # Increment retry count
+            sonar_repo.increment_retry(scan.id)
+
+            from app.tasks.sonar import start_sonar_scan_for_version_commit
+
+            task = start_sonar_scan_for_version_commit.delay(
+                version_id=version_id,
+                commit_sha=commit_sha,
+                repo_full_name=repo_full_name,
+                repo_url=repo_url,
+                component_key=scan.component_key,
+            )
+
+            return {"status": "dispatched", "task_id": task.id, "tool": "sonarqube"}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid tool type: {tool_type}")

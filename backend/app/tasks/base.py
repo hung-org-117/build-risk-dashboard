@@ -10,7 +10,6 @@ from app.services.github.exceptions import (
     GithubRetryableError,
 )
 
-
 logger = logging.getLogger(__name__)
 
 

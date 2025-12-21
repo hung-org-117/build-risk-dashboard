@@ -9,8 +9,8 @@ from typing import Any, Dict, Optional
 import redis
 from pymongo.database import Database
 
-from app.config import settings
 from app.celery_app import celery_app
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +132,7 @@ class MonitoringService:
                 "uptime_seconds": server_status.get("uptime", 0),
                 "connections": {
                     "current": server_status.get("connections", {}).get("current", 0),
-                    "available": server_status.get("connections", {}).get(
-                        "available", 0
-                    ),
+                    "available": server_status.get("connections", {}).get("available", 0),
                 },
                 "collections": len(collections),
                 "operations": {
@@ -176,12 +174,8 @@ class MonitoringService:
                     "raw_repo_id": str(run.raw_repo_id),
                     "raw_build_run_id": str(run.raw_build_run_id),
                     "status": run.status,
-                    "started_at": (
-                        run.started_at.isoformat() if run.started_at else None
-                    ),
-                    "completed_at": (
-                        run.completed_at.isoformat() if run.completed_at else None
-                    ),
+                    "started_at": (run.started_at.isoformat() if run.started_at else None),
+                    "completed_at": (run.completed_at.isoformat() if run.completed_at else None),
                     "duration_ms": run.duration_ms,
                     "feature_count": run.feature_count,
                     "nodes_executed": run.nodes_executed,
@@ -202,6 +196,7 @@ class MonitoringService:
     ) -> Dict[str, Any]:
         """Get pipeline runs with cursor-based pagination for infinite scroll."""
         from bson import ObjectId
+
         from app.repositories.pipeline_run import PipelineRunRepository
 
         repo = PipelineRunRepository(self.db)
@@ -257,12 +252,8 @@ class MonitoringService:
                     "repo": repo_map.get(str(run.raw_repo_id), {}),
                     "build": build_map.get(str(run.raw_build_run_id), {}),
                     "status": run.status,
-                    "started_at": (
-                        run.started_at.isoformat() if run.started_at else None
-                    ),
-                    "completed_at": (
-                        run.completed_at.isoformat() if run.completed_at else None
-                    ),
+                    "started_at": (run.started_at.isoformat() if run.started_at else None),
+                    "completed_at": (run.completed_at.isoformat() if run.completed_at else None),
                     "duration_ms": run.duration_ms,
                     "feature_count": run.feature_count,
                     "nodes_executed": run.nodes_executed,
@@ -278,27 +269,16 @@ class MonitoringService:
 
     def get_background_jobs(self) -> Dict[str, Any]:
         """Get overview of all background jobs."""
-        from app.repositories.export_job import ExportJobRepository
-        from app.repositories.dataset_scan import DatasetScanRepository
         from app.repositories.dataset_version import DatasetVersionRepository
+        from app.repositories.export_job import ExportJobRepository
 
         export_repo = ExportJobRepository(self.db)
-        scan_repo = DatasetScanRepository(self.db)
         version_repo = DatasetVersionRepository(self.db)
 
         # Get active export jobs
         active_exports = list(
             export_repo.collection.find(
                 {"status": {"$in": ["pending", "processing"]}},
-                sort=[("created_at", -1)],
-                limit=10,
-            )
-        )
-
-        # Get active scans
-        active_scans = list(
-            scan_repo.collection.find(
-                {"status": {"$in": ["pending", "running", "partial"]}},
                 sort=[("created_at", -1)],
                 limit=10,
             )
@@ -327,20 +307,6 @@ class MonitoringService:
                 }
                 for j in active_exports
             ],
-            "scans": [
-                {
-                    "id": str(s["_id"]),
-                    "dataset_id": str(s.get("dataset_id")),
-                    "tool_type": s.get("tool_type"),
-                    "status": s.get("status"),
-                    "total_commits": s.get("total_commits", 0),
-                    "scanned_commits": s.get("scanned_commits", 0),
-                    "created_at": (
-                        s.get("created_at").isoformat() if s.get("created_at") else None
-                    ),
-                }
-                for s in active_scans
-            ],
             "enrichments": [
                 {
                     "id": str(e["_id"]),
@@ -356,7 +322,6 @@ class MonitoringService:
             ],
             "summary": {
                 "active_exports": len(active_exports),
-                "active_scans": len(active_scans),
                 "active_enrichments": len(active_enrichments),
             },
         }
@@ -398,9 +363,7 @@ class MonitoringService:
                 {
                     "id": str(doc["_id"]),
                     "timestamp": (
-                        doc.get("timestamp").isoformat()
-                        if doc.get("timestamp")
-                        else None
+                        doc.get("timestamp").isoformat() if doc.get("timestamp") else None
                     ),
                     "level": doc.get("level", "INFO"),
                     "source": doc.get("source", "unknown"),
@@ -446,9 +409,7 @@ class MonitoringService:
             logs.append(
                 {
                     "timestamp": (
-                        doc.get("timestamp").isoformat()
-                        if doc.get("timestamp")
-                        else None
+                        doc.get("timestamp").isoformat() if doc.get("timestamp") else None
                     ),
                     "level": doc.get("level", "INFO"),
                     "source": doc.get("source", "unknown"),

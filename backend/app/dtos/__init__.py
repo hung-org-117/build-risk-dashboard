@@ -62,17 +62,7 @@ from .github import (
     GithubRepositoryStatus,
 )
 from .integration import (
-    FailedResultResponse,
-    FailedResultsListResponse,
-    RetryResultRequest,
-    ScanDetailResponse,
-    ScanResponse,
-    ScanResultResponse,
-    ScanResultsListResponse,
-    ScansListResponse,
-    ScanSummaryResponse,
     SonarWebhookPayload,
-    StartScanRequest,
     ToolInfoResponse,
     ToolsListResponse,
 )
@@ -214,15 +204,5 @@ __all__ = [
     # Integration / Scan
     "ToolInfoResponse",
     "ToolsListResponse",
-    "StartScanRequest",
-    "ScanResponse",
-    "ScansListResponse",
-    "ScanDetailResponse",
-    "ScanResultResponse",
-    "ScanResultsListResponse",
-    "ScanSummaryResponse",
-    "FailedResultResponse",
-    "FailedResultsListResponse",
-    "RetryResultRequest",
     "SonarWebhookPayload",
 ]

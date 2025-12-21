@@ -1,60 +1,97 @@
 """
-Trivy Celery Tasks.
+Trivy Celery Tasks for Enrichment Scans.
 
 Tasks:
-- start_trivy_scan: Async Trivy scan for large repositories
+- start_trivy_scan_for_version_commit: Run Trivy scan on dedicated queue
 """
 
 import logging
 import time
-from datetime import datetime, timezone
+from typing import Any, Dict, List
 
+from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.database.mongo import get_database
-from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
-from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.integrations.tools.trivy import TrivyTool
+from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# TRIVY SCAN TASK - Runs on dedicated trivy_scan queue
+# =============================================================================
+
+
 @celery_app.task(
     bind=True,
-    name="app.tasks.trivy.start_trivy_scan",
-    queue="trivy_scan",  # Dedicated queue for security scanning
-    soft_time_limit=600,  # 10 min soft limit
-    time_limit=900,  # 15 min hard limit
+    name="app.tasks.trivy.start_trivy_scan_for_version_commit",
+    queue="trivy_scan",
+    soft_time_limit=600,
+    time_limit=900,
 )
-def start_trivy_scan(
+def start_trivy_scan_for_version_commit(
     self,
-    build_id: str,
-    build_type: str,
-    worktree_path: str,
+    version_id: str,
     commit_sha: str,
+    repo_full_name: str,
+    worktree_path: str,
+    trivy_config: Dict[str, Any] = None,
+    selected_metrics: List[str] = None,
 ):
     """
-    Run async Trivy scan for large repositories.
+    Run Trivy scan for a commit in a dataset version.
+
+    Creates/updates TrivyCommitScan record for tracking and retry.
+    Results are backfilled to all enrichment builds with matching commit.
 
     Args:
-        build_id: Build ID (ModelBuild or EnrichmentBuild)
-        build_type: "model" or "enrichment"
-        worktree_path: Path to git worktree to scan
+        version_id: DatasetVersion ID
         commit_sha: Commit SHA being scanned
+        repo_full_name: Repository full name (owner/repo)
+        worktree_path: Path to git worktree to scan
+        trivy_config: Optional scan config (scanners, severity, extraArgs)
+        selected_metrics: Optional list of metrics to filter
     """
-    logger.info(f"Starting async Trivy scan for build {build_id} at {commit_sha[:8]}")
+    logger.info(f"Starting Trivy scan for commit {commit_sha[:8]} in version {version_id[:8]}")
+
+    trivy_config = trivy_config or {}
+    selected_metrics = selected_metrics or []
 
     db = get_database()
+    trivy_scan_repo = TrivyCommitScanRepository(db)
+    enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
+
+    # Create or get scan record
+    scan_record = trivy_scan_repo.create_or_get(
+        version_id=ObjectId(version_id),
+        commit_sha=commit_sha,
+        repo_full_name=repo_full_name,
+        scan_config=trivy_config,
+        selected_metrics=selected_metrics,
+        worktree_path=worktree_path,
+    )
+
+    # Mark as scanning
+    trivy_scan_repo.mark_scanning(scan_record.id)
+
     start_time = time.time()
 
     try:
-        # Initialize Trivy tool
-        trivy_tool = TrivyTool()
+        # Parse config
+        scan_types = _parse_scan_types(trivy_config)
+        severity = trivy_config.get("severity", "CRITICAL,HIGH,MEDIUM,LOW")
+        extra_args = trivy_config.get("extraArgs", "")
 
-        # Run scan
+        # Run Trivy scan
+        trivy_tool = TrivyTool()
         scan_result = trivy_tool.scan(
             target_path=worktree_path,
-            scan_types=["vuln", "config", "secret"],
+            scan_types=scan_types,
+            severity=severity,
+            extra_args=extra_args,
         )
 
         scan_duration_ms = scan_result.get(
@@ -64,69 +101,80 @@ def start_trivy_scan(
         if scan_result.get("status") == "failed":
             error_msg = scan_result.get("error", "Unknown error")
             logger.error(f"Trivy scan failed for {commit_sha[:8]}: {error_msg}")
+            trivy_scan_repo.mark_failed(scan_record.id, error_msg)
             return {"status": "error", "error": error_msg}
 
-        # Get metrics from scan result
-        scan_metrics = scan_result.get("metrics", {})
+        # Process and filter metrics
+        raw_metrics = scan_result.get("metrics", {})
+        raw_metrics["scan_duration_ms"] = scan_duration_ms
 
-        # Format features
-        trivy_features = {
-            "trivy_vuln_critical": scan_metrics.get("vuln_critical", 0),
-            "trivy_vuln_high": scan_metrics.get("vuln_high", 0),
-            "trivy_vuln_medium": scan_metrics.get("vuln_medium", 0),
-            "trivy_vuln_low": scan_metrics.get("vuln_low", 0),
-            "trivy_vuln_total": scan_metrics.get("vuln_total", 0),
-            "trivy_misconfig_critical": scan_metrics.get("misconfig_critical", 0),
-            "trivy_misconfig_high": scan_metrics.get("misconfig_high", 0),
-            "trivy_misconfig_medium": scan_metrics.get("misconfig_medium", 0),
-            "trivy_misconfig_low": scan_metrics.get("misconfig_low", 0),
-            "trivy_misconfig_total": scan_metrics.get("misconfig_total", 0),
-            "trivy_secrets_count": scan_metrics.get("secrets_count", 0),
-            "trivy_scan_duration_ms": scan_duration_ms,
-            "trivy_packages_scanned": scan_metrics.get("packages_scanned", 0),
-            "trivy_files_scanned": scan_metrics.get("files_scanned", 0),
-            "trivy_has_critical": scan_metrics.get("has_critical", False),
-            "trivy_has_high": scan_metrics.get("has_high", False),
-            "trivy_top_vulnerable_packages": scan_metrics.get(
-                "top_vulnerable_packages", []
-            ),
-        }
+        filtered_metrics = _filter_trivy_metrics(raw_metrics, selected_metrics)
 
-        # Update build with features
-        if build_type == "enrichment":
-            build_repo = DatasetEnrichmentBuildRepository(db)
-        else:
-            build_repo = ModelTrainingBuildRepository(db)
+        # Backfill to all builds in version with matching commit
+        updated_count = enrichment_build_repo.backfill_by_commit_in_version(
+            version_id=ObjectId(version_id),
+            commit_sha=commit_sha,
+            scan_features=filtered_metrics,
+            prefix="trivy_",
+        )
 
-        # Merge trivy features into existing features
-        build = build_repo.find_by_id(build_id)
-        if build:
-            existing_features = build.features or {}
-            existing_features.update(trivy_features)
-            build_repo.update_one(
-                build_id,
-                {
-                    "features": existing_features,
-                    "trivy_scan_completed_at": datetime.now(timezone.utc),
-                },
-            )
+        # Mark completed with results
+        trivy_scan_repo.mark_completed(
+            scan_id=scan_record.id,
+            metrics=filtered_metrics,
+            builds_affected=updated_count,
+        )
 
         logger.info(
-            f"Async Trivy scan completed for {commit_sha[:8]}: "
-            f"{trivy_features.get('trivy_vuln_total', 0)} vulnerabilities in {scan_duration_ms}ms"
+            f"Trivy scan completed for {commit_sha[:8]}: "
+            f"{filtered_metrics.get('vuln_total', 0)} vulns, "
+            f"backfilled to {updated_count} builds ({scan_duration_ms}ms)"
         )
 
         return {
             "status": "success",
-            "build_id": build_id,
-            "vuln_total": trivy_features.get("trivy_vuln_total", 0),
+            "builds_updated": updated_count,
+            "vuln_total": filtered_metrics.get("vuln_total", 0),
             "scan_duration_ms": scan_duration_ms,
         }
 
-    except Exception as e:
-        logger.error(f"Async Trivy scan failed for {build_id}: {e}")
+    except Exception as exc:
+        error_msg = str(exc)
+        logger.error(f"Trivy scan failed for {commit_sha[:8]}: {error_msg}")
+        trivy_scan_repo.mark_failed(scan_record.id, error_msg)
+
         raise self.retry(
-            exc=e,
+            exc=exc,
             countdown=min(60 * (2**self.request.retries), 600),
             max_retries=2,
-        )
+        ) from exc
+
+
+def _parse_scan_types(trivy_config: dict) -> List[str]:
+    """Parse scan types from config, default to all types."""
+    default_types = ["vuln", "config", "secret"]
+
+    if not trivy_config.get("scanners"):
+        return default_types
+
+    scanners = trivy_config["scanners"]
+    if isinstance(scanners, str):
+        return [s.strip() for s in scanners.split(",")]
+    return scanners
+
+
+def _filter_trivy_metrics(
+    raw_metrics: dict,
+    selected_metrics: List[str],
+) -> dict:
+    """Filter raw Trivy metrics based on user-selected metric list."""
+    if not selected_metrics:
+        return raw_metrics
+
+    filtered = {}
+    for key, value in raw_metrics.items():
+        if key in selected_metrics or f"trivy_{key}" in selected_metrics:
+            filtered[key] = value
+
+    logger.debug(f"Filtered Trivy {len(raw_metrics)} -> {len(filtered)} metrics")
+    return filtered

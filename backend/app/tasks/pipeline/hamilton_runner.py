@@ -11,6 +11,8 @@ Key behaviors:
 - Caching support for intermediate values to avoid recomputation on errors
 """
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
@@ -36,9 +38,11 @@ from app.tasks.pipeline.feature_dag._inputs import (
     GitWorktreeInput,
     RepoInput,
 )
-from app.tasks.pipeline.feature_dag._metadata import (
-    FeatureResource,
-    get_required_resources_for_features,
+from app.tasks.pipeline.feature_dag._metadata import get_required_resources_for_features
+from app.tasks.pipeline.input_preparer import PreparedPipelineInput
+from app.tasks.pipeline.shared.resources import (
+    check_resource_availability,
+    get_input_resource_names,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,51 +149,27 @@ class HamiltonPipeline:
         return builder.build()
 
     def _get_all_feature_names(self) -> Set[str]:
-        """Get all available feature names."""
-        return {v.name for v in self._driver.list_available_variables()}
+        """Get all actual feature output names (excludes inputs and intermediate nodes).
+
+        Uses build_metadata_registry() to get only features with @feature_metadata decorator,
+        which are the actual output features defined in the feature DAG modules.
+        """
+        from app.tasks.pipeline.feature_dag._metadata import build_metadata_registry
+
+        registry = build_metadata_registry(
+            [
+                git_features,
+                build_features,
+                github_features,
+                log_features,
+                repo_features,
+            ]
+        )
+        return set(registry.keys())
 
     def get_active_features(self) -> Set[str]:
         """Get set of all active feature names."""
         return self._all_features.copy()
-
-    def _check_available_resources(
-        self,
-        git_history: Optional[GitHistoryInput],
-        git_worktree: Optional[GitWorktreeInput],
-        github_client: Optional[GitHubClientInput],
-        build_logs: Optional[BuildLogsInput],
-    ) -> Set[str]:
-        """
-        Check which resources are available.
-
-        Returns:
-            Set of available resource names
-        """
-        available = set()
-
-        # Core resources are always available
-        available.add(FeatureResource.BUILD_RUN.value)
-        available.add(FeatureResource.REPO.value)
-        available.add(FeatureResource.REPO_CONFIG.value)
-        available.add(FeatureResource.RAW_BUILD_RUNS.value)  # Query builds available
-
-        # Git history (commit available in bare repo)
-        if git_history and git_history.is_commit_available:
-            available.add(FeatureResource.GIT_HISTORY.value)
-
-        # Git worktree (filesystem ready)
-        if git_worktree and git_worktree.is_ready:
-            available.add(FeatureResource.GIT_WORKTREE.value)
-
-        # GitHub API client
-        if github_client:
-            available.add(FeatureResource.GITHUB_API.value)
-
-        # Build logs
-        if build_logs and build_logs.is_available:
-            available.add(FeatureResource.BUILD_LOGS.value)
-
-        return available
 
     def _filter_by_resources(
         self,
@@ -216,46 +196,105 @@ class HamiltonPipeline:
 
         return valid, skipped
 
+    def execute(
+        self,
+        prepared: PreparedPipelineInput,
+    ) -> Dict[str, Any]:
+        """
+        Execute Hamilton pipeline with prepared inputs.
+
+        This is the pure executor - all input preparation and resource
+        checking is done by prepare_pipeline_input().
+
+        Args:
+            prepared: PreparedPipelineInput from input_preparer
+
+        Returns:
+            Dictionary of feature_name -> value
+        """
+
+        # Store tracking info from prepared input
+        self._last_skipped_features = prepared.skipped_features
+        self._last_missing_resources = prepared.missing_resources
+
+        if not prepared.has_features:
+            logger.warning("No features to extract")
+            return {}
+
+        # Build Hamilton inputs dict
+        inputs: Dict[str, Any] = {
+            "git_history": prepared.inputs.git_history,
+            "git_worktree": prepared.inputs.git_worktree,
+            "repo": prepared.inputs.repo,
+            "build_run": prepared.inputs.build_run,
+            "feature_config": prepared.inputs.feature_config,
+            "build_logs": prepared.inputs.build_logs,
+            "raw_build_runs": self.db.get_collection("raw_build_runs"),
+        }
+
+        if prepared.github_client:
+            inputs["github_client"] = prepared.github_client
+
+        final_vars = list(prepared.features_to_extract)
+        logger.info(f"Extracting {len(final_vars)} features via Hamilton")
+        logger.debug(f"Features: {sorted(final_vars)}")
+
+        try:
+            result = self._driver.execute(final_vars, inputs=inputs)
+
+            # Filter output to only return requested features
+            input_names = get_input_resource_names()
+            filtered_result = {
+                k: v
+                for k, v in dict(result).items()
+                if k in prepared.features_to_extract and k not in input_names
+            }
+
+            return filtered_result
+
+        except Exception as e:
+            logger.error(f"Hamilton pipeline failed: {e}")
+            raise
+
     def run(
         self,
         git_history: GitHistoryInput,
         git_worktree: GitWorktreeInput,
         repo: RepoInput,
         build_run: BuildRunInput,
-        repo_config: Optional[FeatureConfigInput] = None,
+        feature_config: Optional[FeatureConfigInput] = None,
         github_client: Optional[GitHubClientInput] = None,
         build_logs: Optional[BuildLogsInput] = None,
         features_filter: Optional[Set[str]] = None,
     ) -> Dict[str, Any]:
         """
-        Execute feature extraction.
+        Execute feature extraction (legacy interface).
 
-        Args:
-            git_history: Git history input (bare repo access)
-            git_worktree: Git worktree input (filesystem access)
-            repo: Repository metadata from RawRepository
-            build_run: Build run data from RawBuildRun
-            repo_config: Optional user config (ci_provider, test_frameworks)
-            github_client: Optional GitHub client for API features
-            features_filter: Optional set of features to extract
+        For new code, prefer using prepare_pipeline_input() + execute().
 
-        Returns:
-            Dictionary of feature_name -> value (only requested features + defaults)
-
-        Note:
-            - DEFAULT_FEATURES are always included in the output
-            - Hamilton only computes the features you request (+ their dependencies)
-            - Dependencies are computed but NOT included in the output
+        This method builds inputs dict, checks resources, and executes.
         """
-        # Check which resources are available
-        available_resources = self._check_available_resources(
-            git_history=git_history,
-            git_worktree=git_worktree,
-            github_client=github_client,
-            build_logs=build_logs,
-        )
+        # Build inputs dict
+        inputs: Dict[str, Any] = {
+            "git_history": git_history,
+            "git_worktree": git_worktree,
+            "repo": repo,
+            "build_run": build_run,
+            "raw_build_runs": self.db.get_collection("raw_build_runs"),
+        }
 
-        # Filter features based on available resources
+        if feature_config:
+            inputs["feature_config"] = feature_config
+
+        if github_client:
+            inputs["github_client"] = github_client
+
+        if build_logs:
+            inputs["build_logs"] = build_logs
+
+        # Check resources and filter features
+        available_resources = check_resource_availability(inputs)
+
         if features_filter:
             requested_features = (features_filter | DEFAULT_FEATURES) & self._all_features
         else:
@@ -265,11 +304,9 @@ class HamiltonPipeline:
             requested_features, available_resources
         )
 
-        # Calculate missing resources for tracking
         all_required = get_required_resources_for_features(requested_features)
         missing_resources = all_required - available_resources
 
-        # Store for later retrieval
         self._last_skipped_features = skipped_features
         self._last_missing_resources = missing_resources
 
@@ -284,44 +321,19 @@ class HamiltonPipeline:
             logger.warning("No features to extract after resource validation")
             return {}
 
-        # Build inputs dict
-        inputs: Dict[str, Any] = {
-            "git_history": git_history,
-            "git_worktree": git_worktree,
-            "repo": repo,
-            "build_run": build_run,
-            "raw_build_runs": self.db.get_collection("raw_build_runs"),
-        }
-
-        if repo_config:
-            inputs["feature_config"] = repo_config
-
-        if github_client:
-            inputs["github_client"] = github_client
-
-        if build_logs:
-            inputs["build_logs"] = build_logs
-
-        # Filter out input resource names from features to request
-        # This ensures Hamilton only returns actual feature values, not inputs
-        from app.tasks.pipeline.constants import INPUT_RESOURCE_NAMES
-
-        final_vars = list(valid_features - INPUT_RESOURCE_NAMES)
+        input_names = get_input_resource_names()
+        final_vars = list(valid_features - input_names)
 
         logger.info(f"Extracting {len(final_vars)} features via Hamilton")
         logger.debug(f"Features: {sorted(final_vars)}")
 
         try:
-            # Hamilton computes ONLY the requested features and their dependencies
-            # Dependencies are computed internally but not returned in the result
             result = self._driver.execute(final_vars, inputs=inputs)
 
-            # Filter output to only return explicitly requested features
-            # (Hamilton may return intermediate values, so we filter)
             filtered_result = {
                 k: v
                 for k, v in dict(result).items()
-                if k in requested_features and k not in INPUT_RESOURCE_NAMES
+                if k in requested_features and k not in input_names
             }
 
             return filtered_result

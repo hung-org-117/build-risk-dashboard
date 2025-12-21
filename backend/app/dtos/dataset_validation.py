@@ -1,12 +1,11 @@
 """DTOs for dataset validation API."""
 
-from typing import List, Optional
 from datetime import datetime
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 from app.entities import ValidationStats
-
 
 # ============================================================================
 # Request DTOs

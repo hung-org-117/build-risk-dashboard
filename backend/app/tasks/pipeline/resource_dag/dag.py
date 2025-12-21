@@ -3,33 +3,15 @@ Resource DAG - Task resolution for ingestion pipelines.
 
 This module provides functions to determine which ingestion tasks
 are required for given resources.
-
-Usage:
-    from app.tasks.pipeline.resource_dag import (
-        get_ingestion_tasks,
-        get_ingestion_tasks_by_level,
-        get_tasks_for_resource,
-        get_tasks_for_resources,
-    )
-
-    # Get flat list of tasks
-    tasks = get_ingestion_tasks(["git_worktree", "build_logs"])
-    # Returns: ["clone_repo", "create_worktrees",
-    #           "fetch_and_save_builds", "download_build_logs"]
-
-    # Get tasks grouped by level (for parallel execution)
-    levels = get_ingestion_tasks_by_level(["git_worktree", "build_logs"])
-    # Returns: {0: ["clone_repo", "fetch_and_save_builds"],
-    #           1: ["create_worktrees", "download_build_logs"]}
 """
 
 import logging
 from typing import Dict, List, Set
 
 from app.tasks.pipeline.shared.resources import (
-    FeatureResource,
-    TASK_DEPENDENCIES,
     RESOURCE_LEAF_TASKS,
+    TASK_DEPENDENCIES,
+    FeatureResource,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,20 +44,6 @@ def _resolve_dependencies(tasks: List[str]) -> List[str]:
         add_with_deps(task)
 
     return resolved
-
-
-def get_tasks_for_resource(resource: FeatureResource) -> List[str]:
-    """
-    Get all ingestion tasks required for a resource, including dependencies.
-
-    Args:
-        resource: The FeatureResource to get tasks for
-
-    Returns:
-        List of task names in dependency order (dependencies first)
-    """
-    leaf_tasks = RESOURCE_LEAF_TASKS.get(resource, [])
-    return _resolve_dependencies(leaf_tasks)
 
 
 def get_tasks_for_resources(resources: List[FeatureResource]) -> List[str]:

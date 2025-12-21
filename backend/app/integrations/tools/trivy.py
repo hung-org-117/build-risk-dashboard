@@ -5,22 +5,22 @@ Provides vulnerability and security scanning via Trivy.
 Uses sync mode - results are returned directly after scan completes.
 """
 
-import subprocess
 import json
-import time
 import logging
+import subprocess
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.config import settings
 from app.integrations.base import (
     IntegrationTool,
-    ToolType,
-    ScanMode,
-    MetricDefinition,
     MetricCategory,
     MetricDataType,
+    MetricDefinition,
+    ScanMode,
+    ToolType,
 )
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +192,7 @@ class TrivyTool(IntegrationTool):
         self._metrics = TRIVY_METRICS
         self._severity = getattr(settings, "TRIVY_SEVERITY", "CRITICAL,HIGH,MEDIUM")
         self._timeout = getattr(settings, "TRIVY_TIMEOUT", 300)
-        self._skip_dirs = getattr(
-            settings, "TRIVY_SKIP_DIRS", "node_modules,vendor,.git"
-        )
+        self._skip_dirs = getattr(settings, "TRIVY_SKIP_DIRS", "node_modules,vendor,.git")
 
     @property
     def tool_type(self) -> ToolType:
@@ -360,9 +358,7 @@ class TrivyTool(IntegrationTool):
                 "status": "failed",
             }
 
-    def _parse_results(
-        self, raw_results: Dict[str, Any], scan_duration_ms: int
-    ) -> Dict[str, Any]:
+    def _parse_results(self, raw_results: Dict[str, Any], scan_duration_ms: int) -> Dict[str, Any]:
         """Parse Trivy JSON output into structured metrics."""
         vuln_counts = {
             "critical": 0,

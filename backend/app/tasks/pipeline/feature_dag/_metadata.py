@@ -267,14 +267,16 @@ def format_features_for_storage(
         Dictionary with formatted values ready for DB storage
     """
     # Lazy load to avoid circular import
-    from app.tasks.pipeline.constants import HAMILTON_MODULES, INPUT_RESOURCE_NAMES
+    from app.tasks.pipeline.constants import HAMILTON_MODULES
+    from app.tasks.pipeline.shared.resources import get_input_resource_names
 
+    input_resource_names = get_input_resource_names()
     registry = build_metadata_registry(HAMILTON_MODULES)
     result = {}
 
     for name, value in features.items():
         # Skip input resources - these are not actual features
-        if name in INPUT_RESOURCE_NAMES:
+        if name in input_resource_names:
             continue
 
         # Skip non-serializable values (custom objects, Path, etc.)
