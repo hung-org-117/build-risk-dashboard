@@ -804,3 +804,105 @@ def dispatch_version_scans(self: PipelineTask, version_id: str) -> Dict[str, Any
         "has_sonar": has_sonar,
         "has_trivy": has_trivy,
     }
+
+
+# Task 5: Process version export job (for large dataset version exports)
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.version_enrichment.process_version_export_job",
+    queue="processing",
+    soft_time_limit=600,
+    time_limit=900,
+)
+def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any]:
+    """
+    Process async export job for dataset version.
+
+    Writes CSV/JSON file to disk with progress updates.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    from app.config import settings
+    from app.repositories.export_job import ExportJobRepository
+    from app.utils.export_utils import write_csv_file, write_json_file
+
+    job_repo = ExportJobRepository(self.db)
+    enrichment_repo = DatasetEnrichmentBuildRepository(self.db)
+
+    job = job_repo.find_by_id(job_id)
+    if not job:
+        logger.error(f"Export job {job_id} not found")
+        return {"status": "error", "message": "Job not found"}
+
+    # Mark as processing
+    job_repo.update_status(job_id, "processing")
+
+    try:
+        # Get data cursor
+        cursor = enrichment_repo.get_enriched_for_export(
+            dataset_id=job.dataset_id,
+            version_id=job.version_id,
+        )
+
+        # Get all feature keys for CSV headers
+        all_feature_keys = enrichment_repo.get_all_feature_keys(
+            dataset_id=job.dataset_id,
+            version_id=job.version_id,
+        )
+
+        # Prepare output path
+        from app.utils.export_utils import format_feature_row
+
+        export_dir = os.path.join(settings.REPO_DATA_DIR, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"version_{job.version_id}_{timestamp}.{job.format}"
+        file_path = os.path.join(export_dir, filename)
+
+        # Progress callback
+        def update_progress(processed: int) -> None:
+            if processed % 500 == 0:  # Update every 500 rows
+                job_repo.update_progress(job_id, processed)
+
+        # Write file
+        if job.format == "csv":
+            write_csv_file(
+                cursor=cursor,
+                format_row=format_feature_row,
+                output_path=file_path,
+                selected_features=job.features,
+                all_feature_keys=all_feature_keys,
+                progress_callback=update_progress,
+            )
+        else:
+            write_json_file(
+                cursor=cursor,
+                format_row=format_feature_row,
+                output_path=file_path,
+                selected_features=job.features,
+                progress_callback=update_progress,
+            )
+
+        # Get file size
+        file_size = os.path.getsize(file_path)
+
+        # Mark completed
+        job_repo.update_status(
+            job_id,
+            "completed",
+            file_path=file_path,
+            file_size=file_size,
+            processed_rows=job.total_rows,
+            completed_at=datetime.now(timezone.utc),
+        )
+
+        logger.info(f"Export job {job_id} completed: {file_path} ({file_size} bytes)")
+        return {"status": "completed", "file_path": file_path}
+
+    except Exception as exc:
+        logger.error(f"Export job {job_id} failed: {exc}")
+        job_repo.update_status(job_id, "failed", error_message=str(exc))
+        raise

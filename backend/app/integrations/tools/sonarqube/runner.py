@@ -24,7 +24,7 @@ class SonarCommitRunner:
     - RedisLock for concurrency control
     """
 
-    def __init__(self, project_key: str, raw_repo_id: Optional[str] = None):
+    def __init__(self, project_key: str, raw_repo_id: str):
         self.project_key = project_key
         self.raw_repo_id = raw_repo_id  # For shared worktree lookup
 
@@ -37,16 +37,12 @@ class SonarCommitRunner:
         self.session = requests.Session()
         self.session.auth = (self.token, "")
 
-    def _get_repo_path(self) -> Optional[Path]:
+    def _get_repo_path(self) -> Path:
         """Get path to bare repo in shared REPOS_DIR."""
-        if not self.raw_repo_id:
-            return None
         return REPOS_DIR / self.raw_repo_id
 
-    def _get_worktree_path(self, commit_sha: str) -> Optional[Path]:
+    def _get_worktree_path(self, commit_sha: str) -> Path:
         """Get path to worktree in shared WORKTREES_DIR."""
-        if not self.raw_repo_id:
-            return None
         return WORKTREES_DIR / self.raw_repo_id / commit_sha[:12]
 
     def ensure_shared_worktree(self, commit_sha: str, full_name: str) -> Optional[Path]:

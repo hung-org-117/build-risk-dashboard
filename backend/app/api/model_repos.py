@@ -226,3 +226,118 @@ def reprocess_build(
     """
     service = RepositoryService(db)
     return service.reprocess_build(repo_id, build_id, _admin)
+
+
+@router.get("/{repo_id}/export/preview")
+def get_export_preview(
+    repo_id: str = Path(..., description="Repository id"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview exportable data with sample rows and available features."""
+    service = RepositoryService(db)
+    return service.get_export_preview(repo_id, current_user)
+
+
+@router.get("/{repo_id}/export")
+def export_builds_stream(
+    repo_id: str = Path(..., description="Repository id"),
+    format: str = Query(default="csv", description="Export format: csv or json"),
+    features: str | None = Query(default=None, description="Comma-separated feature names"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Stream export builds as CSV or JSON.
+
+    For small datasets. For large datasets (>1000 rows), use async export.
+    """
+    from fastapi.responses import StreamingResponse
+
+    service = RepositoryService(db)
+    feature_list = features.split(",") if features else None
+
+    content = service.export_builds_stream(
+        repo_id=repo_id,
+        format=format,
+        features=feature_list,
+    )
+
+    media_type = "text/csv" if format == "csv" else "application/json"
+    filename = f"builds_{repo_id}.{format}"
+
+    return StreamingResponse(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/{repo_id}/export/async")
+def create_async_export(
+    repo_id: str = Path(..., description="Repository id"),
+    format: str = Query(default="csv", description="Export format: csv or json"),
+    features: str | None = Query(default=None, description="Comma-separated feature names"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Create background export job for large datasets.
+
+    Returns job ID for tracking progress via GET /repos/export/jobs/{job_id}
+    """
+    service = RepositoryService(db)
+    feature_list = features.split(",") if features else None
+
+    return service.create_export_job(
+        repo_id=repo_id,
+        user_id=str(current_user["_id"]),
+        format=format,
+        features=feature_list,
+    )
+
+
+@router.get("/{repo_id}/export/jobs")
+def list_repo_export_jobs(
+    repo_id: str = Path(..., description="Repository id"),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """List export jobs for a repository."""
+    service = RepositoryService(db)
+    return service.list_export_jobs(repo_id, limit)
+
+
+@router.get("/export/jobs/{job_id}")
+def get_export_job_status(
+    job_id: str = Path(..., description="Export job id"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get status of an export job."""
+    service = RepositoryService(db)
+    return service.get_export_job(job_id)
+
+
+@router.get("/export/jobs/{job_id}/download")
+def download_export_file(
+    job_id: str = Path(..., description="Export job id"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Download completed export file."""
+    from pathlib import Path as FilePath
+
+    from fastapi.responses import FileResponse
+
+    service = RepositoryService(db)
+    user_id = str(current_user["_id"])
+    file_path = service.get_export_download_path(job_id, user_id)
+
+    path = FilePath(file_path)
+    return FileResponse(
+        path=path,
+        filename=path.name,
+        media_type="application/octet-stream",
+    )

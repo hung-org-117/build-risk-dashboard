@@ -28,6 +28,8 @@ export interface DatasetVersion {
 interface VersionListResponse {
     versions: DatasetVersion[];
     total: number;
+    skip: number;
+    limit: number;
 }
 
 interface CreateVersionRequest {
@@ -63,8 +65,15 @@ export interface UseDatasetVersionsReturn {
     creating: boolean;
     error: string | null;
 
+    // Pagination
+    total: number;
+    skip: number;
+    limit: number;
+    hasMore: boolean;
+
     // Actions
     refresh: () => Promise<void>;
+    loadMore: () => Promise<void>;
     createVersion: (request: CreateVersionRequest) => Promise<DatasetVersion | null>;
     cancelVersion: (versionId: string) => Promise<void>;
     deleteVersion: (versionId: string) => Promise<void>;
@@ -77,25 +86,50 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
     const [creating, setCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Pagination state
+    const [total, setTotal] = useState(0);
+    const [skip, setSkip] = useState(0);
+    const [limit] = useState(10);
+
     // Find active (processing) version
     const activeVersion = versions.find(
         (v) => v.status === "pending" || v.status === "processing"
     ) || null;
 
-    // Load versions
+    const hasMore = skip + versions.length < total;
+
+    // Load versions (reset to first page)
     const refresh = useCallback(async () => {
         try {
             const response = await api.get<VersionListResponse>(
-                `/datasets/${datasetId}/versions`
+                `/datasets/${datasetId}/versions?skip=0&limit=${limit}`
             );
             setVersions(response.data.versions);
+            setTotal(response.data.total);
+            setSkip(0);
             setError(null);
         } catch (err: unknown) {
             console.error("Failed to load versions:", err);
             const message = err instanceof Error ? err.message : "Failed to load versions";
             setError(message);
         }
-    }, [datasetId]);
+    }, [datasetId, limit]);
+
+    // Load more versions (append to list)
+    const loadMore = useCallback(async () => {
+        if (!hasMore) return;
+        try {
+            const newSkip = skip + limit;
+            const response = await api.get<VersionListResponse>(
+                `/datasets/${datasetId}/versions?skip=${newSkip}&limit=${limit}`
+            );
+            setVersions((prev) => [...prev, ...response.data.versions]);
+            setSkip(newSkip);
+            setTotal(response.data.total);
+        } catch (err: unknown) {
+            console.error("Failed to load more versions:", err);
+        }
+    }, [datasetId, skip, limit, hasMore]);
 
     // Initial load
     useEffect(() => {
@@ -218,7 +252,16 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
         loading,
         creating,
         error,
+
+        // Pagination
+        total,
+        skip,
+        limit,
+        hasMore,
+
+        // Actions
         refresh,
+        loadMore,
         createVersion,
         cancelVersion,
         deleteVersion,

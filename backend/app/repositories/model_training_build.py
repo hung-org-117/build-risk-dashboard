@@ -1,11 +1,12 @@
-from __future__ import annotations
-
 """Repository for ModelTrainingBuild entities (builds for ML model training)."""
+
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
+from pymongo.client_session import ClientSession
 
 from app.entities.enums import ExtractionStatus
 from app.entities.model_training_build import ModelTrainingBuild
@@ -162,14 +163,131 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             cursor = cursor.limit(limit)
         return [ModelTrainingBuild(**doc) for doc in cursor]
 
-    def delete_by_repo_config(self, model_repo_config_id: ObjectId) -> int:
+    def delete_by_repo_config(
+        self, model_repo_config_id: ObjectId, session: "ClientSession | None" = None
+    ) -> int:
         """
         Delete all builds associated with a model repo config.
 
         Called when soft-deleting a ModelRepoConfig to clean up related builds.
 
+        Args:
+            model_repo_config_id: The ModelRepoConfig ID
+            session: Optional MongoDB session for transaction support
+
         Returns:
             Number of documents deleted.
         """
-        result = self.collection.delete_many({"model_repo_config_id": model_repo_config_id})
+        result = self.collection.delete_many(
+            {"model_repo_config_id": model_repo_config_id}, session=session
+        )
         return result.deleted_count
+
+    def get_for_export(
+        self,
+        model_repo_config_id: ObjectId,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        build_status: Optional[str] = None,
+    ):
+        """
+        Get cursor for streaming export of builds.
+
+        Returns a cursor (not materialized list) for memory-efficient streaming.
+
+        Args:
+            model_repo_config_id: The ModelRepoConfig ID
+            start_date: Optional filter by build_created_at >= start_date
+            end_date: Optional filter by build_created_at <= end_date
+            build_status: Optional filter by build status
+
+        Returns:
+            MongoDB cursor for iteration
+        """
+        query: Dict[str, Any] = {
+            "model_repo_config_id": model_repo_config_id,
+            "extraction_status": ExtractionStatus.COMPLETED.value,
+        }
+
+        if start_date or end_date:
+            query["build_created_at"] = {}
+            if start_date:
+                query["build_created_at"]["$gte"] = start_date
+            if end_date:
+                query["build_created_at"]["$lte"] = end_date
+
+        if build_status:
+            query["build_status"] = build_status
+
+        return self.collection.find(query).sort("build_created_at", 1).batch_size(100)
+
+    def get_all_feature_keys(
+        self,
+        model_repo_config_id: ObjectId,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        build_status: Optional[str] = None,
+    ) -> set:
+        """
+        Get all unique feature keys from completed builds for consistent CSV columns.
+
+        Args:
+            model_repo_config_id: The ModelRepoConfig ID
+            start_date: Optional filter
+            end_date: Optional filter
+            build_status: Optional filter
+
+        Returns:
+            Set of feature key names
+        """
+        query: Dict[str, Any] = {
+            "model_repo_config_id": model_repo_config_id,
+            "extraction_status": ExtractionStatus.COMPLETED.value,
+        }
+
+        if start_date or end_date:
+            query["build_created_at"] = {}
+            if start_date:
+                query["build_created_at"]["$gte"] = start_date
+            if end_date:
+                query["build_created_at"]["$lte"] = end_date
+
+        if build_status:
+            query["build_status"] = build_status
+
+        pipeline = [
+            {"$match": query},
+            {"$project": {"feature_keys": {"$objectToArray": "$features"}}},
+            {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
+            {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
+        ]
+
+        result = list(self.collection.aggregate(pipeline))
+        if result:
+            return set(result[0].get("keys", []))
+        return set()
+
+    def count_for_export(
+        self,
+        model_repo_config_id: ObjectId,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        build_status: Optional[str] = None,
+    ) -> int:
+        """Count builds available for export."""
+        query: Dict[str, Any] = {
+            "model_repo_config_id": model_repo_config_id,
+            "extraction_status": ExtractionStatus.COMPLETED.value,
+        }
+
+        if start_date or end_date:
+            query["build_created_at"] = {}
+            if start_date:
+                query["build_created_at"]["$gte"] = start_date
+            if end_date:
+                query["build_created_at"]["$lte"] = end_date
+
+        if build_status:
+            query["build_status"] = build_status
+
+        return self.collection.count_documents(query)

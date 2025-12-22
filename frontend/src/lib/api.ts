@@ -853,7 +853,7 @@ export const exportApi = {
     }
   ): Promise<ExportPreviewResponse> => {
     const response = await api.get<ExportPreviewResponse>(
-      `/export/repos/${repoId}/preview`,
+      `/repos/${repoId}/export/preview`,
       { params }
     );
     return response.data;
@@ -878,7 +878,7 @@ export const exportApi = {
     if (params?.start_date) searchParams.set("start_date", params.start_date);
     if (params?.end_date) searchParams.set("end_date", params.end_date);
     if (params?.build_status) searchParams.set("build_status", params.build_status);
-    return `${baseUrl}/export/repos/${repoId}?${searchParams.toString()}`;
+    return `${baseUrl}/repos/${repoId}/export?${searchParams.toString()}`;
   },
 
   // Download export via blob (for stream download with auth)
@@ -892,7 +892,7 @@ export const exportApi = {
       build_status?: string;
     }
   ): Promise<Blob> => {
-    const response = await api.get(`/export/repos/${repoId}`, {
+    const response = await api.get(`/repos/${repoId}/export`, {
       params: { format, ...params },
       responseType: "blob",
     });
@@ -911,7 +911,7 @@ export const exportApi = {
     }
   ): Promise<ExportAsyncResponse> => {
     const response = await api.post<ExportAsyncResponse>(
-      `/export/repos/${repoId}/async`,
+      `/repos/${repoId}/export/async`,
       null,
       { params: { format, ...params } }
     );
@@ -920,13 +920,13 @@ export const exportApi = {
 
   // Get job status
   getJobStatus: async (jobId: string): Promise<ExportJobResponse> => {
-    const response = await api.get<ExportJobResponse>(`/export/jobs/${jobId}`);
+    const response = await api.get<ExportJobResponse>(`/repos/export/jobs/${jobId}`);
     return response.data;
   },
 
   // Download completed export
   downloadJob: async (jobId: string): Promise<Blob> => {
-    const response = await api.get(`/export/jobs/${jobId}/download`, {
+    const response = await api.get(`/repos/export/jobs/${jobId}/download`, {
       responseType: "blob",
     });
     return response.data;
@@ -938,7 +938,7 @@ export const exportApi = {
     limit: number = 10
   ): Promise<{ items: ExportJobListItem[]; count: number }> => {
     const response = await api.get<{ items: ExportJobListItem[]; count: number }>(
-      `/export/repos/${repoId}/jobs`,
+      `/repos/${repoId}/export/jobs`,
       { params: { limit } }
     );
     return response.data;
@@ -1178,6 +1178,19 @@ export const datasetScanApi = {
 };
 
 // Dataset Version API
+export interface EnrichedBuildData {
+  id: string;
+  raw_build_run_id: string;
+  repo_full_name: string;
+  extraction_status: string;
+  feature_count: number;
+  expected_feature_count: number;
+  skipped_features: string[];
+  missing_resources: string[];
+  enriched_at: string | null;
+  features: Record<string, unknown>;
+}
+
 export interface VersionDataResponse {
   version: {
     id: string;
@@ -1191,13 +1204,11 @@ export interface VersionDataResponse {
     created_at: string | null;
     completed_at: string | null;
   };
-  data: {
-    rows: Record<string, unknown>[];
-    total: number;
-    page: number;
-    page_size: number;
-    total_pages: number;
-  };
+  builds: EnrichedBuildData[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
   column_stats?: Record<string, unknown>;
 }
 
@@ -1218,6 +1229,95 @@ export const datasetVersionApi = {
           include_stats: includeStats,
         },
       }
+    );
+    return response.data;
+  },
+
+  // Get export preview with row count and recommendation
+  getExportPreview: async (datasetId: string, versionId: string) => {
+    const response = await api.get<{
+      total_rows: number;
+      use_async_recommended: boolean;
+      sample_features: string[];
+    }>(`/datasets/${datasetId}/versions/${versionId}/preview`);
+    return response.data;
+  },
+
+  // Stream export (for small datasets)
+  getExportUrl: (
+    datasetId: string,
+    versionId: string,
+    format: "csv" | "json" = "csv"
+  ): string => {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+    return `${baseUrl}/datasets/${datasetId}/versions/${versionId}/export?format=${format}`;
+  },
+
+  // Download export as blob
+  downloadExport: async (
+    datasetId: string,
+    versionId: string,
+    format: "csv" | "json" = "csv"
+  ): Promise<Blob> => {
+    const response = await api.get(
+      `/datasets/${datasetId}/versions/${versionId}/export`,
+      { params: { format }, responseType: "blob" }
+    );
+    return response.data;
+  },
+
+  // Create async export job (for large datasets)
+  createExportJob: async (
+    datasetId: string,
+    versionId: string,
+    format: "csv" | "json" = "csv"
+  ): Promise<{ job_id: string; status: string; total_rows: number }> => {
+    const response = await api.post(
+      `/datasets/${datasetId}/versions/${versionId}/export/async`,
+      null,
+      { params: { format } }
+    );
+    return response.data;
+  },
+
+  // Get export job status
+  getExportJobStatus: async (datasetId: string, jobId: string) => {
+    const response = await api.get<{
+      id: string;
+      status: string;
+      format: string;
+      total_rows: number;
+      processed_rows: number;
+      progress: number;
+      file_path?: string;
+      file_size?: number;
+      error_message?: string;
+      created_at?: string;
+      completed_at?: string;
+    }>(`/datasets/${datasetId}/versions/export/jobs/${jobId}`);
+    return response.data;
+  },
+
+  // List export jobs for a version
+  listExportJobs: async (datasetId: string, versionId: string) => {
+    const response = await api.get<Array<{
+      id: string;
+      status: string;
+      format: string;
+      total_rows: number;
+      processed_rows: number;
+      file_size?: number;
+      created_at?: string;
+      completed_at?: string;
+    }>>(`/datasets/${datasetId}/versions/${versionId}/export/jobs`);
+    return response.data;
+  },
+
+  // Download completed export
+  downloadExportJob: async (datasetId: string, jobId: string): Promise<Blob> => {
+    const response = await api.get(
+      `/datasets/${datasetId}/versions/export/jobs/${jobId}/download`,
+      { responseType: "blob" }
     );
     return response.data;
   },

@@ -11,7 +11,6 @@ from app.entities.dataset_version import DatasetVersion, VersionStatus
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.services.dataset_service import DatasetService
-from app.services.export_service import ExportService, ExportSource
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +28,9 @@ class DatasetVersionService:
     """Service for managing dataset versions."""
 
     def __init__(self, db: Database):
+        self._db = db
         self._repo = DatasetVersionRepository(db)
         self._dataset_service = DatasetService(db)
-        self._export_service = ExportService(db)
         self._enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
 
     def _verify_dataset_access(self, dataset_id: str, user_id: str) -> DatasetProject:
@@ -170,8 +169,6 @@ class DatasetVersionService:
         features: Optional[List[str]] = None,
     ) -> ExportResult:
         """Export version data from DB in specified format."""
-        import os
-        import tempfile
 
         dataset = self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
@@ -182,18 +179,19 @@ class DatasetVersionService:
                 detail=f"Version is not completed. Status: {version.status}",
             )
 
-        # Validate format
-        if format not in ("csv", "json", "parquet"):
+        # Validate format (csv and json only)
+        if format not in ("csv", "json"):
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported format: {format}. Use csv, json, or parquet.",
+                detail=f"Unsupported format: {format}. Use csv or json.",
             )
 
         # Get count to check if we have data
-        count = self._export_service.estimate_row_count(
-            source=ExportSource.ENRICHMENT_BUILDS,
-            dataset_id=dataset_id,
-            version_id=version_id,
+        count = self._enrichment_build_repo.count_by_query(
+            {
+                "dataset_id": ObjectId(dataset_id),
+                "dataset_version_id": ObjectId(version_id),
+            }
         )
 
         if count == 0:
@@ -204,46 +202,8 @@ class DatasetVersionService:
 
         filename = f"enriched_{dataset.name}_v{version.version_number}.{format}"
 
-        if format == "parquet":
-            # Parquet requires random access for writing metadata.
-            # For large datasets (>50k rows), we write to a temp file and stream it back
-            # to avoid OOM issues with keeping the whole file in RAM.
-            PARQUET_MEMORY_LIMIT = 50000
-
-            if count > PARQUET_MEMORY_LIMIT:
-                fd, path = tempfile.mkstemp(suffix=".parquet")
-                os.close(fd)
-
-                try:
-                    self._generate_parquet_content(
-                        dataset_id,
-                        version_id,
-                        features or version.selected_features,
-                        output_path=path,
-                    )
-                    return ExportResult(
-                        content_generator=self._file_iterator(path, delete_after=True),
-                        filename=filename,
-                        media_type="application/octet-stream",
-                    )
-                except Exception:
-                    # Cleanup if generation failed
-                    if os.path.exists(path):
-                        os.unlink(path)
-                    raise
-
-            # Small enough for memory
-            content = self._generate_parquet_content(
-                dataset_id, version_id, features or version.selected_features
-            )
-            return ExportResult(
-                content_generator=iter([content]),  # type: ignore
-                filename=filename,
-                media_type="application/octet-stream",
-            )
-
         # CSV/JSON can be streamed directly
-        content_generator = self._export_service.export_enrichment_version(
+        content_generator = self._stream_enrichment_export(
             dataset_id=dataset_id,
             version_id=version_id,
             format=format,
@@ -258,103 +218,173 @@ class DatasetVersionService:
             media_type=media_type,
         )
 
-    def _file_iterator(
-        self, file_path: str, chunk_size: int = 64 * 1024, delete_after: bool = False
-    ) -> Generator[bytes, None, None]:
-        """Yield file content in chunks and optionally delete file when done."""
-        import os
-
-        try:
-            with open(file_path, "rb") as f:
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                    yield chunk
-        finally:
-            if delete_after and os.path.exists(file_path):
-                os.unlink(file_path)
-
-    def _generate_parquet_content(
+    def _stream_enrichment_export(
         self,
         dataset_id: str,
         version_id: str,
-        features: List[str],
-        output_path: Optional[str] = None,
-    ) -> Optional[bytes]:
-        """
-        Generate Parquet content.
+        format: str,
+        features: Optional[List[str]] = None,
+    ) -> Generator[str, None, None]:
+        """Stream enrichment builds as CSV or JSON."""
+        from app.utils.export_utils import format_feature_row, stream_csv, stream_json
 
-        If output_path is provided, writes to file and returns None.
-        If output_path is None, writes to memory and returns bytes.
-        """
-        import io
-
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-        from bson import ObjectId
-
-        # Get enriched builds from repository (iterator)
-        builds = self._enrichment_build_repo.get_enriched_for_export(
+        cursor = self._enrichment_build_repo.get_enriched_for_export(
             dataset_id=ObjectId(dataset_id),
             version_id=ObjectId(version_id),
         )
 
-        # Use file path if provided, otherwise memory buffer
-        sink = output_path if output_path else io.BytesIO()
+        # Get all feature keys for consistent CSV columns
+        all_feature_keys = None
+        if format == "csv" and not features:
+            all_feature_keys = self._enrichment_build_repo.get_all_feature_keys(
+                dataset_id=ObjectId(dataset_id),
+                version_id=ObjectId(version_id),
+            )
 
-        writer = None
-        batch_size = 10000
-        current_batch = []
+        if format == "csv":
+            return stream_csv(cursor, format_feature_row, features, all_feature_keys)
+        else:
+            return stream_json(cursor, format_feature_row, features)
 
-        for build in builds:
-            # Create dict for current row
-            row = {f: build.features.get(f) for f in features}
-            current_batch.append(row)
+    # Async Export Methods (for large datasets)
+    def create_export_job(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+        format: str = "csv",
+        features: Optional[List[str]] = None,
+    ) -> dict:
+        """
+        Create background export job for large datasets.
 
-            if len(current_batch) >= batch_size:
-                table = pa.Table.from_pylist(current_batch)
+        Returns job ID for tracking progress.
+        """
+        from app.entities.export_job import ExportFormat, ExportJob, ExportStatus
+        from app.repositories.export_job import ExportJobRepository
+        from app.tasks.enrichment_processing import process_version_export_job
 
-                # Initialize writer with schema from first batch
-                if writer is None:
-                    writer = pq.ParquetWriter(sink, table.schema, compression="snappy")
+        self._verify_dataset_access(dataset_id, user_id)
+        version = self._get_version(dataset_id, version_id)
 
-                # Ensure subsequent batches match the schema
-                if table.schema != writer.schema:
-                    # Attempt to cast to original schema (handles null -> type transitions)
-                    # Note: This might fail if types are completely incompatible,
-                    # but it's better than crashing on schema mismatch.
-                    try:
-                        table = table.cast(writer.schema)
-                    except Exception:
-                        # Fallback: let specific write fail if incompatible
-                        pass
+        if version.status != VersionStatus.COMPLETED:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Version is not completed. Status: {version.status}",
+            )
 
-                writer.write_table(table)
-                current_batch = []
+        # Get row count
+        total = self._enrichment_build_repo.count_by_query(
+            {
+                "dataset_id": ObjectId(dataset_id),
+                "dataset_version_id": ObjectId(version_id),
+            }
+        )
 
-        # Write remaining items
-        if current_batch:
-            table = pa.Table.from_pylist(current_batch)
-            if writer is None:
-                writer = pq.ParquetWriter(sink, table.schema, compression="snappy")
-            else:
-                if table.schema != writer.schema:
-                    try:
-                        table = table.cast(writer.schema)
-                    except Exception:
-                        pass
-            writer.write_table(table)
+        if total == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="No builds available for export",
+            )
 
-        if writer:
-            writer.close()
+        job_repo = ExportJobRepository(self._db)
 
-        if output_path is None:
-            # If memory buffer, return bytes
-            sink.seek(0)  # type: ignore
-            return sink.getvalue()  # type: ignore
+        job = ExportJob(
+            dataset_id=ObjectId(dataset_id),
+            version_id=ObjectId(version_id),
+            user_id=ObjectId(user_id),
+            format=ExportFormat(format),
+            status=ExportStatus.PENDING,
+            features=features or version.selected_features,
+            total_rows=total,
+        )
 
-        return None
+        job = job_repo.create(job)
+
+        # Queue background task
+        process_version_export_job.delay(str(job.id))
+
+        return {
+            "job_id": str(job.id),
+            "status": "pending",
+            "total_rows": total,
+        }
+
+    def get_export_job(self, job_id: str, user_id: str) -> dict:
+        """Get export job status."""
+        from app.repositories.export_job import ExportJobRepository
+
+        job_repo = ExportJobRepository(self._db)
+        job = job_repo.find_by_id(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Export job not found")
+
+        return {
+            "id": str(job.id),
+            "status": job.status,
+            "format": job.format,
+            "total_rows": job.total_rows,
+            "processed_rows": job.processed_rows,
+            "progress": (job.processed_rows / job.total_rows * 100 if job.total_rows else 0),
+            "file_path": job.file_path,
+            "file_size": job.file_size,
+            "error_message": job.error_message,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        }
+
+    def list_export_jobs(
+        self, dataset_id: str, version_id: str, user_id: str, limit: int = 10
+    ) -> list:
+        """List export jobs for a version."""
+        from app.repositories.export_job import ExportJobRepository
+
+        self._verify_dataset_access(dataset_id, user_id)
+
+        job_repo = ExportJobRepository(self._db)
+        jobs = job_repo.list_by_version(version_id, limit)
+
+        return [
+            {
+                "id": str(j.id),
+                "status": j.status,
+                "format": j.format,
+                "total_rows": j.total_rows,
+                "processed_rows": j.processed_rows,
+                "file_size": j.file_size,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            }
+            for j in jobs
+        ]
+
+    def get_export_download_path(self, job_id: str, user_id: str) -> str:
+        """Get file path for completed export job."""
+        from app.repositories.export_job import ExportJobRepository
+
+        job_repo = ExportJobRepository(self._db)
+        job = job_repo.find_by_id(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Export job not found")
+
+        if str(job.user_id) != user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to download this export",
+            )
+
+        if job.status != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Export is not ready. Status: {job.status}",
+            )
+
+        if not job.file_path:
+            raise HTTPException(status_code=404, detail="Export file not found")
+
+        return job.file_path
 
     def get_export_preview(self, dataset_id: str, version_id: str, user_id: str) -> dict:
         """Get preview of exportable data."""
@@ -383,19 +413,24 @@ class DatasetVersionService:
         }
 
     def delete_version(self, dataset_id: str, version_id: str, user_id: str) -> None:
-        """Delete a version and its enrichment builds. Permission validated at API layer."""
+        """Delete a version and its enrichment builds atomically. Permission validated at API layer."""
+        from app.database.mongo import get_transaction
+
         self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
 
         if version.status in (VersionStatus.PENDING, VersionStatus.PROCESSING):
             self._revoke_task(version.task_id)
 
-        # Delete associated enrichment builds
-        deleted = self._enrichment_build_repo.delete_by_version(version_id)
-        logger.info(f"Deleted {deleted} enrichment builds for version {version_id}")
+        # Use transaction for atomic deletion
+        with get_transaction() as session:
+            # Delete associated enrichment builds
+            deleted = self._enrichment_build_repo.delete_by_version(version_id, session=session)
+            logger.info(f"Deleted {deleted} enrichment builds for version {version_id}")
 
-        self._repo.delete(version_id)
-        logger.info(f"Deleted version {version_id} for dataset {dataset_id}")
+            # Delete the version
+            self._repo.delete(version_id, session=session)
+            logger.info(f"Deleted version {version_id} for dataset {dataset_id}")
 
     def cancel_version(self, dataset_id: str, version_id: str, user_id: str) -> DatasetVersion:
         """Cancel a processing version. Permission validated at API layer.

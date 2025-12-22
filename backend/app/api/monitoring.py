@@ -138,40 +138,21 @@ def export_system_logs(
     _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
 ):
     """
-    Export system logs as JSON or CSV.
+    Export system logs as JSON or CSV (streaming).
 
     Admin only. Returns up to 10,000 logs for download.
     """
-    import csv
-    import io
-    import json
-
     from fastapi.responses import StreamingResponse
 
     service = MonitoringService(db)
-    logs = service.get_logs_for_export(level=level, source=source)
 
-    if format == "csv":
-        output = io.StringIO()
-        if logs:
-            writer = csv.DictWriter(
-                output,
-                fieldnames=["timestamp", "level", "source", "message", "details"],
-            )
-            writer.writeheader()
-            for log in logs:
-                log["details"] = json.dumps(log.get("details")) if log.get("details") else ""
-                writer.writerow(log)
+    content = service.stream_logs_export(format=format, level=level, source=source)
 
-        output.seek(0)
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=system_logs.csv"},
-        )
-    else:
-        return StreamingResponse(
-            iter([json.dumps(logs, indent=2)]),
-            media_type="application/json",
-            headers={"Content-Disposition": "attachment; filename=system_logs.json"},
-        )
+    media_type = "text/csv" if format == "csv" else "application/json"
+    filename = f"system_logs.{format}"
+
+    return StreamingResponse(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

@@ -39,7 +39,6 @@ from app.api import (
     dataset_validation,
     dataset_versions,
     datasets,
-    export,
     features,
     health,
     integrations,
@@ -102,7 +101,6 @@ app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(features.router, prefix="/api", tags=["Feature Definitions"])
 app.include_router(datasets.router, prefix="/api", tags=["Datasets"])
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
-app.include_router(export.router, prefix="/api", tags=["Export"])
 app.include_router(dataset_validation.router, prefix="/api", tags=["Dataset Validation"])
 app.include_router(dataset_versions.router, prefix="/api", tags=["Dataset Versions"])
 app.include_router(templates.router, prefix="/api", tags=["Templates"])

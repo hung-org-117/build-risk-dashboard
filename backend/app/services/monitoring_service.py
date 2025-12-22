@@ -419,3 +419,47 @@ class MonitoringService:
             )
 
         return logs
+
+    def stream_logs_export(
+        self,
+        format: str = "csv",
+        level: Optional[str] = None,
+        source: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ):
+        """
+        Stream logs export as CSV or JSON.
+
+        Args:
+            format: "csv" or "json"
+            level: Filter by log level
+            source: Filter by source/component
+            start_date: Filter by timestamp >= start_date
+            end_date: Filter by timestamp <= end_date
+
+        Returns:
+            Generator yielding CSV/JSON chunks
+        """
+        from app.utils.export_utils import format_log_row, stream_csv, stream_json
+
+        collection = self.db["system_logs"]
+
+        query: Dict[str, Any] = {}
+        if level:
+            query["level"] = level.upper()
+        if source:
+            query["source"] = {"$regex": source, "$options": "i"}
+        if start_date or end_date:
+            query["timestamp"] = {}
+            if start_date:
+                query["timestamp"]["$gte"] = start_date
+            if end_date:
+                query["timestamp"]["$lte"] = end_date
+
+        cursor = collection.find(query).sort("timestamp", -1).batch_size(100).limit(10000)
+
+        if format == "csv":
+            return stream_csv(cursor, format_log_row)
+        else:
+            return stream_json(cursor, format_log_row)

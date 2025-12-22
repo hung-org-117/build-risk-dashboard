@@ -1,14 +1,13 @@
-from __future__ import annotations
+"""DatasetVersion Repository - CRUD operations for dataset versions."""
 
-"""
-DatasetVersion Repository - CRUD operations for dataset versions.
-"""
+from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
+from pymongo.client_session import ClientSession
 from pymongo.database import Database
 
 from app.entities.dataset_version import DatasetVersion, VersionStatus
@@ -196,14 +195,26 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         )
         return result.modified_count > 0
 
-    def delete(self, version_id: str | ObjectId) -> bool:
-        """Delete a version."""
-        result = self.collection.delete_one({"_id": self.ensure_object_id(version_id)})
+    def delete(self, version_id: str | ObjectId, session: "ClientSession | None" = None) -> bool:
+        """Delete a version.
+
+        Args:
+            version_id: Version ID to delete
+            session: Optional MongoDB session for transaction support
+        """
+        result = self.collection.delete_one(
+            {"_id": self.ensure_object_id(version_id)}, session=session
+        )
         return result.deleted_count > 0
 
-    def delete_by_dataset(self, dataset_id: str) -> int:
-        """Delete all versions for a dataset."""
-        result = self.collection.delete_many({"dataset_id": dataset_id})
+    def delete_by_dataset(self, dataset_id: str, session: "ClientSession | None" = None) -> int:
+        """Delete all versions for a dataset.
+
+        Args:
+            dataset_id: Dataset ID to delete versions for
+            session: Optional MongoDB session for transaction support
+        """
+        result = self.collection.delete_many({"dataset_id": dataset_id}, session=session)
         return result.deleted_count
 
     def cleanup_old_versions(self, days: int = 30) -> int:

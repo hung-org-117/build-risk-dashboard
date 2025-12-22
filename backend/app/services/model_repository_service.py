@@ -459,11 +459,12 @@ class RepositoryService:
 
     def delete_repository(self, repo_id: str) -> None:
         """
-        Soft delete a repository configuration.
+        Soft delete a repository configuration atomically.
 
         This allows re-importing the same repository later.
         Also deletes associated ModelTrainingBuild documents.
         """
+        from app.database.mongo import get_transaction
         from app.repositories.model_training_build import ModelTrainingBuildRepository
 
         repo_doc = self.repo_config.find_by_id(repo_id)
@@ -479,16 +480,19 @@ class RepositoryService:
                 detail="Repository is already deleted",
             )
 
-        # Delete associated ModelTrainingBuild documents
         build_repo = ModelTrainingBuildRepository(self.db)
-        deleted_count = build_repo.delete_by_repo_config(ObjectId(repo_id))
-        logger.info(
-            f"Deleted {deleted_count} ModelTrainingBuild documents for repo config {repo_id}"
-        )
 
-        # Soft delete the config
-        self.repo_config.soft_delete(repo_doc.id)
-        logger.info(f"Soft deleted repository config {repo_id}")
+        # Use transaction for atomic deletion
+        with get_transaction() as session:
+            # Delete associated ModelTrainingBuild documents
+            deleted_count = build_repo.delete_by_repo_config(ObjectId(repo_id), session=session)
+            logger.info(
+                f"Deleted {deleted_count} ModelTrainingBuild documents for repo config {repo_id}"
+            )
+
+            # Soft delete the config
+            self.repo_config.soft_delete(ObjectId(repo_id), session=session)
+            logger.info(f"Soft deleted repository config {repo_id}")
 
     def detect_languages(self, full_name: str, current_user: dict) -> dict:
         """
@@ -604,3 +608,220 @@ class RepositoryService:
             "model_training_build_id": model_training_build_id,
             "message": "Build reprocessing has been queued",
         }
+
+    # Export Methods
+    def export_builds_stream(
+        self,
+        repo_id: str,
+        format: str = "csv",
+        features: Optional[List[str]] = None,
+        start_date=None,
+        end_date=None,
+        build_status: Optional[str] = None,
+    ):
+        """
+        Stream export builds as CSV or JSON.
+
+        For small datasets (< 1000 rows).
+        """
+        from app.repositories.model_training_build import ModelTrainingBuildRepository
+        from app.utils.export_utils import (
+            format_feature_row,
+            stream_csv,
+            stream_json,
+        )
+
+        repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
+        if not repo_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
+            )
+
+        build_repo = ModelTrainingBuildRepository(self.db)
+
+        # Get cursor for streaming
+        cursor = build_repo.get_for_export(ObjectId(repo_id), start_date, end_date, build_status)
+
+        # Get all feature keys for consistent CSV columns
+        all_feature_keys = None
+        if format == "csv" and not features:
+            all_feature_keys = build_repo.get_all_feature_keys(
+                ObjectId(repo_id), start_date, end_date, build_status
+            )
+
+        if format == "csv":
+            return stream_csv(cursor, format_feature_row, features, all_feature_keys)
+        else:
+            return stream_json(cursor, format_feature_row, features)
+
+    def get_export_preview(self, repo_id: str, current_user: dict) -> dict:
+        """Get preview of exportable data with sample rows."""
+        from app.repositories.model_training_build import ModelTrainingBuildRepository
+
+        repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
+        if not repo_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
+            )
+
+        build_repo = ModelTrainingBuildRepository(self.db)
+
+        # Get sample builds
+        cursor = build_repo.get_for_export(ObjectId(repo_id)).limit(10)
+
+        sample_rows = []
+        all_features = set()
+
+        for doc in cursor:
+            features = doc.get("features", {})
+            sample_rows.append(features)
+            all_features.update(features.keys())
+
+        # Get total count
+        total = build_repo.count_for_export(ObjectId(repo_id))
+
+        return {
+            "total_rows": total,
+            "sample_rows": sample_rows,
+            "available_features": sorted(all_features),
+            "feature_count": len(all_features),
+        }
+
+    def create_export_job(
+        self,
+        repo_id: str,
+        user_id: str,
+        format: str = "csv",
+        features: Optional[List[str]] = None,
+        start_date=None,
+        end_date=None,
+        build_status: Optional[str] = None,
+    ) -> dict:
+        """
+        Create background export job for large datasets.
+
+        Returns job ID for tracking progress.
+        """
+        from app.entities.export_job import ExportFormat, ExportJob, ExportStatus
+        from app.repositories.export_job import ExportJobRepository
+        from app.repositories.model_training_build import ModelTrainingBuildRepository
+        from app.tasks.export import process_export_job
+
+        repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
+        if not repo_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
+            )
+
+        build_repo = ModelTrainingBuildRepository(self.db)
+        total = build_repo.count_for_export(ObjectId(repo_id), start_date, end_date, build_status)
+
+        if total == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No builds available for export",
+            )
+
+        job_repo = ExportJobRepository(self.db)
+
+        job = ExportJob(
+            repo_id=ObjectId(repo_id),
+            user_id=ObjectId(user_id),
+            format=ExportFormat(format),
+            status=ExportStatus.PENDING,
+            features=features,
+            start_date=start_date,
+            end_date=end_date,
+            build_status=build_status,
+            total_rows=total,
+        )
+
+        job = job_repo.create(job)
+
+        # Queue background task
+        process_export_job.delay(str(job.id))
+
+        return {
+            "job_id": str(job.id),
+            "status": "pending",
+            "total_rows": total,
+        }
+
+    def get_export_job(self, job_id: str) -> dict:
+        """Get export job status."""
+        from app.repositories.export_job import ExportJobRepository
+
+        job_repo = ExportJobRepository(self.db)
+        job = job_repo.find_by_id(job_id)
+
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found"
+            )
+
+        return {
+            "id": str(job.id),
+            "status": job.status,
+            "format": job.format,
+            "total_rows": job.total_rows,
+            "processed_rows": job.processed_rows,
+            "progress": job.processed_rows / job.total_rows * 100 if job.total_rows else 0,
+            "file_path": job.file_path,
+            "file_size": job.file_size,
+            "error_message": job.error_message,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        }
+
+    def list_export_jobs(self, repo_id: str, limit: int = 10) -> list:
+        """List export jobs for a repository."""
+        from app.repositories.export_job import ExportJobRepository
+
+        job_repo = ExportJobRepository(self.db)
+        jobs = job_repo.list_by_repo(repo_id, limit)
+
+        return [
+            {
+                "id": str(j.id),
+                "status": j.status,
+                "format": j.format,
+                "total_rows": j.total_rows,
+                "processed_rows": j.processed_rows,
+                "file_size": j.file_size,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            }
+            for j in jobs
+        ]
+
+    def get_export_download_path(self, job_id: str, user_id: str) -> str:
+        """Get file path for completed export job."""
+        from app.repositories.export_job import ExportJobRepository
+
+        job_repo = ExportJobRepository(self.db)
+        job = job_repo.find_by_id(job_id)
+
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found"
+            )
+
+        if str(job.user_id) != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to download this export",
+            )
+
+        if job.status != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Export is not ready. Status: {job.status}",
+            )
+
+        if not job.file_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Export file not found",
+            )
+
+        return job.file_path

@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
@@ -100,15 +101,15 @@ async def get_version(
 async def export_version(
     dataset_id: str,
     version_id: str,
-    format: str = Query("csv", regex="^(csv|json|parquet)$"),
+    format: str = Query("csv", regex="^(csv|json)$"),
     features: Optional[List[str]] = Query(None),
     db=Depends(get_db),
     current_user: dict = Depends(RequirePermission(Permission.EXPORT_DATA)),
 ):
     """
-    Export version data in CSV, JSON, or Parquet format.
+    Export version data in CSV or JSON format.
 
-    - **format**: Export format (csv, json, parquet)
+    - **format**: Export format (csv or json)
     - **features**: Optional list of features to include (defaults to all selected features)
     """
     service = DatasetVersionService(db)
@@ -272,4 +273,83 @@ async def retry_commit_scan(
         commit_sha=commit_sha,
         tool_type=tool_type,
         user_id=str(current_user["_id"]),
+    )
+
+
+# =========================================================================
+# Async Export Endpoints (for large datasets)
+# =========================================================================
+
+
+@router.post("/{version_id}/export/async")
+async def create_export_job(
+    dataset_id: str,
+    version_id: str,
+    format: str = Query("csv", regex="^(csv|json)$"),
+    features: Optional[List[str]] = Query(None),
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.EXPORT_DATA)),
+):
+    """Create an async export job for large datasets."""
+    service = DatasetVersionService(db)
+    return service.create_export_job(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        format=format,
+        features=features,
+    )
+
+
+@router.get("/{version_id}/export/jobs")
+async def list_export_jobs(
+    dataset_id: str,
+    version_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """List export jobs for a version."""
+    service = DatasetVersionService(db)
+    return service.list_export_jobs(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+        limit=limit,
+    )
+
+
+@router.get("/export/jobs/{job_id}")
+async def get_export_job_status(
+    job_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """Get export job status."""
+    service = DatasetVersionService(db)
+    return service.get_export_job(
+        job_id=job_id,
+        user_id=str(current_user["_id"]),
+    )
+
+
+@router.get("/export/jobs/{job_id}/download")
+async def download_export_file(
+    job_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.EXPORT_DATA)),
+):
+    """Download completed export file."""
+    from fastapi.responses import FileResponse
+
+    service = DatasetVersionService(db)
+    file_path = service.get_export_download_path(
+        job_id=job_id,
+        user_id=str(current_user["_id"]),
+    )
+
+    return FileResponse(
+        file_path,
+        filename=os.path.basename(file_path),
+        media_type="application/octet-stream",
     )

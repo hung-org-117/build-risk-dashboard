@@ -1,9 +1,12 @@
 """Repository for DatasetEnrichmentBuild entities (builds for dataset enrichment)."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional
 
 from bson import ObjectId
+from pymongo.client_session import ClientSession
 
 from app.entities.dataset_enrichment_build import DatasetEnrichmentBuild
 from app.entities.enums import ExtractionStatus
@@ -131,18 +134,59 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         if version_id:
             query["dataset_version_id"] = version_id
 
-        cursor = self.collection.find(query).sort("_id", 1).limit(limit)
+        cursor = self.collection.find(query).sort("_id", 1).batch_size(100)
+        if limit:
+            cursor = cursor.limit(limit)
         for doc in cursor:
-            yield DatasetEnrichmentBuild(**doc)
+            yield doc  # Return raw dict for export_utils
 
-    def delete_by_dataset(self, dataset_id: ObjectId) -> int:
-        """Delete all builds for a dataset."""
-        result = self.collection.delete_many({"dataset_id": dataset_id})
+    def get_all_feature_keys(
+        self,
+        dataset_id: ObjectId,
+        version_id: Optional[ObjectId] = None,
+    ) -> set:
+        """Get all unique feature keys for consistent CSV columns."""
+        query: Dict[str, Any] = {
+            "dataset_id": dataset_id,
+            "extraction_status": ExtractionStatus.COMPLETED.value,
+        }
+        if version_id:
+            query["dataset_version_id"] = version_id
+
+        pipeline = [
+            {"$match": query},
+            {"$project": {"feature_keys": {"$objectToArray": "$features"}}},
+            {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
+            {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
+        ]
+
+        result = list(self.collection.aggregate(pipeline))
+        if result:
+            return set(result[0].get("keys", []))
+        return set()
+
+    def delete_by_dataset(
+        self, dataset_id: ObjectId, session: Optional["ClientSession"] = None
+    ) -> int:
+        """Delete all builds for a dataset.
+
+        Args:
+            dataset_id: Dataset ID to delete builds for
+            session: Optional MongoDB session for transaction support
+        """
+        result = self.collection.delete_many({"dataset_id": dataset_id}, session=session)
         return result.deleted_count
 
-    def delete_by_version(self, version_id: str) -> int:
-        """Delete all builds for a version."""
-        result = self.collection.delete_many({"dataset_version_id": ObjectId(version_id)})
+    def delete_by_version(self, version_id: str, session: Optional["ClientSession"] = None) -> int:
+        """Delete all builds for a version.
+
+        Args:
+            version_id: Version ID to delete builds for
+            session: Optional MongoDB session for transaction support
+        """
+        result = self.collection.delete_many(
+            {"dataset_version_id": ObjectId(version_id)}, session=session
+        )
         return result.deleted_count
 
     def get_feature_stats(

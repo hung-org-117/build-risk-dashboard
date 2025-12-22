@@ -310,7 +310,8 @@ class DatasetService:
         return self._serialize(self.repo.find_by_id(str(dataset.id)))
 
     def delete_dataset(self, dataset_id: str, user_id: str) -> None:
-        """Delete a dataset and all associated data from all related entities."""
+        """Delete a dataset and all associated data atomically using transaction."""
+        from app.database.mongo import get_transaction
         from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
         from app.repositories.dataset_version import DatasetVersionRepository
 
@@ -319,26 +320,34 @@ class DatasetService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
         dataset_oid = ObjectId(dataset_id)
-
-        # Delete associated enrichment builds (DatasetEnrichmentBuild)
-        deleted_enrichment = self.enrichment_build_repo.delete_by_dataset(dataset_oid)
-        logger.info(f"Deleted {deleted_enrichment} enrichment builds for dataset {dataset_id}")
-
-        # Delete associated dataset builds (DatasetBuild)
-        deleted_builds = self.build_repo.delete_by_dataset(dataset_id)
-        logger.info(f"Deleted {deleted_builds} dataset builds for dataset {dataset_id}")
-
-        # Delete repo stats (DatasetRepoStats)
         repo_stats_repo = DatasetRepoStatsRepository(self.db)
-        deleted_stats = repo_stats_repo.delete_by_dataset(dataset_id)
-        logger.info(f"Deleted {deleted_stats} repo stats for dataset {dataset_id}")
-
-        # Delete versions (DatasetVersion)
         version_repo = DatasetVersionRepository(self.db)
-        deleted_versions = version_repo.delete_by_dataset(dataset_id)
-        logger.info(f"Deleted {deleted_versions} versions for dataset {dataset_id}")
 
-        # Delete the CSV file if exists
+        # Use transaction to ensure all deletes happen atomically
+        with get_transaction() as session:
+            # Delete associated enrichment builds (DatasetEnrichmentBuild)
+            deleted_enrichment = self.enrichment_build_repo.delete_by_dataset(
+                dataset_oid, session=session
+            )
+            logger.info(f"Deleted {deleted_enrichment} enrichment builds for dataset {dataset_id}")
+
+            # Delete associated dataset builds (DatasetBuild)
+            deleted_builds = self.build_repo.delete_by_dataset(dataset_id, session=session)
+            logger.info(f"Deleted {deleted_builds} dataset builds for dataset {dataset_id}")
+
+            # Delete repo stats (DatasetRepoStats)
+            deleted_stats = repo_stats_repo.delete_by_dataset(dataset_id, session=session)
+            logger.info(f"Deleted {deleted_stats} repo stats for dataset {dataset_id}")
+
+            # Delete versions (DatasetVersion)
+            deleted_versions = version_repo.delete_by_dataset(dataset_id, session=session)
+            logger.info(f"Deleted {deleted_versions} versions for dataset {dataset_id}")
+
+            # Delete the dataset document (DatasetProject)
+            self.repo.delete_one(dataset_id, session=session)
+            logger.info(f"Deleted dataset {dataset_id}")
+
+        # Delete the CSV file outside transaction (not a DB operation)
         if dataset.file_path:
             try:
                 file_path = Path(dataset.file_path)
@@ -346,10 +355,6 @@ class DatasetService:
                     file_path.unlink()
             except Exception as e:
                 logger.warning("Failed to delete dataset file: %s", e)
-
-        # Delete the dataset document (DatasetProject)
-        self.repo.delete_one(dataset_id)
-        logger.info(f"Deleted dataset {dataset_id}")
 
     def get_dataset_builds(
         self,

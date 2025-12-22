@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from typing import List, Optional
 
+from pymongo.client_session import ClientSession
 from pymongo.database import Database
 
 from app.entities.dataset_repo_stats import DatasetRepoStats
@@ -42,6 +45,11 @@ class DatasetRepoStatsRepository(BaseRepository[DatasetRepoStats]):
             upsert=True,
         )
 
-    def delete_by_dataset(self, dataset_id: str) -> int:
-        """Delete all repo stats for a dataset."""
-        return self.delete_many({"dataset_id": self._to_object_id(dataset_id)})
+    def delete_by_dataset(self, dataset_id: str, session: "ClientSession | None" = None) -> int:
+        """Delete all repo stats for a dataset.
+
+        Args:
+            dataset_id: Dataset ID to delete stats for
+            session: Optional MongoDB session for transaction support
+        """
+        return self.delete_many({"dataset_id": self._to_object_id(dataset_id)}, session=session)

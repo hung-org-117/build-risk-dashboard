@@ -50,6 +50,7 @@ interface ScanMetricsSelectorProps {
     onSonarChange: (metrics: string[]) => void;
     onTrivyChange: (metrics: string[]) => void;
     className?: string;
+    showOnlyTool?: "sonarqube" | "trivy";
 }
 
 // =============================================================================
@@ -96,12 +97,13 @@ export function ScanMetricsSelector({
     onSonarChange,
     onTrivyChange,
     className,
+    showOnlyTool,
 }: ScanMetricsSelectorProps) {
     const [availableMetrics, setAvailableMetrics] = useState<AvailableMetrics | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
-    const [activeTab, setActiveTab] = useState("sonarqube");
+    const [activeTab, setActiveTab] = useState<string>(showOnlyTool || "sonarqube");
 
     // Fetch available metrics on mount
     useEffect(() => {
@@ -237,14 +239,6 @@ export function ScanMetricsSelector({
             <AccordionItem key={category} value={category}>
                 <AccordionTrigger className="hover:no-underline px-2">
                     <div className="flex items-center gap-3 flex-1">
-                        <div
-                            className={cn(
-                                "p-1.5 rounded-md",
-                                CATEGORY_COLORS[category] || "bg-gray-500/10"
-                            )}
-                        >
-                            {CATEGORY_ICONS[category] || <BarChart3 className="h-4 w-4" />}
-                        </div>
                         <span className="font-medium capitalize">
                             {category.replace(/_/g, " ")}
                         </span>
@@ -301,25 +295,27 @@ export function ScanMetricsSelector({
 
     return (
         <div className={cn("space-y-4", className)}>
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h3 className="text-lg font-semibold">Select Scan Metrics</h3>
-                    <p className="text-sm text-muted-foreground">
-                        Choose metrics to include in your dataset features
-                    </p>
+            {/* Header - only show when displaying both tools */}
+            {!showOnlyTool && (
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-semibold">Select Scan Metrics</h3>
+                        <p className="text-sm text-muted-foreground">
+                            Choose metrics to include in your dataset features
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                        <Badge variant="outline" className="bg-blue-50">
+                            <BarChart3 className="h-3 w-3 mr-1" />
+                            SonarQube: {selectedSonarMetrics.length}
+                        </Badge>
+                        <Badge variant="outline" className="bg-green-50">
+                            <Shield className="h-3 w-3 mr-1" />
+                            Trivy: {selectedTrivyMetrics.length}
+                        </Badge>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm">
-                    <Badge variant="outline" className="bg-blue-50">
-                        <BarChart3 className="h-3 w-3 mr-1" />
-                        SonarQube: {selectedSonarMetrics.length}
-                    </Badge>
-                    <Badge variant="outline" className="bg-green-50">
-                        <Shield className="h-3 w-3 mr-1" />
-                        Trivy: {selectedTrivyMetrics.length}
-                    </Badge>
-                </div>
-            </div>
+            )}
 
             {/* Search */}
             <div className="relative">
@@ -332,67 +328,114 @@ export function ScanMetricsSelector({
                 />
             </div>
 
-            {/* Tabs */}
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="sonarqube" className="gap-2">
-                        <BarChart3 className="h-4 w-4" />
-                        SonarQube
-                        <Badge variant="secondary" className="ml-1">
-                            {selectedSonarMetrics.length}
-                        </Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="trivy" className="gap-2">
-                        <Shield className="h-4 w-4" />
-                        Trivy
-                        <Badge variant="secondary" className="ml-1">
-                            {selectedTrivyMetrics.length}
-                        </Badge>
-                    </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="sonarqube" className="mt-4">
-                    <ScrollArea className="h-[400px] pr-4">
-                        <Accordion type="multiple" className="space-y-2">
-                            {Object.entries(filteredSonarMetrics).map(([category, metrics]) =>
-                                renderCategory(
-                                    "sonarqube",
-                                    category,
-                                    metrics,
-                                    selectedSonarMetrics,
-                                    handleToggleSonar
-                                )
+            {/* Tabs - only show when displaying both tools */}
+            {showOnlyTool ? (
+                // Single tool view - no tabs
+                <div className="mt-2">
+                    {showOnlyTool === "sonarqube" && (
+                        <ScrollArea className="h-[300px] pr-4">
+                            <Accordion type="multiple" className="space-y-2">
+                                {Object.entries(filteredSonarMetrics).map(([category, metrics]) =>
+                                    renderCategory(
+                                        "sonarqube",
+                                        category,
+                                        metrics,
+                                        selectedSonarMetrics,
+                                        handleToggleSonar
+                                    )
+                                )}
+                            </Accordion>
+                            {Object.keys(filteredSonarMetrics).length === 0 && (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    No metrics match your search
+                                </div>
                             )}
-                        </Accordion>
-                        {Object.keys(filteredSonarMetrics).length === 0 && (
-                            <div className="text-center py-8 text-muted-foreground">
-                                No metrics match your search
-                            </div>
-                        )}
-                    </ScrollArea>
-                </TabsContent>
-
-                <TabsContent value="trivy" className="mt-4">
-                    <ScrollArea className="h-[400px] pr-4">
-                        <Accordion type="multiple" className="space-y-2">
-                            {Object.entries(filteredTrivyMetrics).map(([category, metrics]) =>
-                                renderCategory(
-                                    "trivy",
-                                    category,
-                                    metrics,
-                                    selectedTrivyMetrics,
-                                    handleToggleTrivy
-                                )
+                        </ScrollArea>
+                    )}
+                    {showOnlyTool === "trivy" && (
+                        <ScrollArea className="h-[300px] pr-4">
+                            <Accordion type="multiple" className="space-y-2">
+                                {Object.entries(filteredTrivyMetrics).map(([category, metrics]) =>
+                                    renderCategory(
+                                        "trivy",
+                                        category,
+                                        metrics,
+                                        selectedTrivyMetrics,
+                                        handleToggleTrivy
+                                    )
+                                )}
+                            </Accordion>
+                            {Object.keys(filteredTrivyMetrics).length === 0 && (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    No metrics match your search
+                                </div>
                             )}
-                        </Accordion>
-                        {Object.keys(filteredTrivyMetrics).length === 0 && (
-                            <div className="text-center py-8 text-muted-foreground">
-                                No metrics match your search
-                            </div>
-                        )}
-                    </ScrollArea>
-                </TabsContent>
-            </Tabs>
+                        </ScrollArea>
+                    )}
+                </div>
+            ) : (
+                // Both tools view - with tabs
+                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="sonarqube" className="gap-2">
+                            <BarChart3 className="h-4 w-4" />
+                            SonarQube
+                            <Badge variant="secondary" className="ml-1">
+                                {selectedSonarMetrics.length}
+                            </Badge>
+                        </TabsTrigger>
+                        <TabsTrigger value="trivy" className="gap-2">
+                            <Shield className="h-4 w-4" />
+                            Trivy
+                            <Badge variant="secondary" className="ml-1">
+                                {selectedTrivyMetrics.length}
+                            </Badge>
+                        </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="sonarqube" className="mt-4">
+                        <ScrollArea className="h-[400px] pr-4">
+                            <Accordion type="multiple" className="space-y-2">
+                                {Object.entries(filteredSonarMetrics).map(([category, metrics]) =>
+                                    renderCategory(
+                                        "sonarqube",
+                                        category,
+                                        metrics,
+                                        selectedSonarMetrics,
+                                        handleToggleSonar
+                                    )
+                                )}
+                            </Accordion>
+                            {Object.keys(filteredSonarMetrics).length === 0 && (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    No metrics match your search
+                                </div>
+                            )}
+                        </ScrollArea>
+                    </TabsContent>
+
+                    <TabsContent value="trivy" className="mt-4">
+                        <ScrollArea className="h-[400px] pr-4">
+                            <Accordion type="multiple" className="space-y-2">
+                                {Object.entries(filteredTrivyMetrics).map(([category, metrics]) =>
+                                    renderCategory(
+                                        "trivy",
+                                        category,
+                                        metrics,
+                                        selectedTrivyMetrics,
+                                        handleToggleTrivy
+                                    )
+                                )}
+                            </Accordion>
+                            {Object.keys(filteredTrivyMetrics).length === 0 && (
+                                <div className="text-center py-8 text-muted-foreground">
+                                    No metrics match your search
+                                </div>
+                            )}
+                        </ScrollArea>
+                    </TabsContent>
+                </Tabs>
+            )}
 
             {/* Quick Actions */}
             <div className="flex gap-2 pt-2 border-t">

@@ -4,33 +4,44 @@ Export Celery Task - Background job for large dataset exports.
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.celery_app import celery_app
-from app.tasks.base import PipelineTask
-from app.services.export_service import ExportService
+from app.config import settings
 from app.entities.export_job import ExportStatus
+from app.tasks.base import PipelineTask
 
 logger = logging.getLogger(__name__)
+
+# Export directory
+EXPORT_DIR = Path(settings.DATA_DIR) / "exports"
+EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @celery_app.task(
     bind=True,
     base=PipelineTask,
-    name="app.tasks.export.run_export_job",
+    name="app.tasks.export.process_export_job",
     queue="processing",
 )
-def run_export_job(self, job_id: str):
+def process_export_job(self, job_id: str):
     """
     Run export job in background.
 
     This task:
     1. Updates job status to "processing"
-    2. Counts total rows
+    2. Gets cursor from repository
     3. Writes export file with progress updates
     4. Updates job with completed status and file info
     """
-    service = ExportService(self.db)
-    job = service.job_repo.find_by_id(job_id)
+    from bson import ObjectId
+
+    from app.repositories.export_job import ExportJobRepository
+    from app.repositories.model_training_build import ModelTrainingBuildRepository
+    from app.utils.export_utils import format_feature_row, write_csv_file, write_json_file
+
+    job_repo = ExportJobRepository(self.db)
+    job = job_repo.find_by_id(job_id)
 
     if not job:
         logger.error(f"Export job {job_id} not found")
@@ -38,33 +49,58 @@ def run_export_job(self, job_id: str):
 
     try:
         # Update status to processing
-        service.job_repo.update_status(job_id, ExportStatus.PROCESSING.value)
+        job_repo.update_status(job_id, ExportStatus.PROCESSING.value)
+
+        build_repo = ModelTrainingBuildRepository(self.db)
 
         # Count total rows
-        total = service.estimate_row_count(
-            str(job.repo_id),
+        total = build_repo.count_for_export(
+            ObjectId(job.repo_id),
             job.start_date,
             job.end_date,
             job.build_status,
         )
-        service.job_repo.update_status(
-            job_id, ExportStatus.PROCESSING.value, total_rows=total
-        )
+        job_repo.update_status(job_id, ExportStatus.PROCESSING.value, total_rows=total)
 
         logger.info(f"Starting export job {job_id}: {total} rows, format={job.format}")
 
         # Progress callback to update processed count
         def on_progress(processed: int):
-            service.job_repo.update_progress(job_id, processed)
+            job_repo.update_progress(job_id, processed)
+
+        # Get cursor for export
+        cursor = build_repo.get_for_export(
+            ObjectId(job.repo_id),
+            job.start_date,
+            job.end_date,
+            job.build_status,
+        )
+
+        # Get all feature keys for consistent columns (CSV)
+        all_feature_keys = None
+        if job.format == "csv" and not job.features:
+            all_feature_keys = build_repo.get_all_feature_keys(
+                ObjectId(job.repo_id),
+                job.start_date,
+                job.end_date,
+                job.build_status,
+            )
 
         # Write export file
-        file_path = service.write_export_file(job, progress_callback=on_progress)
+        file_path = EXPORT_DIR / f"{job_id}.{job.format}"
+
+        if job.format == "csv":
+            write_csv_file(
+                file_path, cursor, format_feature_row, job.features, all_feature_keys, on_progress
+            )
+        else:
+            write_json_file(file_path, cursor, format_feature_row, job.features, on_progress)
 
         # Get file size
         file_size = file_path.stat().st_size
 
         # Update job as completed
-        service.job_repo.update_status(
+        job_repo.update_status(
             job_id,
             ExportStatus.COMPLETED.value,
             file_path=str(file_path),
@@ -74,8 +110,7 @@ def run_export_job(self, job_id: str):
         )
 
         logger.info(
-            f"Export job {job_id} completed: {total} rows, "
-            f"size={file_size / 1024:.1f}KB"
+            f"Export job {job_id} completed: {total} rows, " f"size={file_size / 1024:.1f}KB"
         )
 
         return {
@@ -88,7 +123,7 @@ def run_export_job(self, job_id: str):
     except Exception as e:
         logger.error(f"Export job {job_id} failed: {e}", exc_info=True)
 
-        service.job_repo.update_status(
+        job_repo.update_status(
             job_id,
             ExportStatus.FAILED.value,
             error_message=str(e),
@@ -109,12 +144,12 @@ def cleanup_old_exports(self, days: int = 7):
 
     Run periodically via Celery beat.
     """
-    from app.services.export_service import EXPORT_DIR
+    from app.repositories.export_job import ExportJobRepository
 
-    service = ExportService(self.db)
+    job_repo = ExportJobRepository(self.db)
 
     # Delete old job records
-    deleted_count = service.job_repo.delete_old_jobs(days)
+    deleted_count = job_repo.delete_old_jobs(days)
     logger.info(f"Deleted {deleted_count} old export job records")
 
     # Delete orphaned export files

@@ -2,7 +2,7 @@
 Export Job Repository - Database operations for export jobs.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from bson import ObjectId
@@ -67,11 +67,17 @@ class ExportJobRepository:
         )
         return [ExportJob(**doc) for doc in cursor]
 
+    def list_by_version(self, version_id: str, limit: int = 10) -> List[ExportJob]:
+        """List export jobs for a dataset version, newest first."""
+        cursor = (
+            self.collection.find({"version_id": ObjectId(version_id)})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        return [ExportJob(**doc) for doc in cursor]
+
     def delete_old_jobs(self, days: int = 7) -> int:
         """Delete export jobs older than specified days."""
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         result = self.collection.delete_many({"created_at": {"$lt": cutoff}})
         return result.deleted_count
-
-
-from datetime import timedelta

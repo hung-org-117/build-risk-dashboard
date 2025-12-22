@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from typing import Optional
 
+from pymongo.client_session import ClientSession
 from pymongo.database import Database
 
 from app.entities.dataset_build import DatasetBuild
@@ -25,12 +28,17 @@ class DatasetBuildRepository(BaseRepository[DatasetBuild]):
             }
         )
 
-    def delete_by_dataset(self, dataset_id: str) -> int:
-        """Delete all builds for a dataset."""
+    def delete_by_dataset(self, dataset_id: str, session: "ClientSession | None" = None) -> int:
+        """Delete all builds for a dataset.
+
+        Args:
+            dataset_id: Dataset ID to delete builds for
+            session: Optional MongoDB session for transaction support
+        """
         oid = self._to_object_id(dataset_id)
         if not oid:
             return 0
-        return self.delete_many({"dataset_id": oid})
+        return self.delete_many({"dataset_id": oid}, session=session)
 
     def find_validated_builds(self, dataset_id: str) -> list[DatasetBuild]:
         """Find all validated builds (status=FOUND) for a dataset."""

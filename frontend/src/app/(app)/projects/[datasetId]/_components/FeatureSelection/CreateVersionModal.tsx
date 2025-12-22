@@ -219,7 +219,6 @@ export function CreateVersionModal({
                         }
                         scanConfig={scanConfig}
                         onScanConfigChange={setScanConfig}
-                        disabled={isDisabled}
                     />
 
                     {/* Version Name Input */}

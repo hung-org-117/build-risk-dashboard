@@ -1,11 +1,12 @@
-from __future__ import annotations
-
 """Repository for ModelRepoConfig entities (user config for model training flow)."""
+
+from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
 
 from bson import ObjectId
+from pymongo.client_session import ClientSession
 
 from app.entities.enums import ModelImportStatus, ModelSyncStatus
 from app.entities.model_repo_config import ModelRepoConfig
@@ -262,8 +263,13 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         )
         return ModelRepoConfig(**doc) if doc else None
 
-    def soft_delete(self, config_id: ObjectId) -> None:
-        """Soft delete a config."""
+    def soft_delete(self, config_id: ObjectId, session: "ClientSession | None" = None) -> None:
+        """Soft delete a config.
+
+        Args:
+            config_id: Config ID to soft delete
+            session: Optional MongoDB session for transaction support
+        """
         self.collection.update_one(
             {"_id": config_id},
             {
@@ -273,4 +279,5 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
                     "updated_at": datetime.utcnow(),
                 }
             },
+            session=session,
         )

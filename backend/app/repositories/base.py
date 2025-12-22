@@ -1,13 +1,16 @@
-from __future__ import annotations
-
 """Base repository pattern for MongoDB operations"""
 
+from __future__ import annotations
+
 from abc import ABC
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
+from contextlib import contextmanager
+from typing import Any, Dict, Generator, Generic, List, Optional, Type, TypeVar, Union
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from pydantic import BaseModel
+from pymongo import MongoClient
+from pymongo.client_session import ClientSession
 from pymongo.collection import Collection
 from pymongo.database import Database
 
@@ -96,30 +99,70 @@ class BaseRepository(ABC, Generic[T]):
 
         return models
 
-    def update_one(self, entity_id: str | ObjectId, updates: Dict[str, Any]) -> Optional[T]:
-        """Update a document by ID"""
+    def update_one(
+        self,
+        entity_id: str | ObjectId,
+        updates: Dict[str, Any],
+        session: Optional[ClientSession] = None,
+    ) -> Optional[T]:
+        """Update a document by ID
+
+        Args:
+            entity_id: Document ID to update
+            updates: Fields to update (will be wrapped in $set)
+            session: Optional MongoDB session for transaction support
+        """
         identifier = self._to_object_id(entity_id)
         if identifier is None:
             return None
-        self.collection.update_one({"_id": identifier}, {"$set": updates})
+        self.collection.update_one({"_id": identifier}, {"$set": updates}, session=session)
         return self.find_by_id(identifier)
 
-    def update_many(self, query: Dict[str, Any], updates: Dict[str, Any]) -> int:
-        """Update multiple documents matching the query"""
-        result = self.collection.update_many(query, {"$set": updates})
+    def update_many(
+        self,
+        query: Dict[str, Any],
+        updates: Dict[str, Any],
+        session: Optional[ClientSession] = None,
+    ) -> int:
+        """Update multiple documents matching the query
+
+        Args:
+            query: Filter to match documents
+            updates: Fields to update (will be wrapped in $set)
+            session: Optional MongoDB session for transaction support
+        """
+        result = self.collection.update_many(query, {"$set": updates}, session=session)
         return result.modified_count
 
-    def delete_one(self, entity_id: str | ObjectId) -> bool:
-        """Delete a document by ID"""
+    def delete_one(
+        self,
+        entity_id: str | ObjectId,
+        session: Optional[ClientSession] = None,
+    ) -> bool:
+        """Delete a document by ID
+
+        Args:
+            entity_id: Document ID to delete
+            session: Optional MongoDB session for transaction support
+        """
         identifier = self._to_object_id(entity_id)
         if identifier is None:
             return False
-        result = self.collection.delete_one({"_id": identifier})
+        result = self.collection.delete_one({"_id": identifier}, session=session)
         return result.deleted_count > 0
 
-    def delete_many(self, query: Dict[str, Any]) -> int:
-        """Delete multiple documents matching the query"""
-        result = self.collection.delete_many(query)
+    def delete_many(
+        self,
+        query: Dict[str, Any],
+        session: Optional[ClientSession] = None,
+    ) -> int:
+        """Delete multiple documents matching the query
+
+        Args:
+            query: Filter to match documents
+            session: Optional MongoDB session for transaction support
+        """
+        result = self.collection.delete_many(query, session=session)
         return result.deleted_count
 
     def count(self, query: Dict[str, Any] = None) -> int:
@@ -273,3 +316,57 @@ class BaseRepository(ABC, Generic[T]):
                 return ObjectId(value)
             raise ValueError(f"Invalid ObjectId string: {value}")
         raise TypeError(f"Expected str or ObjectId, got {type(value).__name__}")
+
+    @contextmanager
+    def transaction(self) -> Generator[ClientSession, None, None]:
+        """
+        Context manager for MongoDB multi-document transactions.
+
+        Use this for operations within a single repository that need
+        atomicity across multiple documents.
+
+        Usage:
+            with repo.transaction() as session:
+                repo.collection.insert_one(doc1, session=session)
+                repo.collection.update_one(query, update, session=session)
+                # Both operations committed together
+
+        Note:
+            Requires MongoDB Replica Set. Will fail on standalone MongoDB.
+
+        Raises:
+            pymongo.errors.PyMongoError: If transaction fails
+        """
+        with self.db.client.start_session() as session:
+            with session.start_transaction():
+                yield session
+
+    @staticmethod
+    @contextmanager
+    def transaction_from_client(
+        client: MongoClient,
+    ) -> Generator[ClientSession, None, None]:
+        """
+        Static method for transactions spanning multiple repositories.
+
+        Use this when you need atomic operations across different
+        repositories/collections.
+
+        Usage:
+            from app.database.mongo import get_client
+            client = get_client()
+
+            with BaseRepository.transaction_from_client(client) as session:
+                repo1.collection.delete_many(query1, session=session)
+                repo2.collection.delete_many(query2, session=session)
+                # Both deletions committed together
+
+        Note:
+            Requires MongoDB Replica Set. Will fail on standalone MongoDB.
+
+        Raises:
+            pymongo.errors.PyMongoError: If transaction fails
+        """
+        with client.start_session() as session:
+            with session.start_transaction():
+                yield session
