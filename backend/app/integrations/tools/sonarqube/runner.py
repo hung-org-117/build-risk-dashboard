@@ -9,7 +9,7 @@ import requests
 from app.config import settings
 from app.core.redis import RedisLock
 from app.integrations.tools.sonarqube.config import get_sonar_runtime_config
-from app.paths import REPOS_DIR, WORKTREES_DIR
+from app.paths import get_repo_path, get_worktree_path
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,9 @@ class SonarCommitRunner:
     - RedisLock for concurrency control
     """
 
-    def __init__(self, project_key: str, raw_repo_id: str):
+    def __init__(self, project_key: str, github_repo_id: int):
         self.project_key = project_key
-        self.raw_repo_id = raw_repo_id  # For shared worktree lookup
+        self.github_repo_id = github_repo_id  # For shared worktree lookup
 
         # Prefer DB-configured settings if available (merged ENV + DB)
         cfg = get_sonar_runtime_config()
@@ -39,11 +39,11 @@ class SonarCommitRunner:
 
     def _get_repo_path(self) -> Path:
         """Get path to bare repo in shared REPOS_DIR."""
-        return REPOS_DIR / self.raw_repo_id
+        return get_repo_path(self.github_repo_id)
 
     def _get_worktree_path(self, commit_sha: str) -> Path:
         """Get path to worktree in shared WORKTREES_DIR."""
-        return WORKTREES_DIR / self.raw_repo_id / commit_sha[:12]
+        return get_worktree_path(self.github_repo_id, commit_sha)
 
     def ensure_shared_worktree(self, commit_sha: str, full_name: str) -> Optional[Path]:
         """
@@ -51,8 +51,8 @@ class SonarCommitRunner:
 
         Uses RedisLock to coordinate with ingestion_tasks and integration_scan.
         """
-        if not self.raw_repo_id:
-            logger.warning("No raw_repo_id set, cannot use shared worktree")
+        if not self.github_repo_id:
+            logger.warning("No github_repo_id set, cannot use shared worktree")
             return None
 
         worktree_path = self._get_worktree_path(commit_sha)
@@ -64,7 +64,7 @@ class SonarCommitRunner:
             return worktree_path
 
         with RedisLock(
-            f"worktree:{self.raw_repo_id}:{commit_sha[:12]}",
+            f"worktree:{self.github_repo_id}:{commit_sha[:12]}",
             timeout=120,
             blocking_timeout=60,
         ):
@@ -105,12 +105,12 @@ class SonarCommitRunner:
 
     def _clone_bare_repo(self, full_name: str) -> None:
         """Clone repo as bare using shared infrastructure."""
-        if not self.raw_repo_id:
+        if not self.github_repo_id:
             return
 
         repo_path = self._get_repo_path()
 
-        with RedisLock(f"clone:{self.raw_repo_id}", timeout=700, blocking_timeout=60):
+        with RedisLock(f"clone:{self.github_repo_id}", timeout=700, blocking_timeout=60):
             if repo_path.exists():
                 return
 
@@ -198,7 +198,7 @@ class SonarCommitRunner:
                     raise ValueError(f"Failed to create shared worktree for {commit_sha}")
                 logger.info(f"Using shared worktree at {worktree} for scan")
             else:
-                raise ValueError("Either shared_worktree_path or raw_repo_id + full_name required")
+                raise ValueError("Shared worktree path or github_repo_id + full_name required")
 
             # Write custom config if provided
             if sonar_config_content:

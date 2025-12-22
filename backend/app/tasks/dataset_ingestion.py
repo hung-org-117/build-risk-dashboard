@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 def build_repo_ingestion_chain(
     raw_repo_id: str,
+    github_repo_id: int,
     full_name: str,
     build_csv_ids: List[str],
     commit_shas: List[str],
@@ -39,7 +40,8 @@ def build_repo_ingestion_chain(
     This chain can be added to a group() for parallel execution across repos.
 
     Args:
-        raw_repo_id: Repository ID
+        raw_repo_id: Repository MongoDB ID
+        github_repo_id: GitHub's internal repository ID for paths
         full_name: Repository full name (owner/repo)
         build_csv_ids: List of build IDs for log download
         commit_shas: List of commit SHAs for worktree creation
@@ -52,6 +54,7 @@ def build_repo_ingestion_chain(
     return build_ingestion_workflow(
         tasks_by_level=tasks_by_level,
         raw_repo_id=raw_repo_id,
+        github_repo_id=github_repo_id,
         full_name=full_name,
         build_ids=build_csv_ids,
         commit_shas=commit_shas,

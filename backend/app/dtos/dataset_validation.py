@@ -27,6 +27,13 @@ class SaveReposRequest(BaseModel):
     repos: List[RepoConfigRequest]
 
 
+class RepoScanConfigRequest(BaseModel):
+    """Request model for updating per-repo scan configuration."""
+
+    sonarqube_properties: Optional[str] = None
+    trivy_yaml: Optional[str] = None
+
+
 # ============================================================================
 # Response DTOs
 # ============================================================================

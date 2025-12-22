@@ -20,7 +20,11 @@ from app.celery_app import celery_app
 from app.ci_providers import CIProvider, get_ci_provider, get_provider_config
 from app.config import settings
 from app.core.redis import RedisLock
-from app.paths import LOGS_DIR, REPOS_DIR, WORKTREES_DIR
+from app.paths import (
+    get_build_logs_path,
+    get_repo_path,
+    get_worktrees_path,
+)
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.services.github.exceptions import GithubRateLimitError, GithubRetryableError
@@ -96,6 +100,7 @@ def clone_repo(
     self: PipelineTask,
     prev_result: Any = None,  # Allow chaining from previous task
     raw_repo_id: str = "",
+    github_repo_id: int = 0,
     full_name: str = "",
     publish_status: bool = False,
 ) -> Dict[str, Any]:
@@ -104,13 +109,14 @@ def clone_repo(
 
     Works for both model and dataset pipelines.
     Supports installation token for private repos.
+    Uses github_repo_id for folder path (stable across renames).
     """
     if publish_status and raw_repo_id:
         _publish_status(raw_repo_id, "importing", "Cloning repository...")
 
-    repo_path = REPOS_DIR / raw_repo_id
+    repo_path = get_repo_path(github_repo_id)
 
-    with RedisLock(f"clone:{raw_repo_id}", timeout=700, blocking_timeout=60):
+    with RedisLock(f"clone:{github_repo_id}", timeout=700, blocking_timeout=60):
         try:
             # Check if this repo belongs to the configured organization
             from app.services.model_repository_service import is_org_repo
@@ -164,6 +170,7 @@ def clone_repo(
 
             result = {
                 "raw_repo_id": raw_repo_id,
+                "github_repo_id": github_repo_id,
                 "status": "cloned",
                 "path": str(repo_path),
             }
@@ -189,6 +196,7 @@ def clone_repo(
 def create_worktrees(
     self: PipelineTask,
     raw_repo_id: str = "",
+    github_repo_id: int = 0,
     commit_shas: List[str] = [],
     publish_status: bool = False,
 ) -> Dict[str, Any]:
@@ -219,7 +227,7 @@ def create_worktrees(
     total_chunks = (len(unique_shas) + chunk_size - 1) // chunk_size
 
     logger.info(
-        f"Creating worktrees for repo {raw_repo_id}: "
+        f"Creating worktrees for github_repo_id={github_repo_id}: "
         f"{len(unique_shas)} commits in {total_chunks} sequential chunks"
     )
 
@@ -233,6 +241,7 @@ def create_worktrees(
         result = _create_worktree_chunk_impl(
             db=self.db,
             raw_repo_id=raw_repo_id,
+            github_repo_id=github_repo_id,
             commit_shas=chunk,
             publish_status=publish_status,
             chunk_index=chunk_index,
@@ -270,6 +279,7 @@ def create_worktrees(
 def _create_worktree_chunk_impl(
     db,
     raw_repo_id: str,
+    github_repo_id: int,
     commit_shas: List[str],
     publish_status: bool = False,
     chunk_index: int = 0,
@@ -286,8 +296,9 @@ def _create_worktree_chunk_impl(
     raw_repo_repo = RawRepositoryRepository(db)
     raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
 
-    repo_path = REPOS_DIR / raw_repo_id
-    worktrees_dir = WORKTREES_DIR / raw_repo_id
+    # Use github_repo_id for paths
+    repo_path = get_repo_path(github_repo_id)
+    worktrees_dir = get_worktrees_path(github_repo_id)
     worktrees_dir.mkdir(parents=True, exist_ok=True)
 
     if not repo_path.exists():
@@ -320,7 +331,7 @@ def _create_worktree_chunk_impl(
         # Use lock to prevent race condition with integration_scan
         try:
             with RedisLock(
-                f"worktree:{raw_repo_id}:{sha[:12]}",
+                f"worktree:{github_repo_id}:{sha[:12]}",
                 timeout=120,
                 blocking_timeout=60,
             ):
@@ -412,6 +423,7 @@ def _create_worktree_chunk_impl(
 def create_worktree_chunk(
     self: PipelineTask,
     raw_repo_id: str,
+    github_repo_id: int,
     commit_shas: List[str],
     publish_status: bool = False,
     chunk_index: int = 0,
@@ -426,6 +438,7 @@ def create_worktree_chunk(
     return _create_worktree_chunk_impl(
         db=self.db,
         raw_repo_id=raw_repo_id,
+        github_repo_id=github_repo_id,
         commit_shas=commit_shas,
         publish_status=publish_status,
         chunk_index=chunk_index,
@@ -444,6 +457,7 @@ def create_worktree_chunk(
 def download_build_logs(
     self: PipelineTask,
     raw_repo_id: str = "",
+    github_repo_id: int = 0,
     full_name: str = "",
     build_ids: List[str] = [],
     ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
@@ -496,6 +510,7 @@ def download_build_logs(
         result = _download_logs_chunk_impl(
             db=self.db,
             raw_repo_id=raw_repo_id,
+            github_repo_id=github_repo_id,
             full_name=full_name,
             build_ids=chunk,
             ci_provider=ci_provider,
@@ -538,6 +553,7 @@ def download_build_logs(
 def _download_logs_chunk_impl(
     db,
     raw_repo_id: str,
+    github_repo_id: int,
     full_name: str,
     build_ids: List[str],
     ci_provider: str = CIProvider.GITHUB_ACTIONS.value,
@@ -589,7 +605,7 @@ def _download_logs_chunk_impl(
         build_run = build_run_repo.find_by_repo_and_build_id(raw_repo_id, build_id)
         if build_run and build_run.logs_available:
             # Verify log files actually exist on disk
-            expected_logs_dir = LOGS_DIR / raw_repo_id / build_id
+            expected_logs_dir = get_build_logs_path(github_repo_id, build_id)
             if expected_logs_dir.exists() and any(expected_logs_dir.glob("*.log")):
                 logs_skipped += 1
                 return "skipped"
@@ -602,7 +618,7 @@ def _download_logs_chunk_impl(
                 )
 
         try:
-            build_logs_dir = LOGS_DIR / raw_repo_id / build_id
+            build_logs_dir = get_build_logs_path(github_repo_id, build_id)
             build_logs_dir.mkdir(parents=True, exist_ok=True)
 
             fetch_kwargs = {"build_id": f"{full_name}:{build_id}"}

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 def build_ingestion_workflow(
     tasks_by_level: Dict[int, List[str]],
     raw_repo_id: str,
+    github_repo_id: int,
     full_name: str,
     build_ids: List[str],
     commit_shas: List[str],
@@ -32,7 +33,8 @@ def build_ingestion_workflow(
 
     Args:
         tasks_by_level: Dict mapping level number to list of task names
-        raw_repo_id: Repository ID of raw repo
+        raw_repo_id: MongoDB ID of raw repo
+        github_repo_id: GitHub's internal repository ID for paths
         full_name: Repository full name (owner/repo)
         build_ids: List of build IDs for log download
         commit_shas: Optional list of commit SHAs for worktree creation
@@ -54,6 +56,7 @@ def build_ingestion_workflow(
             task_sig = _create_task_signature(
                 task_name=task_name,
                 raw_repo_id=raw_repo_id,
+                github_repo_id=github_repo_id,
                 full_name=full_name,
                 build_ids=build_ids,
                 commit_shas=commit_shas,
@@ -83,6 +86,7 @@ def build_ingestion_workflow(
 def _create_task_signature(
     task_name: str,
     raw_repo_id: str,
+    github_repo_id: int,
     full_name: str,
     build_ids: List[str],
     commit_shas: List[str],
@@ -98,6 +102,7 @@ def _create_task_signature(
     if task_name == "clone_repo":
         return clone_repo.si(
             raw_repo_id=raw_repo_id,
+            github_repo_id=github_repo_id,
             full_name=full_name,
             publish_status=publish_status,
         )
@@ -105,6 +110,7 @@ def _create_task_signature(
     elif task_name == "create_worktrees":
         return create_worktrees.si(
             raw_repo_id=raw_repo_id,
+            github_repo_id=github_repo_id,
             commit_shas=commit_shas,
             publish_status=publish_status,
         )
@@ -112,6 +118,7 @@ def _create_task_signature(
     elif task_name == "download_build_logs":
         return download_build_logs.si(
             raw_repo_id=raw_repo_id,
+            github_repo_id=github_repo_id,
             full_name=full_name,
             build_ids=build_ids,
             ci_provider=ci_provider,

@@ -1,6 +1,7 @@
 """Application settings entity stored in MongoDB."""
 
 from typing import Optional
+
 from pydantic import Field
 
 from .base import BaseEntity
@@ -32,6 +33,8 @@ class SonarQubeSettings(BaseEntity):
     # Token stored encrypted in DB
     token_encrypted: Optional[str] = None
     default_project_key: str = "build-risk-ui"
+    # Webhook secret stored encrypted in DB (for verifying SonarQube callbacks)
+    webhook_secret_encrypted: Optional[str] = None
     # List of enabled metric keys (empty = all metrics enabled)
     enabled_metrics: list[str] = Field(default_factory=list)
 

@@ -4,6 +4,13 @@
 from app.ci_providers.models import CIProvider
 
 from .base import BaseEntity, PyObjectId
+from .data_quality import (
+    DataQualityMetric,
+    DataQualityReport,
+    QualityEvaluationStatus,
+    QualityIssue,
+    QualityIssueSeverity,
+)
 
 # Dataset entities
 from .dataset import (
@@ -28,6 +35,13 @@ from .enums import (
     TestFramework,
 )
 from .export_job import ExportFormat, ExportJob, ExportStatus
+from .feature_audit_log import (
+    AuditLogCategory,
+    FeatureAuditLog,
+    FeatureAuditLogStatus,
+    NodeExecutionResult,
+    NodeExecutionStatus,
+)
 
 # Model training flow entities
 from .model_repo_config import ModelRepoConfig
@@ -37,12 +51,6 @@ from .notification import Notification, NotificationType
 # Other entities
 # from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
-from .pipeline_run import (
-    NodeExecutionResult,
-    NodeExecutionStatus,
-    PipelineRun,
-    PipelineRunStatus,
-)
 from .raw_build_run import RawBuildRun
 
 # Raw data entities (shared across flows)
@@ -82,9 +90,10 @@ __all__ = [
     "OAuthIdentity",
     "User",
     "DatasetTemplate",
-    "PipelineRun",
+    "FeatureAuditLog",
+    "FeatureAuditLogStatus",
+    "AuditLogCategory",
     "NodeExecutionResult",
-    "PipelineRunStatus",
     "NodeExecutionStatus",
     "ExportJob",
     "ExportStatus",
@@ -92,4 +101,10 @@ __all__ = [
     # Notifications
     "Notification",
     "NotificationType",
+    # Data Quality
+    "DataQualityReport",
+    "DataQualityMetric",
+    "QualityEvaluationStatus",
+    "QualityIssue",
+    "QualityIssueSeverity",
 ]

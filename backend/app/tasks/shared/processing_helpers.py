@@ -9,23 +9,23 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.entities.pipeline_run import (
+from app.entities.feature_audit_log import (
+    AuditLogCategory,
+    FeatureAuditLog,
+    FeatureAuditLogStatus,
     NodeExecutionResult,
     NodeExecutionStatus,
-    PipelineCategory,
-    PipelineRun,
-    PipelineRunStatus,
 )
 from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository
-from app.repositories.pipeline_run import PipelineRunRepository
+from app.repositories.feature_audit_log import FeatureAuditLogRepository
 from app.tasks.pipeline.feature_dag._metadata import format_features_for_storage
 from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
 
 logger = logging.getLogger(__name__)
 
 
-def _save_pipeline_run(
+def _save_audit_log(
     db,
     raw_repo: RawRepository,
     raw_build_run: RawBuildRun,
@@ -33,7 +33,7 @@ def _save_pipeline_run(
     status: str,
     features: List[str],
     errors: List[str],
-    category: PipelineCategory,
+    category: AuditLogCategory,
     output_build_id: Optional[str] = None,
 ) -> None:
     """
@@ -53,13 +53,15 @@ def _save_pipeline_run(
     try:
         execution_result = pipeline.get_execution_results()
 
-        # Create PipelineRun entity
-        pipeline_run = PipelineRun(
+        # Create FeatureAuditLog entity
+        audit_log = FeatureAuditLog(
             category=category,
             raw_repo_id=raw_repo.id,
             raw_build_run_id=raw_build_run.id,
             status=(
-                PipelineRunStatus.COMPLETED if status == "completed" else PipelineRunStatus.FAILED
+                FeatureAuditLogStatus.COMPLETED
+                if status == "completed"
+                else FeatureAuditLogStatus.FAILED
             ),
             feature_count=len(features),
             features_extracted=features,
@@ -70,20 +72,20 @@ def _save_pipeline_run(
         if output_build_id:
             from bson import ObjectId
 
-            if category == PipelineCategory.MODEL_TRAINING:
-                pipeline_run.training_build_id = ObjectId(output_build_id)
+            if category == AuditLogCategory.MODEL_TRAINING:
+                audit_log.training_build_id = ObjectId(output_build_id)
             else:
-                pipeline_run.enrichment_build_id = ObjectId(output_build_id)
+                audit_log.enrichment_build_id = ObjectId(output_build_id)
 
         if execution_result:
-            pipeline_run.started_at = execution_result.started_at
-            pipeline_run.completed_at = execution_result.completed_at
-            pipeline_run.duration_ms = execution_result.duration_ms
-            pipeline_run.nodes_executed = execution_result.nodes_executed
-            pipeline_run.nodes_succeeded = execution_result.nodes_succeeded
-            pipeline_run.nodes_failed = execution_result.nodes_failed
-            pipeline_run.nodes_skipped = execution_result.nodes_skipped
-            pipeline_run.errors.extend(execution_result.errors)
+            audit_log.started_at = execution_result.started_at
+            audit_log.completed_at = execution_result.completed_at
+            audit_log.duration_ms = execution_result.duration_ms
+            audit_log.nodes_executed = execution_result.nodes_executed
+            audit_log.nodes_succeeded = execution_result.nodes_succeeded
+            audit_log.nodes_failed = execution_result.nodes_failed
+            audit_log.nodes_skipped = execution_result.nodes_skipped
+            audit_log.errors.extend(execution_result.errors)
 
             # Add node-level results
             for node_info in execution_result.node_results:
@@ -99,24 +101,24 @@ def _save_pipeline_run(
                     duration_ms=node_info.duration_ms,
                     error=node_info.error,
                 )
-                pipeline_run.add_node_result(node_result)
+                audit_log.add_node_result(node_result)
         else:
             # If no tracking, just set timestamps
             now = datetime.now(timezone.utc)
-            pipeline_run.started_at = now
-            pipeline_run.completed_at = now
+            audit_log.started_at = now
+            audit_log.completed_at = now
 
         # Save to database
-        pipeline_run_repo = PipelineRunRepository(db)
-        pipeline_run_repo.insert_one(pipeline_run)
+        audit_log_repo = FeatureAuditLogRepository(db)
+        audit_log_repo.insert_one(audit_log)
 
         logger.debug(
-            f"Saved pipeline run ({category.value}) for build {raw_build_run.ci_run_id}: "
-            f"{pipeline_run.nodes_succeeded}/{pipeline_run.nodes_executed} nodes succeeded"
+            f"Saved audit log ({category.value}) for build {raw_build_run.ci_run_id}: "
+            f"{audit_log.nodes_succeeded}/{audit_log.nodes_executed} nodes succeeded"
         )
 
     except Exception as e:
-        logger.warning(f"Failed to save pipeline run: {e}")
+        logger.warning(f"Failed to save audit log: {e}")
 
 
 def extract_features_for_build(
@@ -127,7 +129,7 @@ def extract_features_for_build(
     selected_features: List[str],
     github_client=None,
     save_run: bool = True,
-    category: PipelineCategory = PipelineCategory.MODEL_TRAINING,
+    category: AuditLogCategory = AuditLogCategory.MODEL_TRAINING,
     output_build_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -200,9 +202,9 @@ def extract_features_for_build(
         if not prepared.is_commit_available:
             result["warnings"].append(f"Commit {raw_build_run.commit_sha} not found in repo")
 
-        # Save pipeline run to database
+        # Save audit log to database
         if save_run and pipeline:
-            _save_pipeline_run(
+            _save_audit_log(
                 db=db,
                 raw_repo=raw_repo,
                 raw_build_run=raw_build_run,
@@ -222,9 +224,9 @@ def extract_features_for_build(
             exc_info=True,
         )
 
-        # Save failed pipeline run
+        # Save failed audit log
         if save_run and pipeline:
-            _save_pipeline_run(
+            _save_audit_log(
                 db=db,
                 raw_repo=raw_repo,
                 raw_build_run=raw_build_run,

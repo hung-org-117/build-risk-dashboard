@@ -28,9 +28,9 @@ class RawRepository(BaseEntity):
         ...,
         description="Repository full name (owner/repo). Unique across GitHub.",
     )
-    github_repo_id: Optional[int] = Field(
-        None,
-        description="GitHub's internal repository ID. More stable than full_name.",
+    github_repo_id: int = Field(
+        ...,
+        description="GitHub's internal repository ID.",
     )
 
     default_branch: str = Field(

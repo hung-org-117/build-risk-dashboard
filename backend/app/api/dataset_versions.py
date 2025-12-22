@@ -353,3 +353,136 @@ async def download_export_file(
         filename=os.path.basename(file_path),
         media_type="application/octet-stream",
     )
+
+
+# =========================================================================
+# Quality Evaluation Endpoints
+# =========================================================================
+
+
+@router.post("/{version_id}/evaluate")
+async def evaluate_version_quality(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.MANAGE_DATASETS)),
+):
+    """
+    Start quality evaluation for a completed version.
+
+    Calculates:
+    - Completeness: % features non-null
+    - Validity: % values within valid range
+    - Consistency: % builds with all selected features
+    - Coverage: % successfully enriched builds
+
+    Quality Score = 0.4*completeness + 0.3*validity + 0.2*consistency + 0.1*coverage
+    """
+    from app.services.data_quality_service import DataQualityService
+
+    quality_service = DataQualityService(db)
+    report = quality_service.evaluate_version(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+    )
+
+    return {
+        "report_id": str(report.id),
+        "status": report.status,
+        "message": (
+            "Quality evaluation completed"
+            if report.status == "completed"
+            else f"Evaluation {report.status}"
+        ),
+        "quality_score": report.quality_score if report.status == "completed" else None,
+    }
+
+
+@router.get("/{version_id}/quality-report")
+async def get_quality_report(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """
+    Get the latest quality evaluation report for a version.
+
+    Returns:
+    - Overall quality score and breakdown
+    - Per-feature metrics
+    - Detected issues
+    """
+    from app.dtos.data_quality import (
+        QualityIssueResponse,
+        QualityMetricResponse,
+        QualityReportResponse,
+    )
+    from app.services.data_quality_service import DataQualityService
+
+    quality_service = DataQualityService(db)
+    report = quality_service.get_report(dataset_id, version_id)
+
+    if not report:
+        return {
+            "available": False,
+            "message": "No quality report available for this version. Run evaluation first.",
+        }
+
+    # Convert to response format
+    feature_metrics = [
+        QualityMetricResponse(
+            feature_name=m.feature_name,
+            data_type=m.data_type,
+            total_values=m.total_values,
+            null_count=m.null_count,
+            completeness_pct=m.completeness_pct,
+            validity_pct=m.validity_pct,
+            min_value=m.min_value,
+            max_value=m.max_value,
+            mean_value=m.mean_value,
+            std_dev=m.std_dev,
+            expected_range=m.expected_range,
+            out_of_range_count=m.out_of_range_count,
+            invalid_value_count=m.invalid_value_count,
+            issues=m.issues,
+        )
+        for m in report.feature_metrics
+    ]
+
+    issues = [
+        QualityIssueResponse(
+            severity=i.severity if isinstance(i.severity, str) else i.severity.value,
+            category=i.category,
+            feature_name=i.feature_name,
+            message=i.message,
+            details=i.details,
+        )
+        for i in report.issues
+    ]
+
+    return QualityReportResponse(
+        id=str(report.id),
+        dataset_id=str(report.dataset_id),
+        version_id=str(report.version_id),
+        status=report.status if isinstance(report.status, str) else report.status.value,
+        error_message=report.error_message,
+        quality_score=report.quality_score,
+        completeness_score=report.completeness_score,
+        validity_score=report.validity_score,
+        consistency_score=report.consistency_score,
+        coverage_score=report.coverage_score,
+        total_builds=report.total_builds,
+        enriched_builds=report.enriched_builds,
+        partial_builds=report.partial_builds,
+        failed_builds=report.failed_builds,
+        total_features=report.total_features,
+        features_with_issues=report.features_with_issues,
+        feature_metrics=feature_metrics,
+        issues=issues,
+        issue_counts=report.get_issue_count_by_severity(),
+        started_at=report.started_at,
+        completed_at=report.completed_at,
+        created_at=report.created_at,
+    )

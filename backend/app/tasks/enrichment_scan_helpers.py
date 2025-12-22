@@ -31,6 +31,7 @@ def dispatch_scan_for_commit(
     self: PipelineTask,
     version_id: str,
     raw_repo_id: str,
+    github_repo_id: int,
     commit_sha: str,
     repo_full_name: str,
 ) -> Dict[str, Any]:
@@ -41,7 +42,8 @@ def dispatch_scan_for_commit(
 
     Args:
         version_id: DatasetVersion ID
-        raw_repo_id: RawRepository ID (used to derive worktree path)
+        raw_repo_id: RawRepository MongoDB ID
+        github_repo_id: GitHub's internal repository ID for paths
         commit_sha: Commit SHA to scan
         repo_full_name: Repository full name (owner/repo)
     """
@@ -56,9 +58,7 @@ def dispatch_scan_for_commit(
 
     results = {"trivy": None, "sonarqube": None}
 
-    # ---------------------------------------------------------------------
     # Dispatch Trivy scan
-    # ---------------------------------------------------------------------
     trivy_metrics = version.scan_metrics.get("trivy", [])
     if trivy_metrics:
         try:
@@ -82,6 +82,7 @@ def dispatch_scan_for_commit(
                 commit_sha=commit_sha,
                 repo_full_name=repo_full_name,
                 raw_repo_id=raw_repo_id,
+                github_repo_id=github_repo_id,
                 trivy_config=trivy_config,
                 selected_metrics=trivy_metrics,
             )
@@ -93,9 +94,7 @@ def dispatch_scan_for_commit(
             logger.warning(f"Failed to dispatch Trivy scan for {commit_sha[:8]}: {exc}")
             results["trivy"] = {"status": "error", "error": str(exc)}
 
-    # ---------------------------------------------------------------------
     # Dispatch SonarQube scan
-    # ---------------------------------------------------------------------
     sonar_metrics = version.scan_metrics.get("sonarqube", [])
     if sonar_metrics:
         try:
@@ -127,6 +126,7 @@ def dispatch_scan_for_commit(
                 commit_sha=commit_sha,
                 repo_full_name=repo_full_name,
                 raw_repo_id=raw_repo_id,
+                github_repo_id=github_repo_id,
                 component_key=component_key,
                 config_content=config_content,
             )

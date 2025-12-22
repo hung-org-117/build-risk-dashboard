@@ -7,7 +7,6 @@ Tasks:
 """
 
 import logging
-from typing import Optional
 
 from bson import ObjectId
 
@@ -15,7 +14,7 @@ from app.celery_app import celery_app
 from app.database.mongo import get_database
 from app.integrations.tools.sonarqube.exporter import MetricsExporter
 from app.integrations.tools.sonarqube.runner import SonarCommitRunner
-from app.paths import WORKTREES_DIR
+from app.paths import get_worktree_path
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.sonar_commit_scan import SonarCommitScanRepository
@@ -23,23 +22,7 @@ from app.repositories.sonar_commit_scan import SonarCommitScanRepository
 logger = logging.getLogger(__name__)
 
 
-def get_worktree_path(raw_repo_id: str, commit_sha: str) -> Optional[str]:
-    """
-    Derive worktree path from raw_repo_id and commit_sha.
-
-    Path format: WORKTREES_DIR / raw_repo_id / commit_sha[:12]
-    """
-    path = WORKTREES_DIR / raw_repo_id / commit_sha[:12]
-    if path.exists():
-        return str(path)
-    return None
-
-
-# =============================================================================
 # SCAN TASK - Runs on dedicated sonar_scan queue
-# =============================================================================
-
-
 @celery_app.task(
     bind=True,
     name="app.tasks.sonar.start_sonar_scan_for_version_commit",
@@ -53,6 +36,7 @@ def start_sonar_scan_for_version_commit(
     commit_sha: str,
     repo_full_name: str,
     raw_repo_id: str,
+    github_repo_id: int,
     component_key: str,
     config_content: str = None,
 ):
@@ -66,7 +50,8 @@ def start_sonar_scan_for_version_commit(
         version_id: DatasetVersion ID
         commit_sha: Commit SHA to scan
         repo_full_name: Repository full name (owner/repo)
-        raw_repo_id: RawRepository ID - used to derive worktree path
+        raw_repo_id: RawRepository MongoDB ID
+        github_repo_id: GitHub's internal repository ID for paths
         component_key: SonarQube project key (format: reponame_commithash)
         config_content: Optional sonar-project.properties content
     """
@@ -89,25 +74,27 @@ def start_sonar_scan_for_version_commit(
         logger.info(f"Scan already in progress for {component_key}")
         return {"status": "already_scanning", "component_key": component_key}
 
-    # Derive worktree path from raw_repo_id
-    worktree_path = get_worktree_path(raw_repo_id, commit_sha)
-    if not worktree_path:
+    # Get worktree path using github_repo_id
+    worktree_path = get_worktree_path(github_repo_id, commit_sha)
+    if not worktree_path.exists():
         error_msg = f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
         logger.error(error_msg)
         scan_repo.mark_failed(scan_record.id, error_msg)
         raise ValueError(error_msg)
+
+    worktree_path_str = str(worktree_path)
 
     # Mark as scanning
     scan_repo.mark_scanning(scan_record.id)
 
     try:
         project_key = component_key.rsplit("_", 1)[0]
-        runner = SonarCommitRunner(project_key, raw_repo_id=raw_repo_id)
+        runner = SonarCommitRunner(project_key, github_repo_id=github_repo_id)
         runner.scan_commit(
             repo_url=f"https://github.com/{repo_full_name}.git",
             commit_sha=commit_sha,
             sonar_config_content=config_content,
-            shared_worktree_path=worktree_path,
+            shared_worktree_path=worktree_path_str,
             full_name=repo_full_name,
         )
 
@@ -126,11 +113,7 @@ def start_sonar_scan_for_version_commit(
         ) from exc
 
 
-# =============================================================================
 # WEBHOOK HANDLER - Processes results when SonarQube analysis completes
-# =============================================================================
-
-
 @celery_app.task(
     bind=True,
     name="app.tasks.sonar.export_metrics_from_webhook",

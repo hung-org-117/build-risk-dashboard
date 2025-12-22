@@ -11,26 +11,26 @@ Flow:
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 
 from app.celery_app import celery_app
-from app.tasks.base import PipelineTask
+from app.ci_providers import CIProvider, get_ci_provider, get_provider_config
+from app.ci_providers.models import BuildStatus
+from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
-from app.repositories.dataset_template_repository import DatasetTemplateRepository
-from app.ci_providers import CIProvider, get_provider_config, get_ci_provider
 from app.services.github.exceptions import GithubRateLimitError, GithubRetryableError
+from app.tasks.base import PipelineTask
+from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.feature_dag._metadata import (
-    get_required_resources_for_features,
     FeatureResource,
+    get_required_resources_for_features,
 )
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.shared import build_ingestion_workflow
-from app.ci_providers.models import BuildStatus
-from app.tasks.model_processing import publish_status
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BATCH_SIZE = 50
 
 
-def get_required_resources_for_template(
-    db, template_name: str = "TravisTorrent Full"
-) -> set:
+def get_required_resources_for_template(db, template_name: str = "TravisTorrent Full") -> set:
     """Get required resources based on dataset template."""
     template_repo = DatasetTemplateRepository(db)
     template = template_repo.find_by_name(template_name)
@@ -161,9 +159,7 @@ def fetch_builds_batch(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            builds = loop.run_until_complete(
-                ci_instance.fetch_builds(full_name, **fetch_kwargs)
-            )
+            builds = loop.run_until_complete(ci_instance.fetch_builds(full_name, **fetch_kwargs))
         finally:
             loop.close()
 
@@ -325,16 +321,14 @@ def prepare_and_dispatch_processing(
 
         raw_build_run_ids = [str(doc["_id"]) for doc in raw_build_docs]
         commit_shas = list(
-            set(
+            {
                 doc.get("effective_sha") or doc.get("commit_sha")
                 for doc in raw_build_docs
                 if doc.get("commit_sha")
-            )
+            }
         )
 
-        logger.info(
-            f"Finalizing ingestion for {full_name}: {len(raw_build_run_ids)} builds"
-        )
+        logger.info(f"Finalizing ingestion for {full_name}: {len(raw_build_run_ids)} builds")
 
         # Step 2: Determine required resources based on template
         required_resources = get_required_resources_for_template(self.db)
@@ -368,18 +362,28 @@ def prepare_and_dispatch_processing(
         )
 
         # Step 4: Build and execute workflow with processing as final task
+        from app.repositories.raw_repository import RawRepositoryRepository
+
+        raw_repo_repo = RawRepositoryRepository(self.db)
+        raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+        if not raw_repo:
+            raise ValueError(f"RawRepository {raw_repo_id} not found")
+
         if tasks_by_level:
+            from celery import chain as celery_chain
+
             workflow = build_ingestion_workflow(
                 tasks_by_level=tasks_by_level,
                 raw_repo_id=raw_repo_id,
+                github_repo_id=raw_repo.github_repo_id,
                 full_name=full_name,
                 build_ids=ci_build_ids,
                 commit_shas=commit_shas,
                 ci_provider=ci_provider_enum.value,
-                final_task=final_task,  # Processing runs AFTER ingestion
             )
             if workflow:
-                workflow.apply_async()
+                # Chain ingestion workflow → processing
+                celery_chain(workflow, final_task).apply_async()
             else:
                 # No ingestion tasks, run processing directly
                 final_task.apply_async()

@@ -818,7 +818,7 @@ export interface SonarQubeSettings {
   token?: string | null;
   default_project_key: string;
   webhook_secret?: string | null;
-  webhook_public_url?: string | null;
+  webhook_url?: string | null;
   enabled_metrics: string[];
 }
 

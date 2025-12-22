@@ -1,5 +1,5 @@
 """
-Pipeline Run Entity - Tracks execution history of feature extraction pipelines.
+Feature Audit Log Entity - Tracks execution history of feature extraction pipelines.
 
 This entity stores comprehensive information about each pipeline execution,
 enabling monitoring, debugging, and analytics.
@@ -7,21 +7,22 @@ enabling monitoring, debugging, and analytics.
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+
 from pydantic import Field
 
 from .base import BaseEntity, PyObjectId
 
 
-class PipelineCategory(str, Enum):
-    """Pipeline category."""
+class AuditLogCategory(str, Enum):
+    """Audit log category."""
 
     MODEL_TRAINING = "model_training"
     DATASET_ENRICHMENT = "dataset_enrichment"
 
 
-class PipelineRunStatus(str, Enum):
-    """Pipeline run status."""
+class FeatureAuditLogStatus(str, Enum):
+    """Feature audit log status."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -47,8 +48,26 @@ class NodeExecutionResult(BaseEntity):
     completed_at: Optional[datetime] = None
     duration_ms: float = 0.0
     features_extracted: List[str] = Field(default_factory=list)
+
+    # NEW: Feature-level tracking for quality evaluation
+    feature_values: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Extracted feature values for audit trail",
+    )
+
+    # NEW: Resource tracking
+    resources_used: List[str] = Field(
+        default_factory=list,
+        description="Resources used for extraction (git_worktree, github_api, etc.)",
+    )
+    resources_missing: List[str] = Field(
+        default_factory=list,
+        description="Resources that were unavailable",
+    )
+
     error: Optional[str] = None
     warning: Optional[str] = None
+    skip_reason: Optional[str] = Field(None, description="Reason for skipping if status is SKIPPED")
     retry_count: int = 0
 
     class Config:
@@ -58,7 +77,7 @@ class NodeExecutionResult(BaseEntity):
         use_enum_values = True
 
 
-class PipelineRun(BaseEntity):
+class FeatureAuditLog(BaseEntity):
     """
     Track a single pipeline execution.
 
@@ -75,9 +94,13 @@ class PipelineRun(BaseEntity):
     - enrichment_build_id -> DatasetEnrichmentBuild (for DATASET_ENRICHMENT category)
     """
 
-    # Pipeline category
-    category: PipelineCategory = Field(
-        default=PipelineCategory.MODEL_TRAINING,
+    class Config:
+        collection = "feature_audit_logs"
+        use_enum_values = True
+
+    # Audit log category
+    category: AuditLogCategory = Field(
+        default=AuditLogCategory.MODEL_TRAINING,
         description="Type of pipeline: model_training or dataset_enrichment",
     )
 
@@ -102,7 +125,7 @@ class PipelineRun(BaseEntity):
     )
 
     # Execution metadata
-    status: PipelineRunStatus = PipelineRunStatus.PENDING
+    status: FeatureAuditLogStatus = FeatureAuditLogStatus.PENDING
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_ms: Optional[float] = None
@@ -127,36 +150,29 @@ class PipelineRun(BaseEntity):
     # Retry tracking
     total_retries: int = 0
 
-    class Config:
-        use_enum_values = True
-
-    def mark_started(self) -> "PipelineRun":
-        """Mark pipeline as started."""
-        self.status = PipelineRunStatus.RUNNING
+    def mark_started(self) -> "FeatureAuditLog":
+        """Mark audit log as started."""
+        self.status = FeatureAuditLogStatus.RUNNING
         self.started_at = datetime.now(timezone.utc)
         return self
 
-    def mark_completed(self, features: List[str]) -> "PipelineRun":
-        """Mark pipeline as successfully completed."""
-        self.status = PipelineRunStatus.COMPLETED
+    def mark_completed(self, features: List[str]) -> "FeatureAuditLog":
+        """Mark audit log as successfully completed."""
+        self.status = FeatureAuditLogStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
-            self.duration_ms = (
-                self.completed_at - self.started_at
-            ).total_seconds() * 1000
+            self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
         self.features_extracted = features
         self.feature_count = len(features)
         self._update_node_counts()
         return self
 
-    def mark_failed(self, error: str) -> "PipelineRun":
-        """Mark pipeline as failed."""
-        self.status = PipelineRunStatus.FAILED
+    def mark_failed(self, error: str) -> "FeatureAuditLog":
+        """Mark audit log as failed."""
+        self.status = FeatureAuditLogStatus.FAILED
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
-            self.duration_ms = (
-                self.completed_at - self.started_at
-            ).total_seconds() * 1000
+            self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
         self.errors.append(error)
         self._update_node_counts()
         return self
@@ -169,8 +185,6 @@ class PipelineRun(BaseEntity):
     def _update_node_counts(self) -> None:
         """Update node execution counts from results."""
         self.nodes_executed = len(self.node_results)
-        self.nodes_succeeded = sum(
-            1 for r in self.node_results if r.status == "success"
-        )
+        self.nodes_succeeded = sum(1 for r in self.node_results if r.status == "success")
         self.nodes_failed = sum(1 for r in self.node_results if r.status == "failed")
         self.nodes_skipped = sum(1 for r in self.node_results if r.status == "skipped")

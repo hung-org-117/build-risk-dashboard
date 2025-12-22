@@ -1,6 +1,7 @@
 """DTOs for application settings."""
 
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -9,9 +10,7 @@ class CircleCISettingsDto(BaseModel):
 
     enabled: bool = False
     base_url: str = "https://circleci.com/api/v2"
-    token: Optional[str] = Field(
-        None, description="Token (write-only, returns masked on read)"
-    )
+    token: Optional[str] = Field(None, description="Token (write-only, returns masked on read)")
 
 
 class TravisCISettingsDto(BaseModel):
@@ -19,9 +18,7 @@ class TravisCISettingsDto(BaseModel):
 
     enabled: bool = False
     base_url: str = "https://api.travis-ci.com"
-    token: Optional[str] = Field(
-        None, description="Token (write-only, returns masked on read)"
-    )
+    token: Optional[str] = Field(None, description="Token (write-only, returns masked on read)")
 
 
 class SonarQubeSettingsDto(BaseModel):
@@ -29,10 +26,15 @@ class SonarQubeSettingsDto(BaseModel):
 
     enabled: bool = False
     host_url: str = "http://localhost:9000"
-    token: Optional[str] = Field(
-        None, description="Token (write-only, returns masked on read)"
-    )
+    token: Optional[str] = Field(None, description="Token (write-only, returns masked on read)")
     default_project_key: str = "build-risk-ui"
+    # Webhook settings
+    webhook_secret: Optional[str] = Field(
+        None, description="Webhook secret (write-only, returns masked on read)"
+    )
+    webhook_url: Optional[str] = Field(
+        None, description="Webhook URL (readonly, computed from backend URL)"
+    )
     enabled_metrics: list[str] = Field(
         default_factory=list,
         description="Enabled metric keys (empty = all metrics)",

@@ -35,7 +35,9 @@ import {
     Folder,
     Check,
     ArrowRight,
+    Settings,
 } from "lucide-react";
+import { ScanConfigOverrideModal, RepoScanConfig } from "./ScanConfigOverrideModal";
 
 interface RepoInfo {
     id: string;
@@ -63,6 +65,11 @@ interface RepoConfigSectionProps {
     onChange: (configs: Record<string, RepoConfig>) => void;
     disabled?: boolean;
     isLoading?: boolean;
+    // Scan config props
+    datasetId?: string;
+    repoScanConfigs?: Record<string, RepoScanConfig>;
+    onScanConfigChange?: (repoId: string, config: RepoScanConfig) => void;
+    showScanConfig?: boolean;
 }
 
 const PAGE_SIZE = 10;
@@ -78,10 +85,18 @@ export function RepoConfigSection({
     onChange,
     disabled = false,
     isLoading = false,
+    datasetId,
+    repoScanConfigs = {},
+    onScanConfigChange,
+    showScanConfig = false,
 }: RepoConfigSectionProps) {
     const [page, setPage] = useState(0);
     const [searchQuery, setSearchQuery] = useState("");
     const [filterMode, setFilterMode] = useState<"all" | "overrides" | "default">("all");
+
+    // Scan config modal state
+    const [scanConfigRepo, setScanConfigRepo] = useState<{ id: string; name: string } | null>(null);
+    const [savingScanConfig, setSavingScanConfig] = useState(false);
 
     // Apply to all state - dynamic based on repoFields
     const [applyAllValues, setApplyAllValues] = useState<RepoConfig>({});
@@ -447,6 +462,9 @@ export function RepoConfigSection({
                                         {formatFieldName(field.name)}
                                     </TableHead>
                                 ))}
+                                {showScanConfig && (
+                                    <TableHead className="w-[80px]">Scan Config</TableHead>
+                                )}
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -469,6 +487,26 @@ export function RepoConfigSection({
                                             {getDisplayValue(repo.id, field.name)}
                                         </TableCell>
                                     ))}
+                                    {/* Scan Config Button */}
+                                    {showScanConfig && (
+                                        <TableCell>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setScanConfigRepo({ id: repo.id, name: repo.full_name });
+                                                }}
+                                                className="gap-1"
+                                                title="Configure scan settings"
+                                            >
+                                                <Settings className="h-3.5 w-3.5" />
+                                                {repoScanConfigs[repo.id] && (
+                                                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                                                )}
+                                            </Button>
+                                        </TableCell>
+                                    )}
                                 </TableRow>
                             ))}
                             {paginatedRepos.length === 0 && (
@@ -589,6 +627,23 @@ export function RepoConfigSection({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Scan Config Modal */}
+            {scanConfigRepo && (
+                <ScanConfigOverrideModal
+                    isOpen={!!scanConfigRepo}
+                    onClose={() => setScanConfigRepo(null)}
+                    repoName={scanConfigRepo.name}
+                    scanConfig={repoScanConfigs[scanConfigRepo.id] || null}
+                    onSave={(config) => {
+                        if (onScanConfigChange) {
+                            onScanConfigChange(scanConfigRepo.id, config);
+                        }
+                        setScanConfigRepo(null);
+                    }}
+                    isSaving={savingScanConfig}
+                />
+            )}
         </div>
     );
 }

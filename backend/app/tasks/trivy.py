@@ -7,38 +7,21 @@ Tasks:
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.database.mongo import get_database
 from app.integrations.tools.trivy import TrivyTool
-from app.paths import WORKTREES_DIR
+from app.paths import get_worktree_path
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
 logger = logging.getLogger(__name__)
 
 
-def get_worktree_path(raw_repo_id: str, commit_sha: str) -> Optional[str]:
-    """
-    Derive worktree path from raw_repo_id and commit_sha.
-
-    Follows shared infrastructure pattern from ingestion_tasks.
-    Path format: WORKTREES_DIR / raw_repo_id / commit_sha[:12]
-    """
-    path = WORKTREES_DIR / raw_repo_id / commit_sha[:12]
-    if path.exists():
-        return str(path)
-    return None
-
-
-# =============================================================================
 # TRIVY SCAN TASK - Runs on dedicated trivy_scan queue
-# =============================================================================
-
-
 @celery_app.task(
     bind=True,
     name="app.tasks.trivy.start_trivy_scan_for_version_commit",
@@ -52,6 +35,7 @@ def start_trivy_scan_for_version_commit(
     commit_sha: str,
     repo_full_name: str,
     raw_repo_id: str,
+    github_repo_id: int,
     trivy_config: Dict[str, Any] = None,
     selected_metrics: List[str] = None,
 ):
@@ -65,7 +49,8 @@ def start_trivy_scan_for_version_commit(
         version_id: DatasetVersion ID
         commit_sha: Commit SHA being scanned
         repo_full_name: Repository full name (owner/repo)
-        raw_repo_id: RawRepository ID - used to derive worktree path
+        raw_repo_id: RawRepository MongoDB ID
+        github_repo_id: GitHub's internal repository ID for paths
         trivy_config: Optional scan config (scanners, severity, extraArgs)
         selected_metrics: Optional list of metrics to filter
     """
@@ -88,13 +73,15 @@ def start_trivy_scan_for_version_commit(
         selected_metrics=selected_metrics,
     )
 
-    # Derive worktree path from raw_repo_id
-    worktree_path = get_worktree_path(raw_repo_id, commit_sha)
-    if not worktree_path:
+    # Get worktree path using github_repo_id
+    worktree_path = get_worktree_path(github_repo_id, commit_sha)
+    if not worktree_path.exists():
         error_msg = f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
         logger.error(error_msg)
         trivy_scan_repo.mark_failed(scan_record.id, error_msg)
         raise ValueError(error_msg)
+
+    worktree_path_str = str(worktree_path)
 
     # Mark as scanning
     trivy_scan_repo.mark_scanning(scan_record.id)
@@ -110,7 +97,7 @@ def start_trivy_scan_for_version_commit(
         # Run Trivy scan
         trivy_tool = TrivyTool()
         scan_result = trivy_tool.scan(
-            target_path=worktree_path,
+            target_path=worktree_path_str,
             scan_types=scan_types,
             severity=severity,
             extra_args=extra_args,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,11 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { api } from "@/lib/api";
 import {
     AlertCircle,
@@ -23,12 +28,11 @@ import {
     Shield,
     Settings,
     XCircle,
+    Timer,
+    AlertTriangle,
 } from "lucide-react";
 
-// =============================================================================
 // Types
-// =============================================================================
-
 interface IntegrationsTabProps {
     datasetId: string;
 }
@@ -62,6 +66,33 @@ interface CommitScansResponse {
     sonarqube: CommitScan[];
 }
 
+// Helpers
+/** Format duration from start/end timestamps */
+function formatDuration(startedAt: string | null, completedAt: string | null): string {
+    if (!startedAt) return "—";
+    const start = new Date(startedAt).getTime();
+    const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+    const durationMs = end - start;
+
+    if (durationMs < 1000) return `${durationMs}ms`;
+    if (durationMs < 60000) return `${(durationMs / 1000).toFixed(1)}s`;
+    return `${(durationMs / 60000).toFixed(1)}m`;
+}
+
+/** Check if any scans are still running */
+function hasRunningScans(scans: CommitScansResponse | null): boolean {
+    if (!scans) return false;
+    const allScans = [...scans.trivy, ...scans.sonarqube];
+    return allScans.some(s => s.status === "scanning" || s.status === "pending");
+}
+
+/** Count failed scans */
+function countFailedScans(scans: CommitScansResponse | null): number {
+    if (!scans) return 0;
+    const allScans = [...scans.trivy, ...scans.sonarqube];
+    return allScans.filter(s => s.status === "failed").length;
+}
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -73,6 +104,11 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
     const [commitScans, setCommitScans] = useState<CommitScansResponse | null>(null);
     const [loadingScans, setLoadingScans] = useState(false);
     const [retryingCommit, setRetryingCommit] = useState<string | null>(null);
+    const [bulkRetrying, setBulkRetrying] = useState(false);
+    const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+
+    // Auto-refresh ref
+    const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // Load versions with scan_metrics
     const loadVersions = useCallback(async () => {
@@ -96,14 +132,14 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
     }, [datasetId]);
 
     // Load commit scans for a version
-    const loadCommitScans = async (versionId: string) => {
-        if (expandedVersionId === versionId) {
+    const loadCommitScans = async (versionId: string, silent = false) => {
+        if (expandedVersionId === versionId && !silent) {
             setExpandedVersionId(null);
             setCommitScans(null);
             return;
         }
 
-        setLoadingScans(true);
+        if (!silent) setLoadingScans(true);
         try {
             const response = await api.get<CommitScansResponse>(
                 `/datasets/${datasetId}/versions/${versionId}/commit-scans`
@@ -125,13 +161,73 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                 `/datasets/${datasetId}/versions/${versionId}/commits/${commitSha}/retry/${toolType}`
             );
             // Reload scans
-            await loadCommitScans(versionId);
+            await loadCommitScans(versionId, true);
         } catch (error) {
             console.error("Failed to retry scan:", error);
         } finally {
             setRetryingCommit(null);
         }
     };
+
+    // Bulk retry all failed scans
+    const handleBulkRetry = async (versionId: string) => {
+        if (!commitScans) return;
+
+        setBulkRetrying(true);
+        const failedScans: { commitSha: string; tool: string }[] = [];
+
+        commitScans.trivy.filter(s => s.status === "failed").forEach(s => {
+            failedScans.push({ commitSha: s.commit_sha, tool: "trivy" });
+        });
+        commitScans.sonarqube.filter(s => s.status === "failed").forEach(s => {
+            failedScans.push({ commitSha: s.commit_sha, tool: "sonarqube" });
+        });
+
+        try {
+            // Retry all failed scans in parallel
+            await Promise.all(
+                failedScans.map(({ commitSha, tool }) =>
+                    api.post(`/datasets/${datasetId}/versions/${versionId}/commits/${commitSha}/retry/${tool}`)
+                )
+            );
+            await loadCommitScans(versionId, true);
+        } catch (error) {
+            console.error("Failed to retry scans:", error);
+        } finally {
+            setBulkRetrying(false);
+        }
+    };
+
+    // Toggle error expansion
+    const toggleError = (scanId: string) => {
+        setExpandedErrors(prev => {
+            const next = new Set(prev);
+            if (next.has(scanId)) {
+                next.delete(scanId);
+            } else {
+                next.add(scanId);
+            }
+            return next;
+        });
+    };
+
+    // Auto-refresh when scans are running
+    useEffect(() => {
+        if (hasRunningScans(commitScans) && expandedVersionId) {
+            refreshIntervalRef.current = setInterval(() => {
+                loadCommitScans(expandedVersionId, true);
+            }, 5000);
+        } else if (refreshIntervalRef.current) {
+            clearInterval(refreshIntervalRef.current);
+            refreshIntervalRef.current = null;
+        }
+
+        return () => {
+            if (refreshIntervalRef.current) {
+                clearInterval(refreshIntervalRef.current);
+            }
+        };
+    }, [commitScans, expandedVersionId]);
 
     useEffect(() => {
         loadVersions();
@@ -173,6 +269,75 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
         }
     };
 
+    // Render scan table row with expandable error
+    const renderScanRow = (scan: CommitScan, toolType: string, versionId: string) => {
+        const isExpanded = expandedErrors.has(scan.id);
+        const hasError = scan.status === "failed" && scan.error_message;
+
+        return (
+            <React.Fragment key={scan.id}>
+                <tr className={hasError ? "cursor-pointer hover:bg-muted/50" : ""} onClick={() => hasError && toggleError(scan.id)}>
+                    <td className="px-3 py-2 font-mono text-xs">
+                        {scan.commit_sha.slice(0, 8)}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                        {scan.repo_full_name}
+                    </td>
+                    <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                            {renderStatus(scan.status)}
+                            {scan.retry_count > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                    (retry #{scan.retry_count})
+                                </span>
+                            )}
+                            {hasError && (
+                                <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            )}
+                        </div>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                            <Timer className="h-3 w-3" />
+                            {formatDuration(scan.started_at, scan.completed_at)}
+                        </div>
+                    </td>
+                    <td className="px-3 py-2">{scan.builds_affected}</td>
+                    <td className="px-3 py-2">
+                        {scan.status === "failed" && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRetry(versionId, scan.commit_sha, toolType);
+                                }}
+                                disabled={retryingCommit === `${scan.commit_sha}-${toolType}`}
+                            >
+                                {retryingCommit === `${scan.commit_sha}-${toolType}` ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                    <RotateCcw className="h-3 w-3" />
+                                )}
+                                <span className="ml-1">Retry</span>
+                            </Button>
+                        )}
+                    </td>
+                </tr>
+                {/* Expandable error row */}
+                {isExpanded && hasError && (
+                    <tr>
+                        <td colSpan={6} className="px-3 py-2 bg-red-50 dark:bg-red-950/20">
+                            <div className="text-sm font-mono text-red-700 dark:text-red-400 whitespace-pre-wrap break-all">
+                                {scan.error_message}
+                            </div>
+                        </td>
+                    </tr>
+                )}
+            </React.Fragment>
+        );
+    };
+
     // Render scan table
     const renderScanTable = (scans: CommitScan[], toolType: string, versionId: string) => {
         if (scans.length === 0) {
@@ -190,47 +355,13 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                         <th className="px-3 py-2 text-left font-medium">Commit</th>
                         <th className="px-3 py-2 text-left font-medium">Repository</th>
                         <th className="px-3 py-2 text-left font-medium">Status</th>
+                        <th className="px-3 py-2 text-left font-medium">Duration</th>
                         <th className="px-3 py-2 text-left font-medium">Builds</th>
                         <th className="px-3 py-2 text-left font-medium">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y">
-                    {scans.map((scan) => (
-                        <tr key={scan.id}>
-                            <td className="px-3 py-2 font-mono text-xs">
-                                {scan.commit_sha.slice(0, 8)}
-                            </td>
-                            <td className="px-3 py-2 text-muted-foreground">
-                                {scan.repo_full_name}
-                            </td>
-                            <td className="px-3 py-2">
-                                {renderStatus(scan.status)}
-                                {scan.retry_count > 0 && (
-                                    <span className="ml-2 text-xs text-muted-foreground">
-                                        (retry #{scan.retry_count})
-                                    </span>
-                                )}
-                            </td>
-                            <td className="px-3 py-2">{scan.builds_affected}</td>
-                            <td className="px-3 py-2">
-                                {scan.status === "failed" && (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleRetry(versionId, scan.commit_sha, toolType)}
-                                        disabled={retryingCommit === `${scan.commit_sha}-${toolType}`}
-                                    >
-                                        {retryingCommit === `${scan.commit_sha}-${toolType}` ? (
-                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                        ) : (
-                                            <RotateCcw className="h-3 w-3" />
-                                        )}
-                                        <span className="ml-1">Retry</span>
-                                    </Button>
-                                )}
-                            </td>
-                        </tr>
-                    ))}
+                    {scans.map((scan) => renderScanRow(scan, toolType, versionId))}
                 </tbody>
             </table>
         );
@@ -258,11 +389,22 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
         );
     }
 
+    const failedCount = countFailedScans(commitScans);
+    const isAutoRefreshing = hasRunningScans(commitScans);
+
     return (
         <div className="space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Commit Scan Status</h2>
+                <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-semibold">Commit Scan Status</h2>
+                    {isAutoRefreshing && (
+                        <Badge variant="outline" className="gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Auto-refreshing
+                        </Badge>
+                    )}
+                </div>
                 <Button variant="outline" size="sm" onClick={loadVersions}>
                     <RefreshCw className="h-4 w-4" />
                 </Button>
@@ -312,6 +454,25 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
                     {/* Expanded Content */}
                     {expandedVersionId === version.id && commitScans && (
                         <CardContent className="pt-0">
+                            {/* Bulk retry header */}
+                            {failedCount > 0 && (
+                                <div className="flex items-center justify-end mb-4 pb-4 border-b">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleBulkRetry(version.id)}
+                                        disabled={bulkRetrying}
+                                    >
+                                        {bulkRetrying ? (
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        ) : (
+                                            <RotateCcw className="h-4 w-4 mr-2" />
+                                        )}
+                                        Retry All Failed ({failedCount})
+                                    </Button>
+                                </div>
+                            )}
+
                             <div className="space-y-6">
                                 {/* Trivy Scans */}
                                 {version.scan_metrics?.trivy?.length ? (
@@ -346,3 +507,4 @@ export function IntegrationsTab({ datasetId }: IntegrationsTabProps) {
         </div>
     );
 }
+

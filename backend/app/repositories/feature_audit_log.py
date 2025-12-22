@@ -1,0 +1,125 @@
+"""
+Feature Audit Log Repository - Database operations for feature extraction audit logs.
+"""
+
+from typing import Any, Dict, List, Optional, Tuple
+
+from app.entities.feature_audit_log import FeatureAuditLog
+
+from .base import BaseRepository
+
+
+class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
+    """Repository for FeatureAuditLog entities."""
+
+    def __init__(self, db):
+        super().__init__(db, "feature_audit_logs", FeatureAuditLog)
+
+    def find_recent(
+        self,
+        limit: int = 50,
+        skip: int = 0,
+        status: Optional[str] = None,
+    ) -> Tuple[List[FeatureAuditLog], int]:
+        """
+        Find recent audit logs with optional status filter.
+
+        Args:
+            limit: Maximum number of logs to return
+            skip: Number of logs to skip (for pagination)
+            status: Optional status filter
+
+        Returns:
+            Tuple of (list of logs, total count)
+        """
+        query: Dict[str, Any] = {}
+        if status:
+            query["status"] = status
+
+        return self.paginate(
+            query,
+            sort=[("created_at", -1)],
+            skip=skip,
+            limit=limit,
+        )
+
+    def find_by_repo(
+        self,
+        raw_repo_id: str,
+        limit: int = 20,
+    ) -> List[FeatureAuditLog]:
+        """Find recent audit logs for a specific repository."""
+        return self.find_many(
+            {"raw_repo_id": self._to_object_id(raw_repo_id)},
+            sort=[("created_at", -1)],
+            limit=limit,
+        )
+
+    def find_by_build(self, raw_build_run_id: str) -> Optional[FeatureAuditLog]:
+        """Find an audit log by raw build run ID."""
+        return self.find_one({"raw_build_run_id": self._to_object_id(raw_build_run_id)})
+
+    def find_by_enrichment_build(self, enrichment_build_id: str) -> Optional[FeatureAuditLog]:
+        """Find an audit log by enrichment build ID."""
+        return self.find_one({"enrichment_build_id": self._to_object_id(enrichment_build_id)})
+
+    def find_by_training_build(self, training_build_id: str) -> Optional[FeatureAuditLog]:
+        """Find an audit log by training build ID."""
+        return self.find_one({"training_build_id": self._to_object_id(training_build_id)})
+
+    def find_recent_cursor(
+        self,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> Tuple[List[FeatureAuditLog], Optional[str], bool]:
+        """
+        Find recent audit logs with cursor-based pagination.
+
+        Args:
+            limit: Maximum number of logs to return
+            cursor: Last item ID from previous page (fetch items older than this)
+            status: Optional status filter
+
+        Returns:
+            Tuple of (list of logs, next_cursor, has_more)
+        """
+        query: Dict[str, Any] = {}
+        if status:
+            query["status"] = status
+
+        # If cursor provided, get items with _id less than cursor (older)
+        if cursor:
+            query["_id"] = {"$lt": self._to_object_id(cursor)}
+
+        # Fetch limit + 1 to check if there are more items
+        logs = self.find_many(
+            query,
+            sort=[("_id", -1)],  # Sort by _id descending (newest first)
+            limit=limit + 1,
+        )
+
+        has_more = len(logs) > limit
+        if has_more:
+            logs = logs[:limit]  # Remove the extra item
+
+        next_cursor = str(logs[-1].id) if logs and has_more else None
+
+        return logs, next_cursor, has_more
+
+    def find_by_version(
+        self,
+        version_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Tuple[List[FeatureAuditLog], int]:
+        """Find audit logs for a specific dataset version."""
+
+        # Find all enrichment builds for this version, then get their audit logs
+        query = {"enrichment_build_id": {"$exists": True}}
+        return self.paginate(
+            query,
+            sort=[("created_at", -1)],
+            skip=skip,
+            limit=limit,
+        )

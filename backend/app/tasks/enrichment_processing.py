@@ -187,6 +187,7 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
             repo_chain = build_ingestion_workflow(
                 tasks_by_level=tasks_by_level,
                 raw_repo_id=raw_repo_id,
+                github_repo_id=raw_repo.github_repo_id,
                 full_name=raw_repo.full_name,
                 build_ids=build_csv_ids,
                 commit_shas=commit_shas,
@@ -775,11 +776,6 @@ def dispatch_version_scans(self: PipelineTask, version_id: str) -> Dict[str, Any
         if not raw_repo:
             continue
 
-        worktree_path = (
-            f"{settings.REPO_DATA_DIR}/repos/{raw_repo.full_name}/worktrees"
-            f"/{commit_info['commit_sha'][:12]}"
-        )
-
         # Dispatch scan task
         from app.tasks.enrichment_scan_helpers import dispatch_scan_for_commit
 
@@ -787,10 +783,9 @@ def dispatch_version_scans(self: PipelineTask, version_id: str) -> Dict[str, Any
             dispatch_scan_for_commit.si(
                 version_id=version_id,
                 raw_repo_id=commit_info["raw_repo_id"],
+                github_repo_id=raw_repo.github_repo_id,
                 commit_sha=commit_info["commit_sha"],
                 repo_full_name=raw_repo.full_name,
-                repo_url=raw_repo.clone_url,
-                worktree_path=worktree_path,
             )
         )
 

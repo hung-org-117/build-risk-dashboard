@@ -704,10 +704,12 @@ class DatasetVersionService:
         self._verify_dataset_access(dataset_id, user_id)
         self._get_version(dataset_id, version_id)  # Verify exists
 
+        from app.repositories.raw_repository import RawRepositoryRepository
         from app.repositories.sonar_commit_scan import SonarCommitScanRepository
         from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
         version_oid = ObjectId(version_id)
+        raw_repo_repo = RawRepositoryRepository(self._repo.db)
 
         if tool_type == "trivy":
             trivy_repo = TrivyCommitScanRepository(self._repo.db)
@@ -725,11 +727,17 @@ class DatasetVersionService:
 
             from app.tasks.trivy import start_trivy_scan_for_version_commit
 
+            # Lookup github_repo_id from RawRepository
+            raw_repo = raw_repo_repo.find_by_id(str(scan.raw_repo_id))
+            if not raw_repo:
+                raise HTTPException(status_code=404, detail="Repository not found")
+
             task = start_trivy_scan_for_version_commit.delay(
                 version_id=version_id,
                 commit_sha=commit_sha,
                 repo_full_name=scan.repo_full_name,
                 raw_repo_id=str(scan.raw_repo_id),
+                github_repo_id=raw_repo.github_repo_id,
                 trivy_config=trivy_config,
                 selected_metrics=selected_metrics,
             )
@@ -748,11 +756,17 @@ class DatasetVersionService:
 
             from app.tasks.sonar import start_sonar_scan_for_version_commit
 
+            # Lookup github_repo_id from RawRepository
+            raw_repo = raw_repo_repo.find_by_id(str(scan.raw_repo_id))
+            if not raw_repo:
+                raise HTTPException(status_code=404, detail="Repository not found")
+
             task = start_sonar_scan_for_version_commit.delay(
                 version_id=version_id,
                 commit_sha=commit_sha,
                 repo_full_name=scan.repo_full_name,
                 raw_repo_id=str(scan.raw_repo_id),
+                github_repo_id=raw_repo.github_repo_id,
                 component_key=scan.component_key,
             )
 

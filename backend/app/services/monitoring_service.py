@@ -149,59 +149,59 @@ class MonitoringService:
                 "error": str(e),
             }
 
-    def get_pipeline_runs(
+    def get_feature_audit_logs(
         self,
         limit: int = 50,
         skip: int = 0,
         status: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get recent Hamilton pipeline execution runs."""
-        from app.repositories.pipeline_run import PipelineRunRepository
+        """Get recent feature extraction audit logs."""
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
 
-        repo = PipelineRunRepository(self.db)
+        audit_log_repo = FeatureAuditLogRepository(self.db)
 
-        runs, total = repo.find_recent(
+        logs, total = audit_log_repo.find_recent(
             limit=limit,
             skip=skip,
             status=status,
         )
 
         return {
-            "runs": [
+            "logs": [
                 {
-                    "id": str(run.id),
-                    "category": run.category,
-                    "raw_repo_id": str(run.raw_repo_id),
-                    "raw_build_run_id": str(run.raw_build_run_id),
-                    "status": run.status,
-                    "started_at": (run.started_at.isoformat() if run.started_at else None),
-                    "completed_at": (run.completed_at.isoformat() if run.completed_at else None),
-                    "duration_ms": run.duration_ms,
-                    "feature_count": run.feature_count,
-                    "nodes_executed": run.nodes_executed,
-                    "nodes_succeeded": run.nodes_succeeded,
-                    "nodes_failed": run.nodes_failed,
-                    "errors": run.errors[:3] if run.errors else [],
+                    "id": str(log.id),
+                    "category": log.category,
+                    "raw_repo_id": str(log.raw_repo_id),
+                    "raw_build_run_id": str(log.raw_build_run_id),
+                    "status": log.status,
+                    "started_at": (log.started_at.isoformat() if log.started_at else None),
+                    "completed_at": (log.completed_at.isoformat() if log.completed_at else None),
+                    "duration_ms": log.duration_ms,
+                    "feature_count": log.feature_count,
+                    "nodes_executed": log.nodes_executed,
+                    "nodes_succeeded": log.nodes_succeeded,
+                    "nodes_failed": log.nodes_failed,
+                    "errors": log.errors[:3] if log.errors else [],
                 }
-                for run in runs
+                for log in logs
             ],
             "total": total,
         }
 
-    def get_pipeline_runs_cursor(
+    def get_feature_audit_logs_cursor(
         self,
         limit: int = 20,
         cursor: Optional[str] = None,
         status: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get pipeline runs with cursor-based pagination for infinite scroll."""
+        """Get audit logs with cursor-based pagination for infinite scroll."""
         from bson import ObjectId
 
-        from app.repositories.pipeline_run import PipelineRunRepository
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
 
-        repo = PipelineRunRepository(self.db)
+        audit_log_repo = FeatureAuditLogRepository(self.db)
 
-        runs, next_cursor, has_more = repo.find_recent_cursor(
+        logs, next_cursor, has_more = audit_log_repo.find_recent_cursor(
             limit=limit,
             cursor=cursor,
             status=status,
@@ -210,9 +210,9 @@ class MonitoringService:
         # Collect unique repo_ids and build_run_ids to batch lookup
         repo_ids = set()
         build_ids = set()
-        for run in runs:
-            repo_ids.add(run.raw_repo_id)
-            build_ids.add(run.raw_build_run_id)
+        for log in logs:
+            repo_ids.add(log.raw_repo_id)
+            build_ids.add(log.raw_build_run_id)
 
         # Batch lookup repositories
         repo_map: Dict[str, Dict[str, Any]] = {}
@@ -243,25 +243,25 @@ class MonitoringService:
                 }
 
         return {
-            "runs": [
+            "logs": [
                 {
-                    "id": str(run.id),
-                    "category": run.category,
-                    "raw_repo_id": str(run.raw_repo_id),
-                    "raw_build_run_id": str(run.raw_build_run_id),
-                    "repo": repo_map.get(str(run.raw_repo_id), {}),
-                    "build": build_map.get(str(run.raw_build_run_id), {}),
-                    "status": run.status,
-                    "started_at": (run.started_at.isoformat() if run.started_at else None),
-                    "completed_at": (run.completed_at.isoformat() if run.completed_at else None),
-                    "duration_ms": run.duration_ms,
-                    "feature_count": run.feature_count,
-                    "nodes_executed": run.nodes_executed,
-                    "nodes_succeeded": run.nodes_succeeded,
-                    "nodes_failed": run.nodes_failed,
-                    "errors": run.errors[:3] if run.errors else [],
+                    "id": str(log.id),
+                    "category": log.category,
+                    "raw_repo_id": str(log.raw_repo_id),
+                    "raw_build_run_id": str(log.raw_build_run_id),
+                    "repo": repo_map.get(str(log.raw_repo_id), {}),
+                    "build": build_map.get(str(log.raw_build_run_id), {}),
+                    "status": log.status,
+                    "started_at": (log.started_at.isoformat() if log.started_at else None),
+                    "completed_at": (log.completed_at.isoformat() if log.completed_at else None),
+                    "duration_ms": log.duration_ms,
+                    "feature_count": log.feature_count,
+                    "nodes_executed": log.nodes_executed,
+                    "nodes_succeeded": log.nodes_succeeded,
+                    "nodes_failed": log.nodes_failed,
+                    "errors": log.errors[:3] if log.errors else [],
                 }
-                for run in runs
+                for log in logs
             ],
             "next_cursor": next_cursor,
             "has_more": has_more,

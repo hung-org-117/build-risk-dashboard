@@ -23,7 +23,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from app.paths import LOGS_DIR, REPOS_DIR, WORKTREES_DIR
+from app.entities.raw_build_run import RawBuildRun
+from app.entities.raw_repository import RawRepository
+from app.paths import LOGS_DIR, get_repo_path, get_worktrees_path
 from app.tasks.pipeline.constants import DEFAULT_FEATURES
 from app.tasks.pipeline.feature_dag._inputs import (
     GitHubClientInput,
@@ -111,9 +113,9 @@ def _filter_features_by_resources(
 
 
 def prepare_pipeline_input(
-    raw_repo: Any,
+    raw_repo: RawRepository,
     feature_config: Dict[str, Any],
-    raw_build_run: Any,
+    raw_build_run: RawBuildRun,
     selected_features: Optional[List[str]] = None,
     github_client: Optional[GitHubClientInput] = None,
 ) -> PreparedPipelineInput:
@@ -136,9 +138,9 @@ def prepare_pipeline_input(
     Returns:
         PreparedPipelineInput with validated inputs and features
     """
-    # Build paths
-    repo_path = REPOS_DIR / str(raw_repo.id)
-    worktrees_base = WORKTREES_DIR / str(raw_repo.id)
+    # Build paths using github_repo_id (stable across renames)
+    repo_path = get_repo_path(raw_repo.github_repo_id)
+    worktrees_base = get_worktrees_path(raw_repo.github_repo_id)
 
     # Build all Hamilton inputs
     inputs = build_hamilton_inputs(

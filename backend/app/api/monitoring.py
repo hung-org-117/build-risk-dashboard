@@ -3,7 +3,7 @@ Monitoring API - Endpoints for system monitoring and observability.
 
 Endpoints:
 - GET /monitoring/system - System stats (Celery, Redis, MongoDB)
-- GET /monitoring/pipeline-runs - Recent pipeline runs
+- GET /monitoring/audit-logs - Feature extraction audit logs
 - GET /monitoring/jobs - Active background jobs
 - GET /monitoring/queues - Celery queue details
 """
@@ -40,8 +40,8 @@ def get_system_stats(
     return service.get_system_stats()
 
 
-@router.get("/pipeline-runs")
-def get_pipeline_runs(
+@router.get("/audit-logs")
+def get_feature_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -49,16 +49,16 @@ def get_pipeline_runs(
     _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
 ):
     """
-    Get recent pipeline runs with pagination.
+    Get recent feature extraction audit logs with pagination.
 
-    Shows Hamilton pipeline execution history with timing and status.
+    Shows feature extraction history with timing and status.
     """
     service = MonitoringService(db)
-    return service.get_pipeline_runs(limit=limit, skip=skip, status=status)
+    return service.get_feature_audit_logs(limit=limit, skip=skip, status=status)
 
 
-@router.get("/pipeline-runs/cursor")
-def get_pipeline_runs_cursor(
+@router.get("/audit-logs/cursor")
+def get_feature_audit_logs_cursor(
     limit: int = Query(20, ge=1, le=100),
     cursor: Optional[str] = Query(None, description="Cursor from previous page"),
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -66,12 +66,12 @@ def get_pipeline_runs_cursor(
     _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
 ):
     """
-    Get pipeline runs with cursor-based pagination for infinite scroll.
+    Get audit logs with cursor-based pagination for infinite scroll.
 
-    Returns runs with enriched repository and build information.
+    Returns logs with enriched repository and build information.
     """
     service = MonitoringService(db)
-    return service.get_pipeline_runs_cursor(limit=limit, cursor=cursor, status=status)
+    return service.get_feature_audit_logs_cursor(limit=limit, cursor=cursor, status=status)
 
 
 @router.get("/jobs")

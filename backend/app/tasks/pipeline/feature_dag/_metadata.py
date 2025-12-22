@@ -18,7 +18,7 @@ Usage:
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from app.tasks.pipeline.shared.resources import FeatureResource
 
@@ -72,6 +72,9 @@ def feature_metadata(
     unit: Optional[str] = None,
     output_format: Optional[OutputFormat] = None,
     output_formats: Optional[Dict[str, OutputFormat]] = None,
+    # Quality evaluation parameters
+    valid_range: Optional[Tuple[float, float]] = None,
+    valid_values: Optional[List[str]] = None,
 ) -> Callable[[F], F]:
     """
     Decorator to attach metadata to a Hamilton feature function.
@@ -88,6 +91,8 @@ def feature_metadata(
         output_format: How to format list values for storage (for single-value features)
         output_formats: Dict mapping field names to formats (for @extract_fields features)
                        Example: {"git_all_built_commits": OutputFormat.HASH_SEPARATED}
+        valid_range: Tuple of (min, max) for numeric features, used by Quality Evaluation
+        valid_values: List of allowed values for categorical features
 
     Returns:
         Decorator function that attaches metadata to the function
@@ -116,6 +121,9 @@ def feature_metadata(
                 output_format.value if isinstance(output_format, Enum) else output_format
             ),
             "output_formats": formats_dict,
+            # Quality evaluation metadata
+            "valid_range": valid_range,
+            "valid_values": valid_values,
         }
         return func
 

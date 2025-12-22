@@ -1,13 +1,12 @@
-"""DTOs for pipeline API."""
+"""DTOs for pipeline and audit log API."""
 
 from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel
 
-
 # ============================================================================
-# Node and Run DTOs
+# Node and Audit Log DTOs
 # ============================================================================
 
 
@@ -23,13 +22,13 @@ class NodeResultDTO(BaseModel):
     retry_count: int = 0
 
 
-class PipelineRunDTO(BaseModel):
-    """Pipeline run summary."""
+class FeatureAuditLogDTO(BaseModel):
+    """Feature audit log summary."""
 
     id: str
-    build_sample_id: str
-    repo_id: str
-    workflow_run_id: int
+    raw_build_run_id: str
+    raw_repo_id: str
+    category: str
     status: str
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -39,46 +38,16 @@ class PipelineRunDTO(BaseModel):
     nodes_failed: int = 0
     nodes_skipped: int = 0
     total_retries: int = 0
-    dag_version: Optional[str] = None
     errors: List[str] = []
     warnings: List[str] = []
     created_at: datetime
 
 
-class PipelineRunDetailDTO(PipelineRunDTO):
-    """Pipeline run with full details."""
+class FeatureAuditLogDetailDTO(FeatureAuditLogDTO):
+    """Feature audit log with full details."""
 
     features_extracted: List[str] = []
     node_results: List[NodeResultDTO] = []
-
-
-# ============================================================================
-# Stats and DAG DTOs
-# ============================================================================
-
-
-class PipelineStatsDTO(BaseModel):
-    """Pipeline statistics."""
-
-    total_runs: int
-    completed: int
-    failed: int
-    success_rate: float
-    avg_duration_ms: float
-    total_features: int
-    total_retries: int
-    avg_nodes_executed: float
-    period_days: int
-
-
-class DAGInfoDTO(BaseModel):
-    """DAG information."""
-
-    version: str
-    node_count: int
-    feature_count: int
-    nodes: List[str]
-    groups: List[str]
 
 
 # ============================================================================
@@ -86,10 +55,10 @@ class DAGInfoDTO(BaseModel):
 # ============================================================================
 
 
-class PipelineRunListResponse(BaseModel):
-    """Paginated list of pipeline runs."""
+class FeatureAuditLogListResponse(BaseModel):
+    """Paginated list of feature audit logs."""
 
-    items: List[PipelineRunDTO]
+    items: List[FeatureAuditLogDTO]
     total: int
     skip: int
     limit: int

@@ -1,32 +1,32 @@
 """Service for managing application settings."""
 
-import logging
-from typing import Optional
-from cryptography.fernet import Fernet
 import base64
 import hashlib
+import logging
+from typing import Optional
 
+from cryptography.fernet import Fernet
 from pymongo.database import Database
 
-from app.entities.settings import (
-    ApplicationSettings,
-    CircleCISettings,
-    TravisCISettings,
-    SonarQubeSettings,
-    TrivySettings,
-    NotificationSettings,
-)
+from app.config import settings as app_config
 from app.dtos.settings import (
     ApplicationSettingsResponse,
     ApplicationSettingsUpdateRequest,
     CircleCISettingsDto,
-    TravisCISettingsDto,
-    SonarQubeSettingsDto,
-    TrivySettingsDto,
     NotificationSettingsDto,
+    SonarQubeSettingsDto,
+    TravisCISettingsDto,
+    TrivySettingsDto,
+)
+from app.entities.settings import (
+    ApplicationSettings,
+    CircleCISettings,
+    NotificationSettings,
+    SonarQubeSettings,
+    TravisCISettings,
+    TrivySettings,
 )
 from app.repositories.settings_repository import SettingsRepository
-from app.config import settings as app_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,15 @@ class SettingsService:
             return "****"
         return f"****{token[-4:]}"
 
+    def _get_webhook_url(self) -> str:
+        """Get the webhook URL for SonarQube to call back."""
+        # Use SONAR_WEBHOOK_PUBLIC_URL if set, otherwise construct from backend URL
+        public_url = getattr(app_config, "SONAR_WEBHOOK_PUBLIC_URL", None)
+        if public_url:
+            return public_url
+        # Default fallback - user should configure this in .env
+        return "http://localhost:8000/api/sonar/webhook"
+
     def get_settings(self) -> ApplicationSettingsResponse:
         """Get current application settings (merge env + db)."""
         # Get from database
@@ -101,6 +110,10 @@ class SettingsService:
                     self._decrypt_token(db_settings.sonarqube.token_encrypted or "")
                 ),
                 default_project_key=db_settings.sonarqube.default_project_key,
+                webhook_secret=self._mask_token(
+                    self._decrypt_token(db_settings.sonarqube.webhook_secret_encrypted or "")
+                ),
+                webhook_url=self._get_webhook_url(),
             ),
             trivy=TrivySettingsDto(
                 enabled=db_settings.trivy.enabled,
@@ -132,6 +145,8 @@ class SettingsService:
                 host_url=app_config.SONAR_HOST_URL,
                 token=self._mask_token(app_config.SONAR_TOKEN),
                 default_project_key=app_config.SONAR_DEFAULT_PROJECT_KEY,
+                webhook_secret=self._mask_token(getattr(app_config, "SONAR_WEBHOOK_SECRET", None)),
+                webhook_url=self._get_webhook_url(),
             ),
             trivy=TrivySettingsDto(
                 enabled=app_config.TRIVY_ENABLED,
@@ -157,12 +172,8 @@ class SettingsService:
         # Update fields if provided
         if request.circleci:
             circleci_data = request.circleci.model_dump()
-            if circleci_data.get("token") and not circleci_data["token"].startswith(
-                "****"
-            ):
-                circleci_data["token_encrypted"] = self._encrypt_token(
-                    circleci_data.pop("token")
-                )
+            if circleci_data.get("token") and not circleci_data["token"].startswith("****"):
+                circleci_data["token_encrypted"] = self._encrypt_token(circleci_data.pop("token"))
             else:
                 circleci_data.pop("token", None)
             existing.circleci = CircleCISettings(**circleci_data)
@@ -170,9 +181,7 @@ class SettingsService:
         if request.travis:
             travis_data = request.travis.model_dump()
             if travis_data.get("token") and not travis_data["token"].startswith("****"):
-                travis_data["token_encrypted"] = self._encrypt_token(
-                    travis_data.pop("token")
-                )
+                travis_data["token_encrypted"] = self._encrypt_token(travis_data.pop("token"))
             else:
                 travis_data.pop("token", None)
             existing.travis = TravisCISettings(**travis_data)
@@ -180,11 +189,20 @@ class SettingsService:
         if request.sonarqube:
             sonar_data = request.sonarqube.model_dump()
             if sonar_data.get("token") and not sonar_data["token"].startswith("****"):
-                sonar_data["token_encrypted"] = self._encrypt_token(
-                    sonar_data.pop("token")
-                )
+                sonar_data["token_encrypted"] = self._encrypt_token(sonar_data.pop("token"))
             else:
                 sonar_data.pop("token", None)
+            # Handle webhook_secret encryption
+            if sonar_data.get("webhook_secret") and not sonar_data["webhook_secret"].startswith(
+                "****"
+            ):
+                sonar_data["webhook_secret_encrypted"] = self._encrypt_token(
+                    sonar_data.pop("webhook_secret")
+                )
+            else:
+                sonar_data.pop("webhook_secret", None)
+            # Remove readonly webhook_url from data
+            sonar_data.pop("webhook_url", None)
             existing.sonarqube = SonarQubeSettings(**sonar_data)
 
         if request.trivy:

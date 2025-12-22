@@ -294,6 +294,37 @@ export function IntegrationsTab() {
             />
           </div>
 
+          {/* Webhook Settings */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="sonar-webhook-url">Webhook URL (required in SonarQube)</Label>
+              <Input
+                id="sonar-webhook-url"
+                value={settings.sonarqube.webhook_url || ''}
+                readOnly
+                className="bg-muted cursor-not-allowed"
+              />
+              <p className="text-xs text-muted-foreground">
+                Copy this URL to SonarQube → Administration → Webhooks
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sonar-webhook-secret">Webhook Secret</Label>
+              <Input
+                id="sonar-webhook-secret"
+                type="password"
+                value={settings.sonarqube.webhook_secret || ''}
+                onChange={(e) =>
+                  setSettings({ ...settings, sonarqube: { ...settings.sonarqube, webhook_secret: e.target.value } })
+                }
+                placeholder="Enter secret to update"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional: Used to verify webhook authenticity
+              </p>
+            </div>
+          </div>
+
           {/* SonarQube Metrics Selection */}
           {availableMetrics && (
             <MetricsSection
