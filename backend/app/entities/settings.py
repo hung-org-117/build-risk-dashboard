@@ -6,24 +6,18 @@ from pydantic import Field
 
 from .base import BaseEntity
 
-DEFAULT_SONARQUBE_CONFIG = """# SonarQube Default Configuration
-# This config is used when no custom config is provided during scan
-
+DEFAULT_SONARQUBE_CONFIG = """
 sonar.sources=.
 sonar.sourceEncoding=UTF-8
 sonar.scm.disabled=true
 sonar.java.binaries=.
 
-# Exclude typical non-source / generated / dependencies
 sonar.exclusions=**/.git/**,**/.hg/**,**/.svn/**,**/node_modules/**,**/vendor/**,**/dist/**,**/build/**,**/target/**,**/out/**,**/.next/**,**/.nuxt/**,**/.cache/**,**/__pycache__/**,**/*.min.js,**/*.min.css
 
-# (Optional) Avoid scanning huge binaries/assets
 sonar.inclusions=**/*
 """
 
-DEFAULT_TRIVY_CONFIG = """# Trivy "max info" default config
-# Goal: collect as much data as possible for storage/analysis.
-
+DEFAULT_TRIVY_CONFIG = """
 timeout: 10m
 
 severity:
@@ -39,17 +33,13 @@ scanners:
   - secret
   - license
 
-# Include all discovered packages (not only vulnerable ones)
 list-all-pkgs: true
 
-# Keep unfixed findings too (more complete, noisier)
 ignore-unfixed: false
 
-# Output: prefer JSON for DB ingestion
 format: json
 output: trivy-result.json
 
-# Filesystem scan options
 scan:
   skip-dirs:
     - node_modules
@@ -64,7 +54,6 @@ scan:
     - .cache
     - __pycache__
 
-  # Skip large/binary files (keeps secret scan sane)
   skip-files:
     - "**/*.min.js"
     - "**/*.min.css"
