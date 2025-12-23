@@ -15,9 +15,8 @@ Setup:
 
 import base64
 import logging
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from pathlib import Path
+from email.mime.text import MIMEText
 from typing import List, Optional
 
 from app.config import settings
@@ -41,11 +40,12 @@ def _get_gmail_service():
     global _CACHED_CREDS
 
     try:
+        import json
+
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
         from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
-        import json
     except ImportError:
         logger.warning(
             "Gmail API dependencies not installed. "
@@ -94,8 +94,7 @@ def _get_gmail_service():
 def send_email_via_gmail_api(
     to: List[str],
     subject: str,
-    body: str,
-    html_body: Optional[str] = None,
+    html_body: str,
     from_email: Optional[str] = None,
 ) -> bool:
     """
@@ -117,12 +116,8 @@ def send_email_via_gmail_api(
 
     try:
         # Create message
-        if html_body:
-            message = MIMEMultipart("alternative")
-            message.attach(MIMEText(body, "plain", "utf-8"))
-            message.attach(MIMEText(html_body, "html", "utf-8"))
-        else:
-            message = MIMEText(body, "plain", "utf-8")
+        message = MIMEMultipart("alternative")
+        message.attach(MIMEText(html_body, "html", "utf-8"))
 
         message["To"] = ", ".join(to)
         message["Subject"] = f"[{settings.APP_NAME}] {subject}"
@@ -134,9 +129,7 @@ def send_email_via_gmail_api(
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
 
         # Send
-        service.users().messages().send(
-            userId="me", body={"raw": raw_message}
-        ).execute()
+        service.users().messages().send(userId="me", body={"raw": raw_message}).execute()
 
         logger.info(f"Gmail API: Email sent to {len(to)} recipients: {subject}")
         return True
@@ -161,9 +154,7 @@ def setup_gmail_api():
         from google_auth_oauthlib.flow import InstalledAppFlow
     except ImportError:
         print("Error: Gmail API dependencies not installed.")
-        print(
-            "Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib"
-        )
+        print("Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
         return False
 
     client_id = settings.GOOGLE_CLIENT_ID

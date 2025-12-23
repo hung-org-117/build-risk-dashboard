@@ -1,16 +1,11 @@
-"""
-Google OAuth Service - Handles Google OAuth flow for guest login.
-"""
-
 from __future__ import annotations
 
-import httpx
 from urllib.parse import urlencode
 
-from app.config import settings
+import httpx
 from fastapi import HTTPException, status
-from app.services.github.github_oauth import create_oauth_state as create_state_common
 
+from app.config import settings
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"

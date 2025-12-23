@@ -26,7 +26,7 @@ interface BuildInfo {
     workflow_name?: string;
 }
 
-interface PipelineRun {
+interface FeatureAuditLog {
     id: string;
     category: "model_training" | "dataset_enrichment";
     raw_repo_id: string;
@@ -44,8 +44,8 @@ interface PipelineRun {
     errors: string[];
 }
 
-interface PipelineRunsTableProps {
-    runs: PipelineRun[];
+interface FeatureAuditLogsTableProps {
+    logs: FeatureAuditLog[];
     hasMore: boolean;
     isLoading: boolean;
     isLoadingMore: boolean;
@@ -74,13 +74,13 @@ const statusConfig: Record<
     },
 };
 
-export function PipelineRunsTable({
-    runs,
+export function FeatureAuditLogsTable({
+    logs,
     hasMore,
     isLoading,
     isLoadingMore,
     onLoadMore,
-}: PipelineRunsTableProps) {
+}: FeatureAuditLogsTableProps) {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
 
@@ -110,11 +110,11 @@ export function PipelineRunsTable({
         return () => observer.disconnect();
     }, [handleObserver]);
 
-    if (isLoading && runs.length === 0) {
+    if (isLoading && logs.length === 0) {
         return (
             <Card>
                 <CardHeader>
-                    <CardTitle className="text-lg">Pipeline Runs</CardTitle>
+                    <CardTitle className="text-lg">Feature Audit Logs</CardTitle>
                 </CardHeader>
                 <CardContent>
                     <div className="animate-pulse space-y-2">
@@ -131,8 +131,8 @@ export function PipelineRunsTable({
         <Card>
             <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">Pipeline Runs</CardTitle>
-                    <Badge variant="outline">{runs.length} loaded</Badge>
+                    <CardTitle className="text-lg">Feature Audit Logs</CardTitle>
+                    <Badge variant="outline">{logs.length} loaded</Badge>
                 </div>
             </CardHeader>
             <CardContent
@@ -151,67 +151,67 @@ export function PipelineRunsTable({
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {runs.length === 0 ? (
+                        {logs.length === 0 ? (
                             <TableRow>
                                 <TableCell colSpan={6} className="text-center text-muted-foreground">
-                                    No pipeline runs found
+                                    No audit logs found
                                 </TableCell>
                             </TableRow>
                         ) : (
-                            runs.map((run) => {
-                                const config = statusConfig[run.status] || statusConfig.pending;
+                            logs.map((log) => {
+                                const config = statusConfig[log.status] || statusConfig.pending;
                                 return (
-                                    <TableRow key={run.id}>
+                                    <TableRow key={log.id}>
                                         <TableCell>
                                             <Badge variant={config.variant} className="gap-1">
                                                 {config.icon}
-                                                {run.status}
+                                                {log.status}
                                             </Badge>
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex flex-col gap-1">
-                                                <span className="font-medium text-sm truncate max-w-[180px]" title={run.repo?.full_name}>
-                                                    {run.repo?.full_name || run.repo?.name || "Unknown"}
+                                                <span className="font-medium text-sm truncate max-w-[180px]" title={log.repo?.full_name}>
+                                                    {log.repo?.full_name || log.repo?.name || "Unknown"}
                                                 </span>
                                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                                     <Badge variant="outline" className="text-xs px-1.5 py-0">
-                                                        {run.category === "model_training" ? "🔧 Model" : "📊 Dataset"}
+                                                        {log.category === "model_training" ? "🔧 Model" : "📊 Dataset"}
                                                     </Badge>
-                                                    {run.build?.run_number && (
-                                                        <span className="font-mono">#{run.build.run_number}</span>
+                                                    {log.build?.run_number && (
+                                                        <span className="font-mono">#{log.build.run_number}</span>
                                                     )}
-                                                    {run.build?.head_branch && (
+                                                    {log.build?.head_branch && (
                                                         <span className="flex items-center gap-0.5">
                                                             <GitBranch className="h-3 w-3" />
-                                                            <span className="truncate max-w-[80px]" title={run.build.head_branch}>
-                                                                {run.build.head_branch}
+                                                            <span className="truncate max-w-[80px]" title={log.build.head_branch}>
+                                                                {log.build.head_branch}
                                                             </span>
                                                         </span>
                                                     )}
                                                 </div>
                                             </div>
                                         </TableCell>
-                                        <TableCell className="text-center">{run.feature_count}</TableCell>
+                                        <TableCell className="text-center">{log.feature_count}</TableCell>
                                         <TableCell>
-                                            <span className="text-green-600">{run.nodes_succeeded}</span>
-                                            {run.nodes_failed > 0 && (
+                                            <span className="text-green-600">{log.nodes_succeeded}</span>
+                                            {log.nodes_failed > 0 && (
                                                 <>
                                                     {" / "}
-                                                    <span className="text-red-600">{run.nodes_failed}</span>
+                                                    <span className="text-red-600">{log.nodes_failed}</span>
                                                 </>
                                             )}
                                             <span className="text-muted-foreground">
-                                                {" "}/ {run.nodes_executed}
+                                                {" "}/ {log.nodes_executed}
                                             </span>
                                         </TableCell>
                                         <TableCell>
-                                            {run.duration_ms
-                                                ? `${(run.duration_ms / 1000).toFixed(1)}s`
+                                            {log.duration_ms
+                                                ? `${(log.duration_ms / 1000).toFixed(1)}s`
                                                 : "-"}
                                         </TableCell>
                                         <TableCell className="text-xs text-muted-foreground">
-                                            {run.started_at
-                                                ? formatDistanceToNow(new Date(run.started_at), {
+                                            {log.started_at
+                                                ? formatDistanceToNow(new Date(log.started_at), {
                                                     addSuffix: true,
                                                 })
                                                 : "-"}
@@ -235,9 +235,9 @@ export function PipelineRunsTable({
                 )}
 
                 {/* End of list indicator */}
-                {!hasMore && runs.length > 0 && (
+                {!hasMore && logs.length > 0 && (
                     <div className="text-center py-2 text-xs text-muted-foreground">
-                        All {runs.length} runs loaded
+                        All {logs.length} logs loaded
                     </div>
                 )}
             </CardContent>

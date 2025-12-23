@@ -19,11 +19,20 @@ import {
     FileText,
     FileJson,
     Clock,
+    Sparkles,
 } from "lucide-react";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
-// =========================================================================
+// Types
+export type NormalizationType = "none" | "minmax" | "zscore" | "robust" | "maxabs" | "log" | "decimal";
+
 // Export Job Status Interface
-// =========================================================================
 export interface ExportJobStatus {
     id: string;
     status: "pending" | "processing" | "completed" | "failed";
@@ -31,9 +40,7 @@ export interface ExportJobStatus {
     error_message?: string;
 }
 
-// =========================================================================
 // Export Adapter Interface - Implement this for each export source
-// =========================================================================
 export interface ExportAdapter {
     /** Display name for the export (e.g., "Version v1.0" or "my-repo") */
     name: string;
@@ -41,11 +48,14 @@ export interface ExportAdapter {
     /** Total number of rows to export */
     totalRows: number;
 
+    /** Whether normalization is supported */
+    supportsNormalization?: boolean;
+
     /** Download via streaming (for small datasets) */
-    downloadStream: (format: "csv" | "json") => Promise<Blob>;
+    downloadStream: (format: "csv" | "json", normalization?: NormalizationType) => Promise<Blob>;
 
     /** Create async export job (for large datasets) */
-    createAsyncJob: (format: "csv" | "json") => Promise<{ job_id: string }>;
+    createAsyncJob: (format: "csv" | "json", normalization?: NormalizationType) => Promise<{ job_id: string }>;
 
     /** Get async job status */
     getJobStatus: (jobId: string) => Promise<ExportJobStatus>;
@@ -54,9 +64,7 @@ export interface ExportAdapter {
     downloadJob: (jobId: string) => Promise<Blob>;
 }
 
-// =========================================================================
 // Export Modal Props
-// =========================================================================
 interface ExportModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -65,9 +73,7 @@ interface ExportModalProps {
     asyncThreshold?: number;
 }
 
-// =========================================================================
 // Generic Export Modal Component
-// =========================================================================
 type ExportStatus = "idle" | "exporting" | "polling" | "completed" | "error";
 
 export function ExportModal({
@@ -77,16 +83,16 @@ export function ExportModal({
     asyncThreshold = 10000,
 }: ExportModalProps) {
     const [format, setFormat] = useState<"csv" | "json">("csv");
+    const [normalization, setNormalization] = useState<NormalizationType>("none");
     const [status, setStatus] = useState<ExportStatus>("idle");
     const [progress, setProgress] = useState(0);
     const [jobId, setJobId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const isLargeDataset = adapter.totalRows > asyncThreshold;
+    const showNormalization = adapter.supportsNormalization !== false;
 
-    // =========================================================================
     // Poll for async job status
-    // =========================================================================
     useEffect(() => {
         if (status !== "polling" || !jobId) return;
 
@@ -121,36 +127,32 @@ export function ExportModal({
         setError(null);
 
         try {
-            const blob = await adapter.downloadStream(format);
+            const blob = await adapter.downloadStream(format, normalization);
             triggerDownload(blob, `${adapter.name}.${format}`);
             setStatus("completed");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Export failed");
             setStatus("error");
         }
-    }, [adapter, format]);
+    }, [adapter, format, normalization]);
 
-    // =========================================================================
     // Async Export Handler (for large datasets)
-    // =========================================================================
     const handleAsyncExport = useCallback(async () => {
         setStatus("exporting");
         setError(null);
         setProgress(0);
 
         try {
-            const result = await adapter.createAsyncJob(format);
+            const result = await adapter.createAsyncJob(format, normalization);
             setJobId(result.job_id);
             setStatus("polling");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to create export job");
             setStatus("error");
         }
-    }, [adapter, format]);
+    }, [adapter, format, normalization]);
 
-    // =========================================================================
     // Download Completed Job
-    // =========================================================================
     const handleDownloadCompleted = useCallback(async () => {
         if (!jobId) return;
 
@@ -162,9 +164,7 @@ export function ExportModal({
         }
     }, [adapter, jobId, format]);
 
-    // =========================================================================
     // Main Export Handler
-    // =========================================================================
     const handleExport = () => {
         if (isLargeDataset) {
             handleAsyncExport();
@@ -173,14 +173,13 @@ export function ExportModal({
         }
     };
 
-    // =========================================================================
     // Reset & Close
-    // =========================================================================
     const handleClose = () => {
         setStatus("idle");
         setProgress(0);
         setJobId(null);
         setError(null);
+        setNormalization("none");
         onClose();
     };
 
@@ -229,6 +228,33 @@ export function ExportModal({
                                     <span className="text-sm font-medium">JSON</span>
                                 </Button>
                             </div>
+
+                            {/* Normalization option */}
+                            {showNormalization && (
+                                <div className="space-y-2 pt-2">
+                                    <Label className="flex items-center gap-2">
+                                        <Sparkles className="h-4 w-4" />
+                                        Normalization (Optional)
+                                    </Label>
+                                    <Select value={normalization} onValueChange={(v) => setNormalization(v as NormalizationType)}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select normalization" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">None (Raw values)</SelectItem>
+                                            <SelectItem value="minmax">Min-Max (Scale to 0-1)</SelectItem>
+                                            <SelectItem value="zscore">Z-Score (Standardization)</SelectItem>
+                                            <SelectItem value="robust">Robust (Median-IQR)</SelectItem>
+                                            <SelectItem value="maxabs">Max Absolute ([-1, 1])</SelectItem>
+                                            <SelectItem value="log">Log Transform</SelectItem>
+                                            <SelectItem value="decimal">Decimal Scaling</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Apply normalization to numeric features during export.
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -292,9 +318,7 @@ export function ExportModal({
     );
 }
 
-// =========================================================================
 // Helper: Trigger browser download
-// =========================================================================
 function triggerDownload(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

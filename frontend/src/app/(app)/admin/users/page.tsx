@@ -22,13 +22,6 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog'
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -50,7 +43,6 @@ export default function AdminUsersPage() {
     const [isInviting, setIsInviting] = useState(false)
     const [inviteForm, setInviteForm] = useState<InvitationCreatePayload>({
         email: '',
-        github_username: '',
         role: 'guest',
     })
 
@@ -116,11 +108,10 @@ export default function AdminUsersPage() {
         try {
             await adminInvitationsApi.create({
                 email: inviteForm.email,
-                github_username: inviteForm.github_username || undefined,
                 role: inviteForm.role,
             })
             setIsInviteOpen(false)
-            setInviteForm({ email: '', github_username: '', role: 'user' })
+            setInviteForm({ email: '', role: 'guest' })
             fetchInvitations()
         } catch (err: any) {
             setError(err.response?.data?.detail || 'Failed to create invitation')
@@ -129,14 +120,7 @@ export default function AdminUsersPage() {
         }
     }
 
-    const handleRoleChange = async (userId: string, newRole: 'admin' | 'user') => {
-        try {
-            await adminUsersApi.updateRole(userId, newRole)
-            fetchUsers()
-        } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to update role')
-        }
-    }
+
 
     const handleDeleteUser = async () => {
         if (!deleteUserId) return
@@ -191,8 +175,6 @@ export default function AdminUsersPage() {
         }
     }
 
-    // Filter out current user from the list
-    const filteredUsers = users.filter(user => user.id !== currentUserId)
     const pendingInvitations = invitations.filter(inv => inv.status === 'pending')
 
     return (
@@ -239,23 +221,10 @@ export default function AdminUsersPage() {
                                     />
                                 </div>
                                 <div className="grid gap-2">
-                                    <Label htmlFor="github">GitHub Username (optional)</Label>
-                                    <Input
-                                        id="github"
-                                        placeholder="octocat"
-                                        value={inviteForm.github_username || ''}
-                                        onChange={(e) => setInviteForm({ ...inviteForm, github_username: e.target.value })}
-                                    />
-                                    <p className="text-xs text-muted-foreground">
-                                        If provided, invitation will also match by GitHub username
-                                    </p>
-                                </div>
-                                <div className="grid gap-2">
                                     <Label htmlFor="role">Role</Label>
                                     <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted">
                                         <User className="h-4 w-4 text-muted-foreground" />
                                         <span className="text-sm">Guest</span>
-                                        <span className="text-xs text-muted-foreground">(read-only access)</span>
                                     </div>
                                 </div>
                             </div>
@@ -286,7 +255,7 @@ export default function AdminUsersPage() {
             <Tabs defaultValue="users" className="w-full">
                 <TabsList>
                     <TabsTrigger value="users">
-                        Users ({filteredUsers.length})
+                        Users ({users.length})
                     </TabsTrigger>
                     <TabsTrigger value="invitations">
                         Pending Invitations ({pendingInvitations.length})
@@ -301,7 +270,7 @@ export default function AdminUsersPage() {
                                 <div>
                                     <CardTitle>Users</CardTitle>
                                     <CardDescription>
-                                        All registered users (excluding yourself)
+                                        All registered users in the system
                                     </CardDescription>
                                 </div>
                                 <div className="relative w-64">
@@ -320,9 +289,9 @@ export default function AdminUsersPage() {
                                 <div className="flex items-center justify-center py-8">
                                     <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
                                 </div>
-                            ) : filteredUsers.length === 0 ? (
+                            ) : users.length === 0 ? (
                                 <div className="text-center py-8 text-muted-foreground">
-                                    {searchQuery ? 'No users found matching your search' : 'No other users found'}
+                                    {searchQuery ? 'No users found matching your search' : 'No users found'}
                                 </div>
                             ) : (
                                 <Table>
@@ -336,7 +305,7 @@ export default function AdminUsersPage() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {filteredUsers.map((user) => (
+                                        {users.map((user) => (
                                             <TableRow key={user.id}>
                                                 <TableCell className="font-medium">
                                                     <div className="flex items-center gap-2">
@@ -352,6 +321,9 @@ export default function AdminUsersPage() {
                                                             </div>
                                                         )}
                                                         <span>{user.name || user.github?.login || '-'}</span>
+                                                        {user.id === currentUserId && (
+                                                            <Badge variant="outline" className="text-xs">(You)</Badge>
+                                                        )}
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
@@ -361,42 +333,29 @@ export default function AdminUsersPage() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Select
-                                                        value={user.role}
-                                                        onValueChange={(value: 'admin' | 'user') =>
-                                                            handleRoleChange(user.id, value)
-                                                        }
-                                                    >
-                                                        <SelectTrigger className="w-[100px]">
-                                                            <SelectValue>
-                                                                <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                                                                    {user.role === 'admin' ? (
-                                                                        <Shield className="h-3 w-3 mr-1" />
-                                                                    ) : (
-                                                                        <User className="h-3 w-3 mr-1" />
-                                                                    )}
-                                                                    {user.role}
-                                                                </Badge>
-                                                            </SelectValue>
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="user">User</SelectItem>
-                                                            <SelectItem value="admin">Admin</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
+                                                    <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                                                        {user.role === 'admin' ? (
+                                                            <Shield className="h-3 w-3 mr-1" />
+                                                        ) : (
+                                                            <User className="h-3 w-3 mr-1" />
+                                                        )}
+                                                        {user.role}
+                                                    </Badge>
                                                 </TableCell>
                                                 <TableCell className="text-muted-foreground text-sm">
                                                     {formatDate(user.created_at)}
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="text-destructive hover:text-destructive"
-                                                        onClick={() => setDeleteUserId(user.id)}
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
+                                                    {user.id !== currentUserId && (
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="text-destructive hover:text-destructive"
+                                                            onClick={() => setDeleteUserId(user.id)}
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
                                                 </TableCell>
                                             </TableRow>
                                         ))}
@@ -432,7 +391,6 @@ export default function AdminUsersPage() {
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>Email</TableHead>
-                                            <TableHead>GitHub</TableHead>
                                             <TableHead>Role</TableHead>
                                             <TableHead>Status</TableHead>
                                             <TableHead>Expires</TableHead>
@@ -447,9 +405,6 @@ export default function AdminUsersPage() {
                                                         <Mail className="h-3 w-3 text-muted-foreground" />
                                                         {invitation.email}
                                                     </div>
-                                                </TableCell>
-                                                <TableCell className="text-muted-foreground">
-                                                    {invitation.github_username || '-'}
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant={invitation.role === 'admin' ? 'default' : 'secondary'}>

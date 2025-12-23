@@ -346,10 +346,6 @@ export const datasetsApi = {
     const response = await api.post<DatasetRecord>("/datasets", payload);
     return response.data;
   },
-  update: async (datasetId: string, payload: DatasetUpdatePayload) => {
-    const response = await api.patch<DatasetRecord>(`/datasets/${datasetId}`, payload);
-    return response.data;
-  },
   upload: async (file: File, payload?: { name?: string; description?: string; }) => {
     const formData = new FormData();
     formData.append("file", file);
@@ -578,20 +574,12 @@ export const adminUsersApi = {
     });
     return response.data;
   },
-  create: async (payload: UserCreatePayload): Promise<UserAccount> => {
-    const response = await api.post<UserAccount>("/admin/users", payload);
-    return response.data;
-  },
   get: async (userId: string): Promise<UserAccount> => {
     const response = await api.get<UserAccount>(`/admin/users/${userId}`);
     return response.data;
   },
   update: async (userId: string, payload: UserUpdatePayload): Promise<UserAccount> => {
     const response = await api.patch<UserAccount>(`/admin/users/${userId}`, payload);
-    return response.data;
-  },
-  updateRole: async (userId: string, role: "admin" | "user"): Promise<UserAccount> => {
-    const response = await api.patch<UserAccount>(`/admin/users/${userId}/role`, { role });
     return response.data;
   },
   delete: async (userId: string): Promise<void> => {
@@ -603,7 +591,6 @@ export const adminUsersApi = {
 export interface Invitation {
   id: string;
   email: string;
-  github_username?: string | null;
   status: "pending" | "accepted" | "expired" | "revoked";
   role: "admin" | "user";
   invited_by: string;
@@ -619,7 +606,6 @@ export interface InvitationListResponse {
 
 export interface InvitationCreatePayload {
   email: string;
-  github_username?: string;
   role?: "admin" | "user" | "guest";
 }
 
@@ -1257,11 +1243,12 @@ export const datasetVersionApi = {
   downloadExport: async (
     datasetId: string,
     versionId: string,
-    format: "csv" | "json" = "csv"
+    format: "csv" | "json" = "csv",
+    normalization: "none" | "minmax" | "zscore" = "none"
   ): Promise<Blob> => {
     const response = await api.get(
       `/datasets/${datasetId}/versions/${versionId}/export`,
-      { params: { format }, responseType: "blob" }
+      { params: { format, normalization }, responseType: "blob" }
     );
     return response.data;
   },
@@ -1270,18 +1257,24 @@ export const datasetVersionApi = {
   createExportJob: async (
     datasetId: string,
     versionId: string,
-    format: "csv" | "json" = "csv"
+    format: "csv" | "json" = "csv",
+    normalization: "none" | "minmax" | "zscore" = "none"
   ): Promise<{ job_id: string; status: string; total_rows: number }> => {
     const response = await api.post(
       `/datasets/${datasetId}/versions/${versionId}/export/async`,
       null,
-      { params: { format } }
+      { params: { format, normalization } }
     );
     return response.data;
   },
 
   // Get export job status
-  getExportJobStatus: async (datasetId: string, jobId: string) => {
+  getExportJobStatus: async (datasetId: string, jobId: string): Promise<{
+    id: string;
+    status: "pending" | "processing" | "completed" | "failed";
+    progress: number;
+    error_message?: string;
+  }> => {
     const response = await api.get<{
       id: string;
       status: string;
@@ -1295,7 +1288,13 @@ export const datasetVersionApi = {
       created_at?: string;
       completed_at?: string;
     }>(`/datasets/${datasetId}/versions/export/jobs/${jobId}`);
-    return response.data;
+    // Map to ExportJobStatus format
+    return {
+      id: response.data.id,
+      status: response.data.status as "pending" | "processing" | "completed" | "failed",
+      progress: response.data.progress,
+      error_message: response.data.error_message,
+    };
   },
 
   // List export jobs for a version
@@ -1438,6 +1437,296 @@ export const userSettingsApi = {
 
   update: async (request: UpdateUserSettingsRequest): Promise<UserSettingsResponse> => {
     const response = await api.patch<UserSettingsResponse>("/user-settings", request);
+    return response.data;
+  },
+};
+
+// =============================================================================
+// Statistics API Types and Functions
+// =============================================================================
+
+export interface VersionStatistics {
+  total_builds: number;
+  enriched_builds: number;
+  failed_builds: number;
+  partial_builds: number;
+  enrichment_rate: number;
+  success_rate: number;
+  total_features_selected: number;
+  avg_features_per_build: number;
+  total_feature_values_extracted: number;
+  quality_score?: number;
+  completeness_score?: number;
+  validity_score?: number;
+  consistency_score?: number;
+  coverage_score?: number;
+  processing_duration_seconds?: number;
+}
+
+export interface BuildStatusBreakdown {
+  status: string;
+  count: number;
+  percentage: number;
+}
+
+export interface FeatureCompleteness {
+  feature_name: string;
+  non_null_count: number;
+  null_count: number;
+  completeness_pct: number;
+  data_type: string;
+}
+
+export interface VersionStatisticsResponse {
+  version_id: string;
+  dataset_id: string;
+  version_name: string;
+  status: string;
+  statistics: VersionStatistics;
+  build_status_breakdown: BuildStatusBreakdown[];
+  feature_completeness: FeatureCompleteness[];
+  started_at?: string;
+  completed_at?: string;
+  evaluated_at?: string;
+}
+
+export interface HistogramBin {
+  min_value: number;
+  max_value: number;
+  count: number;
+  percentage: number;
+}
+
+export interface NumericStats {
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  std: number;
+  q1: number;
+  q3: number;
+  iqr: number;
+}
+
+export interface NumericDistribution {
+  feature_name: string;
+  data_type: string;
+  total_count: number;
+  null_count: number;
+  bins: HistogramBin[];
+  stats?: NumericStats;
+}
+
+export interface CategoricalValue {
+  value: string;
+  count: number;
+  percentage: number;
+}
+
+export interface CategoricalDistribution {
+  feature_name: string;
+  data_type: string;
+  total_count: number;
+  null_count: number;
+  unique_count: number;
+  values: CategoricalValue[];
+  truncated: boolean;
+}
+
+export interface FeatureDistributionResponse {
+  version_id: string;
+  distributions: Record<string, NumericDistribution | CategoricalDistribution>;
+}
+
+export interface CorrelationPair {
+  feature_1: string;
+  feature_2: string;
+  correlation: number;
+  strength: string;
+}
+
+export interface CorrelationMatrixResponse {
+  version_id: string;
+  features: string[];
+  matrix: (number | null)[][];
+  significant_pairs: CorrelationPair[];
+}
+
+// Statistics API
+export const statisticsApi = {
+  // Get version statistics
+  getVersionStatistics: async (
+    datasetId: string,
+    versionId: string
+  ): Promise<VersionStatisticsResponse> => {
+    const response = await api.get<VersionStatisticsResponse>(
+      `/datasets/${datasetId}/versions/${versionId}/statistics`
+    );
+    return response.data;
+  },
+
+  // Get feature distributions
+  getDistributions: async (
+    datasetId: string,
+    versionId: string,
+    options?: {
+      features?: string[];
+      bins?: number;
+      top_n?: number;
+    }
+  ): Promise<FeatureDistributionResponse> => {
+    const response = await api.get<FeatureDistributionResponse>(
+      `/datasets/${datasetId}/versions/${versionId}/statistics/distributions`,
+      {
+        params: {
+          features: options?.features?.join(","),
+          bins: options?.bins,
+          top_n: options?.top_n,
+        },
+      }
+    );
+    return response.data;
+  },
+
+  // Get correlation matrix
+  getCorrelation: async (
+    datasetId: string,
+    versionId: string,
+    features?: string[]
+  ): Promise<CorrelationMatrixResponse> => {
+    const response = await api.get<CorrelationMatrixResponse>(
+      `/datasets/${datasetId}/versions/${versionId}/statistics/correlation`,
+      {
+        params: features ? { features: features.join(",") } : undefined,
+      }
+    );
+    return response.data;
+  },
+};
+
+// =============================================================================
+// Enrichment Logs API Types and Functions
+// =============================================================================
+
+export interface PhaseResult {
+  phase_name: string;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  total_items: number;
+  processed_items: number;
+  failed_items: number;
+  skipped_items: number;
+  errors: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface PipelineRunDto {
+  id: string;
+  correlation_id: string;
+  pipeline_type: string;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  total_repos: number;
+  processed_repos: number;
+  total_builds: number;
+  processed_builds: number;
+  failed_builds: number;
+  phases: PhaseResult[];
+  result_summary: Record<string, unknown>;
+  error_message?: string;
+  triggered_by?: string;
+}
+
+export interface NodeExecutionResult {
+  node_name: string;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms: number;
+  features_extracted: string[];
+  feature_values: Record<string, unknown>;
+  resources_used: string[];
+  resources_missing: string[];
+  error?: string;
+  warning?: string;
+  skip_reason?: string;
+}
+
+export interface FeatureAuditLogDto {
+  id: string;
+  correlation_id?: string;
+  category: string;
+  raw_repo_id: string;
+  raw_build_run_id: string;
+  enrichment_build_id?: string;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  node_results: NodeExecutionResult[];
+  feature_count: number;
+  features_extracted: string[];
+  errors: string[];
+  warnings: string[];
+  nodes_executed: number;
+  nodes_succeeded: number;
+  nodes_failed: number;
+  nodes_skipped: number;
+  total_retries: number;
+}
+
+export interface AuditLogListResponse {
+  items: FeatureAuditLogDto[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+// Enrichment Logs API
+export const enrichmentLogsApi = {
+  // Get pipeline run for version
+  getPipelineRun: async (
+    datasetId: string,
+    versionId: string
+  ): Promise<PipelineRunDto> => {
+    const response = await api.get<PipelineRunDto>(
+      `/datasets/${datasetId}/versions/${versionId}/pipeline-run`
+    );
+    return response.data;
+  },
+
+  // Get audit logs for version
+  getAuditLogs: async (
+    datasetId: string,
+    versionId: string,
+    options?: { skip?: number; limit?: number; status?: string }
+  ): Promise<AuditLogListResponse> => {
+    const response = await api.get<AuditLogListResponse>(
+      `/datasets/${datasetId}/versions/${versionId}/audit-logs`,
+      {
+        params: {
+          skip: options?.skip,
+          limit: options?.limit,
+          status: options?.status,
+        },
+      }
+    );
+    return response.data;
+  },
+
+  // Get audit log for specific build
+  getBuildAuditLog: async (
+    datasetId: string,
+    versionId: string,
+    buildId: string
+  ): Promise<FeatureAuditLogDto> => {
+    const response = await api.get<FeatureAuditLogDto>(
+      `/datasets/${datasetId}/versions/${versionId}/builds/${buildId}/audit-log`
+    );
     return response.data;
   },
 };

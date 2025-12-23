@@ -55,8 +55,7 @@ class UserService:
 
     def list_users(self) -> List[UserResponse]:
         """List all users"""
-        user_repo = UserRepository(self.db)
-        documents = user_repo.list_all()
+        documents = self.user_repo.list_all()
         return [UserResponse.model_validate(doc) for doc in documents]
 
     def get_user_by_id(self, user_id: str) -> UserResponse:
@@ -73,15 +72,18 @@ class UserService:
 
     def update_user(self, user_id: str, update_data: UserUpdate) -> UserResponse:
         """Update user details"""
-        user_repo = UserRepository(self.db)
+        # Validate user exists first
+        existing_user = self.user_repo.find_by_id(ObjectId(user_id))
+        if not existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
 
-        # Create update dict, excluding None values
-        # Create update dict using only set fields (allows setting to None)
         update_dict = update_data.model_dump(exclude_unset=True)
 
         if not update_dict:
-            # If nothing to update, just return current user
-            return self.get_user_by_id(user_id)
+            return UserResponse.model_validate(existing_user.model_dump(by_alias=True))
 
-        user_repo.update(user_id, update_dict)
-        return self.get_user_by_id(user_id)
+        updated_user = self.user_repo.update_user(user_id, update_dict)
+        return UserResponse.model_validate(updated_user.model_dump(by_alias=True))

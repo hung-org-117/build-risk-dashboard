@@ -12,9 +12,6 @@ class InvitationCreateRequest(BaseModel):
     """Request to create a new invitation."""
 
     email: EmailStr = Field(..., description="Email of the user to invite")
-    github_username: Optional[str] = Field(
-        None, description="GitHub username (optional)"
-    )
     role: str = Field(default="guest", pattern="^(guest)$")
 
 
@@ -23,7 +20,6 @@ class InvitationResponse(BaseModel):
 
     id: str = Field(..., alias="_id")
     email: str
-    github_username: Optional[str] = None
     status: str
     role: str
     invited_by: str

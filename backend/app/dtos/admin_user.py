@@ -27,22 +27,8 @@ class AdminUserListResponse(BaseModel):
     total: int
 
 
-class AdminUserCreateRequest(BaseModel):
-    """Request to create a new user."""
-
-    email: str = Field(..., description="User email address")
-    name: Optional[str] = Field(None, description="User display name")
-    role: Literal["admin", "user", "guest"] = Field("user", description="User role")
-
-
 class AdminUserUpdateRequest(BaseModel):
     """Request to update user profile."""
 
     email: Optional[str] = Field(None, description="New email address")
     name: Optional[str] = Field(None, description="New display name")
-
-
-class AdminUserRoleUpdateRequest(BaseModel):
-    """Request to update user role."""
-
-    role: Literal["admin", "user", "guest"] = Field(..., description="New role")

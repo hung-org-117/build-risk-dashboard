@@ -1,6 +1,5 @@
 from fastapi import (
     APIRouter,
-    Body,
     Depends,
     File,
     Form,
@@ -17,7 +16,6 @@ from app.database.mongo import get_db
 from app.dtos import (
     DatasetListResponse,
     DatasetResponse,
-    DatasetUpdateRequest,
 )
 from app.middleware.rbac import Permission, RequirePermission
 from app.services.dataset_service import DatasetService
@@ -84,23 +82,6 @@ def get_dataset(
     user_id = str(current_user["_id"])
     service = DatasetService(db)
     return service.get_dataset(dataset_id, user_id)
-
-
-@router.patch(
-    "/{dataset_id}",
-    response_model=DatasetResponse,
-    response_model_by_alias=False,
-)
-def update_dataset(
-    dataset_id: str = PathParam(..., description="Dataset id (Mongo ObjectId)"),
-    payload: DatasetUpdateRequest = Body(...),
-    db: Database = Depends(get_db),
-    current_user: dict = Depends(RequirePermission(Permission.MANAGE_DATASETS)),
-):
-    """Update dataset metadata (Admin and Guest)."""
-    user_id = str(current_user["_id"])
-    service = DatasetService(db)
-    return service.update_dataset(dataset_id, user_id, payload)
 
 
 @router.delete(

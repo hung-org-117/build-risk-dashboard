@@ -182,17 +182,15 @@ class NotificationManager:
     def send_gmail(
         self,
         subject: str,
-        body: str,
         to_recipients: List[str],
-        html_body: Optional[str] = None,
+        html_body: str,
     ) -> bool:
         """
         Send an email via Gmail API (OAuth2).
 
         Args:
             subject: Email subject
-            body: Plain text body
-            html_body: Optional HTML body
+            html_body: HTML body
             to_recipients: List of email addresses to send to.
 
         Returns:
@@ -215,7 +213,6 @@ class NotificationManager:
             return send_email_via_gmail_api(
                 to=to_recipients,
                 subject=subject,
-                body=body,
                 html_body=html_body,
             )
         except ImportError:
@@ -463,8 +460,9 @@ def notify_rate_limit_exhausted(
         )
         manager.send_gmail(
             subject="🚨 CRITICAL: All GitHub Tokens Exhausted",
-            body="",  # HTML only
             html_body=html_body,
+            # TODO: Add to_recipients here
+            to_recipients=["hunglaithe117@gmail.com"],
         )
 
     return notification

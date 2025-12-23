@@ -1,10 +1,8 @@
 """Data Transfer Objects (DTOs) for API requests and responses"""
 
 from .admin_user import (
-    AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserResponse,
-    AdminUserRoleUpdateRequest,
     AdminUserUpdateRequest,
 )
 from .auth import (
@@ -28,7 +26,6 @@ from .dataset import (
     DatasetCreateRequest,
     DatasetListResponse,
     DatasetResponse,
-    DatasetUpdateRequest,
     RepoValidationItem,
     RepoValidationResponse,
 )
@@ -149,7 +146,6 @@ __all__ = [
     "DatasetResponse",
     "DatasetListResponse",
     "DatasetCreateRequest",
-    "DatasetUpdateRequest",
     "BuildValidationFiltersDto",
     "RepoValidationItem",
     "RepoValidationResponse",
@@ -190,9 +186,7 @@ __all__ = [
     # Admin User
     "AdminUserResponse",
     "AdminUserListResponse",
-    "AdminUserCreateRequest",
     "AdminUserUpdateRequest",
-    "AdminUserRoleUpdateRequest",
     # Notification
     "NotificationResponse",
     "NotificationListResponse",

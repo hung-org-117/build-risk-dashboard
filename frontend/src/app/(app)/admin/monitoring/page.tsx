@@ -4,8 +4,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useWebSocket } from "@/contexts/websocket-context";
 import {
     SystemStatsCard,
-    PipelineRunsTable,
-    BackgroundJobsTable,
+    PipelineTracingTable,
+    FeatureAuditLogsTable,
     LogsViewer,
 } from "@/components/monitoring";
 import { Button } from "@/components/ui/button";
@@ -43,15 +43,10 @@ interface PipelineRunsResponse {
     has_more: boolean;
 }
 
-interface BackgroundJobsResponse {
-    exports: any[];
-    scans: any[];
-    enrichments: any[];
-    summary: {
-        active_exports: number;
-        active_scans: number;
-        active_enrichments: number;
-    };
+interface AuditLogsResponse {
+    logs: any[];
+    next_cursor: string | null;
+    has_more: boolean;
 }
 
 interface LogEntry {
@@ -66,21 +61,25 @@ export default function MonitoringPage() {
     const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
     const [isLoadingStats, setIsLoadingStats] = useState(true);
 
-    // Pipeline runs with cursor pagination
+    // Pipeline runs (high-level)
     const [pipelineRuns, setPipelineRuns] = useState<PipelineRunsResponse>({
         runs: [],
         next_cursor: null,
         has_more: false,
     });
-    const [isLoadingRuns, setIsLoadingRuns] = useState(true);
-    const [isLoadingMoreRuns, setIsLoadingMoreRuns] = useState(false);
+    const [isLoadingPipelineRuns, setIsLoadingPipelineRuns] = useState(true);
+    const [isLoadingMorePipelineRuns, setIsLoadingMorePipelineRuns] = useState(false);
 
-    // Background jobs
-    const [backgroundJobs, setBackgroundJobs] =
-        useState<BackgroundJobsResponse | null>(null);
-    const [isLoadingJobs, setIsLoadingJobs] = useState(true);
+    // Feature audit logs (per-build)
+    const [auditLogs, setAuditLogs] = useState<AuditLogsResponse>({
+        logs: [],
+        next_cursor: null,
+        has_more: false,
+    });
+    const [isLoadingAuditLogs, setIsLoadingAuditLogs] = useState(true);
+    const [isLoadingMoreAuditLogs, setIsLoadingMoreAuditLogs] = useState(false);
 
-    // Logs
+    // System logs
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [isLoadingLogs, setIsLoadingLogs] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -88,7 +87,7 @@ export default function MonitoringPage() {
     const [levelFilter, setLevelFilter] = useState("all");
     const [searchQuery, setSearchQuery] = useState("");
 
-    // WebSocket for live updates
+    // WebSocket
     const { subscribe, isConnected } = useWebSocket();
 
     // Fetch system stats
@@ -108,7 +107,7 @@ export default function MonitoringPage() {
         }
     }, []);
 
-    // Fetch pipeline runs with cursor pagination (reset)
+    // Fetch pipeline runs (high-level)
     const fetchPipelineRuns = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/monitoring/pipeline-runs/cursor?limit=20`, {
@@ -121,15 +120,14 @@ export default function MonitoringPage() {
         } catch (error) {
             console.error("Failed to fetch pipeline runs:", error);
         } finally {
-            setIsLoadingRuns(false);
+            setIsLoadingPipelineRuns(false);
         }
     }, []);
 
-    // Load more pipeline runs (append)
     const loadMorePipelineRuns = useCallback(async () => {
-        if (!pipelineRuns.has_more || !pipelineRuns.next_cursor || isLoadingMoreRuns) return;
+        if (!pipelineRuns.has_more || !pipelineRuns.next_cursor || isLoadingMorePipelineRuns) return;
 
-        setIsLoadingMoreRuns(true);
+        setIsLoadingMorePipelineRuns(true);
         try {
             const res = await fetch(
                 `${API_BASE}/monitoring/pipeline-runs/cursor?limit=20&cursor=${pipelineRuns.next_cursor}`,
@@ -146,39 +144,58 @@ export default function MonitoringPage() {
         } catch (error) {
             console.error("Failed to load more pipeline runs:", error);
         } finally {
-            setIsLoadingMoreRuns(false);
+            setIsLoadingMorePipelineRuns(false);
         }
-    }, [pipelineRuns.has_more, pipelineRuns.next_cursor, isLoadingMoreRuns]);
+    }, [pipelineRuns.has_more, pipelineRuns.next_cursor, isLoadingMorePipelineRuns]);
 
-    // Fetch background jobs
-    const fetchBackgroundJobs = useCallback(async () => {
+    // Fetch audit logs (per-build)
+    const fetchAuditLogs = useCallback(async () => {
         try {
-            const res = await fetch(`${API_BASE}/monitoring/jobs`, {
+            const res = await fetch(`${API_BASE}/monitoring/audit-logs/cursor?limit=20`, {
                 credentials: "include",
             });
             if (res.ok) {
                 const data = await res.json();
-                setBackgroundJobs(data);
+                setAuditLogs(data);
             }
         } catch (error) {
-            console.error("Failed to fetch background jobs:", error);
+            console.error("Failed to fetch audit logs:", error);
         } finally {
-            setIsLoadingJobs(false);
+            setIsLoadingAuditLogs(false);
         }
     }, []);
 
-    // Fetch logs from MongoDB via monitoring API
+    const loadMoreAuditLogs = useCallback(async () => {
+        if (!auditLogs.has_more || !auditLogs.next_cursor || isLoadingMoreAuditLogs) return;
+
+        setIsLoadingMoreAuditLogs(true);
+        try {
+            const res = await fetch(
+                `${API_BASE}/monitoring/audit-logs/cursor?limit=20&cursor=${auditLogs.next_cursor}`,
+                { credentials: "include" }
+            );
+            if (res.ok) {
+                const data = await res.json();
+                setAuditLogs((prev) => ({
+                    logs: [...prev.logs, ...data.logs],
+                    next_cursor: data.next_cursor,
+                    has_more: data.has_more,
+                }));
+            }
+        } catch (error) {
+            console.error("Failed to load more audit logs:", error);
+        } finally {
+            setIsLoadingMoreAuditLogs(false);
+        }
+    }, [auditLogs.has_more, auditLogs.next_cursor, isLoadingMoreAuditLogs]);
+
+    // Fetch system logs
     const fetchLogs = useCallback(async () => {
         setIsLoadingLogs(true);
         try {
-            // Build query params
             const params = new URLSearchParams();
-            if (levelFilter !== "all") {
-                params.set("level", levelFilter.toUpperCase());
-            }
-            if (containerFilter !== "all") {
-                params.set("source", containerFilter);
-            }
+            if (levelFilter !== "all") params.set("level", levelFilter.toUpperCase());
+            if (containerFilter !== "all") params.set("source", containerFilter);
             params.set("limit", "100");
 
             const res = await fetch(`${API_BASE}/monitoring/logs?${params.toString()}`, {
@@ -187,7 +204,6 @@ export default function MonitoringPage() {
 
             if (res.ok) {
                 const data = await res.json();
-                // Parse new response format from MongoDB
                 if (data.logs && Array.isArray(data.logs)) {
                     const parsedLogs: LogEntry[] = data.logs.map((log: any) => ({
                         timestamp: log.timestamp || new Date().toISOString(),
@@ -200,7 +216,6 @@ export default function MonitoringPage() {
             }
         } catch (error) {
             console.error("Failed to fetch logs:", error);
-            // Set demo logs if API is not available
             setLogs([
                 {
                     timestamp: new Date().toISOString().replace("T", " ").split(".")[0],
@@ -218,9 +233,9 @@ export default function MonitoringPage() {
     useEffect(() => {
         fetchSystemStats();
         fetchPipelineRuns();
-        fetchBackgroundJobs();
+        fetchAuditLogs();
         fetchLogs();
-    }, [fetchSystemStats, fetchPipelineRuns, fetchBackgroundJobs, fetchLogs]);
+    }, [fetchSystemStats, fetchPipelineRuns, fetchAuditLogs, fetchLogs]);
 
     // Auto-refresh every 10 seconds
     useEffect(() => {
@@ -229,25 +244,27 @@ export default function MonitoringPage() {
         const interval = setInterval(() => {
             fetchSystemStats();
             fetchPipelineRuns();
-            fetchBackgroundJobs();
+            fetchAuditLogs();
         }, 10000);
 
         return () => clearInterval(interval);
-    }, [isPaused, fetchSystemStats, fetchPipelineRuns, fetchBackgroundJobs]);
+    }, [isPaused, fetchSystemStats, fetchPipelineRuns, fetchAuditLogs]);
 
-    // Subscribe to WebSocket events
+    // WebSocket subscriptions
     useEffect(() => {
         const unsubscribePipeline = subscribe("PIPELINE_RUN_UPDATE", () => {
             fetchPipelineRuns();
+            fetchAuditLogs();
         });
 
         const unsubscribeRepo = subscribe("REPO_UPDATE", () => {
             fetchPipelineRuns();
-            fetchBackgroundJobs();
+            fetchAuditLogs();
         });
 
         const unsubscribeBuild = subscribe("BUILD_UPDATE", () => {
             fetchPipelineRuns();
+            fetchAuditLogs();
         });
 
         return () => {
@@ -255,15 +272,15 @@ export default function MonitoringPage() {
             unsubscribeRepo();
             unsubscribeBuild();
         };
-    }, [subscribe, fetchPipelineRuns, fetchBackgroundJobs]);
+    }, [subscribe, fetchPipelineRuns, fetchAuditLogs]);
 
     const handleRefreshAll = () => {
         setIsLoadingStats(true);
-        setIsLoadingRuns(true);
-        setIsLoadingJobs(true);
+        setIsLoadingPipelineRuns(true);
+        setIsLoadingAuditLogs(true);
         fetchSystemStats();
         fetchPipelineRuns();
-        fetchBackgroundJobs();
+        fetchAuditLogs();
         fetchLogs();
     };
 
@@ -282,8 +299,7 @@ export default function MonitoringPage() {
                 </div>
                 <div className="flex items-center gap-2">
                     <span
-                        className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"
-                            }`}
+                        className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
                         title={isConnected ? "WebSocket connected" : "WebSocket disconnected"}
                     />
                     <Button variant="outline" onClick={handleRefreshAll}>
@@ -296,19 +312,25 @@ export default function MonitoringPage() {
             {/* System Stats */}
             <SystemStatsCard stats={systemStats} isLoading={isLoadingStats} />
 
-            {/* Pipeline Runs and Background Jobs */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <PipelineRunsTable
-                    runs={pipelineRuns.runs}
-                    hasMore={pipelineRuns.has_more}
-                    isLoading={isLoadingRuns}
-                    isLoadingMore={isLoadingMoreRuns}
-                    onLoadMore={loadMorePipelineRuns}
-                />
-                <BackgroundJobsTable jobs={backgroundJobs} isLoading={isLoadingJobs} />
-            </div>
+            {/* Pipeline Runs (High-level) */}
+            <PipelineTracingTable
+                runs={pipelineRuns.runs}
+                hasMore={pipelineRuns.has_more}
+                isLoading={isLoadingPipelineRuns}
+                isLoadingMore={isLoadingMorePipelineRuns}
+                onLoadMore={loadMorePipelineRuns}
+            />
 
-            {/* Logs Viewer */}
+            {/* Feature Audit Logs (Per-build) */}
+            <FeatureAuditLogsTable
+                logs={auditLogs.logs}
+                hasMore={auditLogs.has_more}
+                isLoading={isLoadingAuditLogs}
+                isLoadingMore={isLoadingMoreAuditLogs}
+                onLoadMore={loadMoreAuditLogs}
+            />
+
+            {/* System Logs */}
             <LogsViewer
                 logs={logs}
                 isLoading={isLoadingLogs}

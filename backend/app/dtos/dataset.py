@@ -111,18 +111,6 @@ class DatasetCreateRequest(BaseModel):
     preview: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-class DatasetUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    mapped_fields: Optional[DatasetMappingDto] = None
-    stats: Optional[DatasetStatsDto] = None
-    ci_provider: Optional[str] = None
-    build_filters: Optional[BuildValidationFiltersDto] = None
-    source_languages: Optional[List[str]] = None
-    test_frameworks: Optional[List[str]] = None
-    setup_step: Optional[int] = None
-
-
 class RepoValidationItem(BaseModel):
     """Single repo validation result."""
 

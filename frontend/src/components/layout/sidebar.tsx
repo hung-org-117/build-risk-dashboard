@@ -1,10 +1,10 @@
 "use client";
 
+import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
-import { Activity, BadgeCheck, Database, GitBranch, Home, Settings, Users } from "lucide-react";
+import { Activity, BadgeCheck, Database, GitBranch, Home, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/contexts/auth-context";
 
 const navigation = [
   {
@@ -53,14 +53,6 @@ const navigation = [
     icon: Users,
     adminOnly: true, // Admin only
     guestOnly: false,
-    userOnly: false,
-  },
-  {
-    label: "Settings",
-    href: "/settings",
-    icon: Settings,
-    adminOnly: false,
-    guestOnly: true, // Admin + Guest can access settings
     userOnly: false,
   },
 ];

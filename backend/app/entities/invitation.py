@@ -2,11 +2,12 @@
 Invitation Entity - Stores user invitation tokens for non-org members.
 """
 
-from datetime import datetime, timezone, timedelta
+import secrets
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
+
 from pydantic import Field
-import secrets
 
 from .base import BaseEntity, PyObjectId
 
@@ -28,11 +29,8 @@ class Invitation(BaseEntity):
     When they login via GitHub OAuth, the system checks for valid invitation.
     """
 
-    # Invitation target (at least one required)
+    # Invitation target
     email: str = Field(..., description="Email address of the invited user")
-    github_username: Optional[str] = Field(
-        None, description="GitHub username (optional)"
-    )
 
     # Invitation state
     status: InvitationStatus = InvitationStatus.PENDING
@@ -42,9 +40,7 @@ class Invitation(BaseEntity):
     role: str = Field(default="user", description="Role to assign when accepted")
 
     # Metadata
-    invited_by: PyObjectId = Field(
-        ..., description="Admin user ID who created invitation"
-    )
+    invited_by: PyObjectId = Field(..., description="Admin user ID who created invitation")
     expires_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=7)
     )

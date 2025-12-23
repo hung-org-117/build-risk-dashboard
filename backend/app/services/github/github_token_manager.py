@@ -2,14 +2,12 @@
 
 This module provides utility functions for token hashing, masking,
 and verification against GitHub API.
-
-NOTE: Token storage is now handled by Redis pool (redis_token_pool.py).
-This module only contains utility functions.
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
@@ -19,6 +17,8 @@ from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 GITHUB_USER_URL = "https://api.github.com/user"
 GITHUB_RATE_LIMIT_URL = "https://api.github.com/rate_limit"
@@ -92,9 +92,7 @@ async def verify_github_token(access_token: str) -> Tuple[bool, Optional[dict]]:
                     "remaining": int(remaining),
                     "limit": int(limit) if limit else 5000,
                     "reset_at": (
-                        datetime.fromtimestamp(int(reset), tz=timezone.utc)
-                        if reset
-                        else None
+                        datetime.fromtimestamp(int(reset), tz=timezone.utc) if reset else None
                     ),
                 }
 
@@ -120,12 +118,10 @@ async def get_token_rate_limit(access_token: str) -> Optional[dict]:
                 return {
                     "remaining": core.get("remaining", 0),
                     "limit": core.get("limit", 5000),
-                    "reset_at": datetime.fromtimestamp(
-                        core.get("reset", 0), tz=timezone.utc
-                    ),
+                    "reset_at": datetime.fromtimestamp(core.get("reset", 0), tz=timezone.utc),
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get token rate limit: {e}")
     return None
 
 
@@ -164,9 +160,7 @@ async def check_github_token_status(
 async def get_valid_github_token(
     db: Database, user_id: ObjectId, verify_with_api: bool = False
 ) -> str:
-    status_code, identity = await check_github_token_status(
-        db, user_id, verify_with_api
-    )
+    status_code, identity = await check_github_token_status(db, user_id, verify_with_api)
 
     if status_code == GitHubTokenStatus.MISSING:
         raise HTTPException(
@@ -212,9 +206,7 @@ async def mark_github_oauth_token_invalid(
     )
 
 
-async def refresh_github_token_if_needed(
-    db: Database, user_id: ObjectId
-) -> Optional[str]:
+async def refresh_github_token_if_needed(db: Database, user_id: ObjectId) -> Optional[str]:
     identity = db.oauth_identities.find_one({"user_id": user_id, "provider": "github"})
 
     if not identity:
@@ -257,9 +249,7 @@ async def refresh_github_token_if_needed(
             # Calculate new expiration time
             new_expires_at = None
             if expires_in:
-                new_expires_at = datetime.now(timezone.utc) + timedelta(
-                    seconds=expires_in
-                )
+                new_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
             # Update token in database
             db.oauth_identities.update_one(
@@ -279,17 +269,13 @@ async def refresh_github_token_if_needed(
 
     except Exception:
         # Refresh failed - mark token as invalid
-        await mark_github_oauth_token_invalid(
-            db, identity["_id"], reason="refresh_failed"
-        )
+        await mark_github_oauth_token_invalid(db, identity["_id"], reason="refresh_failed")
         return None
 
 
 def requires_github_token(verify_with_api: bool = False):
     async def dependency(user_id: str, db: Database) -> str:
         """Get valid GitHub token or raise exception."""
-        return await get_valid_github_token(
-            db, ObjectId(user_id), verify_with_api=verify_with_api
-        )
+        return await get_valid_github_token(db, ObjectId(user_id), verify_with_api=verify_with_api)
 
     return dependency

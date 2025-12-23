@@ -20,6 +20,7 @@ from app.dtos.invitation import (
 from app.entities.invitation import Invitation
 from app.repositories.invitation import InvitationRepository
 from app.repositories.user import UserRepository
+from app.services.email_templates import render_email
 from app.services.notification_service import get_notification_manager
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,6 @@ class InvitationService:
         return InvitationResponse(
             _id=str(invitation.id),
             email=invitation.email,
-            github_username=invitation.github_username,
             status=invitation.status,
             role=invitation.role,
             invited_by=str(invitation.invited_by),
@@ -95,7 +95,6 @@ class InvitationService:
         # Create invitation
         invitation = Invitation(
             email=payload.email,
-            github_username=payload.github_username,
             role=payload.role,
             invited_by=admin_id,
         )
@@ -164,56 +163,23 @@ class InvitationService:
             invite_url = f"{settings.FRONTEND_BASE_URL}/login?invite={invitation.token}"
             expires_str = invitation.expires_at.strftime("%Y-%m-%d %H:%M UTC")
 
+            # Determine subject
             subject = f"You've been invited to {settings.APP_NAME}"
-            body = f"""Hello,
 
-You have been invited to join {settings.APP_NAME}.
+            # Prepare context for template
+            context = {
+                "app_name": settings.APP_NAME,
+                "invite_url": invite_url,
+                "expires_str": expires_str,
+            }
 
-To accept this invitation and create your account, please visit:
-{invite_url}
-
-This invitation will expire on {expires_str}.
-
-You will need to login with your GitHub account to complete the registration.
-
-If you did not expect this invitation, you can safely ignore this email.
-
-Best regards,
-The {settings.APP_NAME} Team
-"""
-
-            html_body = f"""
-<html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <h2>You've been invited to {settings.APP_NAME}</h2>
-    <p>Hello,</p>
-    <p>You have been invited to join <strong>{settings.APP_NAME}</strong>.</p>
-    <p>
-        <a href="{invite_url}" 
-           style="display: inline-block; padding: 12px 24px; background-color: #2563eb; 
-                  color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
-            Accept Invitation
-        </a>
-    </p>
-    <p style="color: #666; font-size: 0.9em;">
-        This invitation will expire on <strong>{expires_str}</strong>.
-    </p>
-    <p style="color: #666; font-size: 0.9em;">
-        You will need to login with your GitHub account to complete the registration.
-    </p>
-    <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-    <p style="color: #999; font-size: 0.8em;">
-        If you did not expect this invitation, you can safely ignore this email.
-    </p>
-</body>
-</html>
-"""
+            # Render HTML body using Handlebars template
+            html_body = render_email("invitation", context, subject=subject)
 
             manager.send_gmail(
                 subject=subject,
-                body=body,
                 html_body=html_body,
-                recipients=[invitation.email],
+                to_recipients=[invitation.email],
             )
             logger.info(f"Invitation email sent to {invitation.email}")
 
@@ -224,8 +190,7 @@ The {settings.APP_NAME} Team
 
 def find_valid_invitation(
     db: Database,
-    email: Optional[str] = None,
-    github_username: Optional[str] = None,
+    email: str,
 ) -> Optional[Invitation]:
     """
     Helper function to find valid invitation (for use in OAuth flow).
@@ -233,10 +198,9 @@ def find_valid_invitation(
     Args:
         db: Database connection
         email: User's email
-        github_username: User's GitHub login
 
     Returns:
         Valid invitation if found
     """
     repo = InvitationRepository(db)
-    return repo.find_valid_invitation(email=email, github_username=github_username)
+    return repo.find_valid_invitation(email=email)

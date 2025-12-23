@@ -137,47 +137,6 @@ export function NotificationsTab() {
           )}
         </CardContent>
       </Card>
-
-      {/* Slack */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Slack Notifications</CardTitle>
-          <CardDescription>Send notifications to Slack webhook</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="slack-enabled">Enable Slack Notifications</Label>
-            <Switch
-              id="slack-enabled"
-              checked={settings.notifications.slack_enabled}
-              onCheckedChange={(checked) =>
-                setSettings({
-                  ...settings,
-                  notifications: { ...settings.notifications, slack_enabled: checked },
-                })
-              }
-            />
-          </div>
-          {settings.notifications.slack_enabled && (
-            <div className="space-y-2">
-              <Label htmlFor="slack-webhook">Webhook URL</Label>
-              <Input
-                id="slack-webhook"
-                type="password"
-                value={settings.notifications.slack_webhook_url || ''}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    notifications: { ...settings.notifications, slack_webhook_url: e.target.value },
-                  })
-                }
-                placeholder="https://hooks.slack.com/services/..."
-              />
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

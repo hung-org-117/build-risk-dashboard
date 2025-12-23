@@ -95,9 +95,6 @@ async def sync_user_github_repos(access_token: str, max_repos: int = 100) -> lis
     """
     Fetch list of repos the user has access to on GitHub.
 
-    This is used for RBAC - users can automatically see repos they have
-    GitHub access to, without needing manual grants.
-
     Args:
         access_token: GitHub OAuth access token
         max_repos: Maximum number of repos to fetch (default 100)
@@ -123,11 +120,12 @@ async def sync_user_github_repos(access_token: str, max_repos: int = 100) -> lis
             )
             if response.status_code == 200:
                 data = response.json()
-                repos = [
-                    repo.get("full_name") for repo in data if repo.get("full_name")
-                ]
-    except Exception:
-        pass  # Silently fail - this is optional functionality
+                repos = [repo.get("full_name") for repo in data if repo.get("full_name")]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync GitHub repositories: {str(e)}",
+        )
 
     return repos
 
@@ -195,9 +193,7 @@ async def exchange_code_for_token(
     access_token = token_data.get("access_token")
     if not access_token:
         error_details = (
-            token_data.get("error_description")
-            or token_data.get("error")
-            or str(token_data)
+            token_data.get("error_description") or token_data.get("error") or str(token_data)
         )
         print(f"GitHub OAuth Error: {error_details}")
         raise HTTPException(
@@ -234,9 +230,7 @@ async def exchange_code_for_token(
                 if exc.response.status_code != 404:
                     raise
                 emails = []
-            primary = next(
-                (item.get("email") for item in emails if item.get("primary")), None
-            )
+            primary = next((item.get("email") for item in emails if item.get("primary")), None)
             fallback = emails[0]["email"] if emails else None
             email = primary or fallback
 
@@ -262,20 +256,12 @@ async def exchange_code_for_token(
     is_org_member = await check_org_membership(access_token, github_login)
 
     # If not org member, check for valid invitation
-    invitation = None
     if not is_org_member:
-        from app.services.invitation_service import find_valid_invitation
-
-        invitation = find_valid_invitation(
-            db, email=email, github_username=github_login
+        org_name = settings.GITHUB_ORGANIZATION
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied. You must be a member of the '{org_name}' organization to use this application.",
         )
-
-        if not invitation:
-            org_name = settings.GITHUB_ORGANIZATION
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. You must be a member of the '{org_name}' organization or have a valid invitation to use this application.",
-            )
 
     user_doc, identity_doc = upsert_github_identity(
         db,
@@ -292,38 +278,19 @@ async def exchange_code_for_token(
         connected_at=datetime.now(timezone.utc),
     )
 
-    # Sync user's GitHub repo access for RBAC (optional, non-blocking)
+    # Sync user's GitHub repo access for RBAC
     # This caches which repos the user can access on GitHub
-    try:
-        accessible_repos = await sync_user_github_repos(access_token)
-        if accessible_repos:
-            db.users.update_one(
-                {"_id": user_doc["_id"]},
-                {
-                    "$set": {
-                        "github_accessible_repos": accessible_repos,
-                        "github_repos_synced_at": datetime.now(timezone.utc),
-                    }
-                },
-            )
-    except Exception:
-        pass  # Non-critical - don't fail login if sync fails
-
-    # Accept invitation if user logged in via invitation
-    if invitation:
-        try:
-            from app.services.invitation_service import InvitationService
-
-            invitation_service = InvitationService(db)
-            invitation_service.accept_invitation(invitation, user_doc["_id"])
-
-            # Update user role if invitation specifies a different role
-            if invitation.role and invitation.role != "user":
-                db.users.update_one(
-                    {"_id": user_doc["_id"]}, {"$set": {"role": invitation.role}}
-                )
-        except Exception:
-            pass  # Non-critical - invitation already used for access check
+    accessible_repos = await sync_user_github_repos(access_token)
+    if accessible_repos:
+        db.users.update_one(
+            {"_id": user_doc["_id"]},
+            {
+                "$set": {
+                    "github_accessible_repos": accessible_repos,
+                    "github_repos_synced_at": datetime.now(timezone.utc),
+                }
+            },
+        )
 
     db.github_states.update_one(
         {"state": state},

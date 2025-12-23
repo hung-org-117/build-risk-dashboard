@@ -102,6 +102,7 @@ async def export_version(
     dataset_id: str,
     version_id: str,
     format: str = Query("csv", regex="^(csv|json)$"),
+    normalization: str = Query("none", regex="^(none|minmax|zscore|robust|maxabs|log|decimal)$"),
     features: Optional[List[str]] = Query(None),
     db=Depends(get_db),
     current_user: dict = Depends(RequirePermission(Permission.EXPORT_DATA)),
@@ -110,6 +111,14 @@ async def export_version(
     Export version data in CSV or JSON format.
 
     - **format**: Export format (csv or json)
+    - **normalization**: Normalization method:
+        - none: No transformation
+        - minmax: Scale to [0, 1]
+        - zscore: Standardization (mean=0, std=1)
+        - robust: Median-IQR based (resistant to outliers)
+        - maxabs: Scale by max absolute value [-1, 1]
+        - log: Log transformation for skewed data
+        - decimal: Divide by power of 10
     - **features**: Optional list of features to include (defaults to all selected features)
     """
     service = DatasetVersionService(db)
@@ -119,6 +128,7 @@ async def export_version(
         user_id=str(current_user["_id"]),
         format=format,
         features=features,
+        normalization=normalization,
     )
 
     return StreamingResponse(

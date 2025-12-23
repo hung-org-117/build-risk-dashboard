@@ -11,6 +11,7 @@ from app.entities.dataset_version import DatasetVersion, VersionStatus
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.services.dataset_service import DatasetService
+from app.services.normalization_service import NormalizationMethod, NormalizationService
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +168,9 @@ class DatasetVersionService:
         user_id: str,
         format: str = "csv",
         features: Optional[List[str]] = None,
+        normalization: str = "none",
     ) -> ExportResult:
-        """Export version data from DB in specified format."""
+        """Export version data from DB in specified format with optional normalization."""
 
         dataset = self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
@@ -185,6 +187,15 @@ class DatasetVersionService:
                 status_code=400,
                 detail=f"Unsupported format: {format}. Use csv or json.",
             )
+
+        # Validate normalization method
+        try:
+            norm_method = NormalizationMethod(normalization)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid normalization: {normalization}. Use none/minmax/zscore.",
+            ) from exc
 
         # Get count to check if we have data
         count = self._enrichment_build_repo.count_by_query(
@@ -208,6 +219,7 @@ class DatasetVersionService:
             version_id=version_id,
             format=format,
             features=features or version.selected_features,
+            normalization=norm_method,
         )
 
         media_type = "text/csv" if format == "csv" else "application/json"
@@ -224,8 +236,9 @@ class DatasetVersionService:
         version_id: str,
         format: str,
         features: Optional[List[str]] = None,
+        normalization: NormalizationMethod = NormalizationMethod.NONE,
     ) -> Generator[str, None, None]:
-        """Stream enrichment builds as CSV or JSON."""
+        """Stream enrichment builds as CSV or JSON with optional normalization."""
         from app.utils.export_utils import format_feature_row, stream_csv, stream_json
 
         cursor = self._enrichment_build_repo.get_enriched_for_export(
@@ -241,10 +254,22 @@ class DatasetVersionService:
                 version_id=ObjectId(version_id),
             )
 
+        # Calculate normalization params if needed
+        norm_params_map = None
+        if normalization != NormalizationMethod.NONE:
+            norm_params_map = self._calculate_normalization_params(
+                dataset_id=dataset_id,
+                version_id=version_id,
+                features=features or all_feature_keys or [],
+                method=normalization,
+            )
+
         if format == "csv":
-            return stream_csv(cursor, format_feature_row, features, all_feature_keys)
+            return stream_csv(
+                cursor, format_feature_row, features, all_feature_keys, norm_params_map
+            )
         else:
-            return stream_json(cursor, format_feature_row, features)
+            return stream_json(cursor, format_feature_row, features, norm_params_map)
 
     # Async Export Methods (for large datasets)
     def create_export_job(
@@ -571,6 +596,36 @@ class DatasetVersionService:
             version_id=ObjectId(version_id),
             features=features,
         )
+
+    def _calculate_normalization_params(
+        self,
+        dataset_id: str,
+        version_id: str,
+        features: List[str],
+        method: NormalizationMethod,
+    ) -> dict:
+        """Calculate normalization parameters for all features."""
+        from typing import Dict
+
+        if method == NormalizationMethod.NONE:
+            return {}
+
+        # Collect all values for each feature
+        feature_values: Dict[str, list] = {f: [] for f in features}
+
+        cursor = self._enrichment_build_repo.get_enriched_for_export(
+            dataset_id=ObjectId(dataset_id),
+            version_id=ObjectId(version_id),
+        )
+
+        for doc in cursor:
+            feature_dict = doc.get("features", {})
+            for feature_name in features:
+                if feature_name in feature_dict:
+                    feature_values[feature_name].append(feature_dict[feature_name])
+
+        # Calculate params
+        return NormalizationService.calculate_params_batch(feature_values, method)
 
     def _revoke_task(self, task_id: Optional[str]) -> None:
         """Revoke a Celery task if it exists."""

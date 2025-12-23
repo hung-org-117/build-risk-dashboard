@@ -13,7 +13,6 @@ from app.dtos import (
     DatasetCreateRequest,
     DatasetListResponse,
     DatasetResponse,
-    DatasetUpdateRequest,
 )
 from app.entities.dataset import DatasetMapping, DatasetProject, DatasetStats
 from app.repositories.dataset_build_repository import DatasetBuildRepository
@@ -92,72 +91,6 @@ class DatasetService:
             self._validate_required_mapping(data["mapped_fields"], data["columns"])
         dataset = self.repo.insert_one(data)
         return self._serialize(dataset)
-
-    def update_dataset(
-        self, dataset_id: str, user_id: str, payload: DatasetUpdateRequest
-    ) -> DatasetResponse:
-        dataset = self.repo.find_by_id(dataset_id)
-        if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
-
-        payload_dict = payload.model_dump(exclude_none=True)
-        updates = {}
-
-        if "name" in payload_dict:
-            updates["name"] = payload_dict["name"]
-        if "description" in payload_dict:
-            updates["description"] = payload_dict["description"]
-        if "setup_step" in payload_dict:
-            updates["setup_step"] = payload_dict["setup_step"]
-        if "source_languages" in payload_dict:
-            updates["source_languages"] = payload_dict["source_languages"]
-        if "test_frameworks" in payload_dict:
-            updates["test_frameworks"] = payload_dict["test_frameworks"]
-
-        if "mapped_fields" in payload_dict:
-            merged = {}
-            if getattr(dataset, "mapped_fields", None):
-                merged.update(dataset.mapped_fields.model_dump())
-            merged.update(payload_dict["mapped_fields"])
-            updates["mapped_fields"] = merged
-            self._validate_required_mapping(updates["mapped_fields"], dataset.columns)
-
-            # Trigger unified validation if all required fields are set
-            new_repo_name = merged.get("repo_name")
-            validation_status = getattr(dataset, "validation_status", None)
-
-            # Trigger unified validation if all required fields are set
-            if new_repo_name and merged.get("build_id") and validation_status in [None, "pending"]:
-                from app.tasks.dataset_validation import (
-                    dataset_validation_orchestrator,
-                )
-
-                task = dataset_validation_orchestrator.delay(dataset_id)
-                updates["validation_task_id"] = task.id
-                updates["validation_status"] = "validating"
-                logger.info(
-                    f"Dispatched distributed validation task {task.id} for dataset {dataset_id}"
-                )
-
-        if "ci_provider" in payload_dict:
-            updates["ci_provider"] = payload_dict["ci_provider"]
-
-        if "build_filters" in payload_dict:
-            updates["build_filters"] = payload_dict["build_filters"]
-
-        if "stats" in payload_dict:
-            merged_stats = {}
-            if getattr(dataset, "stats", None):
-                merged_stats.update(dataset.stats.model_dump())
-            merged_stats.update(payload_dict["stats"])
-            updates["stats"] = merged_stats
-
-        if not updates:
-            return self._serialize(dataset)
-
-        updates["updated_at"] = datetime.now(timezone.utc)
-        updated = self.repo.update_one(dataset_id, updates)
-        return self._serialize(updated or dataset)
 
     def _guess_mapping(self, columns: Sequence[str]) -> Dict[str, Optional[str]]:
         """Best-effort mapping for required fields based on column names."""

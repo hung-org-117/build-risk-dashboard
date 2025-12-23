@@ -1,6 +1,6 @@
 "use client";
 
-import { ExportModal, type ExportAdapter } from "@/components/common/ExportModal";
+import { ExportModal, type ExportAdapter, type NormalizationType } from "@/components/common/ExportModal";
 import { datasetVersionApi } from "@/lib/api";
 
 interface ExportVersionModalProps {
@@ -28,10 +28,21 @@ export function ExportVersionModal({
     const adapter: ExportAdapter = {
         name: versionName,
         totalRows,
-        downloadStream: (format) =>
-            datasetVersionApi.downloadExport(datasetId, versionId, format),
-        createAsyncJob: (format) =>
-            datasetVersionApi.createExportJob(datasetId, versionId, format),
+        supportsNormalization: true,
+        downloadStream: (format, normalization) =>
+            datasetVersionApi.downloadExport(
+                datasetId,
+                versionId,
+                format,
+                normalization || "none"
+            ),
+        createAsyncJob: (format, normalization) =>
+            datasetVersionApi.createExportJob(
+                datasetId,
+                versionId,
+                format,
+                normalization || "none"
+            ),
         getJobStatus: (jobId) =>
             datasetVersionApi.getExportJobStatus(datasetId, jobId),
         downloadJob: (jobId) =>

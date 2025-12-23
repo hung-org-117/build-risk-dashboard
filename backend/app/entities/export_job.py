@@ -1,10 +1,6 @@
-"""
-Export Job Entity - Tracks export job status and metadata.
-"""
-
 from datetime import datetime
 from enum import Enum
-from typing import Optional, List
+from typing import List, Optional
 
 from .base import BaseEntity, PyObjectId
 

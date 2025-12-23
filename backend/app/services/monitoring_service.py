@@ -267,63 +267,97 @@ class MonitoringService:
             "has_more": has_more,
         }
 
-    def get_background_jobs(self) -> Dict[str, Any]:
-        """Get overview of all background jobs."""
-        from app.repositories.dataset_version import DatasetVersionRepository
-        from app.repositories.export_job import ExportJobRepository
+    def get_pipeline_runs_cursor(
+        self,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+        pipeline_type: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get pipeline runs with cursor-based pagination for infinite scroll."""
+        from bson import ObjectId
 
-        export_repo = ExportJobRepository(self.db)
-        version_repo = DatasetVersionRepository(self.db)
+        from app.entities.pipeline_run import PhaseStatus, PipelineStatus, PipelineType
+        from app.repositories.pipeline_run_repository import PipelineRunRepository
 
-        # Get active export jobs
-        active_exports = list(
-            export_repo.collection.find(
-                {"status": {"$in": ["pending", "processing"]}},
-                sort=[("created_at", -1)],
-                limit=10,
-            )
-        )
+        repo = PipelineRunRepository(self.db)
 
-        # Get active enrichment versions
-        active_enrichments = list(
-            version_repo.collection.find(
-                {"status": {"$in": ["pending", "processing"]}},
-                sort=[("created_at", -1)],
-                limit=10,
-            )
-        )
+        # Build query
+        query: Dict[str, Any] = {}
+        if pipeline_type:
+            query["pipeline_type"] = pipeline_type
+        if status:
+            query["status"] = status
+
+        # Add cursor condition
+        if cursor:
+            try:
+                query["_id"] = {"$lt": ObjectId(cursor)}
+            except Exception:
+                pass
+
+        # Find pipeline runs
+        runs = repo.find_many(query, sort=[("created_at", -1)], limit=limit + 1)
+
+        # Determine if there are more
+        has_more = len(runs) > limit
+        if has_more:
+            runs = runs[:limit]
+
+        next_cursor = str(runs[-1].id) if runs and has_more else None
+
+        def format_phase(phase: Any) -> Dict[str, Any]:
+            """Format phase for API response."""
+            if isinstance(phase, dict):
+                return {
+                    "phase_name": phase.get("phase_name", ""),
+                    "status": phase.get("status", "pending"),
+                    "processed_items": phase.get("processed_items", 0),
+                    "total_items": phase.get("total_items", 0),
+                    "failed_items": phase.get("failed_items", 0),
+                    "duration_seconds": phase.get("duration_seconds"),
+                }
+            return {
+                "phase_name": getattr(phase, "phase_name", ""),
+                "status": (
+                    phase.status.value
+                    if isinstance(getattr(phase, "status", None), PhaseStatus)
+                    else getattr(phase, "status", "pending")
+                ),
+                "processed_items": getattr(phase, "processed_items", 0),
+                "total_items": getattr(phase, "total_items", 0),
+                "failed_items": getattr(phase, "failed_items", 0),
+                "duration_seconds": getattr(phase, "duration_seconds", None),
+            }
 
         return {
-            "exports": [
+            "runs": [
                 {
-                    "id": str(j["_id"]),
-                    "status": j.get("status"),
-                    "format": j.get("format"),
-                    "total_rows": j.get("total_rows", 0),
-                    "processed_rows": j.get("processed_rows", 0),
-                    "created_at": (
-                        j.get("created_at").isoformat() if j.get("created_at") else None
+                    "correlation_id": run.correlation_id,
+                    "pipeline_type": (
+                        run.pipeline_type.value
+                        if isinstance(run.pipeline_type, PipelineType)
+                        else run.pipeline_type
                     ),
-                }
-                for j in active_exports
-            ],
-            "enrichments": [
-                {
-                    "id": str(e["_id"]),
-                    "dataset_id": str(e.get("dataset_id")),
-                    "status": e.get("status"),
-                    "total_rows": e.get("total_rows", 0),
-                    "processed_rows": e.get("processed_rows", 0),
-                    "created_at": (
-                        e.get("created_at").isoformat() if e.get("created_at") else None
+                    "status": (
+                        run.status.value if isinstance(run.status, PipelineStatus) else run.status
                     ),
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+                    "duration_seconds": run.duration_seconds,
+                    "total_repos": run.total_repos,
+                    "processed_repos": run.processed_repos,
+                    "total_builds": run.total_builds,
+                    "processed_builds": run.processed_builds,
+                    "failed_builds": run.failed_builds,
+                    "phases": [format_phase(p) for p in (run.phases or [])],
+                    "error_message": run.error_message,
+                    "triggered_by": run.triggered_by,
                 }
-                for e in active_enrichments
+                for run in runs
             ],
-            "summary": {
-                "active_exports": len(active_exports),
-                "active_enrichments": len(active_enrichments),
-            },
+            "next_cursor": next_cursor,
+            "has_more": has_more,
         }
 
     def get_system_logs(

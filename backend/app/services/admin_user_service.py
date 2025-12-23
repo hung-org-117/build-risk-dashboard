@@ -7,7 +7,6 @@ from fastapi import HTTPException, status
 from pymongo.database import Database
 
 from app.dtos.admin_user import (
-    AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserUpdateRequest,
@@ -52,24 +51,8 @@ class AdminUserService:
             )
         return self._to_response(user)
 
-    def create_user(self, payload: AdminUserCreateRequest) -> AdminUserResponse:
-        """Create a new user (UC1: Create User Account)."""
-        # Check if user already exists
-        existing = self.user_repo.find_by_email(payload.email)
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"User with email {payload.email} already exists",
-            )
-
-        user = self.user_repo.create_user(
-            email=payload.email,
-            name=payload.name,
-            role=payload.role,
-        )
-        return self._to_response(user)
-
     def update_user(self, user_id: str, payload: AdminUserUpdateRequest) -> AdminUserResponse:
+        """Update user profile."""
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
             raise HTTPException(
@@ -78,27 +61,6 @@ class AdminUserService:
             )
 
         user = self.user_repo.update_user(user_id, updates)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found",
-            )
-        return self._to_response(user)
-
-    def update_user_role(
-        self, user_id: str, new_role: str, current_admin_id: str
-    ) -> AdminUserResponse:
-        """Assign/change user role (UC2: Assign User Role)."""
-        # Prevent admin from demoting themselves if they're the last admin
-        if user_id == current_admin_id and new_role != "admin":
-            admin_count = self.user_repo.count_admins()
-            if admin_count <= 1:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot demote the last admin. Assign another admin first.",
-                )
-
-        user = self.user_repo.update_role(user_id, new_role)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

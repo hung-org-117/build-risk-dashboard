@@ -87,3 +87,9 @@ Khi thực hiện yêu cầu từ người dùng, AI phải:
 2. **Verify Presence**: Kiểm tra xem class/method đã tồn tại trong các file tương ứng chưa để tránh viết đè hoặc duplicate.
 3. **Explicit Refactoring**: Nếu người dùng đưa vào mã giả hoặc tên biến sai quy tắc (như `id`), AI phải tự động sửa lại thành tên tường minh (`dataset_id`) trong kết quả cuối cùng.
 4. **Full Implementation**: Viết code hoàn chỉnh cho các lớp (API, Service, Repo) trong một lần phản hồi. **Tuyệt đối không dùng `pass` hoặc `// Logic here**`. Nếu không biết logic, AI phải hỏi để hiểu trước khi viết.
+5. Luôn ưu tiên sử dụng thư viện/giải pháp đã tồn tại thay vì tự implement logic thủ công.
+Trước khi viết bất kỳ đoạn code nào, AI bắt buộc phải tự kiểm tra: logic này đã có thư viện ổn định, phổ biến, production-ready chưa?
+Nếu có → phải dùng thư viện.
+Nếu không → phải nêu rõ lý do (giới hạn thư viện, yêu cầu đặc thù, trade-off).
+Nghiêm cấm tái phát minh bánh xe (retry, validation, parsing, DAG, date-time, HTTP, logging,...).
+Không được “viết tay cho nhanh”. Khi có nghi ngờ, phải hỏi lại người dùng trước khi tự implement.

@@ -4,7 +4,6 @@ Monitoring API - Endpoints for system monitoring and observability.
 Endpoints:
 - GET /monitoring/system - System stats (Celery, Redis, MongoDB)
 - GET /monitoring/audit-logs - Feature extraction audit logs
-- GET /monitoring/jobs - Active background jobs
 - GET /monitoring/queues - Celery queue details
 """
 
@@ -74,21 +73,24 @@ def get_feature_audit_logs_cursor(
     return service.get_feature_audit_logs_cursor(limit=limit, cursor=cursor, status=status)
 
 
-@router.get("/jobs")
-def get_background_jobs(
+@router.get("/pipeline-runs/cursor")
+def get_pipeline_runs_cursor(
+    limit: int = Query(20, ge=1, le=100),
+    cursor: Optional[str] = Query(None, description="Cursor from previous page"),
+    pipeline_type: Optional[str] = Query(None, description="Filter by pipeline type"),
+    status: Optional[str] = Query(None, description="Filter by status"),
     db: Database = Depends(get_db),
     _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
 ):
     """
-    Get active background jobs overview.
+    Get pipeline runs with cursor-based pagination for infinite scroll.
 
-    Returns:
-    - Active export jobs
-    - Active scans (SonarQube, Trivy)
-    - Active enrichment jobs
+    Returns high-level pipeline run data with phases and progress.
     """
     service = MonitoringService(db)
-    return service.get_background_jobs()
+    return service.get_pipeline_runs_cursor(
+        limit=limit, cursor=cursor, pipeline_type=pipeline_type, status=status
+    )
 
 
 @router.get("/queues")

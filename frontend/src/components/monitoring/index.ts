@@ -1,4 +1,4 @@
 export { SystemStatsCard } from "./SystemStatsCard";
-export { PipelineRunsTable } from "./PipelineRunsTable";
-export { BackgroundJobsTable } from "./BackgroundJobsTable";
+export { FeatureAuditLogsTable } from "./FeatureAuditLogsTable";
+export { PipelineTracingTable } from "./PipelineTracingTable";
 export { LogsViewer } from "./LogsViewer";

@@ -1,10 +1,3 @@
-"""
-Email Template Renderer using Handlebars (pybars3).
-
-This module provides utilities for rendering email templates with Handlebars syntax.
-Templates are stored in app/templates/email/ directory.
-"""
-
 import os
 from datetime import datetime
 from functools import lru_cache
@@ -24,14 +17,6 @@ TEMPLATE_DIR = Path(__file__).parent.parent / "templates" / "email"
 class EmailTemplateRenderer:
     """
     Renders email templates using Handlebars (pybars3).
-
-    Usage:
-        renderer = EmailTemplateRenderer()
-        html = renderer.render("rate_limit_exhausted", {
-            "exhausted_tokens": 5,
-            "total_tokens": 5,
-            "next_reset_at": "14:30 UTC",
-        })
     """
 
     def __init__(self, template_dir: Optional[Path] = None):
@@ -80,9 +65,7 @@ class EmailTemplateRenderer:
             Exception: If template rendering fails
         """
         if not self.compiler:
-            raise RuntimeError(
-                "pybars3 is not installed. Install it with: uv add pybars3"
-            )
+            raise RuntimeError("pybars3 is not installed. Install it with: uv add pybars3")
 
         import logging
 

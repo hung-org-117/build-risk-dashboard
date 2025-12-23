@@ -5,7 +5,6 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 from app.entities.base import PyObjectIdStr
 
 

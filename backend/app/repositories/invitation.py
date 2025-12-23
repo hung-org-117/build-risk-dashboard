@@ -7,8 +7,9 @@ from typing import List, Optional
 
 from bson import ObjectId
 
-from .base import BaseRepository
 from app.entities.invitation import Invitation, InvitationStatus
+
+from .base import BaseRepository
 
 
 class InvitationRepository(BaseRepository[Invitation]):
@@ -32,47 +33,19 @@ class InvitationRepository(BaseRepository[Invitation]):
             }
         )
 
-    def find_valid_by_github_username(self, username: str) -> Optional[Invitation]:
-        """Find a valid invitation by GitHub username."""
-        now = datetime.now(timezone.utc)
-        return self.find_one(
-            {
-                "github_username": {"$regex": f"^{username}$", "$options": "i"},
-                "status": InvitationStatus.PENDING.value,
-                "expires_at": {"$gt": now},
-            }
-        )
-
-    def find_valid_invitation(
-        self, email: Optional[str] = None, github_username: Optional[str] = None
-    ) -> Optional[Invitation]:
+    def find_valid_invitation(self, email: str) -> Optional[Invitation]:
         """
-        Find a valid invitation matching email or GitHub username.
+        Find a valid invitation matching email.
 
         Args:
             email: User's email address
-            github_username: User's GitHub login
 
         Returns:
             Valid invitation if found, None otherwise
         """
-        # Try email first
-        if email:
-            invitation = self.find_valid_by_email(email)
-            if invitation:
-                return invitation
+        return self.find_valid_by_email(email)
 
-        # Try GitHub username
-        if github_username:
-            invitation = self.find_valid_by_github_username(github_username)
-            if invitation:
-                return invitation
-
-        return None
-
-    def list_all(
-        self, status: Optional[str] = None, limit: int = 100
-    ) -> List[Invitation]:
+    def list_all(self, status: Optional[str] = None, limit: int = 100) -> List[Invitation]:
         """List invitations with optional status filter."""
         query = {}
         if status:
@@ -101,9 +74,7 @@ class InvitationRepository(BaseRepository[Invitation]):
         )
         return result.modified_count
 
-    def accept_invitation(
-        self, invitation_id: str, user_id: ObjectId
-    ) -> Optional[Invitation]:
+    def accept_invitation(self, invitation_id: str, user_id: ObjectId) -> Optional[Invitation]:
         """Mark invitation as accepted."""
         now = datetime.now(timezone.utc)
         result = self.collection.find_one_and_update(
