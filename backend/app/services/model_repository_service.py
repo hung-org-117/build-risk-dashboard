@@ -472,6 +472,66 @@ class RepositoryService:
             self.repo_config.hard_delete(repo_oid, session=session)
             logger.info(f"Hard deleted repository config {repo_id}")
 
+    def get_import_progress(self, repo_id: str) -> dict:
+        """
+        Get detailed import progress breakdown.
+
+        Returns counts by ModelImportBuild status.
+        """
+        from app.repositories.model_import_build import ModelImportBuildRepository
+        from app.repositories.model_training_build import ModelTrainingBuildRepository
+
+        repo_doc = self.repo_config.find_by_id(repo_id)
+        if not repo_doc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Repository not found")
+
+        import_build_repo = ModelImportBuildRepository(self.db)
+        training_build_repo = ModelTrainingBuildRepository(self.db)
+
+        # Get counts by import status
+        import_status_counts = import_build_repo.count_by_status(repo_id)
+
+        # Get extraction status counts from training builds
+        extraction_pipeline = [
+            {"$match": {"model_repo_config_id": ObjectId(repo_id)}},
+            {"$group": {"_id": "$extraction_status", "count": {"$sum": 1}}},
+        ]
+        extraction_results = list(training_build_repo.collection.aggregate(extraction_pipeline))
+        extraction_counts = {r["_id"]: r["count"] for r in extraction_results if r["_id"]}
+
+        return {
+            "repo_id": repo_id,
+            "import_status": repo_doc.import_status.value
+            if hasattr(repo_doc.import_status, "value")
+            else repo_doc.import_status,
+            "import_version": repo_doc.import_version,
+            # Import phase (ModelImportBuild)
+            "import_builds": {
+                "pending": import_status_counts.get("pending", 0),
+                "fetched": import_status_counts.get("fetched", 0),
+                "ingesting": import_status_counts.get("ingesting", 0),
+                "ingested": import_status_counts.get("ingested", 0),
+                "failed": import_status_counts.get("failed", 0),
+                "total": sum(import_status_counts.values()),
+            },
+            # Processing phase (ModelTrainingBuild)
+            "training_builds": {
+                "pending": extraction_counts.get("pending", 0),
+                "completed": extraction_counts.get("completed", 0),
+                "partial": extraction_counts.get("partial", 0),
+                "failed": extraction_counts.get("failed", 0),
+                "total": sum(extraction_counts.values()),
+            },
+            # Summary from repo config
+            "summary": {
+                "total_builds_imported": repo_doc.total_builds_imported,
+                "total_builds_processed": repo_doc.total_builds_processed,
+                "total_builds_failed": repo_doc.total_builds_failed,
+            },
+        }
+
     def detect_languages(self, full_name: str, current_user: dict) -> dict:
         """
         Detect repository languages via GitHub API.

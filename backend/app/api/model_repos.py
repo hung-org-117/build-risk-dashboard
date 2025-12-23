@@ -127,12 +127,35 @@ def delete_repository(
     _admin: dict = Depends(RequirePermission(Permission.MANAGE_REPOS)),
 ):
     """
-    Delete (soft delete) a repository configuration (Admin only).
+    Permanently delete a repository configuration (Admin only).
 
-    This allows re-importing the same repository later.
+    Cascade deletes:
+    - All ModelImportBuild records
+    - All ModelTrainingBuild records
+    - The ModelRepoConfig itself
     """
     service = RepositoryService(db)
     service.delete_repository(repo_id)
+
+
+@router.get("/{repo_id}/import-progress")
+def get_import_progress(
+    repo_id: str = Path(..., description="Repository id (Mongo ObjectId)"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get detailed import progress for a repository.
+
+    Returns breakdown by ModelImportBuild status:
+    - pending: Queued for fetch
+    - fetched: Fetched from CI API
+    - ingesting: Clone/worktree/logs in progress
+    - ingested: Ready for feature extraction
+    - failed: Import failed
+    """
+    service = RepositoryService(db)
+    return service.get_import_progress(repo_id)
 
 
 @router.post("/{repo_id}/sync-run")

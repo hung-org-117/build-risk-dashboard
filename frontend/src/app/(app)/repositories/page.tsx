@@ -46,6 +46,7 @@ import type {
   RepositoryRecord
 } from "@/types";
 import { ImportRepoModal } from "./_components/ImportRepoModal";
+import { ImportProgressDisplay } from "./_components/ImportProgressDisplay";
 
 const Portal = ({ children }: { children: React.ReactNode }) => {
   const [mounted, setMounted] = useState(false);
@@ -201,7 +202,7 @@ export default function AdminReposPage() {
 
     // Confirmation dialog
     const confirmed = window.confirm(
-      `Are you sure you want to delete "${repo.full_name}"?\n\nThis will soft-delete the repository configuration. You can re-import it later.`
+      `Are you sure you want to delete "${repo.full_name}"?\n\nThis will permanently delete the repository configuration and all associated build data.`
     );
     if (!confirmed) return;
 
@@ -406,35 +407,13 @@ export default function AdminReposPage() {
                         {formatTimestamp(repo.last_synced_at)}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-3 text-sm">
-                            <span className="text-muted-foreground">
-                              {repo.total_builds_imported} imported
-                            </span>
-                            {repo.total_builds_imported > 0 && (
-                              <>
-                                <span className="text-green-600 dark:text-green-400">
-                                  {repo.total_builds_processed} processed
-                                </span>
-                                {repo.total_builds_failed > 0 && (
-                                  <span className="text-red-600 dark:text-red-400">
-                                    {repo.total_builds_failed} failed
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          {repo.total_builds_imported > 0 && (
-                            <div className="h-1.5 w-32 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                              <div
-                                className="h-full bg-green-500 transition-all"
-                                style={{
-                                  width: `${Math.round((repo.total_builds_processed / repo.total_builds_imported) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          )}
-                        </div>
+                        <ImportProgressDisplay
+                          repoId={repo.id}
+                          totalImported={repo.total_builds_imported}
+                          totalProcessed={repo.total_builds_processed}
+                          totalFailed={repo.total_builds_failed}
+                          importStatus={repo.import_status}
+                        />
                       </td>
                       <td className="px-6 py-4">
                         <DropdownMenu>

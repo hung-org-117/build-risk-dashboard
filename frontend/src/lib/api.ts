@@ -323,6 +323,34 @@ export const reposApi = {
   delete: async (repoId: string) => {
     await api.delete(`/repos/${repoId}`);
   },
+  getImportProgress: async (repoId: string) => {
+    const response = await api.get<{
+      repo_id: string;
+      import_status: string;
+      import_version: number;
+      import_builds: {
+        pending: number;
+        fetched: number;
+        ingesting: number;
+        ingested: number;
+        failed: number;
+        total: number;
+      };
+      training_builds: {
+        pending: number;
+        completed: number;
+        partial: number;
+        failed: number;
+        total: number;
+      };
+      summary: {
+        total_builds_imported: number;
+        total_builds_processed: number;
+        total_builds_failed: number;
+      };
+    }>(`/repos/${repoId}/import-progress`);
+    return response.data;
+  },
 };
 
 export const datasetsApi = {
