@@ -19,6 +19,7 @@ Architecture:
 """
 
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
@@ -28,12 +29,15 @@ from app.celery_app import celery_app
 from app.ci_providers.factory import get_ci_provider
 from app.ci_providers.models import BuildData, CIProvider
 from app.config import settings
+from app.core.tracing import TracingContext
 from app.database.mongo import get_database
 from app.entities import DatasetBuild, DatasetBuildStatus, ValidationStats
 from app.entities.dataset import DatasetValidationStatus
+from app.entities.pipeline_run import PipelineRun, PipelineType
 from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
 from app.repositories.dataset_repository import DatasetRepository
+from app.repositories.pipeline_run_repository import PipelineRunRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.services.github.github_client import get_public_github_client
@@ -114,14 +118,39 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
     Returns:
         Dict with dispatch status
     """
+    # Generate correlation_id for entire validation run
+    correlation_id = str(uuid.uuid4())
+    corr_prefix = f"[corr={correlation_id[:8]}]"
+
+    # Set tracing context for structured logging
+    TracingContext.set(
+        correlation_id=correlation_id,
+        dataset_id=dataset_id,
+        pipeline_type=PipelineType.DATASET_VALIDATION.value,
+    )
+
     db = get_database()
     dataset_repo = DatasetRepository(db)
+    pipeline_run_repo = PipelineRunRepository(db)
 
     try:
+        logger.info(f"{corr_prefix}[dataset_validation] Starting for dataset {dataset_id}")
+
         # Load dataset
         dataset = dataset_repo.find_by_id(dataset_id)
         if not dataset:
             raise ValueError(f"Dataset {dataset_id} not found")
+
+        # Create PipelineRun record for tracing
+        pipeline_run = PipelineRun(
+            correlation_id=correlation_id,
+            pipeline_type=PipelineType.DATASET_VALIDATION,
+            dataset_id=dataset.id,
+            triggered_by="system",
+            request_id=self.request.id,
+        )
+        pipeline_run.start()
+        pipeline_run_repo.insert_one(pipeline_run)
 
         # Mark validation started
         dataset_repo.update_one(
@@ -222,6 +251,7 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
                 dataset_id=dataset_id,
                 repo_builds_chunk=chunk,
                 chunk_index=i,
+                correlation_id=correlation_id,
             )
             for i, chunk in enumerate(repo_chunks)
         ]
@@ -236,6 +266,7 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
                         repo_name=repo_name,
                         raw_repo_id=None,  # Will be looked up in task
                         builds=build_chunk,
+                        correlation_id=correlation_id,
                     )
                 )
 
@@ -246,10 +277,15 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
         workflow = chain(
             group(repo_tasks),  # Stage 1: Validate repos first
             group(build_tasks),  # Stage 2: Validate builds
-            aggregate_validation_results.si(dataset_id=dataset_id),  # Final: Aggregate results
+            aggregate_validation_results.si(
+                dataset_id=dataset_id, correlation_id=correlation_id
+            ),  # Final: Aggregate results
         ).apply_async()
 
-        logger.info(f"Dispatched {len(repo_chunks)} repo chunks for dataset {dataset_id}")
+        logger.info(
+            f"{corr_prefix}[dataset_validation] Dispatched {len(repo_chunks)} repo chunks, "
+            f"workflow_id={workflow.id}"
+        )
 
         return {
             "status": "dispatched",
@@ -257,16 +293,18 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
             "total_builds": total_builds,
             "chunks": len(repo_chunks),
             "workflow_id": str(workflow.id),
+            "correlation_id": correlation_id,
         }
 
     except Exception as e:
-        logger.exception(f"Orchestrator failed: {e}")
+        logger.exception(f"{corr_prefix}[dataset_validation] Orchestrator failed: {e}")
         dataset_repo.update_one(
             dataset_id,
             {
                 "validation_status": DatasetValidationStatus.FAILED,
                 "validation_completed_at": utc_now(),
                 "validation_error": str(e),
+                "correlation_id": correlation_id,
             },
         )
         publish_dataset_update(dataset_id, "failed", error=str(e))
@@ -282,12 +320,14 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
     rate_limit=settings.VALIDATION_RATE_LIMIT,
     soft_time_limit=600,
     time_limit=660,
+    max_retries=3,  # Retry up to 3 times on failure, then raise exception
 )
 def validate_repo_chunk(
     self,
     dataset_id: str,
     repo_builds_chunk: Dict[str, List[Dict[str, str]]],
     chunk_index: int,
+    correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
     Validate a chunk of repositories and dispatch build validation tasks.
@@ -296,18 +336,21 @@ def validate_repo_chunk(
         dataset_id: Dataset being validated
         repo_builds_chunk: Dict mapping repo_name to build list
         chunk_index: Index of this chunk
+        correlation_id: Correlation ID for tracing
 
     Returns:
         Dict with validation results for this chunk
     """
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    log_ctx = f"{corr_prefix}[validate_repo_chunk][chunk={chunk_index}]"
     db = get_database()
     raw_repo_repo = RawRepositoryRepository(db)
     dataset_repo_stats_repo = DatasetRepoStatsRepository(db)
 
     # Check if cancelled before starting
     if is_validation_cancelled(dataset_id):
-        logger.info(f"Validation cancelled for {dataset_id}, skipping chunk {chunk_index}")
-        return {"chunk_index": chunk_index, "cancelled": True}
+        logger.info(f"{log_ctx} Validation cancelled, skipping chunk")
+        return {"chunk_index": chunk_index, "cancelled": True, "correlation_id": correlation_id}
 
     repos_valid = 0
     repos_not_found = 0
@@ -390,6 +433,7 @@ def validate_repo_chunk(
         "repos_valid": repos_valid,
         "repos_not_found": repos_not_found,
         "repos_private": repos_private,
+        "correlation_id": correlation_id,
     }
 
 
@@ -402,6 +446,7 @@ def validate_repo_chunk(
     rate_limit=settings.VALIDATION_RATE_LIMIT,
     soft_time_limit=300,
     time_limit=360,
+    max_retries=3,  # Retry up to 3 times on failure, then raise exception
 )
 def validate_builds_chunk(
     self,
@@ -409,6 +454,7 @@ def validate_builds_chunk(
     repo_name: str,
     raw_repo_id: str,
     builds: List[Dict[str, str]],
+    correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
     Validate a chunk of builds for a single repository.
@@ -420,6 +466,7 @@ def validate_builds_chunk(
         repo_name: Repository full name
         raw_repo_id: RawRepository ObjectId string
         builds: List of build info dicts
+        correlation_id: Correlation ID for tracing
 
     Returns:
         Dict with validation results
@@ -433,7 +480,7 @@ def validate_builds_chunk(
 
     # Check if cancelled before starting
     if is_validation_cancelled(dataset_id):
-        return {"repo_name": repo_name, "cancelled": True}
+        return {"repo_name": repo_name, "cancelled": True, "correlation_id": correlation_id}
 
     # Lookup raw_repo_id if not provided (dispatched from orchestrator)
     if raw_repo_id is None:
@@ -448,6 +495,7 @@ def validate_builds_chunk(
                 "builds_found": 0,
                 "builds_not_found": len(builds),
                 "skipped": True,
+                "correlation_id": correlation_id,
             }
 
     builds_found = 0
@@ -652,6 +700,7 @@ def validate_builds_chunk(
         "builds_found": builds_found,
         "builds_not_found": builds_not_found,
         "builds_filtered": builds_filtered,
+        "correlation_id": correlation_id,
     }
 
 
@@ -663,10 +712,12 @@ def validate_builds_chunk(
     queue="validation",
     soft_time_limit=300,
     time_limit=360,
+    max_retries=3,  # Retry up to 3 times on failure, then raise exception
 )
 def aggregate_validation_results(
     self,
     dataset_id: str,
+    correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
     Aggregate validation results from all worker tasks.
@@ -676,17 +727,28 @@ def aggregate_validation_results(
     2. Build validation group (validates builds, creates RawBuildRun records)
 
     Args:
-        build_chunk_results: Results from build validation tasks (passed from chain)
         dataset_id: Dataset that was validated
+        correlation_id: Correlation ID for tracing
 
     Returns:
         Final validation summary
     """
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    log_ctx = f"{corr_prefix}[aggregate_results][dataset={dataset_id}]"
+
+    # Set tracing context for logging
+    if correlation_id:
+        TracingContext.set(
+            correlation_id=correlation_id,
+            dataset_id=dataset_id,
+            pipeline_type=PipelineType.DATASET_VALIDATION.value,
+        )
 
     db = get_database()
     dataset_repo = DatasetRepository(db)
     dataset_build_repo = DatasetBuildRepository(db)
     dataset_repo_stats_repo = DatasetRepoStatsRepository(db)
+    pipeline_run_repo = PipelineRunRepository(db)
 
     # Get final stats from Redis (all tasks have completed at this point)
     stats = get_validation_stats(dataset_id)
@@ -741,7 +803,8 @@ def aggregate_validation_results(
                     is_valid=agg["builds_found"] > 0,
                 )
     except Exception as e:
-        logger.warning(f"Failed to aggregate per-repo stats: {e}")
+        logger.warning(f"{log_ctx} Failed to aggregate per-repo stats: {e}")
+        raise
 
     # Build final stats
     final_stats = ValidationStats(
@@ -779,6 +842,23 @@ def aggregate_validation_results(
     # Cleanup Redis
     cleanup_validation_stats(dataset_id)
 
+    # Complete PipelineRun record
+    if correlation_id:
+        from app.entities.pipeline_run import PipelineStatus
+
+        pipeline_run_repo.update_status(
+            correlation_id=correlation_id,
+            status=PipelineStatus.COMPLETED,
+            result_summary={
+                "repos_valid": repos_valid,
+                "repos_not_found": repos_not_found,
+                "builds_found": builds_found,
+                "builds_not_found": builds_not_found,
+                "builds_filtered": builds_filtered,
+                "build_coverage": build_coverage,
+            },
+        )
+
     logger.info(
         f"Dataset validation completed: {dataset_id}, "
         f"{repos_valid}/{total_repos} repos, {builds_found}/{total_builds} builds"
@@ -789,4 +869,5 @@ def aggregate_validation_results(
         "dataset_id": dataset_id,
         "stats": final_stats.model_dump(),
         "build_coverage": build_coverage,
+        "correlation_id": correlation_id,
     }

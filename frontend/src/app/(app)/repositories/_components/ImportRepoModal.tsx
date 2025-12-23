@@ -456,14 +456,27 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
         try {
             const payloads: RepoImportPayload[] = selectedList.map((repo) => {
                 const config = repoConfigs[repo.full_name];
+                // Build repo-scoped feature configs
+                const repoFeatureConfigs: Record<string, unknown> = {};
+                if (config.source_languages?.length) {
+                    repoFeatureConfigs.source_languages = config.source_languages;
+                }
+                if (config.test_frameworks?.length) {
+                    repoFeatureConfigs.test_frameworks = config.test_frameworks;
+                }
+
                 return {
                     full_name: repo.full_name,
                     provider: "github",
-                    test_frameworks: config.test_frameworks,
-                    source_languages: config.source_languages,
                     ci_provider: config.ci_provider,
                     max_builds: config.max_builds ?? null,
                     since_days: config.since_days ?? null,
+                    feature_configs: {
+                        global: {},
+                        repos: {
+                            [repo.full_name]: repoFeatureConfigs,
+                        },
+                    },
                 };
             });
 
@@ -477,6 +490,7 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setImporting(false);
         }
     };
+
 
 
     if (!isOpen) return null;

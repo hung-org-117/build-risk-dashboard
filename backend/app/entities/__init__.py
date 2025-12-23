@@ -51,6 +51,13 @@ from .notification import Notification, NotificationType
 # Other entities
 # from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
+from .pipeline_run import (
+    PhaseResult,
+    PhaseStatus,
+    PipelineRun,
+    PipelineStatus,
+    PipelineType,
+)
 from .raw_build_run import RawBuildRun
 
 # Raw data entities (shared across flows)
@@ -107,4 +114,10 @@ __all__ = [
     "QualityEvaluationStatus",
     "QualityIssue",
     "QualityIssueSeverity",
+    # Pipeline tracing
+    "PipelineRun",
+    "PipelineType",
+    "PipelineStatus",
+    "PhaseResult",
+    "PhaseStatus",
 ]

@@ -133,6 +133,7 @@ services:
       CELERY_BROKER_URL: amqp://myuser:mypass@rabbitmq:5672//
       REDIS_URL: redis://redis:6379/0
       HOME: /tmp  # Required for git operations
+      LOG_FORMAT: json  # Structured JSON logging for tracing
       # Security
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       # SonarQube Scanner JVM options
@@ -201,6 +202,7 @@ services:
       CELERY_BROKER_URL: amqp://myuser:mypass@rabbitmq:5672//
       REDIS_URL: redis://redis:6379/0
       DEBUG: "True"
+      LOG_FORMAT: json  # Structured JSON logging for tracing
       # SonarQube settings
       SONAR_HOST_URL: http://sonarqube:9000
       SONAR_TOKEN: ${SONAR_TOKEN:-}
@@ -248,41 +250,45 @@ services:
       - backend
 
   # Monitoring Stack
-  # loki:
-  #   image: grafana/loki:3.0.0
-  #   container_name: build-risk-loki
-  #   ports:
-  #     - "3100:3100"
-  #   command: -config.file=/etc/loki/local-config.yaml
-  #   volumes:
-  #     - loki_data:/loki
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: build-risk-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    restart: unless-stopped
 
-  # alloy:
-  #   image: grafana/alloy:latest
-  #   container_name: build-risk-alloy
-  #   volumes:
-  #     - ./monitoring/alloy-config.alloy:/etc/alloy/config.alloy:ro
-  #     - /var/run/docker.sock:/var/run/docker.sock:ro
-  #     - alloy_data:/var/lib/alloy/data
-  #   command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-  #   ports:
-  #     - "12345:12345"
-  #   depends_on:
-  #     - loki
+  alloy:
+    image: grafana/alloy:latest
+    container_name: build-risk-alloy
+    volumes:
+      - ./monitoring/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"
+    depends_on:
+      - loki
+    restart: unless-stopped
 
-  # grafana:
-  #   image: grafana/grafana:10.2.3
-  #   container_name: build-risk-grafana
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3001:3000"
-  #   environment:
-  #     - GF_SECURITY_ADMIN_USER=admin
-  #     - GF_SECURITY_ADMIN_PASSWORD=admin
-  #   volumes:
-  #     - grafana_data:/var/lib/grafana
-  #   depends_on:
-  #     - loki
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: build-risk-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    depends_on:
+      - loki
 
 volumes:
   mongo_data:

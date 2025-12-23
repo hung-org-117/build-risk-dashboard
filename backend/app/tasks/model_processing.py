@@ -4,6 +4,7 @@ Build Processing Tasks
 
 import json
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
 
 import redis
@@ -11,11 +12,14 @@ from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.config import settings
+from app.core.tracing import TracingContext
 from app.entities.enums import ExtractionStatus
 from app.entities.model_training_build import ModelTrainingBuild
+from app.entities.pipeline_run import PipelineRun, PipelineStatus, PipelineType
 from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.model_training_build import ModelTrainingBuildRepository
+from app.repositories.pipeline_run_repository import PipelineRunRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
@@ -94,13 +98,35 @@ def start_model_processing(
     from app.repositories.model_repo_config import ModelRepoConfigRepository
     from app.tasks.model_ingestion import ingest_model_builds
 
+    # Generate correlation_id for tracing entire flow
+    correlation_id = str(uuid.uuid4())
+
+    # Set tracing context for structured logging
+    TracingContext.set(
+        correlation_id=correlation_id,
+        repo_id=repo_config_id,
+        pipeline_type=PipelineType.MODEL_PROCESSING.value,
+    )
+
     model_repo_config_repo = ModelRepoConfigRepository(self.db)
+    pipeline_run_repo = PipelineRunRepository(self.db)
 
     # Validate repo exists
     repo = model_repo_config_repo.find_by_id(repo_config_id)
     if not repo:
         logger.error(f"Repository {repo_config_id} not found")
         return {"status": "error", "error": "Repository not found"}
+
+    # Create PipelineRun record for tracing
+    pipeline_run = PipelineRun(
+        correlation_id=correlation_id,
+        pipeline_type=PipelineType.MODEL_PROCESSING,
+        repo_config_id=repo.id,
+        triggered_by="system",
+        request_id=self.request.id,
+    )
+    pipeline_run.start()
+    pipeline_run_repo.insert_one(pipeline_run)
 
     # Mark as started
     model_repo_config_repo.update_repository(
@@ -124,6 +150,7 @@ def start_model_processing(
             "status": "dispatched",
             "repo_config_id": repo_config_id,
             "full_name": repo.full_name,
+            "correlation_id": correlation_id,
         }
 
     except Exception as e:
@@ -163,7 +190,6 @@ def dispatch_build_processing(
     1. Create ModelTrainingBuild for each raw_build_run (with PENDING status)
     2. Dispatch process_workflow_run tasks in batches
     """
-    import time
 
     from celery import group
 
@@ -230,34 +256,75 @@ def dispatch_build_processing(
         f"Scheduling {len(model_build_ids)} builds for processing...",
     )
 
-    # Step 2: Dispatch processing tasks in batches
-    dispatched = 0
+    # Step 2: Dispatch all processing tasks with chord for accurate completion tracking
+    # Uses chord: group of process_workflow_run tasks → finalize_model_processing callback
+    from celery import chord
 
-    for i in range(0, len(model_build_ids), batch_size):
-        batch = model_build_ids[i : i + batch_size]
-
-        # Create a group of tasks for this batch
-        tasks = group(
-            [
-                process_workflow_run.s(
-                    repo_config_id=repo_config_id,
-                    model_build_id=str(build_id),
-                )
-                for build_id in batch
-            ]
+    processing_tasks = [
+        process_workflow_run.s(
+            repo_config_id=repo_config_id,
+            model_build_id=str(build_id),
         )
-        tasks.apply_async()
+        for build_id in model_build_ids
+    ]
 
-        dispatched += len(batch)
-        logger.info(f"Dispatched batch {i // batch_size + 1}: {len(batch)} tasks")
+    # Dispatch chord: all tasks run in parallel, then finalize is called
+    chord(
+        group(processing_tasks),
+        finalize_model_processing.s(repo_config_id=repo_config_id, created_count=created_count),
+    ).apply_async()
 
-        # Delay between batches to prevent queue flooding
-        if i + batch_size < len(model_build_ids):
-            time.sleep(1.0)
+    logger.info(f"Dispatched chord with {len(model_build_ids)} processing tasks")
+    publish_status(
+        repo_config_id,
+        "processing",
+        f"Processing {len(model_build_ids)} builds...",
+    )
 
-    # Mark import as complete
+    return {
+        "repo_config_id": repo_config_id,
+        "created": created_count,
+        "dispatched": len(model_build_ids),
+        "status": "processing",
+    }
+
+
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.processing.finalize_model_processing",
+    queue="processing",
+)
+def finalize_model_processing(
+    self: PipelineTask,
+    results: List[Dict[str, Any]],
+    repo_config_id: str,
+    created_count: int,
+) -> Dict[str, Any]:
+    """
+    Chord callback: Finalize model processing after all builds are processed.
+
+    Aggregates results and completes the MODEL_PROCESSING PipelineRun.
+
+    Args:
+        results: List of results from all process_workflow_run tasks
+        repo_config_id: The repository config ID
+        created_count: Number of builds created before processing
+    """
     from datetime import datetime
 
+    from app.entities.enums import ModelImportStatus
+
+    logger.info(f"Finalizing model processing for {repo_config_id}")
+
+    # Aggregate results
+    success_count = sum(1 for r in results if r and r.get("status") == "completed")
+    failed_count = sum(1 for r in results if r and r.get("status") == "failed")
+    skipped_count = sum(1 for r in results if r and r.get("status") == "skipped")
+    total_count = len(results)
+
+    # Mark import as complete
+    repo_config_repo = ModelRepoConfigRepository(self.db)
     repo_config_repo.update_repository(
         repo_config_id,
         {
@@ -267,13 +334,50 @@ def dispatch_build_processing(
         },
     )
 
-    publish_status(repo_config_id, "imported", f"Dispatched {dispatched} builds for processing")
+    # Determine final status
+    final_status = PipelineStatus.COMPLETED
+    if failed_count > 0 and success_count > 0:
+        final_status = PipelineStatus.PARTIAL
+    elif failed_count > 0 and success_count == 0:
+        final_status = PipelineStatus.FAILED
+
+    # Complete MODEL_PROCESSING PipelineRun
+    pipeline_run_repo = PipelineRunRepository(self.db)
+    pipeline_runs = pipeline_run_repo.find_many(
+        {
+            "repo_config_id": ObjectId(repo_config_id),
+            "pipeline_type": PipelineType.MODEL_PROCESSING.value,
+            "status": PipelineStatus.RUNNING.value,
+        },
+        limit=1,
+    )
+    if pipeline_runs:
+        pipeline_run_repo.update_status(
+            correlation_id=pipeline_runs[0].correlation_id,
+            status=final_status,
+            result_summary={
+                "created": created_count,
+                "processed": total_count,
+                "success": success_count,
+                "failed": failed_count,
+                "skipped": skipped_count,
+            },
+        )
+
+    publish_status(
+        repo_config_id,
+        "imported" if final_status != PipelineStatus.FAILED else "failed",
+        f"Processed {success_count}/{total_count} builds successfully",
+    )
 
     return {
         "repo_config_id": repo_config_id,
         "created": created_count,
-        "dispatched": dispatched,
-        "status": "completed",
+        "processed": total_count,
+        "success": success_count,
+        "failed": failed_count,
+        "skipped": skipped_count,
+        "status": final_status.value,
     }
 
 
@@ -344,7 +448,7 @@ def process_workflow_run(
             logger.error(f"RawRepository {repo_config.raw_repo_id} not found")
             return {"status": "error", "message": "RawRepository not found"}
 
-        # Get feature names from template
+        # Always use TravisTorrent Full template features
         template_repo = DatasetTemplateRepository(self.db)
         template = template_repo.find_by_name("TravisTorrent Full")
         feature_names = template.feature_names if template else []

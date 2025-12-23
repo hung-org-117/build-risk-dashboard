@@ -12,10 +12,11 @@ from app.entities.base import PyObjectIdStr
 
 class RepoImportRequest(BaseModel):
     full_name: str = Field(..., description="Repository full name (e.g., owner/name)")
-    test_frameworks: List[str] = Field(default_factory=list)
-    source_languages: List[str] = Field(
-        ..., min_length=1, description="Source languages for the repository (required)"
+    feature_configs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Feature configuration dict with global and per-repo settings",
     )
+
     ci_provider: CIProvider = Field(
         default=CIProvider.GITHUB_ACTIONS,
         description="CI/CD provider: github_actions, circleci, travis_ci",

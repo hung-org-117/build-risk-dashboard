@@ -20,6 +20,7 @@ from .notification import NotificationRepository
 # Other repositories
 # from .github_installation import GithubInstallationRepository
 from .oauth_identity import OAuthIdentityRepository
+from .pipeline_run_repository import PipelineRunRepository
 from .raw_build_run import RawBuildRunRepository
 
 # Raw data repositories (shared across flows)
@@ -45,4 +46,6 @@ __all__ = [
     "NotificationRepository",
     # Data Quality
     "DataQualityRepository",
+    # Pipeline tracing
+    "PipelineRunRepository",
 ]

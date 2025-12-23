@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     DOWNLOAD_LOGS_BATCH_SIZE: int = 100  # Number of logs to download per batch
     PROCESSING_BATCH_SIZE: int = 50
     WORKTREE_BATCH_SIZE: int = 50  # Worktrees to create per chunk
+    MODEL_FETCH_BATCH_SIZE: int = 100  # Builds per fetch batch for model ingestion
     API_RATE_LIMIT_PER_SECOND: float = 10.0  # GitHub API calls per second
     COMMIT_REPLAY_MAX_DEPTH: int = 100  # Max depth to traverse for commit replay
     LOG_UNAVAILABLE_THRESHOLD: int = 10  # Stop after N consecutive unavailable logs

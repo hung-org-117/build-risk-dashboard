@@ -12,6 +12,7 @@ Flow (NEW - chord pattern):
 """
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -20,16 +21,19 @@ from celery import chain, chord, group
 
 from app.celery_app import celery_app
 from app.config import settings
+from app.core.tracing import TracingContext
 from app.entities.dataset_build import DatasetBuild
 from app.entities.dataset_enrichment_build import DatasetEnrichmentBuild
 from app.entities.dataset_version import DatasetVersion
 from app.entities.enums import ExtractionStatus
+from app.entities.pipeline_run import PipelineRun, PipelineStatus, PipelineType
 from app.entities.raw_repository import RawRepository
 from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
 from app.repositories.dataset_repository import DatasetRepository
 from app.repositories.dataset_version import DatasetVersionRepository
+from app.repositories.pipeline_run_repository import PipelineRunRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
@@ -68,18 +72,41 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
     from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
     from app.tasks.shared import build_ingestion_workflow
 
+    # Generate correlation_id for entire enrichment run
+    correlation_id = str(uuid.uuid4())
+
+    # Set tracing context for structured logging
+    TracingContext.set(
+        correlation_id=correlation_id,
+        version_id=version_id,
+        pipeline_type=PipelineType.DATASET_ENRICHMENT.value,
+    )
+
     version_repo = DatasetVersionRepository(self.db)
     dataset_build_repo = DatasetBuildRepository(self.db)
     dataset_repo = DatasetRepository(self.db)
     dataset_repo_stats_repo = DatasetRepoStatsRepository(self.db)
     raw_repo_repo = RawRepositoryRepository(self.db)
     raw_build_run_repo = RawBuildRunRepository(self.db)
+    pipeline_run_repo = PipelineRunRepository(self.db)
 
     # Load version
     dataset_version = version_repo.find_by_id(version_id)
     if not dataset_version:
         logger.error(f"Version {version_id} not found")
         return {"status": "error", "error": "Version not found"}
+
+    # Create PipelineRun record for tracing
+    pipeline_run = PipelineRun(
+        correlation_id=correlation_id,
+        pipeline_type=PipelineType.DATASET_ENRICHMENT,
+        version_id=dataset_version.id,
+        dataset_id=dataset_version.dataset_id,
+        triggered_by="system",
+        request_id=self.request.id,
+    )
+    pipeline_run.start()
+    pipeline_run_repo.insert_one(pipeline_run)
 
     # Mark as started
     version_repo.mark_started(version_id, task_id=self.request.id)
@@ -622,6 +649,7 @@ def finalize_enrichment(
     Aggregate results from all batch enrichments and update version status.
     """
     version_repo = DatasetVersionRepository(self.db)
+    pipeline_run_repo = PipelineRunRepository(self.db)
 
     # Aggregate stats
     total_enriched = 0
@@ -643,6 +671,22 @@ def finalize_enrichment(
 
     # Mark completed
     version_repo.mark_completed(version_id)
+
+    # Complete PipelineRun record
+    # Find by version_id since we don't have correlation_id in callback
+    pipeline_runs = pipeline_run_repo.find_by_version(version_id, limit=1)
+    if pipeline_runs:
+        pipeline_run = pipeline_runs[0]
+        status = PipelineStatus.COMPLETED if total_failed == 0 else PipelineStatus.PARTIAL
+        pipeline_run_repo.update_status(
+            correlation_id=pipeline_run.correlation_id,
+            status=status,
+            result_summary={
+                "enriched_rows": total_enriched,
+                "failed_rows": total_failed,
+                "total_rows": total_processed,
+            },
+        )
 
     logger.info(
         f"Version enrichment completed: {version_id}, "

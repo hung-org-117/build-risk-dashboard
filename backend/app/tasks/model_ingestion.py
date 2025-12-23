@@ -11,6 +11,7 @@ Flow:
 """
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -19,23 +20,21 @@ from bson import ObjectId
 from app.celery_app import celery_app
 from app.ci_providers import CIProvider, get_ci_provider, get_provider_config
 from app.ci_providers.models import BuildStatus
+from app.core.tracing import TracingContext
+from app.entities.pipeline_run import PipelineRun, PipelineStatus, PipelineType
 from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
+from app.repositories.pipeline_run_repository import PipelineRunRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.services.github.exceptions import GithubRateLimitError, GithubRetryableError
 from app.tasks.base import PipelineTask
 from app.tasks.model_processing import publish_status
-from app.tasks.pipeline.feature_dag._metadata import (
-    FeatureResource,
-    get_required_resources_for_features,
-)
+from app.tasks.pipeline.feature_dag._metadata import get_required_resources_for_features
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
+from app.tasks.pipeline.shared.resources import FeatureResource
 from app.tasks.shared import build_ingestion_workflow
 
 logger = logging.getLogger(__name__)
-
-# Default batch size for fetching builds
-DEFAULT_BATCH_SIZE = 50
 
 
 def get_required_resources_for_template(db, template_name: str = "TravisTorrent Full") -> set:
@@ -63,7 +62,7 @@ def ingest_model_builds(
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
     only_with_logs: bool = False,
-    batch_size: int = DEFAULT_BATCH_SIZE,
+    batch_size: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Orchestrator: Dispatch first batch fetch task.
@@ -71,11 +70,41 @@ def ingest_model_builds(
     This task validates the repo config and dispatches the first page fetch.
     Subsequent pages are fetched via chained tasks.
     """
+    # Generate correlation_id for tracing entire flow
+    correlation_id = str(uuid.uuid4())
+    corr_prefix = f"[corr={correlation_id[:8]}]"
+
+    # Use config batch size if not specified
+    from app.config import settings
+
+    batch_size = batch_size or settings.MODEL_FETCH_BATCH_SIZE
+
+    # Set tracing context for structured logging
+    TracingContext.set(
+        correlation_id=correlation_id,
+        repo_id=repo_config_id,
+        pipeline_type=PipelineType.MODEL_INGESTION.value,
+    )
+
     repo_config_repo = ModelRepoConfigRepository(self.db)
+    pipeline_run_repo = PipelineRunRepository(self.db)
     repo_config = repo_config_repo.find_by_id(repo_config_id)
 
     if not repo_config:
         raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
+
+    # Create PipelineRun record for tracing
+    pipeline_run = PipelineRun(
+        correlation_id=correlation_id,
+        pipeline_type=PipelineType.MODEL_INGESTION,
+        repo_config_id=repo_config.id,
+        triggered_by="system",
+        request_id=self.request.id,
+    )
+    pipeline_run.start()
+    pipeline_run_repo.insert_one(pipeline_run)
+
+    logger.info(f"{corr_prefix}[model_ingestion] Starting ingestion for {repo_config.full_name}")
 
     # Dispatch first batch (page 1)
     fetch_builds_batch.delay(
@@ -90,11 +119,13 @@ def ingest_model_builds(
         page=1,
         total_fetched=0,
         ci_build_ids=[],
+        correlation_id=correlation_id,
     )
 
     return {
         "status": "dispatched",
         "repo_config_id": repo_config_id,
+        "correlation_id": correlation_id,
         "message": "First batch fetch dispatched",
     }
 
@@ -106,9 +137,7 @@ def ingest_model_builds(
     queue="ingestion",
     soft_time_limit=300,
     time_limit=360,
-    autoretry_for=(GithubRateLimitError, GithubRetryableError),
-    retry_backoff=60,
-    max_retries=5,
+    max_retries=5,  # Manual retry for rate limit errors
 )
 def fetch_builds_batch(
     self: PipelineTask,
@@ -122,7 +151,8 @@ def fetch_builds_batch(
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
     only_with_logs: bool = False,
-    batch_size: int = DEFAULT_BATCH_SIZE,
+    batch_size: Optional[int] = None,
+    correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
     Fetch a single page of builds, save to DB, and chain to next page or finalize.
@@ -133,6 +163,9 @@ def fetch_builds_batch(
     3. Chains to next page OR prepare_and_dispatch_processing
     """
     import asyncio
+
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    log_ctx = f"{corr_prefix}[fetch_builds][page={page}][repo={full_name}]"
 
     build_run_repo = RawBuildRunRepository(self.db)
 
@@ -202,10 +235,7 @@ def fetch_builds_batch(
         new_total = total_fetched + len(batch_ci_build_ids)
         new_ci_build_ids = ci_build_ids + batch_ci_build_ids
 
-        logger.info(
-            f"Page {page}: saved {len(batch_ci_build_ids)} builds for {full_name} "
-            f"(total: {new_total})"
-        )
+        logger.info(f"{log_ctx} Saved {len(batch_ci_build_ids)} builds (total: {new_total})")
 
         # Determine next action
         has_more = len(builds) >= batch_size
@@ -225,6 +255,7 @@ def fetch_builds_batch(
                 since_days=since_days,
                 only_with_logs=only_with_logs,
                 batch_size=batch_size,
+                correlation_id=correlation_id,
             )
             return {
                 "status": "chained",
@@ -232,6 +263,7 @@ def fetch_builds_batch(
                 "builds_this_page": len(batch_ci_build_ids),
                 "total_so_far": new_total,
                 "next_page": page + 1,
+                "correlation_id": correlation_id,
             }
         else:
             prepare_and_dispatch_processing.delay(
@@ -240,19 +272,41 @@ def fetch_builds_batch(
                 full_name=full_name,
                 ci_provider=ci_provider,
                 ci_build_ids=new_ci_build_ids,
+                correlation_id=correlation_id,
             )
             return {
                 "status": "completed",
                 "page": page,
                 "builds_this_page": len(batch_ci_build_ids),
                 "total_builds": new_total,
+                "correlation_id": correlation_id,
             }
 
-    except GithubRateLimitError:
-        logger.warning(f"Rate limit hit on page {page} for {full_name}, retrying...")
-        raise
+    except (GithubRateLimitError, GithubRetryableError) as e:
+        retries_left = self.max_retries - self.request.retries
+        logger.warning(f"{log_ctx} Rate limit/retryable error (retries_left={retries_left}): {e}")
+        if retries_left > 0:
+            # Exponential backoff: 60s, 120s, 180s, etc.
+            countdown = 60 * (self.request.retries + 1)
+            raise self.retry(exc=e, countdown=countdown) from e
+        else:
+            # Max retries exhausted - mark as failed
+            logger.error(f"{log_ctx} Max retries exhausted for rate limit")
+            from app.entities.enums import ModelImportStatus
+
+            repo_config_repo = ModelRepoConfigRepository(self.db)
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {
+                    "import_status": ModelImportStatus.FAILED.value,
+                    "last_sync_status": "failed",
+                    "last_sync_error": f"Rate limit exhausted after {self.max_retries} retries",
+                },
+            )
+            publish_status(repo_config_id, "failed", "Rate limit exhausted")
+            raise
     except Exception as e:
-        logger.error(f"Failed to fetch page {page} for {full_name}: {e}")
+        logger.error(f"{log_ctx} Failed: {e}")
         from app.entities.enums import ModelImportStatus
 
         repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -283,6 +337,7 @@ def prepare_and_dispatch_processing(
     full_name: str,
     ci_provider: str,
     ci_build_ids: List[str],
+    correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
     Final step: Build ingestion workflow and dispatch processing.
@@ -293,10 +348,23 @@ def prepare_and_dispatch_processing(
     3. Builds and applies ingestion workflow (clone, logs, worktrees)
     4. Dispatches dispatch_build_processing for feature extraction
     """
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    log_ctx = f"{corr_prefix}[prepare_dispatch][repo={full_name}]"
+
+    # Set tracing context for structured logging
+    if correlation_id:
+        TracingContext.set(
+            correlation_id=correlation_id,
+            repo_id=repo_config_id,
+            pipeline_type=PipelineType.MODEL_INGESTION.value,
+        )
+
     from app.tasks.model_processing import dispatch_build_processing
 
+    pipeline_run_repo = PipelineRunRepository(self.db)
+
     if not ci_build_ids:
-        logger.info(f"No builds to process for {full_name}")
+        logger.info(f"{log_ctx} No builds to process")
         from app.entities.enums import ModelImportStatus
 
         repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -309,6 +377,15 @@ def prepare_and_dispatch_processing(
             },
         )
         publish_status(repo_config_id, "imported", "No builds found")
+
+        # Complete PipelineRun with no builds
+        if correlation_id:
+            pipeline_run_repo.update_status(
+                correlation_id=correlation_id,
+                status=PipelineStatus.COMPLETED,
+                result_summary={"builds_fetched": 0, "message": "No builds found"},
+            )
+
         return {"status": "completed", "builds": 0, "message": "No builds found"}
 
     try:
@@ -328,16 +405,16 @@ def prepare_and_dispatch_processing(
             }
         )
 
-        logger.info(f"Finalizing ingestion for {full_name}: {len(raw_build_run_ids)} builds")
+        logger.info(f"{log_ctx} Finalizing ingestion: {len(raw_build_run_ids)} builds")
 
         # Step 2: Determine required resources based on template
         required_resources = get_required_resources_for_template(self.db)
         tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
 
         # Debug logging for resource resolution
-        logger.info(f"[DEBUG] Required resources: {sorted(required_resources)}")
-        logger.info(f"[DEBUG] Tasks by level: {tasks_by_level}")
-        logger.info(f"[DEBUG] Commit SHAs for worktrees: {commit_shas[:5]}...")
+        logger.debug(f"{log_ctx} Required resources: {sorted(required_resources)}")
+        logger.debug(f"{log_ctx} Tasks by level: {tasks_by_level}")
+        logger.debug(f"{log_ctx} Commit SHAs for worktrees: {commit_shas[:5]}...")
 
         template_repo = DatasetTemplateRepository(self.db)
         template = template_repo.find_by_name("TravisTorrent Full")
@@ -380,15 +457,19 @@ def prepare_and_dispatch_processing(
                 build_ids=ci_build_ids,
                 commit_shas=commit_shas,
                 ci_provider=ci_provider_enum.value,
+                correlation_id=correlation_id,
             )
             if workflow:
                 # Chain ingestion workflow → processing
+                logger.info(f"{log_ctx} Dispatching ingestion workflow -> processing")
                 celery_chain(workflow, final_task).apply_async()
             else:
                 # No ingestion tasks, run processing directly
+                logger.info(f"{log_ctx} No ingestion tasks, running processing directly")
                 final_task.apply_async()
         else:
             # No resources needed, run processing directly
+            logger.info(f"{log_ctx} No resources needed, running processing directly")
             final_task.apply_async()
 
         return {
@@ -397,10 +478,11 @@ def prepare_and_dispatch_processing(
             "builds": len(ci_build_ids),
             "raw_build_run_ids": len(raw_build_run_ids),
             "resources": list(required_resources) if tasks_by_level else [],
+            "correlation_id": correlation_id,
         }
 
     except Exception as e:
-        logger.error(f"Failed to prepare/dispatch processing for {full_name}: {e}")
+        logger.error(f"{log_ctx} Failed to prepare/dispatch processing: {e}")
         from app.entities.enums import ModelImportStatus
 
         repo_config_repo = ModelRepoConfigRepository(self.db)

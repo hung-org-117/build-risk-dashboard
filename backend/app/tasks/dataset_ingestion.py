@@ -13,6 +13,7 @@ Flow (Celery chord pattern):
 """
 
 import logging
+import uuid
 from typing import Dict, List, Optional
 
 from celery.canvas import Signature
@@ -30,6 +31,7 @@ def build_repo_ingestion_chain(
     commit_shas: List[str],
     ci_provider: str,
     tasks_by_level: Dict[int, List[str]],
+    correlation_id: str = "",
 ) -> Optional[Signature]:
     """
     Build a Celery chain for ingesting a single repository.
@@ -47,10 +49,21 @@ def build_repo_ingestion_chain(
         commit_shas: List of commit SHAs for worktree creation
         ci_provider: CI provider string
         tasks_by_level: Dict of level -> task names from resource_dag
+        correlation_id: Optional correlation ID for tracing
 
     Returns:
         Celery chain signature, or None if no tasks needed
     """
+    # Generate correlation_id if not provided
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+
+    corr_prefix = f"[corr={correlation_id[:8]}]"
+    logger.info(
+        f"{corr_prefix}[dataset_ingestion] Building chain for {full_name} "
+        f"with {len(build_csv_ids)} builds, {len(commit_shas)} commits"
+    )
+
     return build_ingestion_workflow(
         tasks_by_level=tasks_by_level,
         raw_repo_id=raw_repo_id,
@@ -59,4 +72,5 @@ def build_repo_ingestion_chain(
         build_ids=build_csv_ids,
         commit_shas=commit_shas,
         ci_provider=ci_provider,
+        correlation_id=correlation_id,
     )

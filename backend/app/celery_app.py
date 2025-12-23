@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_ready
 from kombu import Exchange, Queue
 
 from app.config import settings
@@ -85,6 +86,17 @@ celery_app.conf.update(
     },
     timezone="UTC",
 )
+
+
+# Setup structured logging when worker starts
+
+
+@worker_ready.connect
+def on_worker_ready(**kwargs):
+    """Initialize structured logging when worker is ready."""
+    from app.core.logging import setup_logging
+
+    setup_logging()
 
 
 __all__ = ["celery_app"]

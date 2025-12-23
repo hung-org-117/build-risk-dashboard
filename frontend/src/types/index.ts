@@ -386,11 +386,8 @@ export interface RepoImportPayload {
   full_name: string;
   provider?: string;
   user_id?: string;
-  test_frameworks?: string[];
-  source_languages?: string[];
   ci_provider?: string;
-  /** @deprecated TravisTorrent features are now always applied server-side */
-  feature_names?: string[];
+  feature_configs?: Record<string, unknown>;
   max_builds?: number | null;
   since_days?: number | null;
   only_with_logs?: boolean;

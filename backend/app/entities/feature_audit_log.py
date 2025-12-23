@@ -98,6 +98,12 @@ class FeatureAuditLog(BaseEntity):
         collection = "feature_audit_logs"
         use_enum_values = True
 
+    # === Link to PipelineRun ===
+    correlation_id: Optional[str] = Field(
+        None,
+        description="Links this audit log to a PipelineRun for end-to-end tracing",
+    )
+
     # Audit log category
     category: AuditLogCategory = Field(
         default=AuditLogCategory.MODEL_TRAINING,

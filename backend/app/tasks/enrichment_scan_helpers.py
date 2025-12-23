@@ -13,6 +13,7 @@ from typing import Any, Dict
 from bson import ObjectId
 
 from app.celery_app import celery_app
+from app.core.tracing import TracingContext
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.sonar_commit_scan import SonarCommitScanRepository
 from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
@@ -47,13 +48,17 @@ def dispatch_scan_for_commit(
         commit_sha: Commit SHA to scan
         repo_full_name: Repository full name (owner/repo)
     """
+    # Get correlation_id from tracing context (set by parent enrichment task)
+    correlation_id = TracingContext.get_correlation_id()
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+
     version_repo = DatasetVersionRepository(self.db)
     trivy_scan_repo = TrivyCommitScanRepository(self.db)
     sonar_scan_repo = SonarCommitScanRepository(self.db)
 
     version = version_repo.find_by_id(version_id)
     if not version:
-        logger.error(f"Version {version_id} not found")
+        logger.error(f"{corr_prefix} Version {version_id} not found")
         return {"status": "error", "error": "Version not found"}
 
     results = {"trivy": None, "sonarqube": None}
@@ -88,10 +93,12 @@ def dispatch_scan_for_commit(
             )
 
             results["trivy"] = {"status": "dispatched"}
-            logger.info(f"Dispatched Trivy scan for commit {commit_sha[:8]}")
+            logger.info(f"{corr_prefix} Dispatched Trivy scan for commit {commit_sha[:8]}")
 
         except Exception as exc:
-            logger.warning(f"Failed to dispatch Trivy scan for {commit_sha[:8]}: {exc}")
+            logger.warning(
+                f"{corr_prefix} Failed to dispatch Trivy scan for {commit_sha[:8]}: {exc}"
+            )
             results["trivy"] = {"status": "error", "error": str(exc)}
 
     # Dispatch SonarQube scan
@@ -132,15 +139,18 @@ def dispatch_scan_for_commit(
             )
 
             results["sonarqube"] = {"status": "dispatched", "component_key": component_key}
-            logger.info(f"Dispatched SonarQube scan for commit {commit_sha[:8]}")
+            logger.info(f"{corr_prefix} Dispatched SonarQube scan for commit {commit_sha[:8]}")
 
         except Exception as exc:
-            logger.warning(f"Failed to dispatch SonarQube scan for {commit_sha[:8]}: {exc}")
+            logger.warning(
+                f"{corr_prefix} Failed to dispatch SonarQube scan for {commit_sha[:8]}: {exc}"
+            )
             results["sonarqube"] = {"status": "error", "error": str(exc)}
 
     return {
         "status": "dispatched",
         "commit_sha": commit_sha,
+        "correlation_id": correlation_id,
         "results": results,
     }
 

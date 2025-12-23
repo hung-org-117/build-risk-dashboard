@@ -22,6 +22,7 @@ from app.api import (
     model_repos,
     monitoring,
     notifications,
+    pipeline_runs,
     settings,
     templates,
     tokens,
@@ -105,6 +106,7 @@ app.include_router(settings.router, prefix="/api", tags=["Settings"])
 app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(user_settings.router, prefix="/api", tags=["User Settings"])
+app.include_router(pipeline_runs.router, prefix="/api", tags=["Pipeline Runs"])
 
 # Admin-only routes
 app.include_router(admin_users.router, prefix="/api", tags=["Admin - Users"])

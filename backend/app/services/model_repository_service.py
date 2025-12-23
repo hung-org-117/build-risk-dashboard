@@ -114,14 +114,20 @@ class RepositoryService:
                 if not repo_data:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Repository '{payload.full_name}' not found on GitHub or you don't have access.",
+                        detail=(
+                            f"Repository '{payload.full_name}' not found on "
+                            "GitHub or you don't have access."
+                        ),
                     )
 
                 is_private = bool(repo_data.get("private"))
                 if is_private and not is_org_owned:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Repository '{payload.full_name}' is private and not owned by the organization.",
+                        detail=(
+                            f"Repository '{payload.full_name}' is private "
+                            "and not owned by the organization."
+                        ),
                     )
 
                 raw_repo = self.raw_repo.upsert_by_full_name(
@@ -145,31 +151,36 @@ class RepositoryService:
                     if not existing_config.is_deleted:
                         raise HTTPException(
                             status_code=status.HTTP_409_CONFLICT,
-                            detail=f"Repository '{payload.full_name}' is already imported. Please delete it first to re-import.",
+                            detail=(
+                                f"Repository '{payload.full_name}' is already "
+                                "imported. Delete it first to re-import."
+                            ),
                         )
+
+                    # Build merged feature_configs from payload
+                    merged_feature_configs = (
+                        payload.feature_configs.copy() if payload.feature_configs else {}
+                    )
 
                     # Re-activate deleted config with new settings
                     repo_doc = self.repo_config.update_one(
                         existing_config.id,
                         {
                             "user_id": ObjectId(target_user_id),
-                            "raw_repo_id": raw_repo.id,  # Update in case raw_repo changed
-                            "test_frameworks": payload.test_frameworks or [],
-                            "source_languages": payload.source_languages or [],
+                            "raw_repo_id": raw_repo.id,
                             "ci_provider": payload.ci_provider,
                             "import_status": ModelImportStatus.QUEUED,
                             "max_builds_to_ingest": payload.max_builds,
                             "since_days": payload.since_days,
                             "only_with_logs": payload.only_with_logs or False,
-                            "is_deleted": False,  # Re-activate
+                            "is_deleted": False,
                             "deleted_at": None,
                             "import_error": None,
                             "import_version": existing_config.import_version + 1,
-                            # Reset stats for fresh re-import
+                            "feature_configs": merged_feature_configs,
                             "total_builds_imported": 0,
                             "total_builds_processed": 0,
                             "total_builds_failed": 0,
-                            "feature_extractors": [],
                             "last_synced_at": None,
                             "last_sync_status": None,
                             "last_sync_error": None,
@@ -185,13 +196,13 @@ class RepositoryService:
                             user_id=ObjectId(target_user_id),
                             full_name=payload.full_name,
                             raw_repo_id=raw_repo.id,
-                            test_frameworks=payload.test_frameworks or [],
-                            source_languages=payload.source_languages or [],
                             ci_provider=payload.ci_provider,
                             import_status=ModelImportStatus.QUEUED,
                             max_builds_to_ingest=payload.max_builds,
                             since_days=payload.since_days,
                             only_with_logs=payload.only_with_logs or False,
+                            feature_configs=payload.feature_configs or {},
+                            feature_extractors=payload.selected_features or [],
                         )
                     )
 

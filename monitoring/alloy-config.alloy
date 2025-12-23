@@ -14,9 +14,61 @@ discovery.docker "containers" {
   host = "unix:///var/run/docker.sock"
 }
 
+// Relabel rules to extract container name as label
+discovery.relabel "docker_labels" {
+  targets = discovery.docker.containers.targets
+  
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label  = "container"
+    regex         = "/(.*)"
+  }
+}
+
+// Process JSON logs for build-risk containers
+loki.process "json_logs" {
+  forward_to = [loki.write.default.receiver]
+  
+  // Only process logs from build-risk containers
+  stage.match {
+    selector = "{container=~\"build-risk-.*\"}"
+    
+    // Try to parse JSON logs
+    stage.json {
+      expressions = {
+        level        = "level",
+        message      = "message",
+        correlation_id = "correlation_id",
+        dataset_id   = "dataset_id",
+        version_id   = "version_id",
+        repo_id      = "repo_id",
+        pipeline_type = "pipeline_type",
+        task_name    = "task_name",
+      }
+    }
+    
+    // Extract labels from parsed fields
+    stage.labels {
+      values = {
+        level        = "",
+        correlation_id = "",
+        dataset_id   = "",
+        version_id   = "",
+        repo_id      = "",
+        pipeline_type = "",
+      }
+    }
+    
+    // Map log level to Loki level label
+    stage.label_drop {
+      values = ["__meta_docker_container_label_com_docker_compose_project"]
+    }
+  }
+}
+
+// Source Docker logs and forward to JSON processor
 loki.source.docker "default" {
   host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.containers.targets
-  forward_to = [loki.write.default.receiver]
-  relabel_rules = discovery.docker.containers.relabel_rules
+  targets    = discovery.relabel.docker_labels.output
+  forward_to = [loki.process.json_logs.receiver]
 }

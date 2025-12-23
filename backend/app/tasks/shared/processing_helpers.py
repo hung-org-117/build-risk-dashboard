@@ -35,6 +35,7 @@ def _save_audit_log(
     errors: List[str],
     category: AuditLogCategory,
     output_build_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
 ) -> None:
     """
     Save pipeline execution results to database.
@@ -49,12 +50,20 @@ def _save_audit_log(
         errors: List of error messages
         category: Pipeline category (model_training or dataset_enrichment)
         output_build_id: ID of the output entity (ModelTrainingBuild or DatasetEnrichmentBuild)
+        correlation_id: Correlation ID for linking to PipelineRun
     """
     try:
+        # Get correlation_id from context if not provided
+        if not correlation_id:
+            from app.core.tracing import TracingContext
+
+            correlation_id = TracingContext.get_correlation_id()
+
         execution_result = pipeline.get_execution_results()
 
         # Create FeatureAuditLog entity
         audit_log = FeatureAuditLog(
+            correlation_id=correlation_id if correlation_id else None,
             category=category,
             raw_repo_id=raw_repo.id,
             raw_build_run_id=raw_build_run.id,
