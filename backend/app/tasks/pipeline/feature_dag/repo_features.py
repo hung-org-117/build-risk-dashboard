@@ -16,7 +16,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from hamilton.function_modifiers import extract_fields, tag
 
 from app.tasks.pipeline.feature_dag._inputs import (
-    FeatureConfigInput,
     GitHistoryInput,
     GitWorktreeInput,
 )
@@ -25,7 +24,6 @@ from app.tasks.pipeline.feature_dag._metadata import (
     FeatureDataType,
     FeatureResource,
     feature_metadata,
-    requires_config,
 )
 from app.tasks.pipeline.feature_dag.languages import LanguageRegistry
 
@@ -74,8 +72,12 @@ def gh_repo_age(git_history: GitHistoryInput) -> Optional[float]:
             .split("\n")[0]
         )
 
-        latest_commit_date = datetime.fromtimestamp(int(latest_commit_ts), tz=timezone.utc)
-        first_commit_date = datetime.fromtimestamp(int(first_commit_ts), tz=timezone.utc)
+        latest_commit_date = datetime.fromtimestamp(
+            int(latest_commit_ts), tz=timezone.utc
+        )
+        first_commit_date = datetime.fromtimestamp(
+            int(first_commit_ts), tz=timezone.utc
+        )
 
         # Age = time from first commit to build commit
         age_days = (latest_commit_date - first_commit_date).days
@@ -132,18 +134,9 @@ def gh_repo_num_commits(git_history: GitHistoryInput) -> Optional[int]:
     required_resources=[FeatureResource.GIT_WORKTREE, FeatureResource.REPO],
 )
 @tag(group="repo")
-@requires_config(
-    source_languages={
-        "type": "list",
-        "scope": "repo",
-        "required": True,
-        "description": "Programming languages used in the repository (for code metrics analysis)",
-        "default": [],
-    }
-)
 def repo_code_metrics(
     git_worktree: GitWorktreeInput,
-    feature_config: FeatureConfigInput,
+    tr_log_lan_all: List[str],
 ) -> Dict[str, Any]:
     """
     SLOC and test density metrics.
@@ -159,11 +152,11 @@ def repo_code_metrics(
         }
 
     worktree_path = git_worktree.worktree_path
-    languages = [
-        lang.lower() for lang in feature_config.get("source_languages", [], scope="repo")
-    ] or [""]
+    languages = tr_log_lan_all
 
-    src_lines, test_lines, test_cases, asserts = _count_code_metrics(worktree_path, languages)
+    src_lines, test_lines, test_cases, asserts = _count_code_metrics(
+        worktree_path, languages
+    )
 
     metrics = {
         "gh_sloc": src_lines,
@@ -181,7 +174,9 @@ def repo_code_metrics(
     return metrics
 
 
-def _count_code_metrics(worktree_path: Path, languages: List[str]) -> Tuple[int, int, int, int]:
+def _count_code_metrics(
+    worktree_path: Path, languages: List[str]
+) -> Tuple[int, int, int, int]:
     """
     Count source lines, test lines, test cases, and assertions.
 

@@ -84,16 +84,6 @@ class RepoListResponse(BaseModel):
     items: List[RepoResponse]
 
 
-class RepoUpdateRequest(BaseModel):
-    ci_provider: Optional[CIProvider] = None
-    test_frameworks: Optional[List[str]] = None
-    source_languages: Optional[List[str]] = None
-    default_branch: Optional[str] = None
-    notes: Optional[str] = None
-    max_builds: Optional[int] = Field(default=None, ge=1, le=1000)
-    since_days: Optional[int] = Field(default=None, ge=1, le=365)
-
-
 class RepoSuggestion(BaseModel):
     full_name: str
     description: Optional[str] = None

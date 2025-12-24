@@ -11,7 +11,6 @@ from app.dtos import (
     RepoResponse,
     RepoSearchResponse,
     RepoSuggestionListResponse,
-    RepoUpdateRequest,
 )
 from app.dtos.build import BuildDetail, BuildListResponse
 from app.middleware.auth import get_current_user
@@ -106,18 +105,6 @@ def get_repository_detail(
 ):
     service = RepositoryService(db)
     return service.get_repository_detail(repo_id, current_user)
-
-
-@router.patch("/{repo_id}", response_model=RepoDetailResponse, response_model_by_alias=False)
-def update_repository_settings(
-    repo_id: str,
-    payload: RepoUpdateRequest,
-    db: Database = Depends(get_db),
-    _admin: dict = Depends(RequirePermission(Permission.MANAGE_REPOS)),
-):
-    """Update repository settings (Admin only)."""
-    service = RepositoryService(db)
-    return service.update_repository_settings(repo_id, payload, _admin)
 
 
 @router.delete("/{repo_id}", status_code=status.HTTP_204_NO_CONTENT)

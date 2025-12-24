@@ -335,14 +335,10 @@ export default function BuildDetailPage() {
                     </div>
 
                     {/* Timestamps */}
-                    <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
                             <span className="text-muted-foreground">Created:</span>{" "}
                             <span>{formatDateTime(build.created_at)}</span>
-                        </div>
-                        <div>
-                            <span className="text-muted-foreground">Started:</span>{" "}
-                            <span>{formatDateTime(build.started_at)}</span>
                         </div>
                         <div>
                             <span className="text-muted-foreground">Completed:</span>{" "}
@@ -403,35 +399,31 @@ export default function BuildDetailPage() {
                             </div>
 
                             {/* Features Table */}
-                            <div className="rounded-lg border overflow-hidden">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-slate-50 dark:bg-slate-900/50">
-                                        <tr>
-                                            <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700">
+                            <div className="rounded-lg border overflow-hidden max-h-[500px] overflow-y-auto relative">
+                                <table className="w-full text-sm relative">
+                                    <thead className="sticky top-0 z-10">
+                                        <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+                                            <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
                                                 Feature Name
                                             </th>
-                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground bg-slate-50 dark:bg-slate-900">
                                                 Value
                                             </th>
                                         </tr>
                                     </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {featureEntries.map(([key, value]) => (
+                                            <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
+                                                <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
+                                                    {key}
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <FeatureValue value={value} />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
                                 </table>
-                                <div className="max-h-[500px] overflow-y-auto">
-                                    <table className="w-full text-sm">
-                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {featureEntries.map(([key, value]) => (
-                                                <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                                                    <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
-                                                        {key}
-                                                    </td>
-                                                    <td className="px-4 py-3 align-top">
-                                                        <FeatureValue value={value} />
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
                             </div>
                         </div>
                     ) : (

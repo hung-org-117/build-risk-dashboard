@@ -1,7 +1,9 @@
 from app.tasks.pipeline.feature_dag import (
     build_features,
+    devops_features,
     git_features,
     github_features,
+    history_features,
     log_features,
     repo_features,
 )
@@ -12,4 +14,6 @@ __all__ = [
     "github_features",
     "repo_features",
     "log_features",
+    "devops_features",
+    "history_features",
 ]

@@ -51,11 +51,6 @@ from app.tasks.pipeline.utils.git_utils import (
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Commit Info Features
-# =============================================================================
-
-
 @extract_fields(
     {
         "git_all_built_commits": list,
@@ -133,7 +128,9 @@ def git_commit_info(
         last_commit_sha = hexsha
 
         # Check if this commit has a build in DB
-        existing_build = raw_build_runs.find_one({"head_sha": hexsha, "repo_id": repo.id})
+        existing_build = raw_build_runs.find_one(
+            {"head_sha": hexsha, "repo_id": repo.id}
+        )
 
         if existing_build:
             status = "build_found"
@@ -177,18 +174,9 @@ def git_commit_info(
     data_type=FeatureDataType.JSON,
     required_resources=[FeatureResource.GIT_HISTORY],
 )
-@requires_config(
-    source_languages={
-        "type": "list",
-        "scope": "repo",
-        "required": True,
-        "description": "Main source programming languages used in the repository",
-        "default": [],
-    }
-)
 def git_diff_features(
     git_history: GitHistoryInput,
-    feature_config: FeatureConfigInput,
+    tr_log_lan_all: List[str],
     git_all_built_commits: List[str],
     git_prev_built_commit: Optional[str],
 ) -> Dict[str, Any]:
@@ -199,10 +187,7 @@ def git_diff_features(
     repo_path = git_history.path
     effective_sha = git_history.effective_sha
 
-    # Normalize languages - repo-scoped config
-    languages = [
-        lang.lower() for lang in feature_config.get("source_languages", [], scope="repo")
-    ] or [""]
+    languages = tr_log_lan_all
 
     stats = _empty_diff_result()
 
@@ -214,7 +199,9 @@ def git_diff_features(
 
         # File status changes
         try:
-            name_status_out = _run_git(repo_path, ["diff", "--name-status", parent, sha])
+            name_status_out = _run_git(
+                repo_path, ["diff", "--name-status", parent, sha]
+            )
             for line in name_status_out.splitlines():
                 parts = line.split("\t")
                 if len(parts) < 2:
@@ -270,7 +257,9 @@ def git_diff_features(
     # Test case diff (prev built commit vs current)
     if git_prev_built_commit and effective_sha:
         try:
-            patch_out = _run_git(repo_path, ["diff", git_prev_built_commit, effective_sha])
+            patch_out = _run_git(
+                repo_path, ["diff", git_prev_built_commit, effective_sha]
+            )
             total_added = 0
             total_deleted = 0
             for lang in languages:
@@ -518,7 +507,9 @@ def gh_by_core_team_member(
     return False
 
 
-def _get_direct_committers(repo_path: Path, start_date: datetime, end_date: datetime) -> Set[str]:
+def _get_direct_committers(
+    repo_path: Path, start_date: datetime, end_date: datetime
+) -> Set[str]:
     """Get names of users who pushed directly (not via PR)."""
     pr_pattern = re.compile(r"\s\(#\d+\)")
 
@@ -532,7 +523,9 @@ def _get_direct_committers(repo_path: Path, start_date: datetime, end_date: date
             f"--until={end_date.isoformat()}",
             "--format=%H|%an|%s",
         ]
-        result = subprocess.run(cmd, cwd=str(repo_path), capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            cmd, cwd=str(repo_path), capture_output=True, text=True, check=True
+        )
         output = result.stdout.strip()
     except subprocess.CalledProcessError:
         return set()
@@ -581,3 +574,126 @@ def _get_pr_mergers(
         logger.warning(f"Failed to get PR mergers: {e}")
 
     return mergers
+
+
+# Cooperation Features
+@feature_metadata(
+    display_name="Distinct Authors",
+    description="Number of unique commit authors in this build",
+    category=FeatureCategory.TEAM,
+    data_type=FeatureDataType.INTEGER,
+    required_resources=[FeatureResource.GIT_HISTORY],
+)
+@tag(group="git")
+def num_of_distinct_authors(
+    git_history: GitHistoryInput,
+    git_all_built_commits: List[str],
+) -> int:
+    """Count unique authors across all commits in this build."""
+    if not git_history.is_commit_available:
+        return 0
+
+    if not git_all_built_commits:
+        return 0
+
+    repo_path = git_history.path
+    authors: Set[str] = set()
+
+    for sha in git_all_built_commits:
+        author = get_author_name(repo_path, sha)
+        if author:
+            authors.add(author)
+
+    return len(authors)
+
+
+@feature_metadata(
+    display_name="Total File Revisions",
+    description="Total number of prior revisions on files touched by this build",
+    category=FeatureCategory.COOPERATION,
+    data_type=FeatureDataType.INTEGER,
+    required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.BUILD_RUN],
+)
+@tag(group="git")
+def total_number_of_revisions(
+    git_history: GitHistoryInput,
+    build_run: BuildRunInput,
+    git_all_built_commits: List[str],
+) -> int:
+    """Count total prior revisions on files touched by this build."""
+    if not git_history.is_commit_available:
+        return 0
+
+    if not git_all_built_commits:
+        return 0
+
+    repo_path = git_history.path
+
+    # Get reference date for filtering
+    ref_date = build_run.created_at
+    if not ref_date:
+        return 0
+
+    # Collect unique files touched by this build
+    files_touched: Set[str] = set()
+    for sha in git_all_built_commits:
+        parents = get_commit_parents(repo_path, sha)
+        if parents:
+            diff_files = get_diff_files(repo_path, parents[0], sha)
+            for f in diff_files:
+                if f.get("b_path"):
+                    files_touched.add(f["b_path"])
+                if f.get("a_path"):
+                    files_touched.add(f["a_path"])
+
+    if not files_touched:
+        return 0
+
+    # Count revisions for each file
+    total_revisions = 0
+    first_commit_sha = git_all_built_commits[0] if git_all_built_commits else None
+
+    if not first_commit_sha:
+        return 0
+
+    for filepath in files_touched:
+        revision_count = _count_file_revisions(repo_path, filepath, first_commit_sha)
+        total_revisions += revision_count
+
+    return total_revisions
+
+
+def _count_file_revisions(repo_path: Path, filepath: str, before_sha: str) -> int:
+    """
+    Count how many commits modified this file before the given commit.
+
+    Args:
+        repo_path: Path to repository
+        filepath: File path to check
+        before_sha: Count revisions before this commit
+
+    Returns:
+        Number of prior commits that touched this file
+    """
+    import subprocess
+
+    try:
+        # Get commits that modified this file, excluding and before the given SHA
+        result = subprocess.run(
+            ["git", "log", "--oneline", "--follow", f"{before_sha}^", "--", filepath],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode != 0:
+            return 0
+
+        # Count non-empty lines
+        lines = [line for line in result.stdout.strip().split("\n") if line.strip()]
+        return len(lines)
+
+    except Exception as e:
+        logger.debug(f"Failed to count revisions for {filepath}: {e}")
+        return 0

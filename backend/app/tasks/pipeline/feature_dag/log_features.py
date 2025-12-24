@@ -56,13 +56,6 @@ logger = logging.getLogger(__name__)
 )
 @tag(group="build_log")
 @requires_config(
-    source_languages={
-        "type": "list",
-        "scope": "repo",
-        "required": False,
-        "description": "Programming languages used in the repository (for log parser hints)",
-        "default": [],
-    },
     test_frameworks={
         "type": "list",
         "scope": "repo",
@@ -73,6 +66,7 @@ logger = logging.getLogger(__name__)
 )
 def test_log_features(
     build_logs: BuildLogsInput,
+    tr_log_lan_all: List[str],
     feature_config: FeatureConfigInput,
 ) -> Dict[str, Any]:
     """
@@ -99,7 +93,7 @@ def test_log_features(
     tests_ok_sum = 0
     test_duration_sum = 0.0
 
-    language_hints = _get_language_hints(feature_config)
+    language_hints = tr_log_lan_all
     allowed_frameworks = _get_allowed_frameworks(feature_config)
 
     for log_path_str in build_logs.log_files:
@@ -175,16 +169,8 @@ def _get_allowed_frameworks(feature_config: FeatureConfigInput) -> Optional[List
     test_frameworks = feature_config.get("test_frameworks", [])
     if not test_frameworks:
         return None
-    return [f.lower() if isinstance(f, str) else str(f).lower() for f in test_frameworks]
-
-
-def _get_language_hints(feature_config: FeatureConfigInput) -> Optional[List[str]]:
-    """Get all source languages from config for parser hints."""
-    source_languages = feature_config.get("source_languages", [])
-    if not source_languages:
-        return None
     return [
-        lang.lower() if isinstance(lang, str) else str(lang).lower() for lang in source_languages
+        f.lower() if isinstance(f, str) else str(f).lower() for f in test_frameworks
     ]
 
 

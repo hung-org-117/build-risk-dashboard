@@ -3,22 +3,18 @@
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/use-debounce";
 import {
-  CheckCircle2,
   Loader2,
   MoreVertical,
   Plus,
   RefreshCw,
   RotateCcw,
-  Settings,
   Trash2,
-  X
 } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useState
 } from "react";
-import { createPortal } from "react-dom";
 
 import { useRouter } from "next/navigation";
 
@@ -41,24 +37,10 @@ import {
 import { useWebSocket } from "@/contexts/websocket-context";
 import { reposApi } from "@/lib/api";
 import type {
-  RepoDetail,
-  RepoUpdatePayload,
   RepositoryRecord
 } from "@/types";
 import { ImportRepoModal } from "./_components/ImportRepoModal";
 import { ImportProgressDisplay } from "./_components/ImportProgressDisplay";
-
-const Portal = ({ children }: { children: React.ReactNode }) => {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return null;
-  return createPortal(children, document.body);
-};
-
 
 function formatTimestamp(value?: string) {
   if (!value) return "—";
@@ -86,12 +68,6 @@ export default function AdminReposPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
-  // Panel state
-  const [panelRepo, setPanelRepo] = useState<RepoDetail | null>(null);
-  const [panelLoading, setPanelLoading] = useState(false);
-  const [panelForm, setPanelForm] = useState<RepoUpdatePayload>({});
-  const [panelNotes, setPanelNotes] = useState("");
-  const [panelSaving, setPanelSaving] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -216,55 +192,6 @@ export default function AdminReposPage() {
       setFeedback(err.response?.data?.detail || "Failed to delete repository.");
     } finally {
       setDeleteLoading((prev) => ({ ...prev, [repo.id]: false }));
-    }
-  };
-
-  const openPanel = async (repoId: string) => {
-    setPanelLoading(true);
-    setPanelRepo(null);
-    setPanelForm({}); // Reset form
-    setPanelNotes(""); // Reset notes
-    try {
-      const detail = await reposApi.get(repoId);
-      setPanelRepo(detail);
-      // Populate form with repo data
-      setPanelForm({
-        default_branch: detail.default_branch,
-        test_frameworks: detail.test_frameworks || [],
-        source_languages: detail.source_languages || [],
-      });
-      setPanelNotes(detail.notes || "");
-    } catch (err) {
-      console.error(err);
-      setFeedback("Unable to load repository details.");
-    } finally {
-      setPanelLoading(false);
-    }
-  };
-
-  const closePanel = () => {
-    setPanelRepo(null);
-    setPanelForm({});
-    setPanelNotes("");
-  };
-
-  const handlePanelSave = async () => {
-    if (!panelRepo) return;
-    setPanelSaving(true);
-    try {
-      const payload: RepoUpdatePayload = {
-        ...panelForm,
-        notes: panelNotes || undefined,
-      };
-      const updated = await reposApi.update(panelRepo.id, payload);
-      setPanelRepo(updated);
-      await loadRepositories(page, true);
-      setFeedback("Repository settings updated.");
-    } catch (err) {
-      console.error(err);
-      setFeedback("Unable to save repository settings.");
-    } finally {
-      setPanelSaving(false);
     }
   };
 
@@ -470,16 +397,6 @@ export default function AdminReposPage() {
                             <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openPanel(repo.id);
-                              }}
-                            >
-                              <Settings className="mr-2 h-4 w-4" />
-                              Settings
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
                                 handleDelete(repo, e as unknown as React.MouseEvent);
                               }}
                               disabled={deleteLoading[repo.id]}
@@ -548,121 +465,6 @@ export default function AdminReposPage() {
           setFeedback("Repositories queued for import.");
         }}
       />
-
-      {panelRepo ? (
-        <Portal>
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
-            <div className="h-full w-full max-w-xl bg-white shadow-2xl dark:bg-slate-950">
-              <div className="flex items-center justify-between border-b px-6 py-4">
-                <div>
-                  <p className="text-lg font-semibold">{panelRepo.full_name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {panelRepo.ci_provider.replace("_", " ")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-full p-2 text-muted-foreground hover:bg-slate-100"
-                  onClick={closePanel}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {panelLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                <div className="flex h-full flex-col">
-                  <div className="flex-1 overflow-y-auto p-6">
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">
-                          Default Branch
-                        </label>
-                        <input
-                          type="text"
-                          className="w-full rounded-lg border px-3 py-2 text-sm"
-                          value={panelForm.default_branch || ""}
-                          readOnly
-                          disabled
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Synced from GitHub.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">
-                          Test Frameworks
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          {panelForm.test_frameworks?.map((fw) => (
-                            <Badge key={fw} variant="secondary">
-                              {fw}
-                            </Badge>
-                          ))}
-                          {(!panelForm.test_frameworks ||
-                            panelForm.test_frameworks.length === 0) && (
-                              <span className="text-sm text-muted-foreground">
-                                None detected
-                              </span>
-                            )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">
-                          Source Languages
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          {panelForm.source_languages?.map((l) => (
-                            <Badge key={l} variant="secondary">
-                              {l}
-                            </Badge>
-                          ))}
-                          {(!panelForm.source_languages ||
-                            panelForm.source_languages.length === 0) && (
-                              <span className="text-sm text-muted-foreground">
-                                None detected
-                              </span>
-                            )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Notes</label>
-                        <textarea
-                          className="h-24 w-full rounded-lg border px-3 py-2 text-sm"
-                          placeholder="Add internal notes about this repository..."
-                          value={panelNotes}
-                          onChange={(e) => setPanelNotes(e.target.value)}
-                        />
-                      </div>
-
-                      <div className="pt-4">
-                        <Button
-                          onClick={handlePanelSave}
-                          disabled={panelSaving}
-                          className="w-full"
-                        >
-                          {panelSaving ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                          )}
-                          Save Changes
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </Portal>
-      ) : null}
     </div>
   );
 }

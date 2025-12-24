@@ -61,7 +61,6 @@ class BuildDetail(BaseModel):
     commit_message: Optional[str] = None
     commit_author: Optional[str] = None
     created_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
     web_url: Optional[str] = None

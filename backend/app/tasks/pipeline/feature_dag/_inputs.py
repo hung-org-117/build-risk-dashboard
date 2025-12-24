@@ -131,7 +131,9 @@ class FeatureConfigInput:
         return default
 
     @classmethod
-    def from_entity(cls, config: Any, current_repo: Optional[str] = None) -> FeatureConfigInput:
+    def from_entity(
+        cls, config: Any, current_repo: Optional[str] = None
+    ) -> FeatureConfigInput:
         """
         Create from ModelRepoConfig, DatasetVersion entity, or direct feature_configs dict.
 
@@ -179,6 +181,8 @@ class BuildRunInput:
     ci_run_id: str
     build_number: Optional[int]
     commit_sha: str
+    branch: Optional[str]
+    commit_author: Optional[str]
     conclusion: Optional[str]
     created_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -199,6 +203,8 @@ class BuildRunInput:
             ci_run_id=build_run.ci_run_id,
             build_number=build_run.build_number,
             commit_sha=build_run.commit_sha,
+            branch=build_run.branch,
+            commit_author=build_run.commit_author,
             conclusion=conclusion_str,
             created_at=build_run.created_at,
             completed_at=build_run.completed_at,
@@ -306,7 +312,9 @@ def build_hamilton_inputs(
             )
             is_commit_available = True
         except subprocess.CalledProcessError:
-            logger.warning(f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}")
+            logger.warning(
+                f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}"
+            )
 
     # Check worktree availability - try effective_sha first, then original_sha
     if is_commit_available and worktrees_base:
@@ -341,7 +349,9 @@ def build_hamilton_inputs(
     # Create input objects from entities
     repo_input = RepoInput.from_entity(raw_repo)
     # Pass current_repo for repo-scoped config lookup
-    config_input = FeatureConfigInput.from_entity(feature_config, current_repo=raw_repo.full_name)
+    config_input = FeatureConfigInput.from_entity(
+        feature_config, current_repo=raw_repo.full_name
+    )
     build_run_input = BuildRunInput.from_entity(build_run)
 
     # Create BuildLogsInput

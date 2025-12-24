@@ -8,6 +8,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { notificationsApi } from '@/lib/api'
 import type { Notification } from '@/types'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/auth-context'
 
 interface NotificationDropdownProps {
     className?: string
@@ -54,12 +55,16 @@ export function NotificationDropdown({ className }: NotificationDropdownProps) {
         }
     }, [])
 
+    const { authenticated } = useAuth()
+
     // Fetch unread count on mount and periodically
     useEffect(() => {
+        if (!authenticated) return
+
         void fetchUnreadCount()
         const interval = setInterval(fetchUnreadCount, 30000) // Poll every 30s
         return () => clearInterval(interval)
-    }, [fetchUnreadCount])
+    }, [fetchUnreadCount, authenticated])
 
     // Fetch full list when dropdown opens
     useEffect(() => {

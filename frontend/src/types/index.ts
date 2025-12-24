@@ -62,7 +62,6 @@ export interface BuildDetail extends Build {
   // Additional RawBuildRun fields
   commit_message?: string;
   commit_author?: string;
-  started_at?: string;
   provider: string;
 
   // Training features

@@ -75,7 +75,7 @@ export function ExportPanel({ repoId, repoName }: ExportPanelProps) {
     const loadRecentJobs = useCallback(async () => {
         try {
             const data = await exportApi.listJobs(repoId, 5);
-            setRecentJobs(data.items);
+            setRecentJobs(data.items || []);
         } catch (err) {
             console.error("Failed to load recent jobs", err);
         }
@@ -317,7 +317,7 @@ export function ExportPanel({ repoId, repoName }: ExportPanelProps) {
                         )}
 
                         {/* Recent Exports */}
-                        {recentJobs.length > 0 && (
+                        {recentJobs?.length > 0 && (
                             <div className="space-y-2">
                                 <h4 className="text-sm font-medium text-muted-foreground">Recent Exports</h4>
                                 <div className="space-y-2">

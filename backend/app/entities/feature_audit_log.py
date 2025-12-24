@@ -60,10 +60,6 @@ class NodeExecutionResult(BaseEntity):
         default_factory=list,
         description="Resources used for extraction (git_worktree, github_api, etc.)",
     )
-    resources_missing: List[str] = Field(
-        default_factory=list,
-        description="Resources that were unavailable",
-    )
 
     error: Optional[str] = None
     warning: Optional[str] = None

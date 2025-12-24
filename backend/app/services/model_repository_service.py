@@ -13,7 +13,6 @@ from app.dtos import (
     RepoResponse,
     RepoSearchResponse,
     RepoSuggestionListResponse,
-    RepoUpdateRequest,
 )
 from app.entities.enums import ModelImportStatus
 from app.entities.feature_audit_log import AuditLogCategory
@@ -341,41 +340,6 @@ class RepositoryService:
         raw_repo_doc = self.raw_repo.find_by_id(repo_doc.raw_repo_id)
 
         return _serialize_repo_detail(repo_doc, raw_repo_doc)
-
-    def update_repository_settings(
-        self, repo_id: str, payload: RepoUpdateRequest, current_user: dict
-    ) -> RepoDetailResponse:
-        repo_doc = self.repo_config.get_repository(repo_id)
-        if not repo_doc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
-            )
-
-        # Verify user owns this repository
-        repo_user_id = str(repo_doc.user_id)
-        current_user_id = str(current_user["_id"])
-        if repo_user_id != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to update this repository",
-            )
-
-        updates = payload.model_dump(exclude_unset=True)
-        if "feature_ids" in updates:
-            updates["requested_feature_ids"] = updates.pop("feature_ids")
-        if "max_builds" in updates:
-            updates["max_builds_to_ingest"] = updates.pop("max_builds")
-
-        if not updates:
-            updated = repo_doc
-        else:
-            updated = self.repo_config.update_repository(repo_id, updates)
-            if not updated:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
-                )
-
-        return _serialize_repo_detail(updated)
 
     def trigger_sync(self, repo_id: str, user_id: str):
         """

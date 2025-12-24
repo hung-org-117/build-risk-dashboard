@@ -380,32 +380,16 @@ function NodeResultDetail({ node }: NodeResultDetailProps) {
             )}
 
             {/* Resources */}
-            {(node.resources_used.length > 0 || node.resources_missing.length > 0) && (
-                <div className="grid grid-cols-2 gap-2">
-                    {node.resources_used.length > 0 && (
-                        <div>
-                            <p className="text-muted-foreground mb-1">Resources Used:</p>
-                            <div className="flex flex-wrap gap-1">
-                                {node.resources_used.map((resource) => (
-                                    <Badge key={resource} variant="outline" className="text-xs text-green-600">
-                                        {resource}
-                                    </Badge>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                    {node.resources_missing.length > 0 && (
-                        <div>
-                            <p className="text-muted-foreground mb-1">Resources Missing:</p>
-                            <div className="flex flex-wrap gap-1">
-                                {node.resources_missing.map((resource) => (
-                                    <Badge key={resource} variant="outline" className="text-xs text-red-600">
-                                        {resource}
-                                    </Badge>
-                                ))}
-                            </div>
-                        </div>
-                    )}
+            {node.resources_used && node.resources_used.length > 0 && (
+                <div>
+                    <p className="text-muted-foreground mb-1">Resources Used:</p>
+                    <div className="flex flex-wrap gap-1">
+                        {node.resources_used.map((resource) => (
+                            <Badge key={resource} variant="outline" className="text-xs text-green-600">
+                                {resource}
+                            </Badge>
+                        ))}
+                    </div>
                 </div>
             )}
 

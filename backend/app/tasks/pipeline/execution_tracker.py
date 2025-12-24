@@ -35,6 +35,7 @@ class NodeExecutionInfo:
     error: Optional[str] = None
     skipped: bool = False
     result: Any = None
+    resources_used: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -141,6 +142,13 @@ class ExecutionTracker(base.BasePreNodeExecute, base.BasePostNodeExecute):
 
         duration_ms = (time.perf_counter() - start_time) * 1000
 
+        # Get required resources for this node
+        from app.tasks.pipeline.feature_dag._metadata import get_required_resources_for_features
+
+        resources_used = list(get_required_resources_for_features({node_name}))
+        # Sort for consistency
+        resources_used.sort()
+
         node_info = NodeExecutionInfo(
             node_name=node_name,
             started_at=started_at,
@@ -150,6 +158,7 @@ class ExecutionTracker(base.BasePreNodeExecute, base.BasePostNodeExecute):
             error=str(error) if error else None,
             skipped=False,
             result=result if success else None,
+            resources_used=resources_used,
         )
 
         self._node_results.append(node_info)

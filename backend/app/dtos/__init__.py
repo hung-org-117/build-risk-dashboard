@@ -79,7 +79,6 @@ from .repository import (
     RepoSearchResponse,
     RepoSuggestion,
     RepoSuggestionListResponse,
-    RepoUpdateRequest,
 )
 from .settings import (
     ApplicationSettingsResponse,
@@ -133,7 +132,6 @@ __all__ = [
     "RepoSearchResponse",
     "RepoSuggestion",
     "RepoSuggestionListResponse",
-    "RepoUpdateRequest",
     # User
     "OAuthIdentityResponse",
     "UserResponse",

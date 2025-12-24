@@ -37,6 +37,11 @@ class FeatureCategory(str, Enum):
     TEAM = "team"
     METADATA = "metadata"
     WORKFLOW = "workflow"
+    # New categories from Circle CI research
+    DEVOPS = "devops"  # DevOps file detection and analysis
+    BUILD_HISTORY = "build_history"  # Link to previous build features
+    COMMITTER = "committer"  # Committer experience features
+    COOPERATION = "cooperation"  # Cooperation features (distinct authors, revisions)
 
 
 class FeatureDataType(str, Enum):
@@ -112,13 +117,16 @@ def feature_metadata(
             "category": category.value if isinstance(category, Enum) else category,
             "data_type": data_type.value if isinstance(data_type, Enum) else data_type,
             "required_resources": [
-                r.value if isinstance(r, Enum) else r for r in (required_resources or [])
+                r.value if isinstance(r, Enum) else r
+                for r in (required_resources or [])
             ],
             "nullable": nullable,
             "example_value": example_value,
             "unit": unit,
             "output_format": (
-                output_format.value if isinstance(output_format, Enum) else output_format
+                output_format.value
+                if isinstance(output_format, Enum)
+                else output_format
             ),
             "output_formats": formats_dict,
             # Quality evaluation metadata

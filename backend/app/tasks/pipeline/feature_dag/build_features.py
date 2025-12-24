@@ -151,7 +151,10 @@ def tr_duration(build_run: BuildRunInput) -> float:
 )
 def tr_log_lan_all(feature_config: FeatureConfigInput) -> List[str]:
     """All source languages for the repository."""
-    return feature_config.get("source_languages", [], scope="repo")
+    return [
+        lang.lower()
+        for lang in feature_config.get("source_languages", [], scope="repo")
+    ] or [""]
 
 
 @feature_metadata(
@@ -196,15 +199,113 @@ def ci_provider(build_run: BuildRunInput) -> str:
 
 @feature_metadata(
     display_name="Build Trigger Commit",
-    description="Commit SHA that triggered the build",
+    description="Commit SHA that triggered the build (resolves virtual merge for Travis CI)",
     category=FeatureCategory.METADATA,
     data_type=FeatureDataType.STRING,
     required_resources=[FeatureResource.BUILD_RUN],
 )
 @tag(group="metadata")
 def git_trigger_commit(build_run: BuildRunInput) -> str:
-    """Commit SHA that triggered the build."""
+    """
+    Commit SHA that triggered the build.
+
+    CI Provider Differences:
+    - GitHub Actions: Returns head_sha directly (no virtual commits)
+    - Circle CI: Returns commit SHA directly (no virtual commits)
+    - Travis CI: For PR builds, Travis creates virtual merge commits.
+                 We resolve to actual commit by parsing commit message.
+
+    Returns:
+        The actual commit SHA that triggered the build.
+    """
+    ci_provider = build_run.ci_provider
+
+    # For Travis CI PR builds, resolve virtual merge commit
+    if ci_provider == "travis_ci":
+        return _resolve_travis_trigger_commit(build_run)
+
+    # For GitHub Actions and Circle CI, commit_sha is the real commit
     return build_run.commit_sha
+
+
+def _is_pr_build(build_run: BuildRunInput) -> bool:
+    """
+    Check if build was triggered by a pull request (CI-agnostic).
+
+    Handles different CI providers:
+    - GitHub Actions: event == "pull_request" or "pull_request_target"
+    - Travis CI: pull_request field is truthy or pull_req is not None
+    - Circle CI: pull_requests array is non-empty or branch starts with "pull/"
+
+    Returns:
+        True if this build is PR-triggered, False otherwise.
+    """
+    raw_data = build_run.raw_data
+    ci_provider = build_run.ci_provider
+
+    if ci_provider == "github_actions":
+        event = raw_data.get("event", "")
+        return event in ("pull_request", "pull_request_target")
+
+    elif ci_provider == "travis_ci":
+        # Travis uses pull_request (bool) or pull_req (PR number)
+        return (
+            raw_data.get("pull_request", False) or raw_data.get("pull_req") is not None
+        )
+
+    elif ci_provider == "circleci":
+        # Circle CI: check for pull_requests array or branch pattern
+        pull_requests = raw_data.get("pull_requests", [])
+        branch = raw_data.get("branch", "")
+        return len(pull_requests) > 0 or branch.startswith("pull/")
+
+    # Fallback: check common fields
+    return (
+        raw_data.get("pull_request", False)
+        or raw_data.get("pull_req") is not None
+        or len(raw_data.get("pull_requests", [])) > 0
+    )
+
+
+def _resolve_travis_trigger_commit(build_run: BuildRunInput) -> str:
+    """
+    Resolve Travis CI virtual merge commit to actual commit.
+
+    When Travis CI builds a PR, it creates a virtual merge commit by merging
+    the PR head into the target branch. The commit message looks like:
+    "Merge abc123def into main"
+
+    For PR builds, we extract the actual PR commit SHA from this message.
+    For non-PR builds, we return the original commit SHA.
+    """
+    import re
+
+    commit_sha = build_run.commit_sha
+
+    # Use CI-agnostic PR check
+    if not _is_pr_build(build_run):
+        # Non-PR builds: commit_sha is the real commit
+        return commit_sha
+
+    # For PR builds, try to resolve from commit message
+    raw_data = build_run.raw_data
+    commit_message = raw_data.get("commit_message", "") or raw_data.get("message", "")
+
+    # Match pattern: "Merge abc123 into xyz789" or "Merge abc123 into main"
+    match = re.search(r"Merge\s+([a-f0-9]+)\s+into\s+", commit_message, re.IGNORECASE)
+
+    if match:
+        actual_sha = match.group(1)
+        logger.info(
+            f"Resolved Travis virtual commit {commit_sha[:8]} to actual {actual_sha[:8]}"
+        )
+        return actual_sha
+
+    # Fallback: return original commit_sha
+    logger.debug(
+        f"Could not resolve Travis virtual commit from message: {commit_message[:50]}"
+    )
+    return commit_sha
 
 
 @feature_metadata(
@@ -224,20 +325,20 @@ def gh_build_started_at(build_run: BuildRunInput) -> Optional[str]:
 
 @feature_metadata(
     display_name="Git Branch",
-    description="Branch name from workflow run payload",
+    description="Branch name (already normalized from CI provider)",
     category=FeatureCategory.GIT_HISTORY,
     data_type=FeatureDataType.STRING,
     required_resources=[FeatureResource.BUILD_RUN],
 )
 @tag(group="metadata")
 def git_branch(build_run: BuildRunInput) -> Optional[str]:
-    """Branch name from workflow run payload."""
-    return build_run.raw_data.get("head_branch")
+    """Branch name (uses normalized field from RawBuildRun)."""
+    return build_run.branch
 
 
 @feature_metadata(
     display_name="Is Pull Request",
-    description="Whether this build was triggered by a pull request",
+    description="Whether this build was triggered by a pull request (CI-agnostic)",
     category=FeatureCategory.PR_INFO,
     data_type=FeatureDataType.BOOLEAN,
     required_resources=[FeatureResource.BUILD_RUN],
@@ -245,10 +346,8 @@ def git_branch(build_run: BuildRunInput) -> Optional[str]:
 )
 @tag(group="metadata")
 def gh_is_pr(build_run: BuildRunInput) -> bool:
-    """Whether this build is triggered by a pull request."""
-    payload = build_run.raw_data
-    event = payload.get("event", "")
-    return event in ("pull_request", "pull_request_target")
+    """Whether this build is triggered by a pull request (works with all CI providers)."""
+    return _is_pr_build(build_run)
 
 
 def _find_primary_pr(payload: dict) -> Optional[dict]:
@@ -282,7 +381,9 @@ def _find_primary_pr(payload: dict) -> Optional[dict]:
         base_repo_name = pr.get("base", {}).get("repo", {}).get("name", "?")
 
         if base_repo_id == repo_id:
-            logger.info(f"Found primary PR #{pr_number} (base.repo.id matches repository.id)")
+            logger.info(
+                f"Found primary PR #{pr_number} (base.repo.id matches repository.id)"
+            )
             return pr
         else:
             logger.debug(
@@ -290,30 +391,81 @@ def _find_primary_pr(payload: dict) -> Optional[dict]:
                 f"(id={base_repo_id}) != repo_id={repo_id}"
             )
 
-    logger.debug(f"No primary PR found among {len(pull_requests)} PRs (all are fork PRs)")
+    logger.debug(
+        f"No primary PR found among {len(pull_requests)} PRs (all are fork PRs)"
+    )
+    return None
+
+
+def _get_pr_number(build_run: BuildRunInput) -> Optional[int]:
+    """
+    Get PR number from build (CI-agnostic).
+
+    CI Provider Differences:
+    - GitHub Actions: pull_requests[0].number (uses _find_primary_pr for fork detection)
+    - Travis CI: pull_req field
+    - Circle CI: extract from vcs.pull_requests[] URLs or branch pattern
+    """
+    raw_data = build_run.raw_data
+    ci_provider = build_run.ci_provider
+
+    if ci_provider == "github_actions":
+        primary_pr = _find_primary_pr(raw_data)
+        if primary_pr:
+            return primary_pr.get("number")
+        return None
+
+    elif ci_provider == "travis_ci":
+        # Travis stores PR number in pull_req field
+        pull_req = raw_data.get("pull_req")
+        if pull_req is not None:
+            return int(pull_req) if isinstance(pull_req, (int, str)) else None
+        return None
+
+    elif ci_provider == "circleci":
+        # Circle CI: extract from pull_requests URLs or branch pattern
+        vcs = raw_data.get("vcs", {})
+        pull_requests = vcs.get("pull_requests", [])
+        if pull_requests:
+            # URLs look like: https://github.com/owner/repo/pull/123
+            url = pull_requests[0] if isinstance(pull_requests[0], str) else None
+            if url and "/pull/" in url:
+                import re
+
+                match = re.search(r"/pull/(\d+)", url)
+                if match:
+                    return int(match.group(1))
+
+        # Fallback: check branch pattern like "pull/123"
+        branch = vcs.get("branch", "")
+        if branch.startswith("pull/"):
+            import re
+
+            match = re.match(r"pull/(\d+)", branch)
+            if match:
+                return int(match.group(1))
+        return None
+
+    # Fallback
     return None
 
 
 @feature_metadata(
     display_name="PR Number",
-    description="Pull request number if applicable",
+    description="Pull request number if applicable (CI-agnostic)",
     category=FeatureCategory.PR_INFO,
     data_type=FeatureDataType.INTEGER,
     required_resources=[FeatureResource.BUILD_RUN],
 )
 @tag(group="metadata")
 def gh_pull_req_num(build_run: BuildRunInput) -> Optional[int]:
-    """Pull request number if this build is PR-triggered."""
-    payload = build_run.raw_data
-    primary_pr = _find_primary_pr(payload)
-    if primary_pr:
-        return primary_pr.get("number")
-    return None
+    """Pull request number (works with GitHub Actions, Travis CI, Circle CI)."""
+    return _get_pr_number(build_run)
 
 
 @feature_metadata(
     display_name="PR Created At",
-    description="Timestamp when the pull request was created",
+    description="Timestamp when the pull request was created (CI-agnostic)",
     category=FeatureCategory.PR_INFO,
     data_type=FeatureDataType.DATETIME,
     required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
@@ -323,20 +475,20 @@ def gh_pr_created_at(
     build_run: BuildRunInput,
     github_client: GitHubClientInput,
 ) -> Optional[str]:
-    """Pull request creation timestamp fetched from GitHub API."""
-    payload = build_run.raw_data
-    primary_pr = _find_primary_pr(payload)
+    """
+    Pull request creation timestamp fetched from GitHub API.
 
-    if not primary_pr:
-        return None
-
-    pr_number = primary_pr.get("number")
+    Works with all CI providers since we always fetch from GitHub API.
+    """
+    pr_number = _get_pr_number(build_run)
     if not pr_number:
         return None
 
     try:
         full_name = github_client.full_name
-        logger.debug(f"Fetching PR #{pr_number} details from GitHub API for {full_name}")
+        logger.debug(
+            f"Fetching PR #{pr_number} details from GitHub API for {full_name}"
+        )
         pr_details = github_client.client.get_pull_request(full_name, pr_number)
         created_at = pr_details.get("created_at")
         logger.debug(f"PR #{pr_number} created_at: {created_at}")

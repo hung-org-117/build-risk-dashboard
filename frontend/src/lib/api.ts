@@ -24,7 +24,7 @@ import type {
   RepoListResponse,
   RepoSearchResponse,
   RepoSuggestionResponse,
-  RepoUpdatePayload,
+
   RepositoryRecord,
   TokenCreatePayload,
   TokenListResponse,
@@ -275,10 +275,6 @@ export const reposApi = {
   },
   get: async (repoId: string) => {
     const response = await api.get<RepoDetail>(`/repos/${repoId}`);
-    return response.data;
-  },
-  update: async (repoId: string, payload: RepoUpdatePayload) => {
-    const response = await api.patch<RepoDetail>(`/repos/${repoId}`, payload);
     return response.data;
   },
   importBulk: async (payloads: RepoImportPayload[]) => {
@@ -1645,7 +1641,6 @@ export interface NodeExecutionResult {
   features_extracted: string[];
   feature_values: Record<string, unknown>;
   resources_used: string[];
-  resources_missing: string[];
   error?: string;
   warning?: string;
   skip_reason?: string;

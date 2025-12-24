@@ -123,6 +123,7 @@ def _save_audit_log(
                     completed_at=node_info.completed_at,
                     duration_ms=node_info.duration_ms,
                     error=node_info.error,
+                    resources_used=node_info.resources_used,
                 )
 
                 # Populate feature values if this node corresponds to a requested feature

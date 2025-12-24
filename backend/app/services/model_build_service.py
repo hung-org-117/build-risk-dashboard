@@ -160,7 +160,6 @@ class BuildService:
             commit_message=raw.commit_message,
             commit_author=raw.commit_author,
             created_at=raw.created_at,
-            started_at=raw.started_at,
             completed_at=raw.completed_at,
             duration_seconds=raw.duration_seconds,
             web_url=raw.web_url,
