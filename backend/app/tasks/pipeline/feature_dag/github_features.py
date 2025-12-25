@@ -25,6 +25,7 @@ from app.tasks.pipeline.feature_dag._metadata import (
     feature_metadata,
 )
 from app.tasks.pipeline.feature_dag._retry import with_retry
+from app.utils.datetime import ensure_naive_utc
 
 logger = logging.getLogger(__name__)
 
@@ -183,18 +184,24 @@ def _count_pr_issue_comments(
         # GitHub treats PRs as issues for comments
         comments = client.list_issue_comments(full_name, pr_number)
 
+        # Normalize datetimes to naive UTC for comparison
+        from_naive = ensure_naive_utc(from_time)
+        to_naive = ensure_naive_utc(to_time)
+
         count = 0
         for comment in comments:
             created_at_str = comment.get("created_at", "")
             if not created_at_str:
                 continue
 
+            # Parse and convert to naive UTC
             comment_time = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            comment_time_naive = comment_time.replace(tzinfo=None)
 
             # Apply time filter
-            if from_time and comment_time < from_time:
+            if from_naive and comment_time_naive < from_naive:
                 continue
-            if to_time and comment_time > to_time:
+            if to_naive and comment_time_naive > to_naive:
                 continue
 
             count += 1
@@ -222,18 +229,24 @@ def _count_pr_review_comments(
     try:
         comments = client.list_review_comments(full_name, pr_number)
 
+        # Normalize datetimes to naive UTC for comparison
+        from_naive = ensure_naive_utc(from_time)
+        to_naive = ensure_naive_utc(to_time)
+
         count = 0
         for comment in comments:
             created_at_str = comment.get("created_at", "")
             if not created_at_str:
                 continue
 
+            # Parse and convert to naive UTC
             comment_time = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            comment_time_naive = comment_time.replace(tzinfo=None)
 
             # Apply time filter
-            if from_time and comment_time < from_time:
+            if from_naive and comment_time_naive < from_naive:
                 continue
-            if to_time and comment_time > to_time:
+            if to_naive and comment_time_naive > to_naive:
                 continue
 
             count += 1

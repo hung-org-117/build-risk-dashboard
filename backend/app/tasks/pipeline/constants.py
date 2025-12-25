@@ -1,7 +1,9 @@
 from app.tasks.pipeline.feature_dag import (
     build_features,
+    devops_features,
     git_features,
     github_features,
+    history_features,
     log_features,
     repo_features,
 )
@@ -10,8 +12,10 @@ DEFAULT_FEATURES = {"tr_build_id", "gh_project_name"}
 
 HAMILTON_MODULES = [
     build_features,
+    devops_features,
     git_features,
     github_features,
+    history_features,
     repo_features,
     log_features,
 ]

@@ -250,13 +250,23 @@ class GitHubClient:
         Returns:
             Response data (from cache or fresh)
         """
+        from urllib.parse import urlencode
+
         from app.services.github.github_cache import get_github_cache
+        from app.services.github.rate_limiter import get_rate_limiter
 
         cache = get_github_cache()
-        url = f"{self._api_url}{path}"
+
+        # Build cache key including params to avoid conflicts
+        cache_key = f"{self._api_url}{path}"
+        if params:
+            cache_key = f"{cache_key}?{urlencode(sorted(params.items()))}"
 
         # Get cached ETag
-        etag, last_modified, cached_data = cache.get_cached(url)
+        etag, last_modified, cached_data = cache.get_cached(cache_key)
+
+        # Rate limit before making request
+        get_rate_limiter().wait()
 
         # Build headers with conditional request
         headers = self._headers()
@@ -265,33 +275,47 @@ class GitHubClient:
         if last_modified:
             headers["If-Modified-Since"] = last_modified
 
-        # Make request directly (not via _retry_on_rate_limit) to handle 304
-        try:
-            response = self._rest.get(path, headers=headers, params=params)
-        except httpx.RequestError as exc:
-            # Network error - return cached data if available
-            if cached_data:
+        # Retry loop for token rotation on rate limit
+        while True:
+            try:
+                response = self._rest.get(path, headers=headers, params=params)
+            except httpx.RequestError as exc:
+                # Network error - return cached data if available
+                if cached_data:
+                    return cached_data
+                raise GithubRetryableError(str(exc)) from exc
+
+            # Handle 304 Not Modified - return cached data (FREE - doesn't count!)
+            if response.status_code == 304 and cached_data:
                 return cached_data
-            raise GithubRetryableError(str(exc)) from exc
 
-        # Handle 304 Not Modified - return cached data (FREE - doesn't count against rate limit!)
-        if response.status_code == 304 and cached_data:
-            return cached_data
+            # Update rate limit info from headers
+            if self._redis_pool and self._current_token_key:
+                self._redis_pool.update_rate_limit_from_headers(
+                    self._current_token_key,
+                    response.headers,
+                )
 
-        # Update rate limit info from headers
-        if self._redis_pool and self._current_token_key:
-            self._redis_pool.update_rate_limit_from_headers(
-                self._current_token_key,
-                response.headers,
-            )
+            # Handle rate limits with token rotation
+            if response.status_code == 403:
+                text_lower = response.text.lower()
+                if "secondary rate limit" in text_lower:
+                    self._handle_secondary_rate_limit(response)
+                elif "rate limit" in text_lower:
+                    # Try to rotate token
+                    if self._rotate_token():
+                        # Update headers with new token and retry
+                        headers = self._headers()
+                        if etag:
+                            headers["If-None-Match"] = etag
+                        if last_modified:
+                            headers["If-Modified-Since"] = last_modified
+                        continue
+                    # No more tokens, raise rate limit error
+                    self._handle_rate_limit(response)
 
-        # Handle rate limits
-        if response.status_code == 403:
-            text_lower = response.text.lower()
-            if "secondary rate limit" in text_lower:
-                self._handle_secondary_rate_limit(response)
-            elif "rate limit" in text_lower:
-                self._handle_rate_limit(response)
+            # Exit retry loop on success or non-rate-limit error
+            break
 
         # Check for other errors
         try:
@@ -305,7 +329,7 @@ class GitHubClient:
         new_last_modified = response.headers.get("Last-Modified")
 
         if new_etag or new_last_modified:
-            cache.set_cached(url, data, new_etag, new_last_modified, ttl)
+            cache.set_cached(cache_key, data, new_etag, new_last_modified, ttl)
 
         return data
 
@@ -460,13 +484,36 @@ class GitHubClient:
         jobs = self._rest_request("GET", f"/repos/{full_name}/actions/runs/{run_id}/jobs")
         return jobs.get("jobs", [])
 
-    def get_pull_request(self, full_name: str, pr_number: int) -> Dict[str, Any]:
+    def get_pull_request(
+        self, full_name: str, pr_number: int, use_cache: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Get pull request details.
+
+        Args:
+            full_name: Repository full name (owner/repo)
+            pr_number: Pull request number
+            use_cache: Whether to use ETag caching (default True)
+        """
+        if use_cache:
+            return self._get_with_cache(f"/repos/{full_name}/pulls/{pr_number}", ttl=300)
         return self._rest_request("GET", f"/repos/{full_name}/pulls/{pr_number}")
 
     def get_pulls(self, full_name: str) -> List[Dict[str, Any]]:
         return self._rest_request("GET", f"/repos/{full_name}/pulls")
 
-    def get_commit(self, full_name: str, sha: str) -> Dict[str, Any]:
+    def get_commit(self, full_name: str, sha: str, use_cache: bool = True) -> Dict[str, Any]:
+        """
+        Get commit details.
+
+        Args:
+            full_name: Repository full name (owner/repo)
+            sha: Commit SHA
+            use_cache: Whether to use ETag caching (default True)
+        """
+        # Commit data is immutable, cache for 1 hour
+        if use_cache:
+            return self._get_with_cache(f"/repos/{full_name}/commits/{sha}", ttl=3600)
         return self._rest_request("GET", f"/repos/{full_name}/commits/{sha}")
 
     def get_commit_patch(self, full_name: str, sha: str) -> str:
@@ -495,7 +542,21 @@ class GitHubClient:
         """List PR code review comments with pagination."""
         return list(self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments"))
 
-    def compare_commits(self, full_name: str, base: str, head: str) -> Dict[str, Any]:
+    def compare_commits(
+        self, full_name: str, base: str, head: str, use_cache: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Compare two commits.
+
+        Args:
+            full_name: Repository full name (owner/repo)
+            base: Base commit SHA or branch
+            head: Head commit SHA or branch
+            use_cache: Whether to use ETag caching (default True)
+        """
+        # Compare results are immutable for same base/head, cache for 1 hour
+        if use_cache:
+            return self._get_with_cache(f"/repos/{full_name}/compare/{base}...{head}", ttl=3600)
         return self._rest_request("GET", f"/repos/{full_name}/compare/{base}...{head}")
 
     def download_job_logs(self, full_name: str, job_id: int) -> bytes:
@@ -568,14 +629,11 @@ class GitHubClient:
 
     def logs_available(self, full_name: str, run_id: int) -> bool:
         """Return True if the workflow run log archive is still retrievable."""
+        from app.services.github.rate_limiter import get_rate_limiter
 
         try:
-
-            def _do_request():
-                return self._rest.head(
-                    f"/repos/{full_name}/actions/runs/{run_id}/logs",
-                    headers=self._headers(),
-                )
+            # Rate limit before request
+            get_rate_limiter().wait()
 
             while True:
                 try:
@@ -587,14 +645,19 @@ class GitHubClient:
                         self._handle_rate_limit(response)
                     break
                 except GithubRateLimitError:
-                    if not self._redis_pool:
-                        raise
-                    self._current_token_key = self._redis_pool.acquire_token()
-                    self._token = self._redis_pool.get_raw_token(self._current_token_key)
+                    # Try to rotate token
+                    if not self._rotate_token():
+                        raise GithubAllRateLimitError(
+                            "All GitHub tokens hit rate limits."
+                        ) from None
+                    # Successfully rotated, continue to retry
                     continue
 
         except httpx.RequestError:  # pragma: no cover - network hiccup
             return False
+        except GithubAllRateLimitError:
+            # Re-raise to caller
+            raise
 
         if response.status_code in {200, 302, 301}:
             return True
@@ -663,6 +726,7 @@ def get_public_github_client() -> GitHubClient:
         )
     except GithubAllRateLimitError:
         # Re-raise rate limit errors
+        logger.warning("All GitHub tokens exhausted")
         raise
     except Exception as e:
         # Redis not available or no tokens in pool, fall back to env vars

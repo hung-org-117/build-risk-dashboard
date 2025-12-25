@@ -32,31 +32,6 @@ from app.tasks.base import PipelineTask
 logger = logging.getLogger(__name__)
 
 
-def _publish_status(repo_id: str, status: str, message: str = ""):
-    """Publish status update to Redis for real-time UI updates."""
-    try:
-        import json
-
-        import redis
-
-        redis_client = redis.from_url(settings.REDIS_URL)
-        redis_client.publish(
-            "events",
-            json.dumps(
-                {
-                    "type": "REPO_UPDATE",
-                    "payload": {
-                        "repo_id": repo_id,
-                        "status": status,
-                        "message": message,
-                    },
-                }
-            ),
-        )
-    except Exception as e:
-        logger.error(f"Failed to publish status update: {e}")
-
-
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -97,9 +72,6 @@ def clone_repo(
         "correlation_id": correlation_id,
         "error": None,
     }
-
-    if publish_status and raw_repo_id:
-        _publish_status(raw_repo_id, "importing", "Cloning repository...")
 
     repo_path = get_repo_path(github_repo_id)
 
@@ -153,9 +125,6 @@ def clone_repo(
                 )
 
             logger.info(f"{log_ctx} Clone/update completed successfully")
-
-            if publish_status and raw_repo_id:
-                _publish_status(raw_repo_id, "importing", "Repository cloned successfully")
 
             result.update(
                 {
@@ -377,13 +346,6 @@ def create_worktree_chunk(
                 logger.exception(f"{log_ctx} Unexpected error creating worktree for {sha[:8]}: {e}")
                 worktrees_failed += 1
 
-        if publish_status and raw_repo_id:
-            msg = (
-                f"Chunk {chunk_index + 1}/{total_chunks}: "
-                f"{worktrees_created} created, {worktrees_skipped} skipped"
-            )
-            _publish_status(raw_repo_id, "importing", msg)
-
         logger.info(
             f"{log_ctx} Completed: created={worktrees_created}, "
             f"skipped={worktrees_skipped}, failed={worktrees_failed}"
@@ -484,12 +446,6 @@ def finalize_worktrees(
             f"skipped={total_skipped}, failed={total_failed}"
         )
 
-    if publish_status and raw_repo_id:
-        msg = f"Worktrees ready: {total_created} created, {total_skipped} skipped"
-        if total_failed > 0:
-            msg += f", {total_failed} failed"
-        _publish_status(raw_repo_id, "importing", msg)
-
     return {
         "status": status,
         "worktrees_created": total_created,
@@ -562,12 +518,6 @@ def aggregate_logs_results(
             f"{log_ctx} Completed successfully: downloaded={total_downloaded}, "
             f"expired={total_expired}, skipped={total_skipped}"
         )
-
-    if publish_status and raw_repo_id:
-        status_msg = f"Logs ready: {total_downloaded} downloaded, {total_expired} expired"
-        if chunks_with_errors:
-            status_msg += f" ({len(chunks_with_errors)} chunks had errors)"
-        _publish_status(raw_repo_id, "importing", status_msg)
 
     return {
         "status": status,
@@ -666,6 +616,34 @@ def download_logs_chunk(
                 return "stopped"
 
             build_run = build_run_repo.find_by_repo_and_build_id(raw_repo_id, build_id)
+
+            # Skip builds with conclusions that never have logs
+            if build_run and build_run.conclusion:
+                from app.ci_providers.models import BuildConclusion
+
+                # These conclusions mean the build never ran, so no logs exist
+                no_logs_conclusions = {
+                    BuildConclusion.SKIPPED,
+                    BuildConclusion.ACTION_REQUIRED,
+                    BuildConclusion.STALE,
+                }
+                # Handle both enum and string values
+                conclusion = build_run.conclusion
+                if isinstance(conclusion, str):
+                    try:
+                        conclusion = BuildConclusion(conclusion)
+                    except ValueError:
+                        conclusion = None
+
+                if conclusion in no_logs_conclusions:
+                    logs_skipped += 1
+                    # Mark as no logs available (not expired - they never existed)
+                    build_run_repo.update_one(
+                        str(build_run.id),
+                        {"logs_available": False, "logs_expired": False},
+                    )
+                    return "skipped_no_logs"
+
             if build_run and build_run.logs_available:
                 # Verify log files actually exist on disk
                 expected_logs_dir = get_build_logs_path(github_repo_id, build_id)
@@ -751,13 +729,6 @@ def download_logs_chunk(
                     break
         finally:
             loop.close()
-
-        if publish_status and raw_repo_id:
-            msg = (
-                f"Logs chunk {chunk_index + 1}/{total_chunks}: "
-                f"{logs_downloaded} downloaded, {logs_expired} expired"
-            )
-            _publish_status(raw_repo_id, "importing", msg)
 
         logger.info(
             f"{log_ctx} Completed: downloaded={logs_downloaded}, "

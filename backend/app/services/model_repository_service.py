@@ -170,6 +170,15 @@ class RepositoryService:
                     )
                 )
 
+                # Publish status immediately for real-time UI update
+                from app.tasks.shared.events import publish_repo_status
+
+                publish_repo_status(
+                    str(repo_doc.id),
+                    "queued",
+                    f"Repository {payload.full_name} queued for import",
+                )
+
                 start_model_processing.delay(
                     repo_config_id=str(repo_doc.id),
                     ci_provider=payload.ci_provider.value,

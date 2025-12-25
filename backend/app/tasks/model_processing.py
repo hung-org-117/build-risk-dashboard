@@ -1,9 +1,7 @@
-import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-import redis
 from bson import ObjectId
 
 from app.celery_app import celery_app
@@ -21,51 +19,10 @@ from app.tasks.pipeline.feature_dag._metadata import (
     format_features_for_storage,
 )
 from app.tasks.shared import extract_features_for_build
+from app.tasks.shared.events import publish_build_status as publish_build_update
+from app.tasks.shared.events import publish_repo_status as publish_status
 
 logger = logging.getLogger(__name__)
-
-
-def publish_build_update(repo_id: str, build_id: str, status: str):
-    try:
-        redis_client = redis.from_url(settings.REDIS_URL)
-        redis_client.publish(
-            "events",
-            json.dumps(
-                {
-                    "type": "BUILD_UPDATE",
-                    "payload": {
-                        "repo_id": repo_id,
-                        "build_id": build_id,
-                        "status": status,
-                    },
-                }
-            ),
-        )
-    except Exception as e:
-        logger.error(f"Failed to publish build update: {e}")
-
-
-def publish_status(
-    repo_id: str, status: str, message: str = "", stats: Optional[Dict[str, int]] = None
-):
-    """Publish status update to Redis for real-time UI updates."""
-    try:
-        redis_client = redis.from_url(settings.REDIS_URL)
-        payload = {
-            "type": "REPO_UPDATE",
-            "payload": {
-                "repo_id": repo_id,
-                "status": status,
-                "message": message,
-            },
-        }
-        if stats:
-            payload["payload"]["stats"] = stats
-
-        redis_client.publish("events", json.dumps(payload))
-
-    except Exception as e:
-        logger.error(f"Failed to publish status update: {e}")
 
 
 # Task 1: Orchestrator - starts ingestion then processing
