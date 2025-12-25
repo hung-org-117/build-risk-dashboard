@@ -70,6 +70,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
                 const message: WebSocketMessage = JSON.parse(event.data);
                 const { type, payload } = message;
 
+                // Notify subscribers via context
                 if (subscribersRef.current[type]) {
                     subscribersRef.current[type].forEach((callback) => {
                         try {
@@ -78,6 +79,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
                             console.error(`Error in WebSocket subscriber for ${type}:`, err);
                         }
                     });
+                }
+
+                // Also dispatch as window custom event for components not using subscribe
+                // This enables hooks that can't use useWebSocket to receive updates
+                if (type === "ENRICHMENT_UPDATE" || type === "DATASET_UPDATE") {
+                    window.dispatchEvent(
+                        new CustomEvent(type, { detail: payload })
+                    );
                 }
             } catch (e) {
                 console.error("Failed to parse WebSocket message:", e);

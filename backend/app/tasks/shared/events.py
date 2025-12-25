@@ -92,3 +92,43 @@ def publish_build_status(repo_id: str, build_id: str, status: str) -> bool:
         "status": status,
     }
     return publish_event("BUILD_UPDATE", payload)
+
+
+def publish_enrichment_update(
+    version_id: str,
+    status: str,
+    processed_rows: int = 0,
+    total_rows: int = 0,
+    enriched_rows: int = 0,
+    failed_rows: int = 0,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    Publish enrichment progress update for real-time UI updates.
+
+    Args:
+        version_id: DatasetVersion ID
+        status: Status value (ingesting, processing, completed, failed)
+        processed_rows: Number of rows processed so far
+        total_rows: Total number of rows to process
+        enriched_rows: Number of rows successfully enriched
+        failed_rows: Number of rows that failed enrichment
+        error: Optional error message
+
+    Returns:
+        True if published successfully, False otherwise
+    """
+    progress = round((processed_rows / total_rows) * 100, 1) if total_rows > 0 else 0
+    payload = {
+        "version_id": version_id,
+        "status": status,
+        "processed_rows": processed_rows,
+        "total_rows": total_rows,
+        "enriched_rows": enriched_rows,
+        "failed_rows": failed_rows,
+        "progress": progress,
+    }
+    if error:
+        payload["error"] = error
+
+    return publish_event("ENRICHMENT_UPDATE", payload)

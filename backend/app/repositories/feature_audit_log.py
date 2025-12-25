@@ -156,48 +156,26 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
         limit: int = 20,
         cursor: Optional[str] = None,
         status: Optional[str] = None,
+        version_id: Optional[str] = None,
     ) -> Tuple[List[FeatureAuditLog], Optional[str], bool]:
         """
         Find audit logs for a specific dataset with cursor-based pagination.
-
-        This queries through the chain: FeatureAuditLog.enrichment_build_id
-        → DatasetEnrichmentBuild.version_id → DatasetVersion.dataset_id
 
         Args:
             dataset_id: The dataset ID to filter by
             limit: Maximum number of logs to return
             cursor: Last item ID from previous page
             status: Optional status filter
+            version_id: Optional version ID filter
 
         Returns:
             Tuple of (list of logs, next_cursor, has_more)
         """
-        # Step 1: Get all version IDs for this dataset
-        version_ids = [
-            doc["_id"]
-            for doc in self.db["dataset_versions"].find(
-                {"dataset_id": self._to_object_id(dataset_id)},
-                {"_id": 1},
-            )
-        ]
+        # Query directly by dataset_id (populated during save_audit_log)
+        query: Dict[str, Any] = {"dataset_id": self._to_object_id(dataset_id)}
 
-        if not version_ids:
-            return [], None, False
-
-        # Step 2: Get all enrichment build IDs for these versions
-        enrichment_build_ids = [
-            doc["_id"]
-            for doc in self.db["dataset_enrichment_builds"].find(
-                {"version_id": {"$in": version_ids}},
-                {"_id": 1},
-            )
-        ]
-
-        if not enrichment_build_ids:
-            return [], None, False
-
-        # Step 3: Query audit logs with these enrichment build IDs
-        query: Dict[str, Any] = {"enrichment_build_id": {"$in": enrichment_build_ids}}
+        if version_id:
+            query["version_id"] = self._to_object_id(version_id)
 
         if status:
             query["status"] = status
@@ -219,3 +197,46 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
         next_cursor = str(logs[-1].id) if logs and has_more else None
 
         return logs, next_cursor, has_more
+
+    def find_by_dataset_page(
+        self,
+        dataset_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+        version_id: Optional[str] = None,
+    ) -> Tuple[List[FeatureAuditLog], int]:
+        """
+        Find audit logs for a specific dataset with page-based pagination.
+
+        Args:
+            dataset_id: The dataset ID to filter by
+            page: Page number (1-indexed)
+            page_size: Number of items per page
+            status: Optional status filter
+            version_id: Optional version ID filter
+
+        Returns:
+            Tuple of (list of logs, total count)
+        """
+        query: Dict[str, Any] = {"dataset_id": self._to_object_id(dataset_id)}
+
+        if version_id:
+            query["version_id"] = self._to_object_id(version_id)
+
+        if status:
+            query["status"] = status
+
+        # Get total count
+        total = self.collection.count_documents(query)
+
+        # Get paginated logs
+        skip = (page - 1) * page_size
+        logs = self.find_many(
+            query,
+            sort=[("_id", -1)],
+            skip=skip,
+            limit=page_size,
+        )
+
+        return logs, total

@@ -47,7 +47,7 @@ class StatisticsService:
         self.version_repo = DatasetVersionRepository(db)
         self.build_repo = DatasetEnrichmentBuildRepository(db)
         self.quality_repo = DataQualityRepository(db)
-        self.feature_service = FeatureService(db)
+        self.feature_service = FeatureService()
 
     def get_version_statistics(self, dataset_id: str, version_id: str) -> VersionStatisticsResponse:
         """
@@ -136,7 +136,7 @@ class StatisticsService:
 
         # Get feature metadata for data types
         all_features = self.feature_service.list_features()
-        feature_types = {f.name: f.data_type for f in all_features}
+        feature_types = {f["name"]: f["data_type"] for f in all_features}
 
         # Get all builds
         builds = self.build_repo.find_by_version(version_id)
@@ -188,10 +188,10 @@ class StatisticsService:
         # Get feature metadata
         all_features = self.feature_service.list_features()
         numeric_features = [
-            f.name
+            f["name"]
             for f in all_features
-            if f.data_type in ("integer", "float", "numeric")
-            and f.name in (features or version.selected_features)
+            if f["data_type"] in ("integer", "float", "numeric")
+            and f["name"] in (features or version.selected_features)
         ]
 
         if not numeric_features:
@@ -333,7 +333,7 @@ class StatisticsService:
         total = len(builds)
         feature_service = self.feature_service
         all_features = feature_service.list_features()
-        feature_types = {f.name: f.data_type for f in all_features}
+        feature_types = {f["name"]: f["data_type"] for f in all_features}
 
         completeness_list: List[FeatureCompleteness] = []
 

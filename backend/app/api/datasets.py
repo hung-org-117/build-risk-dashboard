@@ -173,6 +173,7 @@ def get_dataset_audit_logs_cursor(
     limit: int = Query(20, ge=1, le=100),
     cursor: str | None = Query(None, description="Cursor from previous page"),
     status: str | None = Query(None, description="Filter by status"),
+    version_id: str | None = Query(None, description="Filter by version id"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
 ):
@@ -194,4 +195,66 @@ def get_dataset_audit_logs_cursor(
         limit=limit,
         cursor=cursor,
         status=status,
+        version_id=version_id,
     )
+
+
+@router.get("/{dataset_id}/audit-logs")
+def get_dataset_audit_logs_page(
+    dataset_id: str = PathParam(..., description="Dataset id"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status: str | None = Query(None, description="Filter by status"),
+    version_id: str | None = Query(None, description="Filter by version id"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """
+    Get feature audit logs for a specific dataset with page-based pagination.
+    """
+    from app.services.monitoring_service import MonitoringService
+
+    # Verify dataset access first
+    service = DatasetService(db)
+    service.get_dataset(dataset_id, str(current_user["_id"]))
+
+    # Get audit logs
+    monitoring_service = MonitoringService(db)
+    return monitoring_service.get_feature_audit_logs_by_dataset_page(
+        dataset_id=dataset_id,
+        page=page,
+        page_size=page_size,
+        status=status,
+        version_id=version_id,
+    )
+
+
+@router.get("/{dataset_id}/audit-logs/{log_id}")
+def get_dataset_audit_log_detail(
+    dataset_id: str = PathParam(..., description="Dataset id"),
+    log_id: str = PathParam(..., description="Audit log id"),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """
+    Get detailed audit log with full node execution results.
+
+    Returns complete node_results with timing and feature extraction details.
+    """
+    from app.services.monitoring_service import MonitoringService
+
+    # Verify dataset access first
+    service = DatasetService(db)
+    service.get_dataset(dataset_id, str(current_user["_id"]))
+
+    # Get audit log detail
+    monitoring_service = MonitoringService(db)
+    result = monitoring_service.get_audit_log_detail(log_id)
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audit log not found",
+        )
+
+    return result

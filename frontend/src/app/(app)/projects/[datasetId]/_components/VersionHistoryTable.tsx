@@ -43,7 +43,7 @@ import {
 } from "lucide-react";
 import type { DatasetVersion } from "../_hooks/useDatasetVersions";
 
-type ExportFormat = "csv" | "json" | "parquet";
+type ExportFormat = "csv" | "json";
 
 interface VersionHistoryTableProps {
     datasetId: string;
@@ -123,7 +123,6 @@ export function VersionHistoryTable({
     const formatOptions: { format: ExportFormat; label: string; icon: typeof FileText }[] = [
         { format: "csv", label: "CSV", icon: FileSpreadsheet },
         { format: "json", label: "JSON", icon: FileJson },
-        { format: "parquet", label: "Parquet", icon: FileText },
     ];
 
     return (

@@ -122,6 +122,37 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         result = self.collection.update_one({"_id": self.ensure_object_id(version_id)}, update_ops)
         return result.modified_count > 0
 
+    def increment_progress(
+        self,
+        version_id: str | ObjectId,
+        processed_rows: int = 0,
+        enriched_rows: int = 0,
+        failed_rows: int = 0,
+    ) -> bool:
+        """Increment version progress atomically using $inc.
+
+        Used for batch processing where each task adds to the total.
+        """
+        inc_ops: Dict[str, int] = {}
+        if processed_rows:
+            inc_ops["processed_rows"] = processed_rows
+        if enriched_rows:
+            inc_ops["enriched_rows"] = enriched_rows
+        if failed_rows:
+            inc_ops["failed_rows"] = failed_rows
+
+        if not inc_ops:
+            return False
+
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)},
+            {
+                "$inc": inc_ops,
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
+        )
+        return result.modified_count > 0
+
     def mark_started(self, version_id: str | ObjectId, task_id: Optional[str] = None) -> bool:
         """Mark version as started processing."""
         updates: Dict[str, Any] = {

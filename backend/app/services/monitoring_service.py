@@ -256,9 +256,10 @@ class MonitoringService:
             repo_object_ids = [ObjectId(str(rid)) for rid in repo_ids]
             repos = self._raw_repo_repo.find_by_ids(repo_object_ids)
             for repo in repos:
+                name = repo.full_name.split("/")[-1] if repo.full_name else ""
                 repo_map[str(repo.id)] = {
                     "full_name": repo.full_name,
-                    "name": repo.name or "",
+                    "name": name,
                 }
 
         # Batch lookup build runs using repository
@@ -298,6 +299,7 @@ class MonitoringService:
         limit: int = 20,
         cursor: Optional[str] = None,
         status: Optional[str] = None,
+        version_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get audit logs for a specific dataset with cursor-based pagination."""
 
@@ -310,6 +312,7 @@ class MonitoringService:
             limit=limit,
             cursor=cursor,
             status=status,
+            version_id=version_id,
         )
 
         # Collect unique repo_ids and build_run_ids to batch lookup
@@ -325,9 +328,10 @@ class MonitoringService:
             repo_object_ids = [ObjectId(str(rid)) for rid in repo_ids]
             repos = self._raw_repo_repo.find_by_ids(repo_object_ids)
             for repo in repos:
+                name = repo.full_name.split("/")[-1] if repo.full_name else ""
                 repo_map[str(repo.id)] = {
                     "full_name": repo.full_name,
-                    "name": repo.name or "",
+                    "name": name,
                 }
 
         # Batch lookup build runs using repository
@@ -359,6 +363,151 @@ class MonitoringService:
             ],
             "next_cursor": next_cursor,
             "has_more": has_more,
+        }
+
+    def get_feature_audit_logs_by_dataset_page(
+        self,
+        dataset_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        status: Optional[str] = None,
+        version_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get audit logs for a specific dataset with page-based pagination."""
+
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
+
+        audit_log_repo = FeatureAuditLogRepository(self.db)
+
+        logs, total = audit_log_repo.find_by_dataset_page(
+            dataset_id=dataset_id,
+            page=page,
+            page_size=page_size,
+            status=status,
+            version_id=version_id,
+        )
+
+        # Collect unique repo_ids and build_ids to batch lookup
+        repo_ids = set()
+        build_ids = set()
+        for log in logs:
+            repo_ids.add(log.raw_repo_id)
+            build_ids.add(log.raw_build_run_id)
+
+        # Batch lookup repositories
+        repo_map: Dict[str, Dict[str, Any]] = {}
+        if repo_ids:
+            repo_object_ids = [ObjectId(str(rid)) for rid in repo_ids]
+            repos = self._raw_repo_repo.find_by_ids(repo_object_ids)
+            for repo in repos:
+                name = repo.full_name.split("/")[-1] if repo.full_name else ""
+                repo_map[str(repo.id)] = {
+                    "full_name": repo.full_name,
+                    "name": name,
+                }
+
+        # Batch lookup build runs
+        build_map: Dict[str, Dict[str, Any]] = {}
+        if build_ids:
+            build_object_ids = [ObjectId(str(bid)) for bid in build_ids]
+            build_map = self._raw_build_run_repo.find_metadata_by_ids(build_object_ids)
+
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+        return {
+            "logs": [
+                {
+                    "id": str(log.id),
+                    "category": log.category,
+                    "raw_repo_id": str(log.raw_repo_id),
+                    "raw_build_run_id": str(log.raw_build_run_id),
+                    "repo": repo_map.get(str(log.raw_repo_id), {}),
+                    "build": build_map.get(str(log.raw_build_run_id), {}),
+                    "status": log.status,
+                    "started_at": (log.started_at.isoformat() if log.started_at else None),
+                    "completed_at": (log.completed_at.isoformat() if log.completed_at else None),
+                    "duration_ms": log.duration_ms,
+                    "feature_count": log.feature_count,
+                    "nodes_executed": log.nodes_executed,
+                    "nodes_succeeded": log.nodes_succeeded,
+                    "nodes_failed": log.nodes_failed,
+                    "errors": log.errors[:3] if log.errors else [],
+                }
+                for log in logs
+            ],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+        }
+
+    def get_audit_log_detail(
+        self,
+        log_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Get full audit log detail with node execution results."""
+
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
+
+        audit_log_repo = FeatureAuditLogRepository(self.db)
+        log = audit_log_repo.find_by_id(log_id)
+
+        if not log:
+            return None
+
+        # Lookup repo and build info
+        repo_info = {}
+        build_info = {}
+
+        if log.raw_repo_id:
+            repo = self._raw_repo_repo.find_by_id(log.raw_repo_id)
+            if repo:
+                name = repo.full_name.split("/")[-1] if repo.full_name else ""
+                repo_info = {"full_name": repo.full_name, "name": name}
+
+        if log.raw_build_run_id:
+            build_map = self._raw_build_run_repo.find_metadata_by_ids(
+                [ObjectId(str(log.raw_build_run_id))]
+            )
+            build_info = build_map.get(str(log.raw_build_run_id), {})
+
+        return {
+            "id": str(log.id),
+            "correlation_id": log.correlation_id,
+            "category": log.category,
+            "raw_repo_id": str(log.raw_repo_id),
+            "raw_build_run_id": str(log.raw_build_run_id),
+            "repo": repo_info,
+            "build": build_info,
+            "status": log.status,
+            "started_at": log.started_at.isoformat() if log.started_at else None,
+            "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+            "duration_ms": log.duration_ms,
+            # Full node results
+            "node_results": [
+                {
+                    "node_name": nr.node_name,
+                    "status": nr.status,
+                    "started_at": nr.started_at.isoformat() if nr.started_at else None,
+                    "completed_at": nr.completed_at.isoformat() if nr.completed_at else None,
+                    "duration_ms": nr.duration_ms,
+                    "features_extracted": nr.features_extracted,
+                    "resources_used": nr.resources_used,
+                    "error": nr.error,
+                    "warning": nr.warning,
+                    "skip_reason": nr.skip_reason,
+                }
+                for nr in (log.node_results or [])
+            ],
+            "feature_count": log.feature_count,
+            "features_extracted": log.features_extracted,
+            "errors": log.errors,
+            "warnings": log.warnings,
+            "nodes_executed": log.nodes_executed,
+            "nodes_succeeded": log.nodes_succeeded,
+            "nodes_failed": log.nodes_failed,
+            "nodes_skipped": log.nodes_skipped,
+            "total_retries": log.total_retries,
         }
 
     def get_system_logs(

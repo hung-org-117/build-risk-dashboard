@@ -29,7 +29,6 @@ class DataQualityRepository(BaseRepository[DataQualityReport]):
         """
         return self.find_one(
             {"version_id": self._to_object_id(version_id)},
-            sort=[("created_at", -1)],
         )
 
     def find_all_by_version(self, version_id: str, limit: int = 10) -> List[DataQualityReport]:

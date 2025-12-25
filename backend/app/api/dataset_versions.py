@@ -154,6 +154,82 @@ async def preview_version(
     )
 
 
+@router.get("/{version_id}/preprocess/preview")
+async def preview_normalization(
+    dataset_id: str,
+    version_id: str,
+    method: str = Query("minmax", regex="^(none|minmax|zscore|robust|maxabs|log|decimal)$"),
+    features: Optional[List[str]] = Query(None),
+    limit: int = Query(10, ge=1, le=50),
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """
+    Preview normalization on sample data.
+
+    Returns:
+    - sample_data: Raw and normalized values for comparison
+    - params: Normalization parameters calculated from full dataset
+    - methods: Available normalization methods
+    """
+    from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+    from app.services.normalization_service import NormalizationMethod, NormalizationService
+
+    # Verify access
+    service = DatasetVersionService(db)
+    version = service.get_version(dataset_id, version_id, str(current_user["_id"]))
+
+    # Get sample builds
+    build_repo = DatasetEnrichmentBuildRepository(db)
+    builds = build_repo.find_by_version_id(version_id, limit=limit)
+
+    if not builds:
+        return {
+            "sample_data": [],
+            "params": [],
+            "methods": NormalizationService.get_available_methods(),
+        }
+
+    # Determine features to preview
+    selected_features = features or version.selected_features[:10]
+
+    # Collect all values for param calculation
+    feature_values = {f: [] for f in selected_features}
+    sample_rows = []
+
+    for build in builds:
+        row = {"build_id": str(build.id)}
+        for feat in selected_features:
+            val = build.features.get(feat)
+            feature_values[feat].append(val)
+            row[feat] = val
+        sample_rows.append(row)
+
+    # Calculate normalization params
+    norm_method = NormalizationMethod(method)
+    params_map = NormalizationService.calculate_params_batch(feature_values, norm_method)
+
+    # Apply normalization to sample rows
+    normalized_rows = []
+    for row in sample_rows:
+        normalized_row = {"build_id": row["build_id"]}
+        for feat in selected_features:
+            raw_val = row[feat]
+            normalized_row[f"{feat}_raw"] = raw_val
+            normalized_row[f"{feat}_normalized"] = NormalizationService.normalize_value(
+                raw_val, params_map[feat]
+            )
+        normalized_rows.append(normalized_row)
+
+    return {
+        "sample_data": normalized_rows,
+        "params": NormalizationService.get_normalization_summary(params_map),
+        "methods": NormalizationService.get_available_methods(),
+        "selected_features": selected_features,
+        "method": method,
+    }
+
+
 @router.get("/{version_id}/data")
 async def get_version_data(
     dataset_id: str,

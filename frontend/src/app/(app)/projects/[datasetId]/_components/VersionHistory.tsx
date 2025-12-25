@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,9 +35,8 @@ import {
     XCircle,
 } from "lucide-react";
 import type { DatasetVersion } from "../_hooks/useDatasetVersions";
-import { VersionDetailModal } from "./VersionDetailModal";
 
-type ExportFormat = "csv" | "json" | "parquet";
+type ExportFormat = "csv" | "json";
 
 interface VersionHistoryProps {
     datasetId: string;
@@ -57,8 +57,7 @@ export const VersionHistory = memo(function VersionHistory({
     onDelete,
     onCancel,
 }: VersionHistoryProps) {
-    const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-    const [detailModalOpen, setDetailModalOpen] = useState(false);
+    const router = useRouter();
 
     // Separate active version from completed ones
     const activeVersion = versions.find(
@@ -118,8 +117,7 @@ export const VersionHistory = memo(function VersionHistory({
                                     key={version.id}
                                     version={version}
                                     onView={() => {
-                                        setSelectedVersionId(version.id);
-                                        setDetailModalOpen(true);
+                                        router.push(`/projects/${datasetId}/versions/${version.id}`);
                                     }}
                                     onDownload={(format) => onDownload(version.id, format)}
                                     onDelete={() => onDelete(version.id)}
@@ -129,14 +127,6 @@ export const VersionHistory = memo(function VersionHistory({
                     )}
                 </CardContent>
             </Card>
-
-            {/* Version Detail Modal */}
-            <VersionDetailModal
-                datasetId={datasetId}
-                versionId={selectedVersionId}
-                open={detailModalOpen}
-                onOpenChange={setDetailModalOpen}
-            />
         </div>
     );
 });
@@ -248,7 +238,6 @@ function VersionCard({ version, onView, onDownload, onDelete }: VersionCardProps
     const formatOptions: { format: ExportFormat; label: string; icon: typeof FileText }[] = [
         { format: "csv", label: "CSV", icon: FileSpreadsheet },
         { format: "json", label: "JSON", icon: FileJson },
-        { format: "parquet", label: "Parquet", icon: FileText },
     ];
 
     return (

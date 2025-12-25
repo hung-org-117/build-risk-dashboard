@@ -42,6 +42,10 @@ import {
 } from "lucide-react";
 import { datasetVersionApi, type EnrichedBuildData } from "@/lib/api";
 import { ExportVersionModal } from "@/components/datasets/ExportVersionModal";
+import { QualityReportModal } from "@/components/datasets/QualityReportModal";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VersionLogsSection, StatisticsSection, NormalizationPreviewSection, QualityReportSection, VersionScansSection } from "./_components";
+import { Database, ScrollText, BarChart3, TrendingUp, Shield } from "lucide-react";
 
 interface VersionData {
     id: string;
@@ -79,6 +83,8 @@ export default function VersionDetailPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const [expandedBuildId, setExpandedBuildId] = useState<string | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState("builds");
 
     // Fetch version data
     useEffect(() => {
@@ -182,20 +188,16 @@ export default function VersionDetailPage() {
                             </TableCell>
                             <TableCell className="max-w-[200px] truncate">
                                 <div className="flex items-center gap-2">
-                                    {build.repo_url ? (
-                                        <a
-                                            href={build.repo_url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="hover:underline flex items-center gap-1"
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            {build.repo_full_name}
-                                            <ExternalLink className="h-3 w-3 opacity-50" />
-                                        </a>
-                                    ) : (
-                                        build.repo_full_name
-                                    )}
+                                    <a
+                                        href={`https://github.com/${build.repo_full_name}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="hover:underline flex items-center gap-1"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {build.repo_full_name}
+                                        <ExternalLink className="h-3 w-3 opacity-50" />
+                                    </a>
                                 </div>
                             </TableCell>
                             <TableCell>
@@ -374,71 +376,163 @@ export default function VersionDetailPage() {
                 </Card>
             </div>
 
-            {/* Content Area */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Enriched Builds</CardTitle>
-                    <CardDescription>
-                        Showing {builds.length} of {total} builds
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    {builds.length === 0 ? (
-                        <div className="py-8 text-center text-muted-foreground">
-                            No enriched builds found
-                        </div>
-                    ) : (
-                        <div className="rounded-md border overflow-hidden">
-                            <Table className="table-fixed w-full">
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[40px]"></TableHead>
-                                        <TableHead className="w-[100px]">Build ID</TableHead>
-                                        <TableHead className="w-[200px]">Repository</TableHead>
-                                        <TableHead className="w-[100px]">CI Provider</TableHead>
-                                        <TableHead className="w-[100px]">Status</TableHead>
-                                        <TableHead className="w-[120px]">Features</TableHead>
-                                        <TableHead className="w-[80px]">Skipped</TableHead>
-                                        <TableHead className="w-[100px]">Enriched At</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {builds.map((build) => renderBuildRow(build))}
-                                </TableBody>
-                            </Table>
+            {/* Normalization Preview */}
+            {version.status === "completed" && (
+                <NormalizationPreviewSection
+                    datasetId={datasetId}
+                    versionId={versionId}
+                />
+            )}
+
+            {/* Tabbed Content Area */}
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <TabsList className="grid w-full grid-cols-5 mb-4">
+                    <TabsTrigger value="builds" className="gap-2">
+                        <Database className="h-4 w-4" />
+                        Builds
+                    </TabsTrigger>
+                    <TabsTrigger value="logs" className="gap-2">
+                        <ScrollText className="h-4 w-4" />
+                        Logs
+                    </TabsTrigger>
+                    <TabsTrigger value="scans" className="gap-2">
+                        <Shield className="h-4 w-4" />
+                        Scans
+                    </TabsTrigger>
+                    <TabsTrigger value="quality" className="gap-2">
+                        <TrendingUp className="h-4 w-4" />
+                        Quality
+                    </TabsTrigger>
+                    <TabsTrigger value="statistics" className="gap-2">
+                        <BarChart3 className="h-4 w-4" />
+                        Statistics
+                    </TabsTrigger>
+                </TabsList>
+
+                {/* Builds Tab */}
+                <TabsContent value="builds">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Enriched Builds</CardTitle>
+                            <CardDescription>
+                                Showing {builds.length} of {total} builds
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {builds.length === 0 ? (
+                                <div className="py-8 text-center text-muted-foreground">
+                                    No enriched builds found
+                                </div>
+                            ) : (
+                                <div className="rounded-md border overflow-hidden">
+                                    <Table className="table-fixed w-full">
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead className="w-[40px]"></TableHead>
+                                                <TableHead className="w-[100px]">Build ID</TableHead>
+                                                <TableHead className="w-[200px]">Repository</TableHead>
+                                                <TableHead className="w-[100px]">CI Provider</TableHead>
+                                                <TableHead className="w-[100px]">Status</TableHead>
+                                                <TableHead className="w-[120px]">Features</TableHead>
+                                                <TableHead className="w-[80px]">Skipped</TableHead>
+                                                <TableHead className="w-[100px]">Enriched At</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {builds.map((build) => renderBuildRow(build))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+
+                    {/* Pagination */}
+                    {total_pages > 1 && (
+                        <div className="mt-4 flex items-center justify-between">
+                            <p className="text-sm text-muted-foreground">
+                                Page {currentPage} of {total_pages} (Builds)
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage((p) => Math.min(total_pages, p + 1))}
+                                    disabled={currentPage === total_pages}
+                                >
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
                     )}
-                </CardContent>
-            </Card>
+                </TabsContent>
 
-            {/* Pagination */}
-            {total_pages > 1 && (
-                <div className="mt-4 flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground">
-                        Page {currentPage} of {total_pages} (Builds)
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                            disabled={currentPage === 1}
-                        >
-                            <ChevronLeft className="h-4 w-4" />
-                            Previous
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage((p) => Math.min(total_pages, p + 1))}
-                            disabled={currentPage === total_pages}
-                        >
-                            Next
-                            <ChevronRight className="h-4 w-4" />
-                        </Button>
-                    </div>
-                </div>
-            )}
+                {/* Logs Tab */}
+                <TabsContent value="logs">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Feature Extraction Logs</CardTitle>
+                            <CardDescription>
+                                Audit logs for feature extraction runs in this version
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <VersionLogsSection
+                                datasetId={datasetId}
+                                versionId={versionId}
+                            />
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Scans Tab */}
+                <TabsContent value="scans">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Code Scans</CardTitle>
+                            <CardDescription>
+                                SonarQube and Trivy scan status for commits in this version
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <VersionScansSection
+                                datasetId={datasetId}
+                                versionId={versionId}
+                            />
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Quality Tab */}
+                <TabsContent value="quality">
+                    <QualityReportSection
+                        datasetId={datasetId}
+                        versionId={versionId}
+                        versionStatus={version.status}
+                        onViewDetails={() => setIsQualityModalOpen(true)}
+                    />
+                </TabsContent>
+
+                {/* Statistics Tab */}
+                <TabsContent value="statistics">
+                    <StatisticsSection
+                        datasetId={datasetId}
+                        versionId={versionId}
+                        versionStatus={version.status}
+                    />
+                </TabsContent>
+            </Tabs>
+
 
             {/* Export Modal */}
             <ExportVersionModal
@@ -448,6 +542,14 @@ export default function VersionDetailPage() {
                 versionId={versionId}
                 versionName={version.name}
                 totalRows={version.total_rows}
+            />
+
+            {/* Quality Report Modal */}
+            <QualityReportModal
+                isOpen={isQualityModalOpen}
+                onClose={() => setIsQualityModalOpen(false)}
+                datasetId={datasetId}
+                versionId={versionId}
             />
         </div>
     );

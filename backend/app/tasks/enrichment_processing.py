@@ -37,6 +37,7 @@ from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
 from app.tasks.shared import extract_features_for_build
+from app.tasks.shared.events import publish_enrichment_update
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,13 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
                 "repos_total": len(validated_raw_repo_ids),
                 "ingestion_status": "ingesting",
             },
+        )
+        # Publish initial progress via WebSocket
+        publish_enrichment_update(
+            version_id=version_id,
+            status="ingesting",
+            processed_rows=0,
+            total_rows=total_rows,
         )
         logger.info(
             f"[start_enrichment] {total_rows} builds, "
@@ -577,6 +585,7 @@ def process_enrichment_batch(
                 raw_build_run_repo=raw_build_run_repo,
                 dataset_version=dataset_version,
                 raw_repo=raw_repo,
+                enrichment_build_id=enrichment_build_id,
             )
 
             # Determine extraction status from result
@@ -633,6 +642,26 @@ def process_enrichment_batch(
         f"{enriched_count} enriched, {failed_count} failed"
     )
 
+    # Update database progress for this batch (increment atomically)
+    version_repo.increment_progress(
+        version_id,
+        processed_rows=len(validated_build_ids),
+        enriched_rows=enriched_count,
+        failed_rows=failed_count,
+    )
+
+    # Publish progress update via WebSocket
+    dataset_version = version_repo.find_by_id(version_id)
+    if dataset_version:
+        publish_enrichment_update(
+            version_id=version_id,
+            status="processing",
+            processed_rows=dataset_version.processed_rows or 0,
+            total_rows=dataset_version.total_rows or 0,
+            enriched_rows=dataset_version.enriched_rows or 0,
+            failed_rows=dataset_version.failed_rows or 0,
+        )
+
     return {
         "batch_index": batch_index,
         "status": "completed",
@@ -664,26 +693,47 @@ def finalize_enrichment(
 
     version_repo = DatasetVersionRepository(self.db)
 
-    # Aggregate stats
-    total_enriched = 0
-    total_failed = 0
-    total_processed = 0
+    # Mark completed
+    version_repo.mark_completed(version_id)
 
-    for batch_result in batch_results:
-        total_enriched += batch_result.get("enriched", 0)
-        total_failed += batch_result.get("failed", 0)
-        total_processed += batch_result.get("total", 0)
+    # Get final stats from database (accumulated by batch tasks)
+    dataset_version = version_repo.find_by_id(version_id)
+    if not dataset_version:
+        logger.error(f"{corr_prefix} Version {version_id} not found in finalize")
+        return {"status": "error", "error": "Version not found"}
 
-    # Update final progress
-    version_repo.update_progress(
-        version_id,
+    total_rows = dataset_version.total_rows or 0
+    total_processed = dataset_version.processed_rows or 0
+    total_enriched = dataset_version.enriched_rows or 0
+    total_failed = dataset_version.failed_rows or 0
+
+    # Publish completion via WebSocket
+    publish_enrichment_update(
+        version_id=version_id,
+        status="completed",
         processed_rows=total_processed,
+        total_rows=total_rows,
         enriched_rows=total_enriched,
         failed_rows=total_failed,
     )
 
-    # Mark completed
-    version_repo.mark_completed(version_id)
+    # Auto-trigger quality evaluation after successful enrichment
+    try:
+        from app.services.data_quality_service import DataQualityService
+
+        quality_service = DataQualityService(self.db)
+        quality_report = quality_service.evaluate_version(
+            dataset_id=str(dataset_version.dataset_id),
+            version_id=version_id,
+            user_id="system",  # Auto-triggered by system
+        )
+        logger.info(
+            f"{corr_prefix} Auto quality evaluation completed: "
+            f"quality_score={quality_report.quality_score:.2f}"
+        )
+    except Exception as e:
+        # Don't fail enrichment if quality evaluation fails
+        logger.warning(f"{corr_prefix} Auto quality evaluation failed: {e}")
 
     logger.info(
         f"{corr_prefix} Version enrichment completed: {version_id}, "
@@ -706,6 +756,7 @@ def _extract_features_for_enrichment(
     raw_build_run_repo: RawBuildRunRepository,
     dataset_version: DatasetVersion,
     raw_repo: RawRepository,
+    enrichment_build_id: str = None,
 ) -> Dict[str, Any]:
     """
     Extract features for a single build using shared helper.
@@ -717,6 +768,7 @@ def _extract_features_for_enrichment(
         raw_build_run_repo: Repository for RawBuildRun lookup
         dataset_version: DatasetVersion entity (used for config via feature_configs)
         raw_repo: RawRepository (passed from caller, no lookup needed)
+        enrichment_build_id: ID of the enrichment build for audit log linking
 
     Returns result dict with status, features, errors, warnings.
     """
@@ -756,6 +808,7 @@ def _extract_features_for_enrichment(
         category=AuditLogCategory.DATASET_ENRICHMENT,
         version_id=str(dataset_version.id),
         dataset_id=str(dataset_version.dataset_id),
+        output_build_id=enrichment_build_id,
     )
 
 

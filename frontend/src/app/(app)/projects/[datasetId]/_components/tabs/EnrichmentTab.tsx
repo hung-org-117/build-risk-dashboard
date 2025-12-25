@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle, Sparkles, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -14,7 +14,10 @@ import { Progress } from "@/components/ui/progress";
 import type { DatasetRecord } from "@/types";
 import { CreateVersionModal } from "../FeatureSelection/CreateVersionModal";
 import { VersionHistoryTable } from "../VersionHistoryTable";
-import { useDatasetVersions } from "../../_hooks/useDatasetVersions";
+import { useDatasetVersions, type DatasetVersion } from "../../_hooks/useDatasetVersions";
+import { useWebSocket } from "@/contexts/websocket-context";
+import type { FeatureConfigsData } from "@/components/features/config/FeatureConfigForm";
+import type { ScanConfig } from "@/components/sonar/scan-config-panel";
 
 interface EnrichmentTabProps {
     datasetId: string;
@@ -28,6 +31,7 @@ export function EnrichmentTab({
     onEnrichmentStatusChange,
 }: EnrichmentTabProps) {
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const { subscribe } = useWebSocket();
 
     const {
         versions,
@@ -41,6 +45,28 @@ export function EnrichmentTab({
         deleteVersion,
         downloadVersion,
     } = useDatasetVersions(datasetId);
+
+    // WebSocket subscription for real-time enrichment updates
+    useEffect(() => {
+        const unsubscribe = subscribe("ENRICHMENT_UPDATE", (data: {
+            version_id: string;
+            status: string;
+            processed_rows: number;
+            total_rows: number;
+            enriched_rows: number;
+            failed_rows: number;
+            progress: number;
+        }) => {
+            // Check if this update is for one of our versions
+            const isOurVersion = versions.some(v => v.id === data.version_id);
+            if (isOurVersion) {
+                // Refresh to get updated data
+                refresh();
+            }
+        });
+
+        return () => unsubscribe();
+    }, [subscribe, refresh, versions]);
 
     // Notify parent when active version status changes
     const hasActiveVersion = !!activeVersion;
@@ -58,16 +84,10 @@ export function EnrichmentTab({
     // Handle create version
     const handleCreateVersion = async (
         features: string[],
-        featureConfigs: {
-            global: Record<string, unknown>;
-            repos: Record<string, Record<string, string[]>>;
-        },
+        featureConfigs: FeatureConfigsData,
         scanData: {
             metrics: { sonarqube: string[]; trivy: string[] };
-            config: {
-                sonarqube: { projectKey?: string; sonarToken?: string; sonarUrl?: string; extraProperties?: string };
-                trivy: { severity?: string; scanners?: string; extraArgs?: string };
-            };
+            config: ScanConfig;
         },
         name?: string
     ) => {
@@ -79,7 +99,7 @@ export function EnrichmentTab({
             selected_features: features,
             feature_configs: flatConfigs,
             scan_metrics: scanData.metrics,
-            scan_config: scanData.config,
+            scan_config: scanData.config as Record<string, unknown>,
             name,
         });
         if (version) {

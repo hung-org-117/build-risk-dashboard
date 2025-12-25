@@ -71,6 +71,21 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         query = {"dataset_version_id": dataset_version_id}
         return self.paginate(query, sort=[("_id", 1)], skip=skip, limit=limit)
 
+    def find_by_version(
+        self,
+        dataset_version_id: str | ObjectId,
+    ) -> List[DatasetEnrichmentBuild]:
+        """
+        Find all builds for a dataset version.
+
+        Used for statistics calculation where we need the full dataset.
+        """
+        oid = self._to_object_id(dataset_version_id)
+        if not oid:
+            return []
+
+        return self.find_many({"dataset_version_id": oid})
+
     def update_extraction_status(
         self,
         build_id: ObjectId,
@@ -497,14 +512,32 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
                             }
                         },
                         {
+                            "$lookup": {
+                                "from": "dataset_repo_stats",
+                                "let": {"dataset_id": "$dataset_id", "repo_id": "$raw_repo_id"},
+                                "pipeline": [
+                                    {
+                                        "$match": {
+                                            "$expr": {
+                                                "$and": [
+                                                    {"$eq": ["$dataset_id", "$$dataset_id"]},
+                                                    {"$eq": ["$raw_repo_id", "$$repo_id"]},
+                                                ]
+                                            }
+                                        }
+                                    }
+                                ],
+                                "as": "repo_stats",
+                            }
+                        },
+                        {
                             "$addFields": {
                                 "repo_full_name": {"$arrayElemAt": ["$repo.full_name", 0]},
-                                "repo_url": {"$arrayElemAt": ["$repo.url", 0]},
-                                "provider": {"$arrayElemAt": ["$repo.provider", 0]},
+                                "provider": {"$arrayElemAt": ["$repo_stats.ci_provider", 0]},
                                 "web_url": {"$arrayElemAt": ["$run.web_url", 0]},
                             }
                         },
-                        {"$project": {"repo": 0, "run": 0}},
+                        {"$project": {"repo": 0, "run": 0, "repo_stats": 0}},
                     ],
                 }
             },

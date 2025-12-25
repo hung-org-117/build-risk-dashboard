@@ -77,7 +77,7 @@ export interface UseDatasetVersionsReturn {
     createVersion: (request: CreateVersionRequest) => Promise<DatasetVersion | null>;
     cancelVersion: (versionId: string) => Promise<void>;
     deleteVersion: (versionId: string) => Promise<void>;
-    downloadVersion: (versionId: string, format?: "csv" | "json" | "parquet") => void;
+    downloadVersion: (versionId: string, format?: "csv" | "json") => void;
 }
 
 export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn {
@@ -141,13 +141,13 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
         load();
     }, [refresh]);
 
-    // Poll for progress when active version exists
+    // Poll for progress when active version exists (fallback when WebSocket not used)
     useEffect(() => {
         if (!activeVersion) return;
 
         const interval = setInterval(async () => {
             await refresh();
-        }, 2000); // Poll every 2 seconds
+        }, 5000); // Poll every 5 seconds as fallback
 
         return () => clearInterval(interval);
     }, [activeVersion?.id, refresh]);
@@ -211,7 +211,7 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
 
     // Download a version in specified format
     const downloadVersion = useCallback(
-        async (versionId: string, format: "csv" | "json" | "parquet" = "csv") => {
+        async (versionId: string, format: "csv" | "json" = "csv") => {
             try {
                 const response = await api.get(
                     `/datasets/${datasetId}/versions/${versionId}/export?format=${format}`,
