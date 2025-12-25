@@ -5,6 +5,12 @@ import { cn } from "@/lib/utils";
 import { Activity, BadgeCheck, Database, GitBranch, Home, Settings, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const navigation = [
   {
@@ -65,7 +71,11 @@ const navigation = [
   },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  collapsed?: boolean;
+}
+
+export function Sidebar({ collapsed = false }: SidebarProps) {
   const pathname = usePathname();
   const { user } = useAuth();
 
@@ -82,39 +92,68 @@ export function Sidebar() {
   });
 
   return (
-    <div className="flex h-full flex-col border-r bg-white/70 backdrop-blur dark:bg-slate-950/90">
-      <div className="flex h-16 items-center gap-2 border-b px-6">
-        <div>
-          <p className="text-lg font-semibold">BuildGuard</p>
+    <TooltipProvider delayDuration={0}>
+      <div className="flex h-full flex-col border-r bg-white/70 backdrop-blur dark:bg-slate-950/90">
+        <div className={cn(
+          "flex h-16 items-center gap-2 border-b",
+          collapsed ? "justify-center px-2" : "px-6"
+        )}>
+          <div>
+            <p className={cn(
+              "font-semibold",
+              collapsed ? "text-sm" : "text-lg"
+            )}>
+              {collapsed ? "BG" : "BuildGuard"}
+            </p>
+          </div>
         </div>
-      </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {visibleNavigation.map((item) => {
-          const isActive = pathname.startsWith(item.href);
-          const Icon = item.icon;
+        <nav className={cn(
+          "flex-1 space-y-1 py-4",
+          collapsed ? "px-2" : "px-3"
+        )}>
+          {visibleNavigation.map((item) => {
+            const isActive = pathname.startsWith(item.href);
+            const Icon = item.icon;
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                isActive ? "bg-blue-600 text-white hover:text-white" : ""
-              )}
-            >
-              <Icon
+            const linkContent = (
+              <Link
+                href={item.href}
                 className={cn(
-                  "h-4 w-4",
-                  isActive ? "text-white" : "text-muted-foreground"
+                  "group flex items-center rounded-lg text-sm font-medium transition-colors",
+                  collapsed ? "justify-center p-2" : "gap-3 px-3 py-2",
+                  isActive ? "bg-blue-600 text-white hover:text-white" : ""
                 )}
-              />
-              <span className="flex-1">{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-    </div>
+              >
+                <Icon
+                  className={cn(
+                    collapsed ? "h-5 w-5" : "h-4 w-4",
+                    isActive ? "text-white" : "text-muted-foreground"
+                  )}
+                />
+                {!collapsed && <span className="flex-1">{item.label}</span>}
+              </Link>
+            );
+
+            if (collapsed) {
+              return (
+                <Tooltip key={item.href}>
+                  <TooltipTrigger asChild>
+                    {linkContent}
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {item.label}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            }
+
+            return <div key={item.href}>{linkContent}</div>;
+          })}
+        </nav>
+      </div>
+    </TooltipProvider>
   );
 }
+
 

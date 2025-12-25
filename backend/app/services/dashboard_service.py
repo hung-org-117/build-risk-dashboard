@@ -10,6 +10,7 @@ from app.entities.user_dashboard_layout import (
     UserDashboardLayout,
     WidgetConfig,
 )
+from app.repositories.dataset_repository import DatasetRepository
 from app.repositories.user_dashboard_layout import UserDashboardLayoutRepository
 
 
@@ -19,6 +20,7 @@ class DashboardService:
         self.build_collection = db["model_builds"]
         self.repo_collection = db["repositories"]
         self.layout_repo = UserDashboardLayoutRepository(db)
+        self._dataset_repo = DatasetRepository(db)
 
     def get_summary(self, current_user: Optional[dict] = None) -> DashboardSummaryResponse:
         """
@@ -78,12 +80,12 @@ class DashboardService:
         repo_distribution.sort(key=lambda x: x.builds, reverse=True)
 
         # 6. Count datasets (admin and guest see all, user sees only their own)
-        dataset_filter: dict = {}
+        user_id_for_filter = None
         if user_role not in ("admin", "guest") and current_user:
             user_id = current_user.get("_id")
             if user_id:
-                dataset_filter["user_id"] = user_id
-        dataset_count = self.db["datasets"].count_documents(dataset_filter)
+                user_id_for_filter = str(user_id)
+        dataset_count = self._dataset_repo.count_by_filter(user_id=user_id_for_filter)
 
         return DashboardSummaryResponse(
             metrics=DashboardMetrics(

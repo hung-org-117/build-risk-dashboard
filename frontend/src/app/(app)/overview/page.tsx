@@ -59,6 +59,8 @@ import { useAuth } from "@/contexts/auth-context";
 import { formatDuration, cn } from "@/lib/utils";
 
 const GRID_COLS = 12; // Use 12-column grid for more flexibility
+const GRID_COLS_TABLET = 6; // Tablet uses 6 columns for stacking
+const TABLET_BREAKPOINT = 1024; // Switch to tablet cols below this width
 const ROW_HEIGHT = 100;
 
 // Preset layouts
@@ -131,6 +133,10 @@ export default function OverviewPage() {
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
+
+  // Dynamic grid cols based on screen width
+  const isTabletView = containerWidth < TABLET_BREAKPOINT;
+  const gridCols = isTabletView ? GRID_COLS_TABLET : GRID_COLS;
 
   useEffect(() => {
     if (authLoading || !authenticated) {
@@ -745,13 +751,13 @@ export default function OverviewPage() {
       <RGL
         className="layout"
         layout={layout}
-        cols={GRID_COLS}
-        rowHeight={ROW_HEIGHT}
+        cols={gridCols}
+        rowHeight={isTabletView ? 90 : ROW_HEIGHT}
         width={containerWidth}
         onLayoutChange={handleLayoutChange}
         isDraggable={isEditing}
         isResizable={isEditing}
-        margin={[12, 12]}
+        margin={isTabletView ? [8, 8] : [12, 12]}
         containerPadding={[0, 0]}
         useCSSTransforms
       >

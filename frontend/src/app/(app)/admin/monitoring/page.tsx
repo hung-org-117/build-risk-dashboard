@@ -198,14 +198,14 @@ export default function MonitoringPage() {
     };
 
     return (
-        <div className="container mx-auto py-6 space-y-6">
+        <div className="container mx-auto py-4 md:py-6 space-y-4 md:space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-3">
-                    <Activity className="h-8 w-8" />
+                    <Activity className="h-6 w-6 md:h-8 md:w-8" />
                     <div>
-                        <h1 className="text-2xl font-bold">System Monitoring</h1>
-                        <p className="text-muted-foreground text-sm">
+                        <h1 className="text-xl md:text-2xl font-bold">System Monitoring</h1>
+                        <p className="text-muted-foreground text-xs md:text-sm">
                             Real-time system stats and logs
                         </p>
                     </div>
@@ -215,9 +215,10 @@ export default function MonitoringPage() {
                         className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
                         title={isConnected ? "WebSocket connected" : "WebSocket disconnected"}
                     />
-                    <Button variant="outline" onClick={handleRefreshAll}>
+                    <Button variant="outline" size="sm" onClick={handleRefreshAll}>
                         <RefreshCw className="h-4 w-4 mr-2" />
-                        Refresh All
+                        <span className="hidden md:inline">Refresh All</span>
+                        <span className="md:hidden">Refresh</span>
                     </Button>
                 </div>
             </div>

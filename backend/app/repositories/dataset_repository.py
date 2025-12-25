@@ -38,3 +38,18 @@ class DatasetRepository(BaseRepository[DatasetProject]):
             skip=skip,
             limit=limit,
         )
+
+    def count_by_filter(self, user_id: Optional[str] = None) -> int:
+        """
+        Count datasets with optional user filter.
+
+        Args:
+            user_id: Optional user ID to filter by (admin/guest sees all if None)
+
+        Returns:
+            Number of datasets matching the filter
+        """
+        query: Dict[str, Any] = {}
+        if user_id:
+            query["user_id"] = self._to_object_id(user_id)
+        return self.collection.count_documents(query)

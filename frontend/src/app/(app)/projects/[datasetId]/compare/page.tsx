@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
     ArrowLeftRight,
@@ -26,7 +26,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/use-toast';
 import { Progress } from '@/components/ui/progress';
-import { comparisonApi, ComparableDataset, CompareResponse, CompareExternalResponse } from '@/lib/comparison-api';
+import { comparisonApi, ComparableDataset, ComparableVersion, CompareResponse, CompareExternalResponse } from '@/lib/api';
 
 export default function ComparePage() {
     const params = useParams();
@@ -53,32 +53,35 @@ export default function ComparePage() {
     const [result, setResult] = useState<CompareResponse | CompareExternalResponse | null>(null);
 
     // Load comparable datasets
+    const loadDatasets = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await comparisonApi.getComparableDatasets();
+            setDatasets(data.datasets);
+        } catch (err) {
+            console.error('Failed to load datasets:', err);
+            toast({ title: 'Failed to load datasets', variant: 'destructive' });
+        } finally {
+            setLoading(false);
+        }
+    }, [toast]);
+
     useEffect(() => {
         loadDatasets();
-    }, []);
+    }, [loadDatasets]);
 
     // Auto-select current dataset
     useEffect(() => {
         if (datasets.length > 0 && datasetId) {
             setBaseDatasetId(datasetId);
             const currentDataset = datasets.find(d => d.dataset_id === datasetId);
-            if (currentDataset?.versions.length > 0) {
+            if (currentDataset && currentDataset.versions && currentDataset.versions.length > 0) {
                 setInternalVersionId(currentDataset.versions[0].version_id);
             }
         }
     }, [datasets, datasetId]);
 
-    const loadDatasets = async () => {
-        setLoading(true);
-        try {
-            const data = await comparisonApi.getComparableDatasets();
-            setDatasets(data.datasets);
-        } catch (error) {
-            toast({ title: 'Failed to load datasets', variant: 'destructive' });
-        } finally {
-            setLoading(false);
-        }
-    };
+
 
     const handleCompareInternal = async () => {
         if (!baseDatasetId || !baseVersionId || !targetDatasetId || !targetVersionId) {
@@ -95,7 +98,8 @@ export default function ComparePage() {
                 target_version_id: targetVersionId,
             });
             setResult(response);
-        } catch (error) {
+        } catch (err) {
+            console.error('Internal comparison failed:', err);
             toast({ title: 'Comparison failed', variant: 'destructive' });
         } finally {
             setComparing(false);
@@ -116,22 +120,23 @@ export default function ComparePage() {
                 externalFile
             );
             setResult(response);
-        } catch (error) {
+        } catch (err) {
+            console.error('External comparison failed:', err);
             toast({ title: 'Comparison failed', variant: 'destructive' });
         } finally {
             setComparing(false);
         }
     };
 
-    const getBaseVersions = () => {
+    const getBaseVersions = (): ComparableVersion[] => {
         return datasets.find(d => d.dataset_id === baseDatasetId)?.versions || [];
     };
 
-    const getTargetVersions = () => {
+    const getTargetVersions = (): ComparableVersion[] => {
         return datasets.find(d => d.dataset_id === targetDatasetId)?.versions || [];
     };
 
-    const getInternalVersions = () => {
+    const getInternalVersions = (): ComparableVersion[] => {
         return datasets.find(d => d.dataset_id === datasetId)?.versions || [];
     };
 

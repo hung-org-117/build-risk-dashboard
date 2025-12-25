@@ -8,9 +8,21 @@ module.exports = {
     './src/**/*.{ts,tsx}',
   ],
   theme: {
+    // Custom breakpoints for Desktop/Laptop/Tablet
+    screens: {
+      'sm': '640px',   // Mobile landscape
+      'md': '768px',   // Tablet
+      'lg': '1024px',  // Laptop
+      'xl': '1280px',  // Desktop
+      '2xl': '1536px', // Large Desktop
+    },
     container: {
       center: true,
-      padding: "2rem",
+      padding: {
+        DEFAULT: "1rem",
+        md: "1.5rem",
+        lg: "2rem",
+      },
       screens: {
         "2xl": "1400px",
       },

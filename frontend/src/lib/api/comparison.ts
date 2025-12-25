@@ -1,13 +1,6 @@
-/**
- * API client for dataset comparison endpoints.
- */
+import { api } from "./client";
 
-import api from './axios';
-
-// =============================================================================
 // Types
-// =============================================================================
-
 export interface ComparableVersion {
     version_id: string;
     version_name: string;
@@ -78,7 +71,7 @@ export interface RowOverlap {
 }
 
 export interface CompareResponse {
-    comparison_type: 'internal';
+    comparison_type: "internal";
     base: VersionSummary;
     target: VersionSummary;
     feature_comparison: FeatureComparison;
@@ -87,55 +80,38 @@ export interface CompareResponse {
 }
 
 export interface CompareExternalResponse {
-    comparison_type: 'external';
+    comparison_type: "external";
     base: VersionSummary;
     external_target: ExternalDatasetSummary;
     feature_comparison: FeatureComparison;
     quality_comparison: QualityComparison;
 }
 
-// =============================================================================
-// API Client
-// =============================================================================
-
 export const comparisonApi = {
-    /**
-     * Get list of datasets and versions available for comparison.
-     */
     getComparableDatasets: async (): Promise<{ datasets: ComparableDataset[] }> => {
-        const response = await api.get<{ datasets: ComparableDataset[] }>('/comparison/datasets');
+        const response = await api.get<{ datasets: ComparableDataset[] }>("/comparison/datasets");
         return response.data;
     },
 
-    /**
-     * Compare two internal dataset versions.
-     */
     compareInternal: async (request: CompareInternalRequest): Promise<CompareResponse> => {
-        const response = await api.post<CompareResponse>('/comparison/compare', request);
+        const response = await api.post<CompareResponse>("/comparison/compare", request);
         return response.data;
     },
 
-    /**
-     * Compare an internal version with an uploaded external CSV.
-     */
     compareExternal: async (
         datasetId: string,
         versionId: string,
         file: File
     ): Promise<CompareExternalResponse> => {
         const formData = new FormData();
-        formData.append('dataset_id', datasetId);
-        formData.append('version_id', versionId);
-        formData.append('file', file);
+        formData.append("dataset_id", datasetId);
+        formData.append("version_id", versionId);
+        formData.append("file", file);
 
         const response = await api.post<CompareExternalResponse>(
-            '/comparison/compare-external',
+            "/comparison/compare-external",
             formData,
-            {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            }
+            { headers: { "Content-Type": "multipart/form-data" } }
         );
         return response.data;
     },
