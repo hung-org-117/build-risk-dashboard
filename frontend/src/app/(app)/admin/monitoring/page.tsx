@@ -5,6 +5,7 @@ import { useWebSocket } from "@/contexts/websocket-context";
 import {
     SystemStatsCard,
     LogsViewer,
+    MetricsChart,
 } from "@/components/monitoring";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Activity } from "lucide-react";
@@ -137,7 +138,49 @@ export default function MonitoringPage() {
         fetchLogs();
     }, [fetchSystemStats, fetchLogs]);
 
-    // Auto-refresh every 10 seconds
+    // Real-time logs via WebSocket
+    useEffect(() => {
+        if (isPaused) return;
+
+        const wsUrl = (API_BASE.replace("http", "ws").replace("/api", "") + "/api/ws/logs");
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            console.log("Connected to logs WebSocket");
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === "connected") return;
+
+                const newLog: LogEntry = {
+                    timestamp: data.timestamp || new Date().toISOString(),
+                    level: data.level || "INFO",
+                    message: data.message || "",
+                    container: data.source || "unknown",
+                };
+
+                setLogs((prev) => [newLog, ...prev].slice(0, 200));
+            } catch (error) {
+                console.error("Failed to parse WebSocket message:", error);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+        };
+
+        ws.onclose = () => {
+            console.log("Logs WebSocket disconnected");
+        };
+
+        return () => {
+            ws.close();
+        };
+    }, [isPaused]);
+
+    // Auto-refresh system stats every 10 seconds
     useEffect(() => {
         if (isPaused) return;
 
@@ -181,6 +224,9 @@ export default function MonitoringPage() {
 
             {/* System Stats */}
             <SystemStatsCard stats={systemStats} isLoading={isLoadingStats} />
+
+            {/* Metrics Chart */}
+            <MetricsChart />
 
             {/* System Logs */}
             <LogsViewer

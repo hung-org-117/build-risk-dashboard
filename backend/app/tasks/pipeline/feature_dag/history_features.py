@@ -14,7 +14,11 @@ from typing import Any, Dict, List, Optional
 
 from hamilton.function_modifiers import extract_fields, tag
 
-from app.tasks.pipeline.feature_dag._inputs import BuildRunInput, RepoInput
+from app.tasks.pipeline.feature_dag._inputs import (
+    BuildRunInput,
+    RawBuildRunsCollection,
+    RepoInput,
+)
 from app.tasks.pipeline.feature_dag._metadata import (
     FeatureCategory,
     FeatureDataType,
@@ -116,7 +120,7 @@ def time_of_day(build_run: BuildRunInput) -> Optional[int]:
 )
 @tag(group="history")
 def build_history_features(
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     build_run: BuildRunInput,
     repo: RepoInput,
 ) -> Dict[str, Any]:
@@ -212,7 +216,7 @@ def _get_author_from_raw(raw_build: dict) -> Optional[str]:
 )
 @tag(group="committer")
 def committer_fail_history_features(
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     build_run: BuildRunInput,
     repo: RepoInput,
 ) -> Dict[str, Any]:
@@ -254,8 +258,7 @@ def committer_fail_history_features(
             build_author = _get_author_from_raw(b)
             if (
                 build_author
-                and compute_similarity(current_author, build_author)
-                > AUTHOR_SIMILARITY_THRESHOLD
+                and compute_similarity(current_author, build_author) > AUTHOR_SIMILARITY_THRESHOLD
             ):
                 author_builds.append(b)
 
@@ -265,9 +268,7 @@ def committer_fail_history_features(
         # Calculate overall fail history
         total = len(author_builds)
         failed = sum(1 for b in author_builds if _is_failed(b))
-        result["committer_fail_history"] = (
-            round(failed / total, 2) if total > 0 else None
-        )
+        result["committer_fail_history"] = round(failed / total, 2) if total > 0 else None
 
         # Calculate recent fail history (last N builds)
         recent_builds = author_builds[:RECENT_BUILDS_COUNT]
@@ -292,7 +293,7 @@ def committer_fail_history_features(
 )
 @tag(group="committer")
 def committer_avg_exp(
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     build_run: BuildRunInput,
     repo: RepoInput,
 ) -> Optional[float]:
@@ -368,7 +369,7 @@ def committer_avg_exp(
 )
 @tag(group="project")
 def project_fail_history_features(
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     build_run: BuildRunInput,
     repo: RepoInput,
 ) -> Dict[str, Any]:

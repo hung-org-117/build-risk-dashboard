@@ -195,3 +195,42 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
             {"$set": {"effective_sha": effective_sha}},
         )
         return result.modified_count > 0
+
+    def find_metadata_by_ids(
+        self,
+        build_run_ids: List[ObjectId],
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Find multiple build runs by IDs and return display metadata.
+
+        Used by monitoring service to display build info in audit logs.
+
+        Args:
+            build_run_ids: List of RawBuildRun ObjectIds
+
+        Returns:
+            Dict mapping build_run_id string to metadata dict with:
+            - build_number: Sequential build number
+            - branch: Branch name
+            - event: CI event type (from raw_data)
+            - workflow_name: Workflow name (from raw_data)
+        """
+        if not build_run_ids:
+            return {}
+
+        cursor = self.collection.find(
+            {"_id": {"$in": build_run_ids}},
+            {"_id": 1, "build_number": 1, "branch": 1, "raw_data": 1},
+        )
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for doc in cursor:
+            raw_data = doc.get("raw_data", {})
+            result[str(doc["_id"])] = {
+                "build_number": doc.get("build_number"),
+                "branch": doc.get("branch", ""),
+                "event": raw_data.get("event", ""),
+                "workflow_name": raw_data.get("name", ""),
+            }
+
+        return result

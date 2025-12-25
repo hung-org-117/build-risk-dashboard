@@ -560,3 +560,48 @@ def notify_system_alert(
         link=None,
         metadata=None,
     )
+
+
+def notify_system_error_to_admins(
+    db: Database,
+    source: str,
+    message: str,
+    correlation_id: Optional[str] = None,
+) -> None:
+    """
+    Notify all admins about a system error.
+
+    Called from MongoDBLogHandler when ERROR/CRITICAL logs occur.
+    Uses in-app notifications only (not Gmail to avoid spam).
+
+    Args:
+        db: Database connection
+        source: Log source/module name
+        message: Error message (truncated to 500 chars)
+        correlation_id: Correlation ID for Loki cross-reference
+    """
+    from app.repositories.user import UserRepository
+
+    # Truncate message to avoid huge notifications
+    truncated_message = message[:500] + "..." if len(message) > 500 else message
+
+    # Find all admin users
+    user_repo = UserRepository(db)
+    admin_users = user_repo.find_by_role("admin")
+
+    for admin in admin_users:
+        try:
+            create_notification(
+                db=db,
+                user_id=admin.id,
+                type=NotificationType.SYSTEM,
+                title=f"⚠️ System Error: {source}",
+                message=truncated_message,
+                link="/admin/monitoring",
+                metadata={
+                    "source": source,
+                    "correlation_id": correlation_id,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create error notification for admin {admin.id}: {e}")

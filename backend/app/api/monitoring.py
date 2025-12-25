@@ -138,3 +138,20 @@ def export_system_logs(
         media_type=media_type,
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/metrics")
+def get_log_metrics(
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 7 days)"),
+    bucket_minutes: int = Query(60, ge=15, le=360, description="Bucket size in minutes"),
+    db: Database = Depends(get_db),
+    _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
+):
+    """
+    Get log metrics aggregated by time bucket for charts.
+
+    Returns time-series data of log counts by level, suitable for
+    visualizing error rate trends on the monitoring dashboard.
+    """
+    service = MonitoringService(db)
+    return service.get_log_metrics(hours=hours, bucket_minutes=bucket_minutes)

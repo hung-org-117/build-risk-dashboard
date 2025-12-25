@@ -7,10 +7,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import redis
+from bson import ObjectId
 from pymongo.database import Database
 
 from app.celery_app import celery_app
 from app.config import settings
+from app.repositories.raw_build_run import RawBuildRunRepository
+from app.repositories.raw_repository import RawRepositoryRepository
+from app.repositories.system_log import SystemLogRepository
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,9 @@ class MonitoringService:
     def __init__(self, db: Database):
         self.db = db
         self._redis_client: Optional[redis.Redis] = None
+        self._raw_build_run_repo = RawBuildRunRepository(db)
+        self._raw_repo_repo = RawRepositoryRepository(db)
+        self._system_log_repo = SystemLogRepository(db)
 
     @property
     def redis_client(self) -> redis.Redis:
@@ -225,7 +232,6 @@ class MonitoringService:
         status: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get audit logs with cursor-based pagination for infinite scroll."""
-        from bson import ObjectId
 
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
 
@@ -244,33 +250,22 @@ class MonitoringService:
             repo_ids.add(log.raw_repo_id)
             build_ids.add(log.raw_build_run_id)
 
-        # Batch lookup repositories
+        # Batch lookup repositories using repository
         repo_map: Dict[str, Dict[str, Any]] = {}
         if repo_ids:
-            repos_cursor = self.db["raw_repositories"].find(
-                {"_id": {"$in": [ObjectId(str(rid)) for rid in repo_ids]}},
-                {"full_name": 1, "name": 1},
-            )
-            for r in repos_cursor:
-                repo_map[str(r["_id"])] = {
-                    "full_name": r.get("full_name", ""),
-                    "name": r.get("name", ""),
+            repo_object_ids = [ObjectId(str(rid)) for rid in repo_ids]
+            repos = self._raw_repo_repo.find_by_ids(repo_object_ids)
+            for repo in repos:
+                repo_map[str(repo.id)] = {
+                    "full_name": repo.full_name,
+                    "name": repo.name or "",
                 }
 
-        # Batch lookup build runs
+        # Batch lookup build runs using repository
         build_map: Dict[str, Dict[str, Any]] = {}
         if build_ids:
-            builds_cursor = self.db["raw_build_runs"].find(
-                {"_id": {"$in": [ObjectId(str(bid)) for bid in build_ids]}},
-                {"run_number": 1, "event": 1, "head_branch": 1, "workflow_name": 1},
-            )
-            for b in builds_cursor:
-                build_map[str(b["_id"])] = {
-                    "run_number": b.get("run_number"),
-                    "event": b.get("event", ""),
-                    "head_branch": b.get("head_branch", ""),
-                    "workflow_name": b.get("workflow_name", ""),
-                }
+            build_object_ids = [ObjectId(str(bid)) for bid in build_ids]
+            build_map = self._raw_build_run_repo.find_metadata_by_ids(build_object_ids)
 
         return {
             "logs": [
@@ -305,7 +300,6 @@ class MonitoringService:
         status: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get audit logs for a specific dataset with cursor-based pagination."""
-        from bson import ObjectId
 
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
 
@@ -325,33 +319,22 @@ class MonitoringService:
             repo_ids.add(log.raw_repo_id)
             build_ids.add(log.raw_build_run_id)
 
-        # Batch lookup repositories
+        # Batch lookup repositories using repository
         repo_map: Dict[str, Dict[str, Any]] = {}
         if repo_ids:
-            repos_cursor = self.db["raw_repositories"].find(
-                {"_id": {"$in": [ObjectId(str(rid)) for rid in repo_ids]}},
-                {"full_name": 1, "name": 1},
-            )
-            for r in repos_cursor:
-                repo_map[str(r["_id"])] = {
-                    "full_name": r.get("full_name", ""),
-                    "name": r.get("name", ""),
+            repo_object_ids = [ObjectId(str(rid)) for rid in repo_ids]
+            repos = self._raw_repo_repo.find_by_ids(repo_object_ids)
+            for repo in repos:
+                repo_map[str(repo.id)] = {
+                    "full_name": repo.full_name,
+                    "name": repo.name or "",
                 }
 
-        # Batch lookup build runs
+        # Batch lookup build runs using repository
         build_map: Dict[str, Dict[str, Any]] = {}
         if build_ids:
-            builds_cursor = self.db["raw_build_runs"].find(
-                {"_id": {"$in": [ObjectId(str(bid)) for bid in build_ids]}},
-                {"run_number": 1, "event": 1, "head_branch": 1, "workflow_name": 1},
-            )
-            for b in builds_cursor:
-                build_map[str(b["_id"])] = {
-                    "run_number": b.get("run_number"),
-                    "event": b.get("event", ""),
-                    "head_branch": b.get("head_branch", ""),
-                    "workflow_name": b.get("workflow_name", ""),
-                }
+            build_object_ids = [ObjectId(str(bid)) for bid in build_ids]
+            build_map = self._raw_build_run_repo.find_metadata_by_ids(build_object_ids)
 
         return {
             "logs": [
@@ -394,38 +377,25 @@ class MonitoringService:
             level: Filter by log level (DEBUG, INFO, WARNING, ERROR)
             source: Filter by source/component
         """
-        collection = self.db["system_logs"]
-
-        # Build filter
-        query: Dict[str, Any] = {}
-        if level:
-            query["level"] = level.upper()
-        if source:
-            query["source"] = {"$regex": source, "$options": "i"}
-
-        # Get total count
-        total = collection.count_documents(query)
-
-        # Get logs sorted by timestamp desc
-        cursor = collection.find(query).sort("timestamp", -1).skip(skip).limit(limit)
-
-        logs = []
-        for doc in cursor:
-            logs.append(
-                {
-                    "id": str(doc["_id"]),
-                    "timestamp": (
-                        doc.get("timestamp").isoformat() if doc.get("timestamp") else None
-                    ),
-                    "level": doc.get("level", "INFO"),
-                    "source": doc.get("source", "unknown"),
-                    "message": doc.get("message", ""),
-                    "details": doc.get("details"),
-                }
-            )
+        logs, total = self._system_log_repo.find_recent(
+            skip=skip,
+            limit=limit,
+            level=level,
+            source=source,
+        )
 
         return {
-            "logs": logs,
+            "logs": [
+                {
+                    "id": str(log.id),
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                    "level": log.level,
+                    "source": log.source,
+                    "message": log.message,
+                    "details": log.details,
+                }
+                for log in logs
+            ],
             "total": total,
             "has_more": skip + limit < total,
         }
@@ -440,37 +410,23 @@ class MonitoringService:
         """
         Get logs for export with optional date filtering.
         """
-        collection = self.db["system_logs"]
+        logs = self._system_log_repo.find_for_export(
+            level=level,
+            source=source,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
-        query: Dict[str, Any] = {}
-        if level:
-            query["level"] = level.upper()
-        if source:
-            query["source"] = {"$regex": source, "$options": "i"}
-        if start_date or end_date:
-            query["timestamp"] = {}
-            if start_date:
-                query["timestamp"]["$gte"] = start_date
-            if end_date:
-                query["timestamp"]["$lte"] = end_date
-
-        cursor = collection.find(query).sort("timestamp", -1).limit(10000)
-
-        logs = []
-        for doc in cursor:
-            logs.append(
-                {
-                    "timestamp": (
-                        doc.get("timestamp").isoformat() if doc.get("timestamp") else None
-                    ),
-                    "level": doc.get("level", "INFO"),
-                    "source": doc.get("source", "unknown"),
-                    "message": doc.get("message", ""),
-                    "details": doc.get("details"),
-                }
-            )
-
-        return logs
+        return [
+            {
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "level": log.level,
+                "source": log.source,
+                "message": log.message,
+                "details": log.details,
+            }
+            for log in logs
+        ]
 
     def stream_logs_export(
         self,
@@ -495,23 +451,92 @@ class MonitoringService:
         """
         from app.utils.export_utils import format_log_row, stream_csv, stream_json
 
-        collection = self.db["system_logs"]
-
-        query: Dict[str, Any] = {}
-        if level:
-            query["level"] = level.upper()
-        if source:
-            query["source"] = {"$regex": source, "$options": "i"}
-        if start_date or end_date:
-            query["timestamp"] = {}
-            if start_date:
-                query["timestamp"]["$gte"] = start_date
-            if end_date:
-                query["timestamp"]["$lte"] = end_date
-
-        cursor = collection.find(query).sort("timestamp", -1).batch_size(100).limit(10000)
+        cursor = self._system_log_repo.get_cursor_for_export(
+            level=level,
+            source=source,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         if format == "csv":
             return stream_csv(cursor, format_log_row)
         else:
             return stream_json(cursor, format_log_row)
+
+    def get_log_metrics(
+        self,
+        hours: int = 24,
+        bucket_minutes: int = 60,
+    ) -> Dict[str, Any]:
+        """
+        Get log count metrics aggregated by time bucket and level.
+
+        Used for metrics charts on the monitoring dashboard.
+
+        Args:
+            hours: Number of hours to look back (default 24)
+            bucket_minutes: Size of each time bucket in minutes (default 60)
+
+        Returns:
+            Dict with time_buckets array and level_counts
+        """
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        start_time = now - timedelta(hours=hours)
+
+        # Aggregation pipeline to bucket logs by time and level
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": start_time}}},
+            {
+                "$group": {
+                    "_id": {
+                        "bucket": {
+                            "$dateTrunc": {
+                                "date": "$timestamp",
+                                "unit": "minute",
+                                "binSize": bucket_minutes,
+                            }
+                        },
+                        "level": "$level",
+                    },
+                    "count": {"$sum": 1},
+                }
+            },
+            {"$sort": {"_id.bucket": 1}},
+        ]
+
+        results = list(self._system_log_repo.aggregate(pipeline))
+
+        # Transform results into chart-friendly format
+        buckets_dict: Dict[str, Dict[str, int]] = {}
+        for r in results:
+            bucket_time = r["_id"]["bucket"].isoformat()
+            level = r["_id"]["level"]
+            count = r["count"]
+
+            if bucket_time not in buckets_dict:
+                buckets_dict[bucket_time] = {
+                    "timestamp": bucket_time,
+                    "ERROR": 0,
+                    "WARNING": 0,
+                    "INFO": 0,
+                    "DEBUG": 0,
+                }
+            buckets_dict[bucket_time][level] = count
+
+        # Sort by timestamp and return as array
+        time_buckets = sorted(buckets_dict.values(), key=lambda x: x["timestamp"])
+
+        # Calculate totals
+        level_totals = {"ERROR": 0, "WARNING": 0, "INFO": 0, "DEBUG": 0}
+        for bucket in time_buckets:
+            for level in level_totals:
+                level_totals[level] += bucket.get(level, 0)
+
+        return {
+            "time_buckets": time_buckets,
+            "level_totals": level_totals,
+            "hours": hours,
+            "bucket_minutes": bucket_minutes,
+        }

@@ -16,6 +16,7 @@ from hamilton.function_modifiers import extract_fields, tag
 from app.tasks.pipeline.feature_dag._inputs import (
     BuildRunInput,
     GitHubClientInput,
+    RawBuildRunsCollection,
     RepoInput,
 )
 from app.tasks.pipeline.feature_dag._metadata import (
@@ -56,7 +57,7 @@ def github_discussion_features(
     repo: RepoInput,
     build_run: BuildRunInput,
     git_all_built_commits: List[str],
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     gh_pull_req_num: Optional[int],
     gh_pr_created_at: Optional[str],
 ) -> Dict[str, Any]:
@@ -139,7 +140,7 @@ def github_discussion_features(
 
 
 def _get_previous_build_start_time(
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     repo_id: str,
     current_ci_run_id: str,
     current_build_time: Optional[datetime],

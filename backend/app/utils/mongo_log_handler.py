@@ -55,11 +55,17 @@ class MongoDBLogHandler(logging.Handler):
             if self.collection is None:
                 return
 
+            # Get correlation_id from TracingContext for Loki cross-reference
+            from app.core.tracing import TracingContext
+
+            correlation_id = TracingContext.get_correlation_id() or None
+
             log_entry = {
                 "timestamp": datetime.now(timezone.utc),
                 "level": record.levelname,
                 "source": record.name,
                 "message": self.format(record),
+                "correlation_id": correlation_id,
                 "details": {
                     "filename": record.filename,
                     "lineno": record.lineno,
@@ -74,8 +80,81 @@ class MongoDBLogHandler(logging.Handler):
                 )
 
             self.collection.insert_one(log_entry)
+
+            # Publish to Redis for real-time WebSocket streaming
+            self._publish_to_websocket(log_entry)
+
+            # Alert admins for ERROR/CRITICAL logs (with debounce)
+            if record.levelno >= logging.ERROR:
+                self._alert_on_error(record, correlation_id)
         except Exception:
             # Silent fail - don't break the app if logging fails
+            pass
+
+    def _alert_on_error(self, record: logging.LogRecord, correlation_id: str | None) -> None:
+        """
+        Alert admins on ERROR/CRITICAL logs with Redis-based debouncing.
+
+        Uses Redis TTL to prevent notification spam - only alerts once per
+        source module every 5 minutes.
+        """
+        try:
+            import redis
+
+            from app.config import settings
+            from app.database.mongo import get_database
+            from app.services.notification_service import notify_system_error_to_admins
+
+            # Debounce key: prevent same source from spamming within 5 minutes
+            debounce_key = f"log_alert:{record.name}"
+            redis_client = redis.from_url(settings.REDIS_URL)
+
+            # Check if we've already alerted for this source recently
+            if redis_client.exists(debounce_key):
+                return
+
+            # Set debounce key with 5 minute TTL
+            redis_client.setex(debounce_key, 300, "1")
+
+            # Send notification
+            db = get_database()
+            notify_system_error_to_admins(
+                db=db,
+                source=record.name,
+                message=self.format(record),
+                correlation_id=correlation_id,
+            )
+        except Exception:
+            # Silent fail - alerting failure shouldn't break logging
+            pass
+
+    def _publish_to_websocket(self, log_entry: dict) -> None:
+        """
+        Publish log entry to Redis for real-time WebSocket streaming.
+
+        Clients subscribed to 'system_logs' channel will receive these logs.
+        """
+        try:
+            import json
+
+            import redis
+
+            from app.config import settings
+
+            redis_client = redis.from_url(settings.REDIS_URL)
+
+            # Convert datetime to ISO string for JSON serialization
+            ws_entry = {
+                "timestamp": log_entry["timestamp"].isoformat(),
+                "level": log_entry["level"],
+                "source": log_entry["source"],
+                "message": log_entry["message"],
+                "correlation_id": log_entry.get("correlation_id"),
+            }
+
+            redis_client.publish("system_logs", json.dumps(ws_entry))
+        except Exception:
+            # Silent fail - don't break logging if Redis fails
             pass
 
     def close(self):

@@ -166,3 +166,12 @@ async def startup_event():
         )
     except Exception as e:
         logger.warning(f"Failed to load feature definitions: {e}")
+
+    # Enable MongoDB logging for system log viewer UI
+    try:
+        from app.utils.mongo_log_handler import setup_mongodb_logging
+
+        setup_mongodb_logging()
+        logger.info("MongoDB logging handler enabled for WARNING+ logs")
+    except Exception as e:
+        logger.warning(f"Failed to setup MongoDB logging: {e}")

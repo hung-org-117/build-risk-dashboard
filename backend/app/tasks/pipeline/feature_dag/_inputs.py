@@ -10,11 +10,52 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
+
+from bson import ObjectId
+from pymongo.collection import Collection
 
 from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository
 from app.services.github.github_client import GitHubClient
+
+
+# MongoDB Collection Types
+class RawBuildRunDocument(TypedDict, total=False):
+    """
+    TypedDict representing a raw_build_runs MongoDB document.
+
+    Matches the RawBuildRun entity schema for type-safe queries.
+    Using total=False allows partial documents from projections.
+    """
+
+    _id: ObjectId
+    raw_repo_id: ObjectId
+    ci_run_id: str
+    build_number: Optional[int]
+    repo_name: str
+    branch: str
+    commit_sha: str
+    commit_message: Optional[str]
+    commit_author: Optional[str]
+    effective_sha: Optional[str]
+    status: str
+    conclusion: str
+    created_at: Optional[datetime]
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    duration_seconds: Optional[float]
+    web_url: Optional[str]
+    logs_available: Optional[bool]
+    logs_path: Optional[str]
+    logs_expired: bool
+    provider: str
+    raw_data: Dict[str, Any]
+    is_bot_commit: Optional[bool]
+
+
+# Type alias for raw_build_runs collection
+RawBuildRunsCollection = Collection[RawBuildRunDocument]
 
 
 @dataclass
@@ -131,9 +172,7 @@ class FeatureConfigInput:
         return default
 
     @classmethod
-    def from_entity(
-        cls, config: Any, current_repo: Optional[str] = None
-    ) -> FeatureConfigInput:
+    def from_entity(cls, config: Any, current_repo: Optional[str] = None) -> FeatureConfigInput:
         """
         Create from ModelRepoConfig, DatasetVersion entity, or direct feature_configs dict.
 
@@ -312,9 +351,7 @@ def build_hamilton_inputs(
             )
             is_commit_available = True
         except subprocess.CalledProcessError:
-            logger.warning(
-                f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}"
-            )
+            logger.warning(f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}")
 
     # Check worktree availability - try effective_sha first, then original_sha
     if is_commit_available and worktrees_base:
@@ -349,9 +386,7 @@ def build_hamilton_inputs(
     # Create input objects from entities
     repo_input = RepoInput.from_entity(raw_repo)
     # Pass current_repo for repo-scoped config lookup
-    config_input = FeatureConfigInput.from_entity(
-        feature_config, current_repo=raw_repo.full_name
-    )
+    config_input = FeatureConfigInput.from_entity(feature_config, current_repo=raw_repo.full_name)
     build_run_input = BuildRunInput.from_entity(build_run)
 
     # Create BuildLogsInput

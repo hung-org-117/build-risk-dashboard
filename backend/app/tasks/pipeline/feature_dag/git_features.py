@@ -21,6 +21,7 @@ from app.tasks.pipeline.feature_dag._inputs import (
     BuildRunInput,
     FeatureConfigInput,
     GitHistoryInput,
+    RawBuildRunsCollection,
     RepoInput,
 )
 from app.tasks.pipeline.feature_dag._metadata import (
@@ -78,7 +79,7 @@ logger = logging.getLogger(__name__)
 def git_commit_info(
     git_history: GitHistoryInput,
     repo: RepoInput,
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
 ) -> Dict[str, Any]:
     """
     Determine commits included in this build and find previous build.
@@ -128,7 +129,7 @@ def git_commit_info(
         last_commit_sha = hexsha
 
         # Check if this commit has a build in DB
-        existing_build = raw_build_runs.find_one({"head_sha": hexsha, "repo_id": repo.id})
+        existing_build = raw_build_runs.find_one({"commit_sha": hexsha, "raw_repo_id": repo.id})
 
         if existing_build:
             status = "build_found"
@@ -404,7 +405,7 @@ def gh_num_commits_on_files_touched(
 def gh_team_size(
     git_history: GitHistoryInput,
     build_run: BuildRunInput,
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     repo: RepoInput,
 ) -> int:
     """Number of unique contributors in last 90 days."""
@@ -457,7 +458,7 @@ def gh_by_core_team_member(
     git_history: GitHistoryInput,
     gh_team_size: int,
     build_run: BuildRunInput,
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     repo: RepoInput,
 ) -> bool:
     """Whether build author is a core team member."""
@@ -536,7 +537,7 @@ def _get_direct_committers(repo_path: Path, start_date: datetime, end_date: date
 
 
 def _get_pr_mergers(
-    raw_build_runs: Any,
+    raw_build_runs: RawBuildRunsCollection,
     repo_id: str,
     start_date: datetime,
     end_date: datetime,
@@ -546,13 +547,13 @@ def _get_pr_mergers(
     try:
         cursor = raw_build_runs.find(
             {
-                "repo_id": repo_id,
+                "raw_repo_id": repo_id,
                 "created_at": {"$gte": start_date, "$lte": end_date},
             }
         )
 
         for doc in cursor:
-            payload = doc.get("raw_payload", {})
+            payload = doc.get("raw_data", {})
             pull_requests = payload.get("pull_requests", [])
             is_pr = len(pull_requests) > 0 or payload.get("event") == "pull_request"
             if is_pr:

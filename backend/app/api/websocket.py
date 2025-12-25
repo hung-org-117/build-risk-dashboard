@@ -237,3 +237,81 @@ async def events_websocket(websocket: WebSocket):
             await redis_client.close()
         except Exception:
             pass
+
+
+@router.websocket("/ws/logs")
+async def logs_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time system logs.
+
+    Connect to receive live system logs published to Redis 'system_logs' channel.
+
+    Events received:
+    - {"timestamp": "...", "level": "ERROR", "source": "app.tasks", "message": "...", "correlation_id": "..."}
+    """
+    await websocket.accept()
+
+    redis_client = await get_async_redis()
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("system_logs")
+
+    async def listen_logs():
+        """Listen for logs from Redis and send to WebSocket."""
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    try:
+                        await websocket.send_text(data)
+                    except Exception:
+                        break
+        except Exception as e:
+            logger.error(f"Logs Redis listener error: {e}")
+
+    async def receive_client():
+        """Keep connection alive by receiving client messages."""
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+
+    try:
+        # Send initial connection message
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "message": "Connected to system logs stream",
+            }
+        )
+
+        # Run both tasks concurrently
+        logs_task = asyncio.create_task(listen_logs())
+        receive_task = asyncio.create_task(receive_client())
+
+        done, pending = await asyncio.wait(
+            [logs_task, receive_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    except WebSocketDisconnect:
+        logger.info("Logs WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"Logs WebSocket error: {e}")
+    finally:
+        try:
+            await pubsub.unsubscribe("system_logs")
+            await redis_client.close()
+        except Exception:
+            pass
