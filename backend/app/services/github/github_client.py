@@ -530,16 +530,62 @@ class GitHubClient:
         response = self._retry_on_rate_limit(_do_request)
         return response.text
 
-    def list_commit_comments(self, full_name: str, sha: str) -> List[Dict[str, Any]]:
+    def list_commit_comments(
+        self, full_name: str, sha: str, use_cache: bool = True
+    ) -> List[Dict[str, Any]]:
         """List comments on a commit with pagination."""
+        if use_cache:
+            from app.services.github.github_cache import get_github_cache
+
+            cache = get_github_cache()
+            cache_key = f"{self._api_url}/repos/{full_name}/commits/{sha}/comments"
+            _, _, cached_data = cache.get_cached(cache_key)
+            if cached_data:
+                return cached_data
+
+            result = list(self._paginate(f"/repos/{full_name}/commits/{sha}/comments"))
+            # Cache for 5 minutes (comments can be added)
+            cache.set_cached(cache_key, result, None, None, ttl=300)
+            return result
+
         return list(self._paginate(f"/repos/{full_name}/commits/{sha}/comments"))
 
-    def list_issue_comments(self, full_name: str, issue_number: int) -> List[Dict[str, Any]]:
+    def list_issue_comments(
+        self, full_name: str, issue_number: int, use_cache: bool = True
+    ) -> List[Dict[str, Any]]:
         """List issue/PR discussion comments with pagination."""
+        if use_cache:
+            from app.services.github.github_cache import get_github_cache
+
+            cache = get_github_cache()
+            cache_key = f"{self._api_url}/repos/{full_name}/issues/{issue_number}/comments"
+            _, _, cached_data = cache.get_cached(cache_key)
+            if cached_data:
+                return cached_data
+
+            result = list(self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments"))
+            cache.set_cached(cache_key, result, None, None, ttl=300)
+            return result
+
         return list(self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments"))
 
-    def list_review_comments(self, full_name: str, pr_number: int) -> List[Dict[str, Any]]:
+    def list_review_comments(
+        self, full_name: str, pr_number: int, use_cache: bool = True
+    ) -> List[Dict[str, Any]]:
         """List PR code review comments with pagination."""
+        if use_cache:
+            from app.services.github.github_cache import get_github_cache
+
+            cache = get_github_cache()
+            cache_key = f"{self._api_url}/repos/{full_name}/pulls/{pr_number}/comments"
+            _, _, cached_data = cache.get_cached(cache_key)
+            if cached_data:
+                return cached_data
+
+            result = list(self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments"))
+            cache.set_cached(cache_key, result, None, None, ttl=300)
+            return result
+
         return list(self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments"))
 
     def compare_commits(

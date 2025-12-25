@@ -152,7 +152,6 @@ class GitHubActionsProvider(CIProviderInterface):
             params["status"] = "completed"
 
         with self._get_github_client(repo_name, installation_id) as client:
-            # Fetch single page only (no internal pagination)
             response = client.list_workflow_runs(repo_name, params)
             runs = response.get("workflow_runs", [])
 

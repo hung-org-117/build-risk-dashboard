@@ -639,7 +639,6 @@ export interface EnrichmentJob {
   skipped_rows: number;
   progress_percent: number;
   selected_features: string[];
-  repos_auto_imported: string[];
   started_at?: string;
   completed_at?: string;
   error?: string;
@@ -655,7 +654,6 @@ export interface EnrichmentStatusResponse {
   total_rows: number;
   enriched_rows: number;
   failed_rows: number;
-  repos_auto_imported: string[];
   error?: string;
   output_file?: string;
   estimated_time_remaining_seconds?: number;

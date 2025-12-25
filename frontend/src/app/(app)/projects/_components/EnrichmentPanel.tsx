@@ -120,7 +120,6 @@ export function EnrichmentPanel({
                 skipped_rows: 0,
                 progress_percent: 0,
                 selected_features: selectedFeatures,
-                repos_auto_imported: [],
             });
 
             setState("running");

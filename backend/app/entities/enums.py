@@ -14,8 +14,7 @@ class TestFramework(str, Enum):
     PYTEST = "pytest"
     UNITTEST = "unittest"
     # Ruby
-    RSPEC = "rspec"
-    MINITEST = "minitest"
+
     TESTUNIT = "testunit"
     CUCUMBER = "cucumber"
     # Java
@@ -25,10 +24,10 @@ class TestFramework(str, Enum):
     JEST = "jest"
     MOCHA = "mocha"
     JASMINE = "jasmine"
-    VITEST = "vitest"
+
     # Go
     GOTEST = "gotest"
-    GOTESTSUM = "gotestsum"
+
     # C/C++
     GTEST = "gtest"
     CATCH2 = "catch2"

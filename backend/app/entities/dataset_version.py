@@ -74,14 +74,6 @@ class DatasetVersion(FeatureConfigBase):
     failed_rows: int = Field(default=0, description="Rows that failed enrichment")
     skipped_rows: int = Field(default=0, description="Rows skipped (already processed)")
 
-    repos_auto_imported: List[str] = Field(
-        default_factory=list,
-        description="Repositories that were auto-imported during enrichment",
-    )
-    repos_failed_import: List[str] = Field(
-        default_factory=list, description="Repositories that failed to import"
-    )
-
     # Ingestion tracking (runs before enrichment)
     ingestion_status: str = Field(
         default="pending",
@@ -96,9 +88,6 @@ class DatasetVersion(FeatureConfigBase):
     completed_at: Optional[datetime] = None
 
     error_message: Optional[str] = None
-    row_errors: List[dict] = Field(
-        default_factory=list, description="List of {row_index, error} for failed rows"
-    )
 
     task_id: Optional[str] = None
 
@@ -123,36 +112,12 @@ class DatasetVersion(FeatureConfigBase):
         self.status = VersionStatus.CANCELLED
         self.completed_at = datetime.now(timezone.utc)
 
-    def increment_progress(
-        self,
-        success: bool = True,
-        error: Optional[str] = None,
-        row_index: Optional[int] = None,
-    ) -> None:
-        """Increment progress counters."""
-        self.processed_rows += 1
-        if success:
-            self.enriched_rows += 1
-        else:
-            self.failed_rows += 1
-            if error and row_index is not None:
-                self.row_errors.append({"row_index": row_index, "error": error})
-
     @property
     def progress_percent(self) -> float:
         """Calculate progress percentage."""
         if self.total_rows == 0:
             return 0.0
         return (self.processed_rows / self.total_rows) * 100
-
-    @property
-    def is_complete(self) -> bool:
-        """Check if version is in a terminal state."""
-        return self.status in (
-            VersionStatus.COMPLETED,
-            VersionStatus.FAILED,
-            VersionStatus.CANCELLED,
-        )
 
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -164,26 +129,3 @@ class DatasetVersion(FeatureConfigBase):
 
     def generate_default_name(self) -> str:
         return f"v{self.version_number}_{self.name}"
-
-    def get_repo_config(self, full_name: str) -> dict:
-        """
-        Get feature config for a specific repository.
-
-        Merges global configs with repo-specific configs.
-        Repo-specific configs override global configs.
-
-        Args:
-            full_name: Repository full name (e.g., "owner/repo")
-
-        Returns:
-            Dict with merged configs for this repo
-        """
-        # Start with global configs (exclude 'repos' key)
-        result = {k: v for k, v in self.feature_configs.items() if k != "repos"}
-
-        # Merge repo-specific configs
-        repos = self.feature_configs.get("repos", {})
-        if full_name in repos:
-            result.update(repos[full_name])
-
-        return result

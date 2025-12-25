@@ -566,6 +566,9 @@ def _process_single_build(
 
     model_build_repo.update_one(build_id, updates)
 
+    # Publish build status update for real-time UI
+    publish_build_update(str(repo_config.id), build_id, updates["extraction_status"])
+
     # Update repo config stats (batch mode - update counts)
     if updates["extraction_status"] in (
         ExtractionStatus.COMPLETED.value,

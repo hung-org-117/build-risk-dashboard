@@ -108,7 +108,6 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         processed_rows: int,
         enriched_rows: int,
         failed_rows: int,
-        row_error: Optional[Dict] = None,
     ) -> bool:
         """Update version progress atomically."""
         updates: Dict[str, Any] = {
@@ -119,9 +118,6 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         }
 
         update_ops: Dict[str, Any] = {"$set": updates}
-
-        if row_error:
-            update_ops["$push"] = {"row_errors": row_error}
 
         result = self.collection.update_one({"_id": self.ensure_object_id(version_id)}, update_ops)
         return result.modified_count > 0
@@ -180,17 +176,6 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
                     "completed_at": datetime.now(timezone.utc),
                     "updated_at": datetime.now(timezone.utc),
                 }
-            },
-        )
-        return result.modified_count > 0
-
-    def add_auto_imported_repo(self, version_id: str | ObjectId, repo_name: str) -> bool:
-        """Add a repo to the auto-imported list."""
-        result = self.collection.update_one(
-            {"_id": self.ensure_object_id(version_id)},
-            {
-                "$push": {"repos_auto_imported": repo_name},
-                "$set": {"updated_at": datetime.now(timezone.utc)},
             },
         )
         return result.modified_count > 0
