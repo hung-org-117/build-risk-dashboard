@@ -1,0 +1,84 @@
+name: Deploy to Google VM
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to deploy (leave empty to use latest)'
+        required: false
+        type: string
+
+env:
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get deployment tag
+        id: get_tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "TAG=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            
+            echo "🚀 Starting deployment of ${{ steps.get_tag.outputs.TAG }}..."
+            
+            # Navigate to project directory
+            cd ${{ secrets.DEPLOY_PATH }}
+            
+            # Backup current version (for rollback)
+            CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+            echo "📦 Current version: $CURRENT_TAG"
+            
+            # Fetch latest changes
+            echo "📥 Fetching latest changes..."
+            git fetch --all --tags --prune
+            
+            # Checkout the tag
+            echo "🔄 Checking out ${{ steps.get_tag.outputs.TAG }}..."
+            git checkout ${{ steps.get_tag.outputs.TAG }}
+            
+            # Pull latest changes for the tag
+            git pull origin ${{ steps.get_tag.outputs.TAG }} || true
+            
+            # Run deployment script
+            echo "🐳 Running deployment..."
+            chmod +x scripts/deploy.sh
+            ./scripts/deploy.sh
+            
+            echo "✅ Deployment completed successfully!"
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "🎉 Successfully deployed ${{ steps.get_tag.outputs.TAG }} to production"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed for ${{ steps.get_tag.outputs.TAG }}"
+          exit 1

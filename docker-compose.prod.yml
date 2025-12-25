@@ -1,0 +1,398 @@
+# =============================================================================
+# Docker Compose - Production Deployment
+# Full-stack deployment with Nginx reverse proxy + Let's Encrypt SSL
+# =============================================================================
+
+services:
+  # =========================================
+  # Nginx Reverse Proxy with SSL
+  # =========================================
+  nginx:
+    image: nginx:alpine
+    container_name: prod-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Certbot for SSL certificate renewal
+  certbot:
+    image: certbot/certbot
+    container_name: prod-certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    restart: unless-stopped
+
+  # =========================================
+  # MongoDB Database (Replica Set)
+  # =========================================
+  mongo:
+    image: mongo:7
+    container_name: prod-mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: >
+        mongosh --quiet --eval "
+          try { 
+            rs.status().ok 
+          } catch(e) { 
+            rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]}); 
+            1 
+          }"
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # RabbitMQ Message Broker
+  # =========================================
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: prod-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-myuser}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-mypass}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Redis Cache & Result Backend
+  # =========================================
+  redis:
+    image: redis:7-alpine
+    container_name: prod-redis
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # PostgreSQL for SonarQube
+  # =========================================
+  sonar-db:
+    image: postgres:15-alpine
+    container_name: prod-sonar-db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+      POSTGRES_DB: sonar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # SonarQube Server
+  # =========================================
+  sonarqube:
+    image: sonarqube:latest
+    container_name: prod-sonarqube
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    depends_on:
+      sonar-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/api/system/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Trivy Vulnerability Scanner
+  # =========================================
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: prod-trivy
+    command: server --listen 0.0.0.0:4954 --cache-dir /root/.cache/trivy
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    volumes:
+      - trivy_cache:/root/.cache/trivy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:4954/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Backend API Server
+  # =========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prod-backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    environment:
+      # Database
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
+      # Message Broker
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "False"
+      # SonarQube
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
+      SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
+      # Trivy
+      TRIVY_ENABLED: "true"
+      TRIVY_SERVER_URL: http://trivy:4954
+      # GitHub
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # Email (Gmail API)
+      GMAIL_ENABLED: ${GMAIL_ENABLED:-false}
+      GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
+    volumes:
+      - repo_data:/app/repo-data
+      - shared_data:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Celery Worker
+  # =========================================
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prod-celery-worker
+    command: >
+      uv run celery -A app.celery_app worker 
+      --loglevel=info 
+      --concurrency=${CELERY_CONCURRENCY:-4}
+      -Q pipeline.default,ingestion,processing,validation,sonar_scan,trivy_scan
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      HOME: /tmp
+      # SonarQube
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
+      SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
+      # Trivy
+      TRIVY_ENABLED: "true"
+      TRIVY_SERVER_URL: http://trivy:4954
+      # GitHub
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+    volumes:
+      - repo_data:/app/repo-data
+      - shared_data:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Celery Beat Scheduler
+  # =========================================
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prod-celery-beat
+    command: uv run celery -A app.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      HOME: /tmp
+    volumes:
+      - shared_data:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Frontend (Next.js Production)
+  # =========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: prod-frontend
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # =========================================
+  # Monitoring Stack
+  # =========================================
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: prod-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  alloy:
+    image: grafana/alloy:latest
+    container_name: prod-alloy
+    volumes:
+      - ./monitoring/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: prod-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASS:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+    volumes:
+      - ./monitoring/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  rabbitmq_data:
+  redis_data:
+  postgres_data:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:
+  trivy_cache:
+  repo_data:
+  shared_data:
+  loki_data:
+  alloy_data:
+  grafana_data:
