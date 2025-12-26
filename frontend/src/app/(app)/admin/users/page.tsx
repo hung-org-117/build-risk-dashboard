@@ -25,6 +25,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { toast } from '@/components/ui/use-toast'
 import { adminUsersApi, adminInvitationsApi, usersApi } from '@/lib/api'
 import type { UserAccount } from '@/types'
 import type { Invitation, InvitationCreatePayload } from '@/lib/api'
@@ -35,7 +36,6 @@ export default function AdminUsersPage() {
     const [currentUserId, setCurrentUserId] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isLoadingInvitations, setIsLoadingInvitations] = useState(true)
-    const [error, setError] = useState<string | null>(null)
     const [searchQuery, setSearchQuery] = useState('')
 
     // Create invitation dialog state
@@ -65,12 +65,11 @@ export default function AdminUsersPage() {
 
     const fetchUsers = useCallback(async () => {
         setIsLoading(true)
-        setError(null)
         try {
             const response = await adminUsersApi.list(searchQuery || undefined)
             setUsers(response.items)
-        } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to load users')
+        } catch (err) {
+            console.error('Failed to load users:', err)
         } finally {
             setIsLoading(false)
         }
@@ -104,7 +103,6 @@ export default function AdminUsersPage() {
         if (!inviteForm.email) return
 
         setIsInviting(true)
-        setError(null)
         try {
             await adminInvitationsApi.create({
                 email: inviteForm.email,
@@ -113,8 +111,9 @@ export default function AdminUsersPage() {
             setIsInviteOpen(false)
             setInviteForm({ email: '', role: 'guest' })
             fetchInvitations()
-        } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to create invitation')
+            toast({ title: 'Success', description: 'Invitation sent successfully' })
+        } catch (err) {
+            console.error('Failed to create invitation:', err)
         } finally {
             setIsInviting(false)
         }
@@ -130,8 +129,9 @@ export default function AdminUsersPage() {
             await adminUsersApi.delete(deleteUserId)
             setDeleteUserId(null)
             fetchUsers()
-        } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to delete user')
+            toast({ title: 'Success', description: 'User deleted successfully' })
+        } catch (err) {
+            console.error('Failed to delete user:', err)
         } finally {
             setIsDeleting(false)
         }
@@ -145,8 +145,9 @@ export default function AdminUsersPage() {
             await adminInvitationsApi.revoke(revokeInvitationId)
             setRevokeInvitationId(null)
             fetchInvitations()
-        } catch (err: any) {
-            setError(err.response?.data?.detail || 'Failed to revoke invitation')
+            toast({ title: 'Success', description: 'Invitation revoked' })
+        } catch (err) {
+            console.error('Failed to revoke invitation:', err)
         } finally {
             setIsRevoking(false)
         }
@@ -240,16 +241,6 @@ export default function AdminUsersPage() {
                     </Dialog>
                 </div>
             </div>
-
-            {/* Error Alert */}
-            {error && (
-                <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md flex items-center justify-between">
-                    <span>{error}</span>
-                    <Button variant="ghost" size="sm" onClick={() => setError(null)}>
-                        <X className="h-4 w-4" />
-                    </Button>
-                </div>
-            )}
 
             {/* Tabs for Users and Invitations */}
             <Tabs defaultValue="users" className="w-full">

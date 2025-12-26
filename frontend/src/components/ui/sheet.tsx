@@ -36,13 +36,15 @@ const Sheet = ({ open: controlledOpen, onOpenChange: controlledOnOpenChange, chi
             {triggerChild}
 
             {open && (
-                <div className="fixed inset-0 z-50">
+                <>
+                    {/* Backdrop */}
                     <div
-                        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+                        className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-in fade-in-0"
                         onClick={() => onOpenChange(false)}
                     />
+                    {/* Content positioned at edge */}
                     {contentChildren}
-                </div>
+                </>
             )}
         </SheetContext.Provider>
     );
@@ -74,19 +76,19 @@ const SheetTrigger = ({ children, asChild }: SheetTriggerProps) => {
 };
 
 const sheetVariants = cva(
-    "fixed z-50 h-full bg-background p-6 shadow-lg border-l animate-in",
+    "fixed z-[51] h-full bg-background p-6 shadow-lg border-l transition-transform duration-300 ease-in-out",
     {
         variants: {
             side: {
-                left: "left-0 top-0 slide-in-from-left",
-                right: "right-0 top-0 slide-in-from-right",
+                left: "left-0 top-0 animate-in slide-in-from-left",
+                right: "right-0 top-0 animate-in slide-in-from-right",
             },
             size: {
                 default: "w-80",
                 sm: "w-72",
                 lg: "w-[480px]",
                 xl: "w-[640px]",
-                "2xl": "w-[800px]",
+                "2xl": "w-[800px] max-w-[90vw]",
                 full: "w-screen",
             },
         },

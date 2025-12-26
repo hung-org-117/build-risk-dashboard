@@ -163,11 +163,9 @@ class TokenService:
             if token_status not in [TOKEN_STATUS_ACTIVE, TOKEN_STATUS_DISABLED]:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status. Must be '{TOKEN_STATUS_ACTIVE}' or '{TOKEN_STATUS_DISABLED}'",
+                    detail="Please select a valid status: Active or Disabled",
                 )
-            self._pool._redis.hset(
-                f"github_tokens:stats:{token_hash}", "status", token_status
-            )
+            self._pool._redis.hset(f"github_tokens:stats:{token_hash}", "status", token_status)
 
         if label is not None:
             self._pool._redis.hset(f"github_tokens:stats:{token_hash}", "label", label)
@@ -218,7 +216,7 @@ class TokenService:
         if not raw_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="raw_token is required for verification",
+                detail="Token is required for verification",
             )
 
         # Validate the provided token
@@ -235,12 +233,8 @@ class TokenService:
 
             return {
                 "valid": True,
-                "rate_limit_remaining": (
-                    rate_limit_info["remaining"] if rate_limit_info else None
-                ),
-                "rate_limit_limit": (
-                    rate_limit_info["limit"] if rate_limit_info else None
-                ),
+                "rate_limit_remaining": (rate_limit_info["remaining"] if rate_limit_info else None),
+                "rate_limit_limit": (rate_limit_info["limit"] if rate_limit_info else None),
             }
         else:
             return {

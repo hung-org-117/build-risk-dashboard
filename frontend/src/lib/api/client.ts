@@ -83,6 +83,30 @@ export class ApiError extends Error {
     }
 }
 
+// Global error handler callback for toast notifications
+type ErrorToastHandler = (title: string, description: string) => void;
+let globalErrorHandler: ErrorToastHandler | null = null;
+
+/**
+ * Register a global error handler for showing toast notifications.
+ * Call this once from the root layout/provider.
+ */
+export function registerErrorToastHandler(handler: ErrorToastHandler) {
+    globalErrorHandler = handler;
+}
+
+/**
+ * Show error toast using the registered handler.
+ * Returns true if handler was called, false if not registered.
+ */
+export function showErrorToast(title: string, description: string): boolean {
+    if (globalErrorHandler) {
+        globalErrorHandler(title, description);
+        return true;
+    }
+    return false;
+}
+
 // Response interceptor to unwrap standardized response format
 api.interceptors.response.use(
     (response) => {
@@ -98,8 +122,10 @@ api.interceptors.response.use(
     },
     async (error) => {
         const originalRequest = error.config;
+        const status = error.response?.status;
 
         // Handle new standardized error format
+        let errorMessage = "An unexpected error occurred";
         if (error.response?.data?.success === false && error.response?.data?.error) {
             const errorData = error.response.data as ApiErrorResponse;
             const apiError = new ApiError(
@@ -110,10 +136,16 @@ api.interceptors.response.use(
                 error.response.status
             );
             error.apiError = apiError;
+            errorMessage = apiError.message;
+        } else if (error.response?.data?.detail) {
+            errorMessage = error.response.data.detail;
+        } else if (error.message) {
+            errorMessage = error.message;
         }
 
+        // Handle 401 for auth flow
         if (
-            error.response?.status === 401 &&
+            status === 401 &&
             !originalRequest._retry &&
             !originalRequest.url?.includes("/auth/refresh")
         ) {
@@ -155,6 +187,13 @@ api.interceptors.response.use(
                 }
                 return Promise.reject(refreshError);
             }
+        }
+
+        // Show global error toast for non-401 errors (if handler is registered)
+        // Skip for silent requests (marked with _silentError)
+        if (status !== 401 && !originalRequest._silentError && globalErrorHandler) {
+            const title = status >= 500 ? "Server Error" : "Request Failed";
+            globalErrorHandler(title, errorMessage);
         }
 
         return Promise.reject(error);

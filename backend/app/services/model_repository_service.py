@@ -99,102 +99,94 @@ class RepositoryService:
         for payload in payloads:
             target_user_id = user_id
 
-            try:
-                from app.config import settings
+            from app.config import settings
 
-                is_org_owned = is_org_repo(payload.full_name)
-                if is_org_owned:
-                    client_ctx = get_app_github_client(self.db, settings.GITHUB_INSTALLATION_ID)
-                else:
-                    client_ctx = get_user_github_client(self.db, user_id)
+            is_org_owned = is_org_repo(payload.full_name)
+            if is_org_owned:
+                client_ctx = get_app_github_client(self.db, settings.GITHUB_INSTALLATION_ID)
+            else:
+                client_ctx = get_user_github_client(self.db, user_id)
 
-                with client_ctx as gh:
-                    repo_data = gh.get_repository(payload.full_name)
+            with client_ctx as gh:
+                repo_data = gh.get_repository(payload.full_name)
 
-                if not repo_data:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=(
-                            f"Repository '{payload.full_name}' not found on "
-                            "GitHub or you don't have access."
-                        ),
-                    )
-
-                is_private = bool(repo_data.get("private"))
-                if is_private and not is_org_owned:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            f"Repository '{payload.full_name}' is private "
-                            "and not owned by the organization."
-                        ),
-                    )
-
-                raw_repo = self.raw_repo.upsert_by_full_name(
-                    full_name=payload.full_name,
-                    github_repo_id=repo_data.get("id"),
-                    default_branch=repo_data.get("default_branch", "main"),
-                    is_private=is_private,
-                    main_lang=repo_data.get("language"),
-                    github_metadata=repo_data,
-                )
-
-                from app.entities.model_repo_config import ModelRepoConfig
-
-                # Check if repo already exists (with hard delete, this is simple)
-                existing_config = self.repo_config.find_by_full_name(payload.full_name)
-
-                if existing_config:
-                    # Already imported - reject
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            f"Repository '{payload.full_name}' is already "
-                            "imported. Delete it first to re-import."
-                        ),
-                    )
-
-                # Create new config
-                repo_doc = self.repo_config.insert_one(
-                    ModelRepoConfig(
-                        _id=None,
-                        user_id=ObjectId(target_user_id),
-                        full_name=payload.full_name,
-                        raw_repo_id=raw_repo.id,
-                        ci_provider=payload.ci_provider,
-                        import_status=ModelImportStatus.QUEUED,
-                        max_builds_to_ingest=payload.max_builds,
-                        since_days=payload.since_days,
-                        only_with_logs=payload.only_with_logs or False,
-                        feature_configs=payload.feature_configs or {},
-                    )
-                )
-
-                # Publish status immediately for real-time UI update
-                from app.tasks.shared.events import publish_repo_status
-
-                publish_repo_status(
-                    str(repo_doc.id),
-                    "queued",
-                    f"Repository {payload.full_name} queued for import",
-                )
-
-                start_model_processing.delay(
-                    repo_config_id=str(repo_doc.id),
-                    ci_provider=payload.ci_provider.value,
-                    max_builds=payload.max_builds,
-                    since_days=payload.since_days,
-                    only_with_logs=payload.only_with_logs,
-                )
-
-                results.append(repo_doc)
-
-            except Exception as e:
-                logger.error(f"Internal error importing {payload.full_name}: {e}")
+            if not repo_data:
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to import '{payload.full_name}'. Please try again later.",
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        f"Repository '{payload.full_name}' not found on "
+                        "GitHub or you don't have access."
+                    ),
                 )
+
+            is_private = bool(repo_data.get("private"))
+            if is_private and not is_org_owned:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Repository '{payload.full_name}' is private "
+                        "and not owned by the organization."
+                    ),
+                )
+
+            raw_repo = self.raw_repo.upsert_by_full_name(
+                full_name=payload.full_name,
+                github_repo_id=repo_data.get("id"),
+                default_branch=repo_data.get("default_branch", "main"),
+                is_private=is_private,
+                main_lang=repo_data.get("language"),
+                github_metadata=repo_data,
+            )
+
+            from app.entities.model_repo_config import ModelRepoConfig
+
+            # Check if repo already exists (with hard delete, this is simple)
+            existing_config = self.repo_config.find_by_full_name(payload.full_name)
+
+            if existing_config:
+                # Already imported - reject
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Repository '{payload.full_name}' is already "
+                        "imported. Delete it first to re-import."
+                    ),
+                )
+
+            # Create new config
+            repo_doc = self.repo_config.insert_one(
+                ModelRepoConfig(
+                    _id=None,
+                    user_id=ObjectId(target_user_id),
+                    full_name=payload.full_name,
+                    raw_repo_id=raw_repo.id,
+                    ci_provider=payload.ci_provider,
+                    import_status=ModelImportStatus.QUEUED,
+                    max_builds_to_ingest=payload.max_builds,
+                    since_days=payload.since_days,
+                    only_with_logs=payload.only_with_logs or False,
+                    feature_configs=payload.feature_configs or {},
+                )
+            )
+
+            # Publish status immediately for real-time UI update
+            from app.tasks.shared.events import publish_repo_status
+
+            publish_repo_status(
+                str(repo_doc.id),
+                "queued",
+                f"Repository {payload.full_name} queued for import",
+            )
+
+            start_model_processing.delay(
+                repo_config_id=str(repo_doc.id),
+                ci_provider=payload.ci_provider.value,
+                max_builds=payload.max_builds,
+                since_days=payload.since_days,
+                only_with_logs=payload.only_with_logs,
+            )
+
+            results.append(repo_doc)
 
         return [_serialize_repo(doc) for doc in results]
 

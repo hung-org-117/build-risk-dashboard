@@ -1,12 +1,12 @@
 "use client";
 
 import {
+    ArrowLeft,
+    ArrowRight,
     Building2,
     Globe,
     Loader2,
     Search,
-    ArrowRight,
-    ArrowLeft,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -34,10 +34,9 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { datasetsApi, featuresApi, reposApi } from "@/lib/api";
 import {
     CIProvider,
-    DatasetTemplateRecord,
     FeatureDefinitionSummary,
     RepoImportPayload,
-    RepoSuggestion,
+    RepoSuggestion
 } from "@/types";
 import { ExtractionPlanTimeline } from "./ExtractionPlanTimeline";
 
@@ -153,7 +152,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     const [featuresLoading, setFeaturesLoading] = useState(false);
 
     const [importing, setImporting] = useState(false);
-    const [importError, setImportError] = useState<string | null>(null);
     const [activeRepo, setActiveRepo] = useState<string | null>(null);
 
     // Templates state
@@ -254,7 +252,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             setPrivateMatches([]);
             setPublicMatches([]);
             setSearchError(null);
-            setImportError(null);
             setFeaturesData(null);
             setDagData(null);
             setActiveRepo(null);
@@ -315,7 +312,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
     const handleImport = async () => {
         if (!selectedList.length) return;
         setImporting(true);
-        setImportError(null);
 
         try {
             const payloads: RepoImportPayload[] = selectedList.map((repo) => {
@@ -340,9 +336,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
             await reposApi.importBulk(payloads);
             onImport(); // Trigger refresh in parent
             onClose();
-        } catch (err) {
+        } catch (err: unknown) {
             console.error(err);
-            setImportError("Failed to import repositories. Please try again.");
         } finally {
             setImporting(false);
         }
@@ -483,8 +478,8 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
                                     <button
                                         key={repo.full_name}
                                         className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors ${activeRepo === repo.full_name
-                                                ? "bg-primary text-primary-foreground"
-                                                : "bg-muted hover:bg-muted/80"
+                                            ? "bg-primary text-primary-foreground"
+                                            : "bg-muted hover:bg-muted/80"
                                             }`}
                                         onClick={() => setActiveRepo(repo.full_name)}
                                     >
@@ -602,11 +597,6 @@ export function ImportRepoModal({ isOpen, onClose, onImport }: ImportRepoModalPr
 
                 {/* Footer */}
                 <div className="px-6 py-4 border-t bg-background">
-                    {importError && (
-                        <div className="mb-3 rounded-lg bg-red-50 p-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
-                            {importError}
-                        </div>
-                    )}
                     <SheetFooter className="flex-row justify-between sm:justify-between">
                         <Button variant="ghost" onClick={onClose}>
                             Cancel

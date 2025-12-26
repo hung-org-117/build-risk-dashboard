@@ -141,7 +141,7 @@ class DatasetService:
                 temp_path.unlink(missing_ok=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to persist uploaded file: {exc}",
+                detail="Failed to save uploaded file. Please try again.",
             ) from exc
 
         try:
@@ -190,7 +190,7 @@ class DatasetService:
             temp_path.unlink(missing_ok=True)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to parse CSV: {exc}",
+                detail="Unable to parse your CSV file. Please check the format and try again.",
             ) from exc
 
         mapping = self._guess_mapping(columns)

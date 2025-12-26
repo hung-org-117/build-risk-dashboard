@@ -34,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { toast } from "@/components/ui/use-toast";
 import { useWebSocket } from "@/contexts/websocket-context";
 import { reposApi } from "@/lib/api";
 import type {
@@ -61,7 +62,6 @@ export default function AdminReposPage() {
   const [repositories, setRepositories] = useState<RepositoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
   // Search state
@@ -88,10 +88,8 @@ export default function AdminReposPage() {
         setRepositories(data.items);
         setTotal(data.total);
         setPage(pageNumber);
-        setError(null);
       } catch (err) {
         console.error(err);
-        setError("Unable to load repositories from backend API.");
       } finally {
         setLoading(false);
         setTableLoading(false);
@@ -147,9 +145,8 @@ export default function AdminReposPage() {
       await reposApi.triggerLazySync(repo.id);
       setFeedback("Repository queued for sync (fetching new builds).");
       loadRepositories(page);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setFeedback(err.response?.data?.detail || "Failed to trigger sync.");
     } finally {
       setRescanLoading((prev) => ({ ...prev, [repo.id]: false }));
     }
@@ -164,9 +161,8 @@ export default function AdminReposPage() {
       await reposApi.reprocessFeatures(repo.id);
       setFeedback("Builds queued for feature re-extraction.");
       loadRepositories(page);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setFeedback(err.response?.data?.detail || "Failed to trigger re-extraction.");
     } finally {
       setReprocessLoading((prev) => ({ ...prev, [repo.id]: false }));
     }
@@ -185,11 +181,10 @@ export default function AdminReposPage() {
     setDeleteLoading((prev) => ({ ...prev, [repo.id]: true }));
     try {
       await reposApi.delete(repo.id);
-      setFeedback(`Repository "${repo.full_name}" deleted successfully.`);
+      toast({ title: "Deleted", description: `Repository "${repo.full_name}" deleted.` });
       loadRepositories(page);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setFeedback(err.response?.data?.detail || "Failed to delete repository.");
     } finally {
       setDeleteLoading((prev) => ({ ...prev, [repo.id]: false }));
     }
@@ -220,21 +215,6 @@ export default function AdminReposPage() {
           <CardContent>
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Card className="w-full max-w-md border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
-          <CardHeader>
-            <CardTitle className="text-red-700 dark:text-red-300">
-              Unable to load data
-            </CardTitle>
-            <CardDescription>{error}</CardDescription>
-          </CardHeader>
         </Card>
       </div>
     );

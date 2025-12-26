@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/use-toast";
 import { useDebounce } from "@/hooks/use-debounce";
 import { datasetsApi } from "@/lib/api";
 import type {
@@ -53,7 +54,6 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<DatasetRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [resumeDataset, setResumeDataset] = useState<DatasetRecord | null>(null);
@@ -82,10 +82,8 @@ export default function DatasetsPage() {
         setDatasets(data.items || []);
         setTotal(data.total);
         setPage(pageNumber);
-        setError(null);
       } catch (err) {
         console.error(err);
-        setError("Unable to load datasets from backend API.");
       } finally {
         setLoading(false);
         setTableLoading(false);
@@ -160,11 +158,10 @@ export default function DatasetsPage() {
     }
     try {
       await datasetsApi.delete(dataset.id);
-      setFeedback(`Dataset "${dataset.name}" deleted.`);
+      toast({ title: "Deleted", description: `Dataset "${dataset.name}" deleted.` });
       loadDatasets(page, true);
     } catch (err) {
       console.error(err);
-      setFeedback("Failed to delete dataset.");
     }
   };
 
@@ -207,21 +204,6 @@ export default function DatasetsPage() {
           <CardContent>
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Card className="w-full max-w-md border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
-          <CardHeader>
-            <CardTitle className="text-red-700 dark:text-red-300">
-              Unable to load data
-            </CardTitle>
-            <CardDescription>{error}</CardDescription>
-          </CardHeader>
         </Card>
       </div>
     );
@@ -327,7 +309,6 @@ export default function DatasetsPage() {
                             setUploadModalOpen(true);
                           } catch (err) {
                             console.error("Failed to fetch dataset:", err);
-                            setFeedback("Failed to load dataset.");
                           }
                         }
                       }}
