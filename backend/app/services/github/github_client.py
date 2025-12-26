@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
@@ -21,6 +22,12 @@ from app.services.github.github_app import (
     github_app_configured,
 )
 from app.services.github.redis_token_pool import RedisTokenPool
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 1.0  # Base delay in seconds (will be exponential: 1s, 2s, 4s)
+RETRY_BACKOFF_MAX = 30.0  # Maximum delay between retries
+RETRYABLE_STATUS_CODES = {500, 502, 503, 504}  # Server errors worth retrying
 
 API_PREVIEW_HEADERS = {
     "Accept": "application/vnd.github+json",
@@ -183,22 +190,70 @@ class GitHubClient:
             # No tokens available
             return False
 
-    def _retry_on_rate_limit(self, request_func: Callable[[], httpx.Response]) -> httpx.Response:
+    def _retry_on_rate_limit(
+        self, request_func: Callable[[], httpx.Response], max_retries: int = MAX_RETRIES
+    ) -> httpx.Response:
         """
-        Execute request with automatic token rotation on rate limit.
+        Execute request with exponential backoff retry for transient errors.
 
-        When a token hits rate limit:
-        1. Mark current token as rate limited in Redis
-        2. Try to acquire another token from pool
-        3. Retry the request with new token
-        4. Only raise GithubAllRateLimitError when ALL tokens exhausted
+        Handles:
+        - HTTP 5xx server errors with exponential backoff
+        - Rate limits with token rotation
+        - Network errors with retry
 
-        GithubRateLimitError is handled internally and NOT propagated.
+        Args:
+            request_func: Callable that returns httpx.Response
+            max_retries: Maximum number of retry attempts for 5xx errors
+
+        Returns:
+            httpx.Response on success
+
+        Raises:
+            GithubAllRateLimitError: When all tokens are rate limited
+            GithubSecondaryRateLimitError: When secondary rate limit is hit
+            GithubRetryableError: When max retries exceeded for 5xx errors
         """
+        retries = 0
+
         while True:
             try:
                 response = request_func()
+
+                # Check for retryable 5xx errors before handling response
+                if response.status_code in RETRYABLE_STATUS_CODES:
+                    retries += 1
+                    if retries > max_retries:
+                        raise GithubRetryableError(
+                            f"Max retries ({max_retries}) exceeded for HTTP {response.status_code}"
+                        )
+
+                    # Exponential backoff: 1s, 2s, 4s, ... capped at RETRY_BACKOFF_MAX
+                    delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
+                    logger.warning(
+                        f"HTTP {response.status_code} error, retrying in {delay:.1f}s "
+                        f"(attempt {retries}/{max_retries})"
+                    )
+                    time.sleep(delay)
+                    continue
+
                 return self._handle_response(response)
+
+            except httpx.RequestError as e:
+                # Network-level errors (connection refused, timeout, etc.)
+                retries += 1
+                if retries > max_retries:
+                    raise GithubRetryableError(
+                        f"Max retries ({max_retries}) exceeded for network error: {e}"
+                    ) from e
+
+                delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
+                logger.warning(
+                    f"Network error: {e}, retrying in {delay:.1f}s "
+                    f"(attempt {retries}/{max_retries})"
+                )
+                time.sleep(delay)
+                continue
+
             except GithubRateLimitError as e:
                 # Current token is rate limited, try to rotate to another
                 logger.warning(
@@ -211,9 +266,10 @@ class GitHubClient:
                         "All GitHub tokens hit rate limits.",
                         retry_after=e.retry_after,
                     ) from e
-                # Successfully rotated, retry with new token
+                # Successfully rotated, retry with new token (don't count as retry)
                 logger.info("Successfully rotated token, retrying request...")
                 continue
+
             except GithubSecondaryRateLimitError:
                 # Secondary rate limit affects ALL tokens (IP-based), don't rotate
                 raise
@@ -285,7 +341,7 @@ class GitHubClient:
                     return cached_data
                 raise GithubRetryableError(str(exc)) from exc
 
-            # Handle 304 Not Modified - return cached data (FREE - doesn't count!)
+            # Handle 304 Not Modified - return cached data
             if response.status_code == 304 and cached_data:
                 return cached_data
 

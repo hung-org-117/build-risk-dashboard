@@ -1,42 +1,55 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { useRouter, useParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
+    AlertTriangle,
     ArrowLeft,
     ArrowRight,
+    Box,
+    CheckSquare,
+    LayoutDashboard,
     Loader2,
+    Settings,
     Sparkles,
-    Zap,
-    Check,
-    Settings2,
-    Scan,
-    FileCheck,
+    Zap
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+
 import { useFeatureSelector } from "@/components/features";
+import { FeatureConfigForm, type FeatureConfigsData } from "@/components/features/config/FeatureConfigForm";
 import {
     GraphView,
     ListView,
     SelectedFeaturesPanel,
-    ViewToggle,
     TemplateSelector,
+    ViewToggle,
 } from "@/components/features/selection";
+import { DEFAULT_ENABLED_TOOLS } from "@/components/sonar/scan-config-panel";
+import { ScanPropertiesPanel } from "@/components/sonar/scan-properties-panel";
+import { ScanSelectionPanel, type EnabledTools } from "@/components/sonar/scan-selection-panel";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-    FeatureConfigForm,
-    type FeatureConfigsData,
-} from "@/components/features/config/FeatureConfigForm";
-import {
-    ScanConfigPanel,
-    type ScanConfig,
-    DEFAULT_SCAN_CONFIG,
-} from "@/components/sonar/scan-config-panel";
+    Card,
+    CardContent,
+    CardDescription,
+    CardHeader,
+    CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/use-toast";
 import { datasetsApi } from "@/lib/api";
-import { useDatasetVersions } from "../../_hooks/useDatasetVersions";
+import { cn } from "@/lib/utils";
+import { useScanConfig } from "../../_components/FeatureSelection/useScanConfig";
 
-/** Scan metrics selection */
+interface PageProps {
+    params: {
+        datasetId: string;
+    };
+}
+
 interface ScanMetricsData {
     sonarqube: string[];
     trivy: string[];
@@ -47,23 +60,12 @@ interface RepoInfo {
     full_name: string;
 }
 
-const STEPS = [
-    { id: 1, name: "Features", icon: Sparkles, description: "Select features" },
-    { id: 2, name: "Configure", icon: Settings2, description: "Feature settings" },
-    { id: 3, name: "Scan", icon: Scan, description: "Scan configuration" },
-    { id: 4, name: "Review", icon: FileCheck, description: "Review & create" },
-];
-
-export default function CreateVersionPage() {
+export default function CreateVersionPage({ params }: PageProps) {
+    const { datasetId } = params;
     const router = useRouter();
-    const params = useParams();
-    const datasetId = params.datasetId as string;
 
-    // Use the existing hook for version management
-    const { activeVersion, createVersion, creating } = useDatasetVersions(datasetId);
-    const hasActiveVersion = !!activeVersion;
-
-    const [step, setStep] = useState(1);
+    // State
+    const [step, setStep] = useState<1 | 2>(1);
     const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
     const [versionName, setVersionName] = useState("");
     const [featureConfigs, setFeatureConfigs] = useState<FeatureConfigsData>({
@@ -74,22 +76,24 @@ export default function CreateVersionPage() {
         sonarqube: [],
         trivy: [],
     });
-    const [scanConfig, setScanConfig] = useState<ScanConfig>(DEFAULT_SCAN_CONFIG);
+    const [enabledTools, setEnabledTools] = useState<EnabledTools>(DEFAULT_ENABLED_TOOLS);
     const [repos, setRepos] = useState<RepoInfo[]>([]);
-    const [dataset, setDataset] = useState<{ name: string; rows: number } | null>(null);
     const [isCreating, setIsCreating] = useState(false);
+    const [hasActiveVersion, setHasActiveVersion] = useState(false);
 
-    // Fetch dataset info
+    // Check for active versions
     useEffect(() => {
-        async function fetchDataset() {
+        async function checkActiveVersions() {
             try {
-                const data = await datasetsApi.get(datasetId);
-                setDataset({ name: data.name, rows: data.rows || 0 });
+                const dataset = await datasetsApi.get(datasetId);
+                const response = await datasetsApi.listVersions(datasetId, { limit: 100 });
+                const active = response.versions.some((v: any) => v.status === 'processing' || v.status === 'pending');
+                setHasActiveVersion(active);
             } catch (err) {
-                console.error("Failed to fetch dataset:", err);
+                console.error("Failed to check active versions:", err);
             }
         }
-        fetchDataset();
+        checkActiveVersions();
     }, [datasetId]);
 
     // Fetch repos for per-repo scan config
@@ -98,12 +102,10 @@ export default function CreateVersionPage() {
             try {
                 const summary = await datasetsApi.getValidationSummary(datasetId);
                 if (summary.repos) {
-                    setRepos(
-                        summary.repos.map((r) => ({
-                            id: String(r.github_repo_id || r.id),
-                            full_name: r.full_name,
-                        }))
-                    );
+                    setRepos(summary.repos.map(r => ({
+                        id: String(r.github_repo_id || r.id),
+                        full_name: r.full_name,
+                    })));
                 }
             } catch (err) {
                 console.error("Failed to fetch repos:", err);
@@ -112,6 +114,13 @@ export default function CreateVersionPage() {
         fetchRepos();
     }, [datasetId]);
 
+    // Scan config hook
+    const { scanConfig, setScanConfig } = useScanConfig({
+        fetchOnEnable: true,
+        enabled: true,
+    });
+
+    // Feature selection hook
     const {
         extractorNodes,
         dagData,
@@ -123,21 +132,28 @@ export default function CreateVersionPage() {
         toggleFeature,
         toggleNodeExpand,
         clearSelection,
+        selectAllAvailable,
         setSearchQuery,
         filteredNodes,
         applyTemplate,
     } = useFeatureSelector();
+
+    // Clear all scan metrics
+    const handleClearScanMetrics = () => {
+        setScanMetrics({
+            sonarqube: [],
+            trivy: [],
+        });
+    };
 
     // Handle features change from graph view
     const handleGraphFeaturesChange = useCallback(
         (features: string[]) => {
             const currentSet = selectedFeatures;
             const newSet = new Set(features);
-
             newSet.forEach((f) => {
                 if (!currentSet.has(f)) toggleFeature(f);
             });
-
             currentSet.forEach((f) => {
                 if (!newSet.has(f)) toggleFeature(f);
             });
@@ -148,142 +164,136 @@ export default function CreateVersionPage() {
     const handleCreateVersion = async () => {
         setIsCreating(true);
         try {
-            // Flatten configs for API
-            const flatConfigs: Record<string, unknown> = {
-                ...featureConfigs.global,
-                repo_configs: featureConfigs.repos,
-            };
-
-            const result = await createVersion({
+            await datasetsApi.createVersion(datasetId, {
                 selected_features: Array.from(selectedFeatures),
-                feature_configs: flatConfigs,
-                scan_metrics: scanMetrics,
-                scan_config: scanConfig as unknown as Record<string, unknown>,
+                feature_configs: featureConfigs as unknown as Record<string, unknown>,
+                scan_config: { metrics: scanMetrics, config: scanConfig },
                 name: versionName || undefined,
             });
 
-            if (result) {
-                router.push(`/projects/${datasetId}`);
-            }
+            toast({
+                title: "Version creation started",
+                description: "Your new dataset version is being processed.",
+            });
+
+            router.push(`/projects/${datasetId}`);
         } catch (err) {
             console.error("Failed to create version:", err);
+            toast({
+                title: "Failed to create version",
+                description: err instanceof Error ? err.message : "Unknown error",
+                variant: "destructive",
+            });
         } finally {
             setIsCreating(false);
         }
     };
 
-    const canProceed = useMemo(() => {
-        switch (step) {
-            case 1:
-                return selectedFeatures.size > 0;
-            case 2:
-            case 3:
-                return true;
-            case 4:
-                return !isCreating && !creating && !hasActiveVersion && selectedFeatures.size > 0;
-            default:
-                return false;
-        }
-    }, [step, selectedFeatures.size, isCreating, creating, hasActiveVersion]);
-
-    const handleNext = () => {
-        if (step < 4) setStep(step + 1);
-        else handleCreateVersion();
-    };
-
-    const handleBack = () => {
-        if (step > 1) setStep(step - 1);
-        else router.push(`/projects/${datasetId}`);
-    };
+    const hasSelection = selectedFeatures.size > 0 || enabledTools.sonarqube || scanMetrics.sonarqube.length > 0 || enabledTools.trivy || scanMetrics.trivy.length > 0;
+    // canProceedToStep2 logic: allow proceeding if something is selected
+    const canProceedToStep2 = hasSelection && !hasActiveVersion;
+    const isDisabled = isCreating || hasActiveVersion;
 
     return (
-        <div className="min-h-screen bg-background flex flex-col">
-            {/* Header */}
-            <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-                <div className="container mx-auto px-6 py-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => router.push(`/projects/${datasetId}`)}
-                            >
-                                <ArrowLeft className="h-4 w-4 mr-2" />
-                                Back to Project
-                            </Button>
-                            <div className="h-6 w-px bg-border" />
-                            <div>
-                                <h1 className="text-lg font-semibold flex items-center gap-2">
-                                    <Sparkles className="h-5 w-5" />
-                                    Create New Version
-                                </h1>
-                                {dataset && (
-                                    <p className="text-sm text-muted-foreground">
-                                        {dataset.name} • {dataset.rows.toLocaleString()} rows
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Step Indicator */}
-                        <div className="hidden md:flex items-center gap-2">
-                            {STEPS.map((s, idx) => (
-                                <div key={s.id} className="flex items-center">
-                                    <button
-                                        onClick={() => s.id < step && setStep(s.id)}
-                                        disabled={s.id > step}
-                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${step === s.id
-                                            ? "bg-primary text-primary-foreground"
-                                            : step > s.id
-                                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                                : "bg-muted text-muted-foreground"
-                                            }`}
-                                    >
-                                        {step > s.id ? (
-                                            <Check className="h-4 w-4" />
-                                        ) : (
-                                            <s.icon className="h-4 w-4" />
-                                        )}
-                                        <span className="hidden lg:inline">{s.name}</span>
-                                    </button>
-                                    {idx < STEPS.length - 1 && (
-                                        <div
-                                            className={`w-8 h-px mx-1 ${step > s.id ? "bg-green-500" : "bg-border"
-                                                }`}
-                                        />
-                                    )}
-                                </div>
-                            ))}
-                        </div>
+        <div className="flex h-[calc(100vh-theme(spacing.16))] overflow-hidden -m-6 rounded-none flex-col">
+            {/* Steps Header */}
+            <div className="flex-shrink-0 bg-background border-b px-6 py-4 flex items-center justify-between z-20 shadow-sm">
+                <div className="flex items-center gap-3">
+                    <Button variant="ghost" size="icon" className="-ml-2" onClick={() => router.push(`/projects/${datasetId}`)}>
+                        <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <div>
+                        <h1 className="text-lg font-semibold leading-none flex items-center gap-2">
+                            Create Version
+                        </h1>
+                        <nav className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground" aria-label="Breadcrumb">
+                            <span className={cn("flex items-center gap-1", step === 1 ? "font-medium text-foreground" : "")}>
+                                <div className={cn("w-4 h-4 rounded-full flex items-center justify-center border text-[10px]", step === 1 ? "bg-black border-black text-white" : "border-muted-foreground/30")}>1</div>
+                                Selection
+                            </span>
+                            <span className="text-muted-foreground/30">/</span>
+                            <span className={cn("flex items-center gap-1", step === 2 ? "font-medium text-foreground" : "")}>
+                                <div className={cn("w-4 h-4 rounded-full flex items-center justify-center border text-[10px]", step === 2 ? "bg-black border-black text-white" : "border-muted-foreground/30")}>2</div>
+                                Configuration
+                            </span>
+                        </nav>
                     </div>
                 </div>
-            </header>
 
-            {/* Main Content */}
-            <main className="flex-1 container mx-auto px-6 py-8">
-                {/* Step 1: Feature Selection */}
-                {step === 1 && (
-                    <div className="space-y-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h2 className="text-2xl font-bold">Select Features</h2>
-                                <p className="text-muted-foreground">
-                                    Choose which features to include in your enriched dataset
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <TemplateSelector
-                                    onApplyTemplate={applyTemplate}
-                                    disabled={isCreating || hasActiveVersion}
-                                />
-                                <ViewToggle value={viewMode} onChange={setViewMode} />
-                            </div>
-                        </div>
+                <div className="flex items-center gap-3">
+                    {step === 1 ? (
+                        <Button
+                            onClick={() => setStep(2)}
+                            disabled={!canProceedToStep2}
+                            className="bg-black hover:bg-slate-800 text-white transition-colors"
+                        >
+                            Next: Configure
+                            <ArrowRight className="ml-2 h-4 w-4" />
+                        </Button>
+                    ) : (
+                        <>
+                            <Button variant="outline" onClick={() => setStep(1)} disabled={isCreating}>
+                                Back
+                            </Button>
+                            <Button
+                                onClick={handleCreateVersion}
+                                disabled={isDisabled}
+                                className="bg-black hover:bg-slate-800 min-w-[140px]"
+                            >
+                                {isCreating ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Creating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Zap className="mr-2 h-4 w-4" />
+                                        Launch Version
+                                    </>
+                                )}
+                            </Button>
+                        </>
+                    )}
+                </div>
+            </div>
 
-                        <div className="grid lg:grid-cols-3 gap-6">
-                            <div className="lg:col-span-2">
-                                <div className="border rounded-xl p-4 min-h-[500px]">
-                                    {viewMode === "graph" ? (
+            {hasActiveVersion && (
+                <div className="bg-amber-50 border-b border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300 py-2 px-6 flex items-center gap-2 text-sm justify-center">
+                    <AlertTriangle className="h-4 w-4" />
+                    A version is currently processing. You must wait for it to complete.
+                </div>
+            )}
+
+            {/* STEP 1: SELECTION (Full Screen Graph + Split Bottom) */}
+            {step === 1 && (
+                <div className="flex-1 flex overflow-hidden">
+                    <ResizablePanelGroup direction="vertical" className="h-full w-full">
+                        {/* Top: Graph Area (Default 65%) */}
+                        <ResizablePanel defaultSize={65} minSize={30}>
+                            <div className="flex flex-col h-full relative bg-slate-50/50 dark:bg-slate-950/50">
+                                {/* Toolbar Area */}
+                                <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
+                                    {/* Left: Template Selector */}
+                                    <div className="pointer-events-auto">
+                                        <TemplateSelector
+                                            onApplyTemplate={applyTemplate}
+                                            disabled={hasActiveVersion}
+                                        />
+                                    </div>
+
+                                    {/* Right: View Toggle */}
+                                    <div className="pointer-events-auto flex items-center gap-2 bg-background/80 backdrop-blur-sm p-1 rounded-lg shadow-sm">
+                                        <ViewToggle value={viewMode} onChange={setViewMode} />
+                                    </div>
+                                </div>
+
+                                {/* Visualization */}
+                                <div className="flex-1 overflow-hidden pt-16">
+                                    {loading ? (
+                                        <div className="flex h-full items-center justify-center">
+                                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                        </div>
+                                    ) : viewMode === "graph" ? (
                                         <GraphView
                                             dagData={dagData}
                                             selectedFeatures={selectedFeatures}
@@ -291,197 +301,241 @@ export default function CreateVersionPage() {
                                             isLoading={loading}
                                         />
                                     ) : (
-                                        <ListView
-                                            nodes={filteredNodes}
-                                            selectedFeatures={selectedFeatures}
-                                            expandedNodes={expandedNodes}
-                                            onToggleFeature={toggleFeature}
-                                            onToggleNode={toggleNodeExpand}
-                                            onToggleNodeExpand={toggleNodeExpand}
-                                            searchQuery={searchQuery}
-                                            onSearchChange={setSearchQuery}
-                                        />
+                                        <div className="h-full overflow-y-auto p-4 md:p-6">
+                                            <div className="max-w-4xl mx-auto bg-background rounded-lg border shadow-sm">
+                                                <ListView
+                                                    nodes={filteredNodes}
+                                                    selectedFeatures={selectedFeatures}
+                                                    expandedNodes={expandedNodes}
+                                                    onToggleFeature={toggleFeature}
+                                                    onToggleNode={toggleNodeExpand}
+                                                    onToggleNodeExpand={toggleNodeExpand}
+                                                    searchQuery={searchQuery}
+                                                    onSearchChange={setSearchQuery}
+                                                />
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </div>
-                            <div>
-                                <SelectedFeaturesPanel
-                                    selectedFeatures={selectedFeatures}
-                                    allFeatures={allFeatures}
-                                    nodes={extractorNodes}
-                                    onRemoveFeature={toggleFeature}
-                                    onClearAll={clearSelection}
-                                    rowCount={dataset?.rows || 0}
+                        </ResizablePanel>
+
+                        <ResizableHandle withHandle />
+
+                        {/* Bottom: Selection Area (Split Features / Scans) */}
+                        <ResizablePanel defaultSize={35} minSize={20}>
+                            <ResizablePanelGroup direction="horizontal">
+                                {/* Left: Selected Features */}
+                                <ResizablePanel defaultSize={50} minSize={30}>
+                                    <div className="h-full flex flex-col bg-background">
+                                        <div className="px-4 py-2 border-b bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between flex-shrink-0">
+                                            <div className="flex items-center gap-2 font-medium text-sm">
+                                                Selected Features
+                                                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">
+                                                    {selectedFeatures.size}
+                                                </Badge>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={selectAllAvailable}
+                                                    className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                                                >
+                                                    Select All
+                                                </Button>
+                                                <div className="w-px h-3 bg-border mx-1" />
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={clearSelection}
+                                                    className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
+                                                >
+                                                    Clear All
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto">
+                                            <SelectedFeaturesPanel
+                                                selectedFeatures={selectedFeatures}
+                                                allFeatures={allFeatures}
+                                                nodes={extractorNodes}
+                                                onRemoveFeature={toggleFeature}
+                                                onClearAll={clearSelection}
+                                                rowCount={0}
+                                                className="border-none shadow-none h-full rounded-none"
+                                                hideHeader={true}
+                                            />
+                                        </div>
+                                    </div>
+                                </ResizablePanel>
+
+                                <ResizableHandle withHandle />
+
+                                {/* Right: Scan Metrics */}
+                                <ResizablePanel defaultSize={50} minSize={30}>
+                                    <div className="h-full flex flex-col bg-background">
+                                        <div className="px-4 py-2 border-b bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between flex-shrink-0">
+                                            <div className="flex items-center gap-2 font-medium text-sm">
+                                                Selected Scan Metrics
+                                                {(scanMetrics.sonarqube.length > 0 || scanMetrics.trivy.length > 0) && (
+                                                    <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">
+                                                        {scanMetrics.sonarqube.length + scanMetrics.trivy.length}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={handleClearScanMetrics}
+                                                className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
+                                            >
+                                                Clear All
+                                            </Button>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-4">
+                                            <ScanSelectionPanel
+                                                selectedSonarMetrics={scanMetrics.sonarqube}
+                                                selectedTrivyMetrics={scanMetrics.trivy}
+                                                onSonarMetricsChange={(metrics) =>
+                                                    setScanMetrics((prev) => ({ ...prev, sonarqube: metrics }))
+                                                }
+                                                onTrivyMetricsChange={(metrics) =>
+                                                    setScanMetrics((prev) => ({ ...prev, trivy: metrics }))
+                                                }
+                                                enabledTools={enabledTools}
+                                                onEnabledToolsChange={setEnabledTools}
+                                                disabled={hasActiveVersion}
+                                            />
+                                        </div>
+                                    </div>
+                                </ResizablePanel>
+                            </ResizablePanelGroup>
+                        </ResizablePanel>
+                    </ResizablePanelGroup>
+                </div>
+            )}
+
+            {/* STEP 2: CONFIGURATION */}
+            {step === 2 && (
+                <div className="flex-1 flex overflow-hidden">
+                    {/* Left: Configuration Forms */}
+                    {/* Left: Configuration Forms (Tabbed) */}
+                    <Tabs defaultValue="features" className="flex-1 flex flex-col overflow-hidden bg-slate-50/50 dark:bg-slate-950/50">
+                        <div className="flex-shrink-0 px-8 pt-6 pb-0 bg-background border-b z-10">
+                            <TabsList className="w-full justify-start gap-6 bg-transparent p-0 h-auto rounded-none border-b-0">
+                                <TabsTrigger
+                                    value="features"
+                                    disabled={selectedFeatures.size === 0}
+                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-purple-600 data-[state=active]:shadow-none data-[state=active]:bg-transparent px-4 py-3 font-medium text-muted-foreground data-[state=active]:text-foreground data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+                                >
+                                    Feature Configuration
+                                </TabsTrigger>
+                                <TabsTrigger
+                                    value="scanner"
+                                    disabled={!enabledTools.sonarqube && scanMetrics.sonarqube.length === 0 && !enabledTools.trivy && scanMetrics.trivy.length === 0}
+                                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:shadow-none data-[state=active]:bg-transparent px-4 py-3 font-medium text-muted-foreground data-[state=active]:text-foreground data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+                                >
+                                    Scan Configuration
+                                </TabsTrigger>
+                            </TabsList>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-8">
+                            <div className="max-w-3xl mx-auto">
+                                <TabsContent value="features" className="m-0 space-y-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div>
+                                            <h3 className="text-lg font-semibold">Feature Configuration</h3>
+                                            <p className="text-sm text-muted-foreground">
+                                                Configure parameters for the {selectedFeatures.size} selected features
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Card>
+                                        <CardContent className="pt-6">
+                                            <FeatureConfigForm
+                                                datasetId={datasetId}
+                                                selectedFeatures={selectedFeatures}
+                                                value={featureConfigs}
+                                                onChange={setFeatureConfigs}
+                                                disabled={isDisabled}
+                                            />
+                                        </CardContent>
+                                    </Card>
+                                </TabsContent>
+
+                                <TabsContent value="scanner" className="m-0 space-y-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div>
+                                            <h3 className="text-lg font-semibold">Scan Configuration</h3>
+                                            <p className="text-sm text-muted-foreground">
+                                                Configure credentials and options for enabled scanners
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Card>
+                                        <CardContent className="pt-6">
+                                            <ScanPropertiesPanel
+                                                scanConfig={scanConfig}
+                                                onScanConfigChange={setScanConfig}
+                                                enabledTools={enabledTools}
+                                                repos={repos}
+                                                disabled={isDisabled}
+                                            />
+                                        </CardContent>
+                                    </Card>
+                                </TabsContent>
+                            </div>
+                        </div>
+                    </Tabs>
+
+                    {/* Right: Summary & Finalize */}
+                    <div className="w-[350px] bg-background border-l p-6 space-y-8 z-10">
+                        <div>
+                            <h3 className="text-sm font-medium uppercase text-muted-foreground tracking-wider mb-4">Summary</h3>
+                            <div className="space-y-4">
+                                <div className="flex justify-between items-center p-3 border rounded-lg bg-slate-50 dark:bg-slate-900">
+                                    <div className="flex items-center gap-2">
+                                        <Box className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm font-medium">Selected Features</span>
+                                    </div>
+                                    <Badge variant="secondary">{selectedFeatures.size}</Badge>
+                                </div>
+                                <div className="flex justify-between items-center p-3 border rounded-lg bg-slate-50 dark:bg-slate-900">
+                                    <div className="flex items-center gap-2">
+                                        <CheckSquare className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm font-medium">Selected Scan Metrics</span>
+                                    </div>
+                                    <div className="flex gap-1">
+                                        {!enabledTools.sonarqube && scanMetrics.sonarqube.length === 0 && !enabledTools.trivy && scanMetrics.trivy.length === 0 && <span className="text-xs text-muted-foreground">None</span>}
+                                        {enabledTools.sonarqube && scanMetrics.sonarqube.length > 0 && <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Sonar</Badge>}
+                                        {enabledTools.trivy && scanMetrics.trivy.length > 0 && <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Trivy</Badge>}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="h-px bg-border" />
+
+                        <div>
+                            <h3 className="text-sm font-medium uppercase text-muted-foreground tracking-wider mb-4">Finalize</h3>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Version Name <span className="text-muted-foreground font-normal">(optional)</span></label>
+                                <Input
+                                    placeholder="e.g., 'v3 - With Build Logs'"
+                                    value={versionName}
+                                    onChange={(e) => setVersionName(e.target.value)}
+                                    disabled={isDisabled}
                                 />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Step 2: Feature Configuration */}
-                {step === 2 && (
-                    <div className="space-y-6 max-w-4xl">
-                        <div>
-                            <h2 className="text-2xl font-bold">Configure Features</h2>
-                            <p className="text-muted-foreground">
-                                Set parameters for feature extraction
-                            </p>
-                        </div>
-
-                        <FeatureConfigForm
-                            datasetId={datasetId}
-                            selectedFeatures={selectedFeatures}
-                            onChange={setFeatureConfigs}
-                            disabled={isCreating}
-                        />
-                    </div>
-                )}
-
-                {/* Step 3: Scan Configuration */}
-                {step === 3 && (
-                    <div className="space-y-6 max-w-4xl">
-                        <div>
-                            <h2 className="text-2xl font-bold">Scan Configuration</h2>
-                            <p className="text-muted-foreground">
-                                Configure SonarQube and Trivy scans for additional metrics
-                            </p>
-                        </div>
-
-                        <ScanConfigPanel
-                            selectedSonarMetrics={scanMetrics.sonarqube}
-                            selectedTrivyMetrics={scanMetrics.trivy}
-                            onSonarMetricsChange={(metrics) =>
-                                setScanMetrics((prev) => ({ ...prev, sonarqube: metrics }))
-                            }
-                            onTrivyMetricsChange={(metrics) =>
-                                setScanMetrics((prev) => ({ ...prev, trivy: metrics }))
-                            }
-                            scanConfig={scanConfig}
-                            onScanConfigChange={setScanConfig}
-                            repos={repos}
-                        />
-                    </div>
-                )}
-
-                {/* Step 4: Review & Create */}
-                {step === 4 && (
-                    <div className="space-y-6 max-w-4xl">
-                        <div>
-                            <h2 className="text-2xl font-bold">Review & Create</h2>
-                            <p className="text-muted-foreground">
-                                Review your configuration and create the version
-                            </p>
-                        </div>
-
-                        <div className="grid gap-6 md:grid-cols-2">
-                            {/* Features Summary */}
-                            <div className="border rounded-xl p-4 space-y-3">
-                                <h3 className="font-semibold flex items-center gap-2">
-                                    <Sparkles className="h-4 w-4" />
-                                    Selected Features
-                                </h3>
-                                <Badge variant="secondary" className="text-lg">
-                                    {selectedFeatures.size} features
-                                </Badge>
-                                <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
-                                    {Array.from(selectedFeatures)
-                                        .slice(0, 20)
-                                        .map((f) => (
-                                            <Badge key={f} variant="outline" className="text-xs">
-                                                {f}
-                                            </Badge>
-                                        ))}
-                                    {selectedFeatures.size > 20 && (
-                                        <Badge variant="outline">
-                                            +{selectedFeatures.size - 20} more
-                                        </Badge>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Scan Summary */}
-                            <div className="border rounded-xl p-4 space-y-3">
-                                <h3 className="font-semibold flex items-center gap-2">
-                                    <Scan className="h-4 w-4" />
-                                    Scan Metrics
-                                </h3>
-                                <div className="space-y-2 text-sm">
-                                    <p>
-                                        SonarQube:{" "}
-                                        <span className="font-medium">
-                                            {scanMetrics.sonarqube.length > 0
-                                                ? `${scanMetrics.sonarqube.length} metrics`
-                                                : "Disabled"}
-                                        </span>
-                                    </p>
-                                    <p>
-                                        Trivy:{" "}
-                                        <span className="font-medium">
-                                            {scanMetrics.trivy.length > 0
-                                                ? `${scanMetrics.trivy.length} metrics`
-                                                : "Disabled"}
-                                        </span>
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Version Name */}
-                        <div className="border rounded-xl p-4 space-y-3">
-                            <h3 className="font-semibold">Version Name (optional)</h3>
-                            <Input
-                                placeholder="e.g., 'v3 - Git + Build Logs'"
-                                value={versionName}
-                                onChange={(e) => setVersionName(e.target.value)}
-                                disabled={isCreating}
-                                className="max-w-md"
-                            />
-                        </div>
-
-                        {hasActiveVersion && (
-                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
-                                <p className="text-amber-700 dark:text-amber-400">
-                                    ⏳ A version is currently processing. Wait for it to complete or
-                                    cancel it before creating a new one.
+                                <p className="text-xs text-muted-foreground">
+                                    Give this version a meaningful name to easily identify it later.
                                 </p>
                             </div>
-                        )}
-                    </div>
-                )}
-            </main>
-
-            {/* Footer */}
-            <footer className="sticky bottom-0 border-t bg-background/95 backdrop-blur">
-                <div className="container mx-auto px-6 py-4">
-                    <div className="flex items-center justify-between">
-                        <Button variant="outline" onClick={handleBack}>
-                            <ArrowLeft className="h-4 w-4 mr-2" />
-                            {step === 1 ? "Cancel" : "Back"}
-                        </Button>
-
-                        <Button onClick={handleNext} disabled={!canProceed}>
-                            {step === 4 ? (
-                                isCreating || creating ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Creating...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Zap className="h-4 w-4 mr-2" />
-                                        Create Version
-                                    </>
-                                )
-                            ) : (
-                                <>
-                                    Next
-                                    <ArrowRight className="h-4 w-4 ml-2" />
-                                </>
-                            )}
-                        </Button>
+                        </div>
                     </div>
                 </div>
-            </footer>
+            )}
         </div>
     );
 }

@@ -194,53 +194,6 @@ export function StatisticsSection({ datasetId, versionId, versionStatus }: Stati
                 />
             </div>
 
-            {/* Quality Score Card (if evaluated) */}
-            {statistics.quality_score !== null && statistics.quality_score !== undefined && (
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base flex items-center gap-2">
-                            <TrendingUp className="h-4 w-4" />
-                            Quality Score
-                        </CardTitle>
-                        <CardDescription>
-                            Based on completeness, validity, consistency, and coverage
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                            {/* Overall Score */}
-                            <div className="md:col-span-1">
-                                <QualityScoreGauge score={statistics.quality_score} />
-                            </div>
-
-                            {/* Score Breakdown */}
-                            <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <ScoreBreakdownItem
-                                    label="Completeness"
-                                    score={statistics.completeness_score}
-                                    description="% non-null values"
-                                />
-                                <ScoreBreakdownItem
-                                    label="Validity"
-                                    score={statistics.validity_score}
-                                    description="% values in valid range"
-                                />
-                                <ScoreBreakdownItem
-                                    label="Consistency"
-                                    score={statistics.consistency_score}
-                                    description="% builds with all features"
-                                />
-                                <ScoreBreakdownItem
-                                    label="Coverage"
-                                    score={statistics.coverage_score}
-                                    description="% successfully enriched"
-                                />
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
             {/* Build Status Breakdown + Feature Stats */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Build Status Breakdown */}

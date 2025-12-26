@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Bell, Loader2, Save, User } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Bell, Loader2, User } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 
-import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -13,27 +13,31 @@ import { useToast } from '@/components/ui/use-toast';
 import { userSettingsApi, UpdateUserSettingsRequest } from '@/lib/api';
 import { NotificationsList } from '@/components/notifications/NotificationsList';
 import { ProfileSettings } from '@/components/settings/ProfileSettings';
+import { useDebounce } from '@/hooks/use-debounce';
 
 interface SettingsState {
     browserNotifications: boolean;
+    savedBrowserNotifications: boolean;
     isLoading: boolean;
     isSaving: boolean;
-    hasChanges: boolean;
 }
 
 export default function SettingsPage() {
     const { toast } = useToast();
     const searchParams = useSearchParams();
     const router = useRouter();
+    const saveRequestIdRef = useRef(0);
 
     const [activeTab, setActiveTab] = useState('notifications');
 
     const [settingsState, setSettingsState] = useState<SettingsState>({
         browserNotifications: true,
+        savedBrowserNotifications: true,
         isLoading: true,
         isSaving: false,
-        hasChanges: false,
     });
+
+    const debouncedBrowserNotifications = useDebounce(settingsState.browserNotifications, 500);
 
     // Sync tab with URL
     useEffect(() => {
@@ -53,16 +57,18 @@ export default function SettingsPage() {
     // Load user settings on mount
     const loadSettings = useCallback(async () => {
         try {
-            const data = await userSettingsApi.get();
-            setSettingsState((prev) => ({
-                ...prev,
-                browserNotifications: data.browser_notifications,
+            const userSettingsResponse = await userSettingsApi.get();
+            setSettingsState({
+                browserNotifications: userSettingsResponse.browser_notifications,
+                savedBrowserNotifications: userSettingsResponse.browser_notifications,
                 isLoading: false,
-            }));
+                isSaving: false,
+            });
         } catch {
             // Use defaults if API fails
-            setSettingsState((prev) => ({
-                ...prev,
+            setSettingsState((currentSettingsState) => ({
+                ...currentSettingsState,
+                savedBrowserNotifications: currentSettingsState.browserNotifications,
                 isLoading: false,
             }));
         }
@@ -72,34 +78,69 @@ export default function SettingsPage() {
         loadSettings();
     }, [loadSettings]);
 
-    const handleSaveSettings = async () => {
-        setSettingsState((prev) => ({ ...prev, isSaving: true }));
+    const persistBrowserNotifications = useCallback(
+        async (browserNotificationsEnabled: boolean) => {
+            const saveRequestId = saveRequestIdRef.current + 1;
+            saveRequestIdRef.current = saveRequestId;
 
-        try {
-            const request: UpdateUserSettingsRequest = {
-                browser_notifications: settingsState.browserNotifications,
-            };
-            await userSettingsApi.update(request);
-
-            toast({
-                title: 'Settings saved',
-                description: 'Your preferences have been updated.',
-            });
-
-            setSettingsState((prev) => ({
-                ...prev,
-                isSaving: false,
-                hasChanges: false,
+            setSettingsState((currentSettingsState) => ({
+                ...currentSettingsState,
+                isSaving: true,
             }));
-        } catch {
-            toast({
-                title: 'Error saving settings',
-                description: 'Please try again later.',
-                variant: 'destructive',
-            });
-            setSettingsState((prev) => ({ ...prev, isSaving: false }));
+
+            try {
+                const updateRequest: UpdateUserSettingsRequest = {
+                    browser_notifications: browserNotificationsEnabled,
+                };
+                const updatedSettingsResponse = await userSettingsApi.update(updateRequest);
+
+                if (saveRequestId !== saveRequestIdRef.current) {
+                    return;
+                }
+
+                setSettingsState((currentSettingsState) => ({
+                    ...currentSettingsState,
+                    browserNotifications: updatedSettingsResponse.browser_notifications,
+                    savedBrowserNotifications: updatedSettingsResponse.browser_notifications,
+                    isSaving: false,
+                }));
+            } catch {
+                if (saveRequestId !== saveRequestIdRef.current) {
+                    return;
+                }
+
+                toast({
+                    title: 'Error saving settings',
+                    description: 'Please try again later.',
+                    variant: 'destructive',
+                });
+
+                setSettingsState((currentSettingsState) => ({
+                    ...currentSettingsState,
+                    browserNotifications: currentSettingsState.savedBrowserNotifications,
+                    isSaving: false,
+                }));
+            }
+        },
+        [toast]
+    );
+
+    useEffect(() => {
+        if (settingsState.isLoading) {
+            return;
         }
-    };
+
+        if (debouncedBrowserNotifications === settingsState.savedBrowserNotifications) {
+            return;
+        }
+
+        void persistBrowserNotifications(debouncedBrowserNotifications);
+    }, [
+        debouncedBrowserNotifications,
+        persistBrowserNotifications,
+        settingsState.isLoading,
+        settingsState.savedBrowserNotifications,
+    ]);
 
     if (settingsState.isLoading) {
         return (
@@ -137,32 +178,55 @@ export default function SettingsPage() {
                     {/* Browser Notifications */}
                     <Card>
                         <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <Bell className="h-5 w-5" />
-                                Browser Notifications
-                            </CardTitle>
-                            <CardDescription>
-                                Receive push notifications in your browser for real-time updates.
-                            </CardDescription>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="space-y-1">
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Bell className="h-5 w-5" />
+                                        Personal Notification Settings
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Control whether this browser should receive in-app alerts.
+                                    </CardDescription>
+                                </div>
+                                <Badge
+                                    variant="outline"
+                                    className={
+                                        settingsState.browserNotifications
+                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                            : 'border-slate-200 bg-slate-50 text-slate-600'
+                                    }
+                                >
+                                    {settingsState.browserNotifications ? 'Enabled' : 'Paused'}
+                                </Badge>
+                            </div>
                         </CardHeader>
                         <CardContent>
-                            <div className="flex items-center justify-between">
-                                <div className="space-y-0.5">
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-1">
                                     <Label htmlFor="browser-notifications">
                                         Enable Browser Notifications
                                     </Label>
                                     <p className="text-sm text-muted-foreground">
-                                        Get instant notifications when important events occur.
+                                        {settingsState.browserNotifications
+                                            ? 'You will receive alerts in this browser.'
+                                            : 'Notifications are paused in this browser.'}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {settingsState.isSaving
+                                            ? 'Saving your preference...'
+                                            : settingsState.browserNotifications !==
+                                                settingsState.savedBrowserNotifications
+                                            ? 'Saving soon...'
+                                            : 'Saved.'}
                                     </p>
                                 </div>
                                 <Switch
                                     id="browser-notifications"
                                     checked={settingsState.browserNotifications}
                                     onCheckedChange={(checked) =>
-                                        setSettingsState((prev) => ({
-                                            ...prev,
+                                        setSettingsState((currentSettingsState) => ({
+                                            ...currentSettingsState,
                                             browserNotifications: checked,
-                                            hasChanges: true,
                                         }))
                                     }
                                 />
@@ -172,28 +236,6 @@ export default function SettingsPage() {
 
                     {/* Notification History */}
                     <NotificationsList />
-
-                    {settingsState.hasChanges && (
-                        <div className="flex justify-end">
-                            <Button
-                                onClick={handleSaveSettings}
-                                disabled={settingsState.isSaving}
-                                className="min-w-[120px]"
-                            >
-                                {settingsState.isSaving ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Saving…
-                                    </>
-                                ) : (
-                                    <>
-                                        <Save className="mr-2 h-4 w-4" />
-                                        Save Changes
-                                    </>
-                                )}
-                            </Button>
-                        </div>
-                    )}
                 </TabsContent>
 
                 <TabsContent value="profile" className="space-y-6">

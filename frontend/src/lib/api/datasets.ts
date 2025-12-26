@@ -102,4 +102,28 @@ export const datasetsApi = {
         }>(`/datasets/${datasetId}/repos`, { params });
         return response.data;
     },
+    listVersions: async (datasetId: string, params?: { skip?: number; limit?: number }) => {
+        const response = await api.get<{
+            versions: Array<{
+                id: string;
+                status: string;
+                // Add other fields as needed
+                [key: string]: unknown;
+            }>;
+            total: number;
+        }>(`/datasets/${datasetId}/versions`, { params });
+        return response.data;
+    },
+    createVersion: async (datasetId: string, payload: {
+        selected_features: string[];
+        feature_configs?: Record<string, unknown>;
+        scan_config?: {
+            metrics?: { sonarqube?: string[]; trivy?: string[] };
+            config?: unknown;
+        };
+        name?: string;
+    }) => {
+        const response = await api.post(`/datasets/${datasetId}/versions`, payload);
+        return response.data;
+    },
 };

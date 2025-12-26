@@ -470,7 +470,6 @@ async def evaluate_version_quality(
     report = quality_service.evaluate_version(
         dataset_id=dataset_id,
         version_id=version_id,
-        user_id=str(current_user["_id"]),
     )
 
     return {

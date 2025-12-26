@@ -191,7 +191,7 @@ EXCLUDE_PATTERNS = [
 ]
 
 
-def is_devops_file(filepath: str) -> bool:
+def _is_devops_file(filepath: str) -> bool:
     """
     Check if a file is a DevOps/CI configuration file.
 
@@ -239,7 +239,7 @@ def is_devops_file(filepath: str) -> bool:
     return False
 
 
-def get_devops_tool(filepath: str) -> Optional[str]:
+def _get_devops_tool(filepath: str) -> Optional[str]:
     """
     Identify which DevOps tool a file belongs to.
 
@@ -319,16 +319,14 @@ def devops_file_features(
     for commit_sha in commits_to_analyze:
         try:
             # Get files changed in this commit with their stats
-            files_changed, change_sizes = _get_commit_file_changes(
-                repo_path, commit_sha
-            )
+            files_changed, change_sizes = _get_commit_file_changes(repo_path, commit_sha)
 
             for filepath, change_size in zip(files_changed, change_sizes, strict=False):
-                if is_devops_file(filepath):
+                if _is_devops_file(filepath):
                     devops_files.add(filepath)
                     total_change_size += change_size
 
-                    tool = get_devops_tool(filepath)
+                    tool = _get_devops_tool(filepath)
                     if tool:
                         devops_tools.add(tool)
 
@@ -342,9 +340,7 @@ def devops_file_features(
     }
 
 
-def _get_commit_file_changes(
-    repo_path: Path, commit_sha: str
-) -> Tuple[List[str], List[int]]:
+def _get_commit_file_changes(repo_path: Path, commit_sha: str) -> Tuple[List[str], List[int]]:
     """
     Get files changed in a commit with their line change counts.
 

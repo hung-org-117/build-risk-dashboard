@@ -19,6 +19,7 @@ interface UseStep1UploadReturn {
     name: string;
     description: string;
     ciProvider: string;
+    ciProviders: { value: string; label: string }[];
     ciProviderMode: CIProviderMode;
     ciProviderColumn: string;
     buildFilters: BuildValidationFilters;
@@ -67,6 +68,17 @@ export function useStep1Upload(): UseStep1UploadReturn {
     const [ciProviderColumn, setCiProviderColumn] = useState("");
     const [buildFilters, setBuildFilters] = useState<BuildValidationFilters>(DEFAULT_BUILD_FILTERS);
 
+    const ciProviders = [
+        { value: "github_actions", label: "GitHub Actions" },
+        { value: "travis", label: "Travis CI" },
+        { value: "circleci", label: "CircleCI" },
+        { value: "gitlab", label: "GitLab CI" },
+        { value: "jenkins", label: "Jenkins" },
+        { value: "azure_pipelines", label: "Azure Pipelines" },
+        { value: "bitbucket_pipelines", label: "Bitbucket Pipelines" },
+        { value: "other", label: "Other / Generic" },
+    ];
+
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const isMappingValid = Boolean(mappings.build_id && mappings.repo_name);
@@ -100,7 +112,7 @@ export function useStep1Upload(): UseStep1UploadReturn {
                 Papa.parse(csvText, {
                     header: true,
                     skipEmptyLines: true,
-                    preview: 5,
+                    preview: 20,
                     complete: (results) => {
                         if (results.errors.length > 0 && results.data.length === 0) {
                             reject(new Error(results.errors[0].message));
@@ -243,6 +255,7 @@ export function useStep1Upload(): UseStep1UploadReturn {
         name,
         description,
         ciProvider,
+        ciProviders,
         ciProviderMode,
         ciProviderColumn,
         buildFilters,

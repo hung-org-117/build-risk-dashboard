@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { CheckCheck, ExternalLink, Bell, Loader2, ChevronDown } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { CheckCheck, ExternalLink, Bell, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -22,9 +22,11 @@ const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
 }
 
 const ITEMS_PER_PAGE = 10
+const SCROLL_THRESHOLD_PX = 140
 
 export function NotificationsList() {
     const router = useRouter()
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
     const [notifications, setNotifications] = useState<Notification[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
@@ -36,14 +38,14 @@ export function NotificationsList() {
     const loadNotifications = useCallback(async () => {
         try {
             setIsLoading(true)
-            const data = await notificationsApi.list({
+            const notificationListResponse = await notificationsApi.list({
                 limit: ITEMS_PER_PAGE
             })
-            setNotifications(data.items)
-            setNextCursor(data.next_cursor || null)
-            setHasMore(!!data.next_cursor)
-        } catch (err) {
-            console.error('Failed to fetch notifications:', err)
+            setNotifications(notificationListResponse.items)
+            setNextCursor(notificationListResponse.next_cursor || null)
+            setHasMore(!!notificationListResponse.next_cursor)
+        } catch (error) {
+            console.error('Failed to fetch notifications:', error)
         } finally {
             setIsLoading(false)
         }
@@ -53,33 +55,69 @@ export function NotificationsList() {
         loadNotifications()
     }, [loadNotifications])
 
-    const handleLoadMore = async () => {
-        if (!nextCursor || isLoadingMore) return
+    const loadMoreNotifications = useCallback(async () => {
+        if (!nextCursor || isLoadingMore) {
+            return
+        }
 
         try {
             setIsLoadingMore(true)
-            const data = await notificationsApi.list({
+            const notificationListResponse = await notificationsApi.list({
                 limit: ITEMS_PER_PAGE,
                 cursor: nextCursor
             })
 
-            setNotifications(prev => [...prev, ...data.items])
-            setNextCursor(data.next_cursor || null)
-            setHasMore(!!data.next_cursor)
-        } catch (err) {
-            console.error('Failed to load more notifications:', err)
+            setNotifications((currentNotifications) => [
+                ...currentNotifications,
+                ...notificationListResponse.items
+            ])
+            setNextCursor(notificationListResponse.next_cursor || null)
+            setHasMore(!!notificationListResponse.next_cursor)
+        } catch (error) {
+            console.error('Failed to load more notifications:', error)
         } finally {
             setIsLoadingMore(false)
         }
-    }
+    }, [isLoadingMore, nextCursor])
+
+    const handleScroll = useCallback(() => {
+        const scrollContainer = scrollContainerRef.current
+        if (!scrollContainer || isLoadingMore || !hasMore) {
+            return
+        }
+
+        const remainingScroll =
+            scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight
+
+        if (remainingScroll <= SCROLL_THRESHOLD_PX) {
+            void loadMoreNotifications()
+        }
+    }, [hasMore, isLoadingMore, loadMoreNotifications])
+
+    useEffect(() => {
+        const scrollContainer = scrollContainerRef.current
+        if (!scrollContainer || isLoading || isLoadingMore || !hasMore) {
+            return
+        }
+
+        const scrollFillGap = scrollContainer.scrollHeight - scrollContainer.clientHeight
+        if (scrollFillGap <= SCROLL_THRESHOLD_PX) {
+            void loadMoreNotifications()
+        }
+    }, [hasMore, isLoading, isLoadingMore, loadMoreNotifications, notifications.length])
 
     const handleMarkAllAsRead = async () => {
         try {
             setIsMarkingAll(true)
             await notificationsApi.markAllAsRead()
-            setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
-        } catch (err) {
-            console.error('Failed to mark all as read:', err)
+            setNotifications((currentNotifications) =>
+                currentNotifications.map((notificationItem) => ({
+                    ...notificationItem,
+                    is_read: true
+                }))
+            )
+        } catch (error) {
+            console.error('Failed to mark all as read:', error)
         } finally {
             setIsMarkingAll(false)
         }
@@ -89,16 +127,20 @@ export function NotificationsList() {
         try {
             if (!notification.is_read) {
                 await notificationsApi.markAsRead(notification.id)
-                setNotifications((prev) =>
-                    prev.map((n) => (n.id === notification.id ? { ...n, is_read: true } : n))
+                setNotifications((currentNotifications) =>
+                    currentNotifications.map((notificationItem) =>
+                        notificationItem.id === notification.id
+                            ? { ...notificationItem, is_read: true }
+                            : notificationItem
+                    )
                 )
             }
 
             if (notification.link) {
                 router.push(notification.link)
             }
-        } catch (err) {
-            console.error('Failed to mark notification as read:', err)
+        } catch (error) {
+            console.error('Failed to mark notification as read:', error)
         }
     }
 
@@ -111,7 +153,7 @@ export function NotificationsList() {
                         Recent activity from your pipelines and datasets.
                     </p>
                 </div>
-                {notifications.some(n => !n.is_read) && (
+                {notifications.some((notificationItem) => !notificationItem.is_read) && (
                     <Button
                         variant="outline"
                         size="sm"
@@ -146,74 +188,76 @@ export function NotificationsList() {
                         </p>
                     </div>
                 ) : (
-                    <div className="divide-y">
-                        {notifications.map((notification) => (
-                            <div
-                                key={notification.id}
-                                onClick={() => handleNotificationClick(notification)}
-                                className={cn(
-                                    "group flex cursor-pointer items-start gap-4 p-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50",
-                                    !notification.is_read && "bg-blue-50/40 dark:bg-blue-900/10"
-                                )}
-                            >
-                                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg dark:bg-slate-800">
-                                    {NOTIFICATION_TYPE_ICONS[notification.type] || '📌'}
-                                </div>
-
-                                <div className="flex-1 min-w-0 space-y-1">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <p className={cn("text-sm font-medium", !notification.is_read && "text-blue-700 dark:text-blue-400")}>
-                                            {notification.title}
-                                        </p>
-                                        <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
-                                            {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
-                                        </span>
+                    <div
+                        ref={scrollContainerRef}
+                        onScroll={handleScroll}
+                        className="max-h-[420px] overflow-y-auto sm:max-h-[520px]"
+                    >
+                        <div className="divide-y">
+                            {notifications.map((notification) => (
+                                <div
+                                    key={notification.id}
+                                    onClick={() => handleNotificationClick(notification)}
+                                    className={cn(
+                                        "group flex cursor-pointer items-start gap-4 p-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50",
+                                        !notification.is_read && "bg-blue-50/40 dark:bg-blue-900/10"
+                                    )}
+                                >
+                                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg dark:bg-slate-800">
+                                        {NOTIFICATION_TYPE_ICONS[notification.type] || '📌'}
                                     </div>
-                                    <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                                        {notification.message}
-                                    </p>
 
-                                    {notification.link && (
-                                        <div className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 mt-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                                            <span>View details</span>
-                                            <ExternalLink className="h-3 w-3" />
+                                    <div className="flex-1 min-w-0 space-y-1">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p
+                                                className={cn(
+                                                    "text-sm font-medium",
+                                                    !notification.is_read &&
+                                                        "text-blue-700 dark:text-blue-400"
+                                                )}
+                                            >
+                                                {notification.title}
+                                            </p>
+                                            <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                                                {formatDistanceToNow(
+                                                    new Date(notification.created_at),
+                                                    { addSuffix: true }
+                                                )}
+                                            </span>
                                         </div>
+                                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                                            {notification.message}
+                                        </p>
+
+                                        {notification.link && (
+                                            <div className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 mt-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                                                <span>View details</span>
+                                                <ExternalLink className="h-3 w-3" />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {!notification.is_read && (
+                                        <div className="mt-1.5 h-2 w-2 rounded-full bg-blue-600 shrink-0" />
                                     )}
                                 </div>
-
-                                {!notification.is_read && (
-                                    <div className="mt-1.5 h-2 w-2 rounded-full bg-blue-600 shrink-0" />
+                            ))}
+                        </div>
+                        {hasMore && (
+                            <div className="flex items-center justify-center gap-2 border-t py-3 text-xs text-muted-foreground">
+                                {isLoadingMore ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Loading more notifications...
+                                    </>
+                                ) : (
+                                    <span>Scroll to load more</span>
                                 )}
                             </div>
-                        ))}
+                        )}
                     </div>
                 )}
             </div>
-
-            {/* Load More Button */}
-            {hasMore && (
-                <div className="flex justify-center pt-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleLoadMore}
-                        disabled={isLoadingMore}
-                        className="w-full sm:w-auto"
-                    >
-                        {isLoadingMore ? (
-                            <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Loading...
-                            </>
-                        ) : (
-                            <>
-                                Load More
-                                <ChevronDown className="ml-2 h-4 w-4" />
-                            </>
-                        )}
-                    </Button>
-                </div>
-            )}
         </div>
     )
 }

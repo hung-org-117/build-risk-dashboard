@@ -67,11 +67,14 @@ interface RepoConfigSectionProps {
     onChange: (configs: Record<string, RepoConfig>) => void;
     disabled?: boolean;
     isLoading?: boolean;
+    showValidationStatusColumn?: boolean;
     // Scan config props
-    datasetId?: string;
     repoScanConfigs?: Record<string, RepoScanConfig>;
     onScanConfigChange?: (repoId: string, config: RepoScanConfig) => void;
     showScanConfig?: boolean;
+    // Language detection
+    repoLanguages?: Record<string, string[]>;
+    languageLoading?: Record<string, boolean>;
 }
 
 const PAGE_SIZE = 10;
@@ -87,10 +90,12 @@ export function RepoConfigSection({
     onChange,
     disabled = false,
     isLoading = false,
-    datasetId,
-    repoScanConfigs = {},
+    showValidationStatusColumn = true,
     onScanConfigChange,
     showScanConfig = false,
+    repoLanguages,
+    languageLoading,
+    repoScanConfigs = {},
 }: RepoConfigSectionProps) {
     const [page, setPage] = useState(0);
     const [searchQuery, setSearchQuery] = useState("");
@@ -107,84 +112,9 @@ export function RepoConfigSection({
     const [editingRepo, setEditingRepo] = useState<string | null>(null);
     const [editValues, setEditValues] = useState<RepoConfig>({});
 
-    // Language detection state
-    const [repoLanguages, setRepoLanguages] = useState<Record<string, string[]>>({});
-    const [languageLoading, setLanguageLoading] = useState<Record<string, boolean>>({});
-
-    // Detect languages for repos when they change
-    useEffect(() => {
-        if (repos.length === 0) return;
-
-        const detectLanguagesForRepos = async () => {
-            for (const repo of repos) {
-                // Skip if already loaded or loading
-                if (repoLanguages[repo.id] !== undefined || languageLoading[repo.id]) {
-                    continue;
-                }
-
-                setLanguageLoading(prev => ({ ...prev, [repo.id]: true }));
-                try {
-                    const result = await reposApi.detectLanguages(repo.full_name);
-                    setRepoLanguages(prev => ({
-                        ...prev,
-                        [repo.id]: result.languages.map(l => l.toLowerCase()),
-                    }));
-                } catch (err) {
-                    console.error(`Failed to detect languages for ${repo.full_name}:`, err);
-                    // Set empty array to prevent re-fetching
-                    setRepoLanguages(prev => ({ ...prev, [repo.id]: [] }));
-                } finally {
-                    setLanguageLoading(prev => ({ ...prev, [repo.id]: false }));
-                }
-            }
-        };
-
-        detectLanguagesForRepos();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [repos]);
-
-    // Get union of all detected languages (for "Apply to All" section)
-    const allDetectedLanguages = useMemo(() => {
-        const languages = new Set<string>();
-        Object.values(repoLanguages).forEach(langs => {
-            langs.forEach(l => languages.add(l));
-        });
-        return Array.from(languages);
-    }, [repoLanguages]);
-
-    // Check if any repo is still loading languages
-    const isLoadingLanguages = useMemo(() =>
-        Object.values(languageLoading).some(Boolean),
-        [languageLoading]
-    );
-
-    // Initialize when repoFields change
-    useEffect(() => {
-        const initialConfig: RepoConfig = {};
-        repoFields.forEach(field => {
-            if (field.type === "list") {
-                initialConfig[field.name] = [];
-            }
-        });
-        setApplyAllValues(prev => {
-            // Preserve existing values
-            const merged = { ...initialConfig };
-            repoFields.forEach(field => {
-                if (prev[field.name]) {
-                    merged[field.name] = prev[field.name];
-                }
-            });
-            return merged;
-        });
-    }, [repoFields]);
-
-    // When repos is empty, sync applyAllValues as default config
-    useEffect(() => {
-        const hasAnyValues = Object.values(applyAllValues).some(arr => arr.length > 0);
-        if (repos.length === 0 && hasAnyValues) {
-            onChange({ __default__: applyAllValues });
-        }
-    }, [repos.length, applyAllValues, onChange]);
+    // Language detection state (received from props or empty)
+    const effectiveRepoLanguages = repoLanguages || {};
+    const effectiveLanguageLoading = languageLoading || {};
 
     // Only fields with type "list" and valid options (array or non-empty object)
     const listFields = useMemo(() =>
@@ -227,33 +157,11 @@ export function RepoConfigSection({
     }, [filteredRepos, page]);
 
     const totalPages = Math.ceil(filteredRepos.length / PAGE_SIZE);
-
-    // Apply to all repos for a specific field
-    const handleApplyToAll = (fieldName: string) => {
-        if (disabled) return;
-        const newConfigs = { ...repoConfigs };
-        repos.forEach(repo => {
-            if (!newConfigs[repo.id]) {
-                newConfigs[repo.id] = {};
-            }
-            newConfigs[repo.id] = {
-                ...newConfigs[repo.id],
-                [fieldName]: [...(applyAllValues[fieldName] || [])],
-            };
-        });
-        onChange(newConfigs);
-    };
-
-    // Toggle option in apply-all
-    const toggleApplyAllOption = (fieldName: string, option: string) => {
-        setApplyAllValues(prev => {
-            const current = prev[fieldName] || [];
-            const newValues = current.includes(option)
-                ? current.filter(v => v !== option)
-                : [...current, option];
-            return { ...prev, [fieldName]: newValues };
-        });
-    };
+    const tableColumnCount =
+        1 +
+        listFields.length +
+        (showValidationStatusColumn ? 1 : 0) +
+        (showScanConfig ? 1 : 0);
 
     // Open edit dialog
     const openEditDialog = (repoId: string) => {
@@ -348,69 +256,8 @@ export function RepoConfigSection({
                             ⚠️ <strong>Dataset validation required</strong> to configure per-repo settings.
                         </p>
                         <p className="text-xs">
-                            Please validate the dataset first to see repositories, or set default values below.
+                            Please validate the dataset first to see repositories.
                         </p>
-                    </div>
-
-                    <div className="pt-3 border-t space-y-4">
-                        <div className="text-sm font-medium">Set Default Values for All Repositories</div>
-
-                        {listFields.map(field => {
-                            // All options are now flat arrays from API
-
-                            return (
-                                <div key={field.name} className="border rounded-lg p-3 bg-background">
-                                    <div className="text-sm font-medium mb-2">
-                                        {formatFieldName(field.name)}
-                                    </div>
-
-                                    {field.name === "test_frameworks" ? (
-                                        <div className="space-y-2">
-                                            {Object.entries(field.options as Record<string, string[]>).map(([group, options]) => (
-                                                <div key={group} className="flex flex-wrap items-center gap-2">
-                                                    <span className="text-xs text-muted-foreground w-20 capitalize font-medium">
-                                                        {group}:
-                                                    </span>
-                                                    <div className="flex flex-wrap gap-1 flex-1">
-                                                        {options.map(option => {
-                                                            const isSelected = (applyAllValues[field.name] || []).includes(option);
-                                                            return (
-                                                                <Badge
-                                                                    key={option}
-                                                                    variant={isSelected ? "default" : "outline"}
-                                                                    className={`cursor-pointer transition-colors text-xs ${disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-primary/80"
-                                                                        }`}
-                                                                    onClick={() => !disabled && toggleApplyAllOption(field.name, option)}
-                                                                >
-                                                                    {option}
-                                                                </Badge>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="flex flex-wrap gap-1">
-                                            {(Array.isArray(field.options) ? field.options : []).map((option: string) => {
-                                                const isSelected = (applyAllValues[field.name] || []).includes(option);
-                                                return (
-                                                    <Badge
-                                                        key={option}
-                                                        variant={isSelected ? "default" : "outline"}
-                                                        className={`cursor-pointer transition-colors ${disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-primary/80"
-                                                            }`}
-                                                        onClick={() => !disabled && toggleApplyAllOption(field.name, option)}
-                                                    >
-                                                        {option}
-                                                    </Badge>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
                     </div>
                 </div>
             </div>
@@ -423,118 +270,6 @@ export function RepoConfigSection({
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Folder className="h-4 w-4" />
                 Repository Settings ({repos.length} repos)
-            </div>
-
-            {/* Apply to All Section - Each field in separate card */}
-            <div className="space-y-3">
-                <div className="text-sm font-medium flex items-center gap-2 text-muted-foreground">
-                    📋 Apply to All Repositories
-                    {isLoadingLanguages && (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                    )}
-                </div>
-
-                {listFields.map(field => {
-                    // Get filtered options based on all detected languages
-                    const filteredOptions = getFilteredOptions(field, allDetectedLanguages);
-
-                    return (
-                        <div key={field.name} className="border rounded-lg p-4 bg-muted/30">
-                            <div className="flex items-center justify-between mb-3">
-                                <span className="text-sm font-medium">
-                                    {formatFieldName(field.name)}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={disabled || !(applyAllValues[field.name]?.length)}
-                                    onClick={() => handleApplyToAll(field.name)}
-                                    className="gap-1"
-                                >
-                                    Apply to All <ArrowRight className="h-3 w-3" />
-                                </Button>
-                            </div>
-
-                            {field.name === "test_frameworks" ? (
-                                // Render grouped by language - filtered
-                                <div className="space-y-2">
-                                    {Object.entries(filteredOptions as Record<string, string[]>).map(([group, options]) => (
-                                        <div key={group} className="flex flex-wrap items-center gap-2">
-                                            <span className="text-xs text-muted-foreground w-24 capitalize font-medium">
-                                                {group}:
-                                            </span>
-                                            <div className="flex flex-wrap gap-1 flex-1">
-                                                {options.map(option => {
-                                                    const isSelected = (applyAllValues[field.name] || []).includes(option);
-                                                    return (
-                                                        <Badge
-                                                            key={option}
-                                                            variant={isSelected ? "default" : "outline"}
-                                                            className={`cursor-pointer transition-colors text-xs ${disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-primary/80"
-                                                                }`}
-                                                            onClick={() => !disabled && toggleApplyAllOption(field.name, option)}
-                                                        >
-                                                            {option}
-                                                        </Badge>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {Object.keys(filteredOptions as Record<string, string[]>).length === 0 && (
-                                        <div className="text-xs text-muted-foreground italic">
-                                            No matching frameworks for detected languages
-                                        </div>
-                                    )}
-                                </div>
-                            ) : field.name === "source_languages" ? (
-                                // Filtered source languages
-                                <div className="flex flex-wrap gap-1">
-                                    {(filteredOptions as string[]).map((option: string) => {
-                                        const isSelected = (applyAllValues[field.name] || []).includes(option);
-                                        return (
-                                            <Badge
-                                                key={option}
-                                                variant={isSelected ? "default" : "outline"}
-                                                className={`cursor-pointer transition-colors ${disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-primary/80"
-                                                    }`}
-                                                onClick={() => !disabled && toggleApplyAllOption(field.name, option)}
-                                            >
-                                                {option}
-                                            </Badge>
-                                        );
-                                    })}
-                                    {(filteredOptions as string[]).length === 0 && (
-                                        <div className="text-xs text-muted-foreground italic">
-                                            No supported languages detected
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                // Flat list fallback for other fields
-                                <div className="flex flex-wrap gap-1">
-                                    {(Array.isArray(field.options) ? field.options : []).slice(0, 15).map((option: string) => {
-                                        const isSelected = (applyAllValues[field.name] || []).includes(option);
-                                        return (
-                                            <Badge
-                                                key={option}
-                                                variant={isSelected ? "default" : "outline"}
-                                                className={`cursor-pointer transition-colors ${disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-primary/80"
-                                                    }`}
-                                                onClick={() => !disabled && toggleApplyAllOption(field.name, option)}
-                                            >
-                                                {option}
-                                            </Badge>
-                                        );
-                                    })}
-                                    {(Array.isArray(field.options) && field.options.length > 15) && (
-                                        <Badge variant="secondary">+{field.options.length - 15} more</Badge>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    );
-                })}
             </div>
 
             {/* Search and Filter */}
@@ -576,6 +311,9 @@ export function RepoConfigSection({
                         <TableHeader>
                             <TableRow className="bg-muted/50">
                                 <TableHead className="w-[40%]">Repository</TableHead>
+                                {showValidationStatusColumn && (
+                                    <TableHead className="w-[10%]">Status</TableHead>
+                                )}
                                 {listFields.map(field => (
                                     <TableHead key={field.name}>
                                         {formatFieldName(field.name)}
@@ -601,6 +339,16 @@ export function RepoConfigSection({
                                             )}
                                         </div>
                                     </TableCell>
+                                    {showValidationStatusColumn && (
+                                        <TableCell>
+                                            <Badge
+                                                variant={repo.validation_status === 'valid' ? 'default' : 'secondary'}
+                                                className="text-[10px] h-5 px-1.5 uppercase"
+                                            >
+                                                {repo.validation_status || 'unknown'}
+                                            </Badge>
+                                        </TableCell>
+                                    )}
                                     {listFields.map(field => (
                                         <TableCell key={field.name} className="text-sm text-muted-foreground">
                                             {getDisplayValue(repo.id, field.name)}
@@ -630,7 +378,7 @@ export function RepoConfigSection({
                             ))}
                             {paginatedRepos.length === 0 && (
                                 <TableRow>
-                                    <TableCell colSpan={1 + listFields.length} className="text-center text-muted-foreground py-8">
+                                    <TableCell colSpan={tableColumnCount} className="text-center text-muted-foreground py-8">
                                         No repositories match your search
                                     </TableCell>
                                 </TableRow>
@@ -680,7 +428,7 @@ export function RepoConfigSection({
                     <div className="space-y-4 py-4">
                         {listFields.map(field => {
                             // Get filtered options for this specific repo
-                            const repoLangs = editingRepo ? (repoLanguages[editingRepo] || []) : [];
+                            const repoLangs = editingRepo ? (effectiveRepoLanguages[editingRepo] || []) : [];
                             const filteredOptions = getFilteredOptions(field, repoLangs);
 
                             return (

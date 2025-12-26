@@ -313,7 +313,7 @@ export default function AdminUsersPage() {
                                                         )}
                                                         <span>{user.name || user.github?.login || '-'}</span>
                                                         {user.id === currentUserId && (
-                                                            <Badge variant="outline" className="text-xs">(You)</Badge>
+                                                            <Badge variant="outline" className="text-xs">You</Badge>
                                                         )}
                                                     </div>
                                                 </TableCell>

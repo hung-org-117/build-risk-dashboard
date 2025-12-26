@@ -163,13 +163,7 @@ export default function OverviewPage() {
 
         setSummary(summaryResult);
         setRecentBuilds(buildsResult);
-        // Convert from old 4-col to new 12-col if needed
-        const convertedWidgets = layoutResult.widgets.map((w: WidgetConfig) => ({
-          ...w,
-          w: w.w <= 4 ? w.w * 3 : w.w, // Scale up if using old format
-          x: w.x <= 4 ? w.x * 3 : w.x,
-        }));
-        setWidgets(convertedWidgets);
+        setWidgets(layoutResult.widgets);
         setAvailableWidgets(widgetsResult);
       } catch (err) {
         console.error("Failed to load overview data", err);

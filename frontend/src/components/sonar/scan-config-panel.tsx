@@ -280,7 +280,7 @@ export function ScanConfigPanel({
                                         <div className="flex items-center gap-2">
                                             <Wrench className="h-4 w-4 text-muted-foreground" />
                                             <CardTitle className="text-sm font-medium">
-                                                Scanner Configuration
+                                                Scan Configuration
                                             </CardTitle>
                                             {hasConfig && (
                                                 <Badge variant="secondary" className="text-xs">

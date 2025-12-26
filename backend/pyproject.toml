@@ -31,6 +31,7 @@ dependencies = [
   "google-auth-httplib2>=0.3.0",
   "google-auth-oauthlib>=1.2.3",
   "jaro-winkler>=2.0.3",
+  "scikit-learn>=1.8.0",
 ]
 
 [project.optional-dependencies]

@@ -148,19 +148,6 @@ function NodeCard({
                             }`}
                     >
                         <div className="flex items-center gap-3">
-                            <div
-                                className={`rounded-lg p-2 ${node.is_configured
-                                    ? "bg-slate-100 dark:bg-slate-800"
-                                    : "bg-slate-50 dark:bg-slate-900"
-                                    }`}
-                            >
-                                <Icon
-                                    className={`h-4 w-4 ${node.is_configured
-                                        ? "text-slate-600 dark:text-slate-400"
-                                        : "text-slate-400"
-                                        }`}
-                                />
-                            </div>
                             <div>
                                 <div className="flex items-center gap-2">
                                     <Checkbox
@@ -172,17 +159,6 @@ function NodeCard({
                                         }}
                                     />
                                     <span className="font-medium">{node.display_name}</span>
-                                    {node.is_configured ? (
-                                        <Badge variant="outline" className="text-xs border-green-500 text-green-600">
-                                            <Check className="mr-1 h-2.5 w-2.5" />
-                                            Available
-                                        </Badge>
-                                    ) : (
-                                        <Badge variant="outline" className="text-xs">
-                                            <AlertCircle className="mr-1 h-2.5 w-2.5" />
-                                            Not Configured
-                                        </Badge>
-                                    )}
                                 </div>
                                 <p className="text-xs text-muted-foreground">{node.description}</p>
                             </div>

@@ -137,11 +137,12 @@ class DatasetService:
                     size_bytes += len(chunk)
                     out_f.write(chunk)
         except Exception as exc:
+            logger.error(f"Upload failed: {str(exc)}", exc_info=True)
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save uploaded file. Please try again.",
+                detail=f"Failed to save uploaded file: {str(exc)}",
             ) from exc
 
         try:

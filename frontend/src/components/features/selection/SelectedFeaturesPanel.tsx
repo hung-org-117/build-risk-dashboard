@@ -28,6 +28,7 @@ import {
     X,
     Box,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { NodeInfo } from "../types";
 
 // Local interface for feature display (subset of full FeatureDefinition)
@@ -45,6 +46,8 @@ interface SelectedFeaturesPanelProps {
     onRemoveFeature: (featureName: string) => void;
     onClearAll: () => void;
     rowCount: number;
+    className?: string;
+    hideHeader?: boolean;
 }
 
 const groupIcons: Record<string, typeof GitBranch> = {
@@ -63,6 +66,8 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
     onRemoveFeature,
     onClearAll,
     rowCount,
+    className,
+    hideHeader = false,
 }: SelectedFeaturesPanelProps) {
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(
         new Set(["git_commit_info", "git_diff_features", "job_metadata"])
@@ -135,7 +140,7 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
 
     if (selectedFeatures.size === 0) {
         return (
-            <Card className="border-dashed">
+            <Card className={cn("border-dashed", className)}>
                 <CardContent className="flex items-center justify-center py-8 text-muted-foreground">
                     No features selected. Click on extractors or features above to select them.
                 </CardContent>
@@ -144,36 +149,38 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
     }
 
     return (
-        <Card className="border-dashed">
-            <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                    <CardTitle className="text-base">
-                        Selected Features ({selectedFeatures.size})
-                    </CardTitle>
-                    <div className="flex gap-1">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleCopy}
-                            className="h-7 gap-1 px-2"
-                        >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copy
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={onClearAll}
-                            className="h-7 gap-1 px-2 text-destructive hover:text-destructive"
-                        >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Clear
-                        </Button>
+        <Card className={cn("border-dashed flex flex-col h-full", className)}>
+            {!hideHeader && (
+                <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">
+                            Selected Features ({selectedFeatures.size})
+                        </CardTitle>
+                        <div className="flex gap-1">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleCopy}
+                                className="h-7 gap-1 px-2"
+                            >
+                                <Copy className="h-3.5 w-3.5" />
+                                Copy
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={onClearAll}
+                                className="h-7 gap-1 px-2 text-destructive hover:text-destructive"
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Clear
+                            </Button>
+                        </div>
                     </div>
-                </div>
-            </CardHeader>
+                </CardHeader>
+            )}
 
-            <CardContent className="max-h-[200px] space-y-2 overflow-y-auto pb-2">
+            <CardContent className="flex-1 overflow-y-auto pb-2 min-h-0">
                 {Object.entries(groupedFeatures).map(([nodeName, features]) => {
                     const group = nodeGroups[nodeName] || "other";
                     const Icon = groupIcons[group] || Box;

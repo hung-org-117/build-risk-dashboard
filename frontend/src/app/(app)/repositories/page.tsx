@@ -40,7 +40,6 @@ import { reposApi } from "@/lib/api";
 import type {
   RepositoryRecord
 } from "@/types";
-import { ImportRepoModal } from "./_components/ImportRepoModal";
 import { ImportProgressDisplay } from "./_components/ImportProgressDisplay";
 
 function formatTimestamp(value?: string) {
@@ -62,7 +61,7 @@ export default function AdminReposPage() {
   const [repositories, setRepositories] = useState<RepositoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -239,7 +238,7 @@ export default function AdminReposPage() {
                 className="h-9"
               />
             </div>
-            <Button onClick={() => setModalOpen(true)} className="gap-2">
+            <Button onClick={() => router.push("/repositories/import")} className="gap-2">
               <Plus className="h-4 w-4" /> Add GitHub Repository
             </Button>
           </div>
@@ -437,14 +436,7 @@ export default function AdminReposPage() {
         </div>
       </Card>
 
-      <ImportRepoModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onImport={() => {
-          loadRepositories(page, true);
-          setFeedback("Repositories queued for import.");
-        }}
-      />
+
     </div>
   );
 }

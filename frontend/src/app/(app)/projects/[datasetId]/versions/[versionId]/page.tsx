@@ -42,10 +42,10 @@ import {
 } from "lucide-react";
 import { datasetVersionApi, type EnrichedBuildData } from "@/lib/api";
 import { ExportVersionModal } from "@/components/datasets/ExportVersionModal";
-import { QualityReportModal } from "@/components/datasets/QualityReportModal";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { VersionLogsSection, StatisticsSection, NormalizationPreviewSection, QualityReportSection, VersionScansSection } from "./_components";
-import { Database, ScrollText, BarChart3, TrendingUp, Shield } from "lucide-react";
+import { VersionLogsSection, VersionScansSection, VersionDashboard, AnalysisSection, PreprocessingSection } from "./_components";
+import { Database, ScrollText, BarChart3, Shield, Settings2 } from "lucide-react";
 
 interface VersionData {
     id: string;
@@ -79,7 +79,7 @@ export default function VersionDetailPage() {
     const searchParams = useSearchParams();
 
     // Valid tabs
-    const validTabs = ["builds", "logs", "scans", "quality", "statistics"] as const;
+    const validTabs = ["builds", "logs", "scans", "analysis", "preprocessing"] as const;
     type TabValue = typeof validTabs[number];
 
     // Get tab from URL or default to "builds"
@@ -99,7 +99,7 @@ export default function VersionDetailPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const [expandedBuildId, setExpandedBuildId] = useState<string | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-    const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
+
 
     // Fetch version data
     useEffect(() => {
@@ -359,49 +359,17 @@ export default function VersionDetailPage() {
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-4 gap-4">
-                <Card>
-                    <CardContent className="pt-4">
-                        <p className="text-sm text-muted-foreground">Total Rows</p>
-                        <p className="text-2xl font-bold">{version.total_rows.toLocaleString()}</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-4">
-                        <p className="text-sm text-muted-foreground">Enriched Rows</p>
-                        <p className="text-2xl font-bold text-green-600">
-                            {version.enriched_rows.toLocaleString()}
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-4">
-                        <p className="text-sm text-muted-foreground">Failed Rows</p>
-                        <p className="text-2xl font-bold text-red-600">
-                            {version.failed_rows.toLocaleString()}
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-4">
-                        <p className="text-sm text-muted-foreground">Features</p>
-                        <p className="text-2xl font-bold">{version.selected_features.length}</p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Normalization Preview
-            {version.status === "completed" && (
-                <NormalizationPreviewSection
-                    datasetId={datasetId}
-                    versionId={versionId}
-                />
-            )} */}
+            {/* Dashboard Overview */}
+            <VersionDashboard
+                datasetId={datasetId}
+                versionId={versionId}
+                versionStatus={version.status}
+                onNavigateToAnalysis={() => handleTabChange("analysis")}
+            />
 
             {/* Tabbed Content Area */}
             <Tabs value={activeTab} onValueChange={handleTabChange}>
-                <TabsList className="grid w-full grid-cols-5 mb-4">
+                <TabsList className="grid w-full grid-cols-4 mb-4">
                     <TabsTrigger value="builds" className="gap-2">
                         <Database className="h-4 w-4" />
                         Builds
@@ -414,13 +382,13 @@ export default function VersionDetailPage() {
                         <Shield className="h-4 w-4" />
                         Scans
                     </TabsTrigger>
-                    <TabsTrigger value="quality" className="gap-2">
-                        <TrendingUp className="h-4 w-4" />
-                        Quality
-                    </TabsTrigger>
-                    <TabsTrigger value="statistics" className="gap-2">
+                    <TabsTrigger value="analysis" className="gap-2">
                         <BarChart3 className="h-4 w-4" />
-                        Statistics
+                        Analysis
+                    </TabsTrigger>
+                    <TabsTrigger value="preprocessing" className="gap-2">
+                        <Settings2 className="h-4 w-4" />
+                        Preprocessing
                     </TabsTrigger>
                 </TabsList>
 
@@ -528,19 +496,18 @@ export default function VersionDetailPage() {
                     </Card>
                 </TabsContent>
 
-                {/* Quality Tab */}
-                <TabsContent value="quality">
-                    <QualityReportSection
+                {/* Analysis Tab (merged Quality + Statistics) */}
+                <TabsContent value="analysis">
+                    <AnalysisSection
                         datasetId={datasetId}
                         versionId={versionId}
                         versionStatus={version.status}
-                        onViewDetails={() => setIsQualityModalOpen(true)}
                     />
                 </TabsContent>
 
-                {/* Statistics Tab */}
-                <TabsContent value="statistics">
-                    <StatisticsSection
+                {/* Preprocessing Tab */}
+                <TabsContent value="preprocessing">
+                    <PreprocessingSection
                         datasetId={datasetId}
                         versionId={versionId}
                         versionStatus={version.status}
@@ -559,13 +526,7 @@ export default function VersionDetailPage() {
                 totalRows={version.total_rows}
             />
 
-            {/* Quality Report Modal */}
-            <QualityReportModal
-                isOpen={isQualityModalOpen}
-                onClose={() => setIsQualityModalOpen(false)}
-                datasetId={datasetId}
-                versionId={versionId}
-            />
+
         </div>
     );
 }

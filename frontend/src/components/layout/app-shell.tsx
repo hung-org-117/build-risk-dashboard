@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 import { Sidebar } from './sidebar'
@@ -10,21 +10,54 @@ interface AppShellProps {
   children: React.ReactNode
 }
 
+const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
+
 export function AppShell({ children }: AppShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  // Load collapsed state from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+    if (stored !== null) {
+      setSidebarCollapsed(stored === 'true')
+    }
+    setMounted(true)
+  }, [])
+
+  const handleToggleSidebar = () => {
+    const newValue = !sidebarCollapsed
+    setSidebarCollapsed(newValue)
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(newValue))
+  }
 
   const closeMobileNav = () => setMobileNavOpen(false)
 
+  // Determine grid columns based on collapsed state
+  const gridCols = sidebarCollapsed
+    ? 'md:grid-cols-[64px_1fr]'
+    : 'md:grid-cols-[64px_1fr] lg:grid-cols-[280px_1fr]'
+
   return (
-    <div className="grid h-screen w-full overflow-hidden bg-slate-50 text-slate-900 md:grid-cols-[64px_1fr] lg:grid-cols-[280px_1fr] dark:bg-slate-950 dark:text-slate-50">
+    <div className={cn(
+      "grid h-screen w-full overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50 transition-all duration-200",
+      mounted ? gridCols : 'md:grid-cols-[64px_1fr] lg:grid-cols-[280px_1fr]'
+    )}>
       {/* Tablet Sidebar - Icon only (md breakpoint) */}
-      <aside className="hidden md:block lg:hidden h-screen overflow-hidden border-r dark:border-slate-800">
-        <Sidebar collapsed />
+      <aside className={cn(
+        "hidden md:block h-screen overflow-hidden border-r dark:border-slate-800",
+        sidebarCollapsed ? "" : "lg:hidden"
+      )}>
+        <Sidebar collapsed onToggleCollapse={handleToggleSidebar} />
       </aside>
 
       {/* Desktop/Laptop Sidebar - Full (lg+ breakpoint) */}
-      <aside className="hidden lg:block h-screen overflow-hidden border-r dark:border-slate-800">
-        <Sidebar />
+      <aside className={cn(
+        "hidden h-screen overflow-hidden border-r dark:border-slate-800",
+        sidebarCollapsed ? "" : "lg:block"
+      )}>
+        <Sidebar onToggleCollapse={handleToggleSidebar} />
       </aside>
 
       {/* Mobile Sidebar - Overlay */}
@@ -54,4 +87,3 @@ export function AppShell({ children }: AppShellProps) {
     </div>
   )
 }
-

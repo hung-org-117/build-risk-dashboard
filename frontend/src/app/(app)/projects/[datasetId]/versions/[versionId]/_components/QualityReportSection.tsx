@@ -20,7 +20,7 @@ interface QualityReportSectionProps {
     datasetId: string;
     versionId: string;
     versionStatus: string;
-    onViewDetails?: () => void;
+
 }
 
 function getScoreColor(score: number): string {
@@ -45,7 +45,7 @@ export function QualityReportSection({
     datasetId,
     versionId,
     versionStatus,
-    onViewDetails,
+
 }: QualityReportSectionProps) {
     const [report, setReport] = useState<QualityReport | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -231,23 +231,13 @@ export function QualityReportSection({
                     <CardContent>
                         <div className="max-h-64 overflow-y-auto space-y-2">
                             {report.feature_metrics && report.feature_metrics.length > 0 ? (
-                                report.feature_metrics.slice(0, 10).map((metric, idx) => (
+                                report.feature_metrics.map((metric, idx) => (
                                     <MetricRow key={idx} metric={metric} />
                                 ))
                             ) : (
                                 <p className="text-sm text-muted-foreground text-center py-4">
                                     No feature metrics available
                                 </p>
-                            )}
-                            {report.feature_metrics && report.feature_metrics.length > 10 && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="w-full text-xs"
-                                    onClick={onViewDetails}
-                                >
-                                    View all {report.feature_metrics.length} metrics
-                                </Button>
                             )}
                         </div>
                     </CardContent>
@@ -269,7 +259,7 @@ export function QualityReportSection({
                     <CardContent>
                         <div className="max-h-64 overflow-y-auto space-y-2">
                             {report.issues && report.issues.length > 0 ? (
-                                report.issues.slice(0, 8).map((issue, idx) => (
+                                report.issues.map((issue, idx) => (
                                     <IssueRow key={idx} issue={issue} />
                                 ))
                             ) : (
@@ -279,16 +269,6 @@ export function QualityReportSection({
                                         No issues detected
                                     </p>
                                 </div>
-                            )}
-                            {report.issues && report.issues.length > 8 && (
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="w-full text-xs"
-                                    onClick={onViewDetails}
-                                >
-                                    View all {report.issues.length} issues
-                                </Button>
                             )}
                         </div>
                     </CardContent>

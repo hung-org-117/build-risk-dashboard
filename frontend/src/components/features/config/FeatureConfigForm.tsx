@@ -1,21 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { Settings, Globe, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     Select,
     SelectContent,
@@ -23,10 +14,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronDown, ChevronUp, Settings, Globe, AlertCircle } from "lucide-react";
-import { featuresApi, datasetsApi } from "@/lib/api";
+import { featuresApi, datasetsApi, reposApi } from "@/lib/api";
 import { RepoConfigSection } from "./RepoConfigSection";
 
 /** Config field spec from API */
@@ -59,25 +47,33 @@ interface FeatureConfigFormProps {
     datasetId?: string; // Optional if repos provided directly
     repos?: RepoInfo[]; // Direct shuffle for ImportRepoModal
     selectedFeatures: Set<string>;
+    value?: FeatureConfigsData;
     onChange: (configs: FeatureConfigsData) => void;
     disabled?: boolean;
+    showValidationStatusColumn?: boolean;
 }
 
 export function FeatureConfigForm({
     datasetId,
     repos: providedRepos,
     selectedFeatures,
+    value,
     onChange,
     disabled = false,
+    showValidationStatusColumn = true,
 }: FeatureConfigFormProps) {
-    const [isOpen, setIsOpen] = useState(false);
-    const [globalConfigs, setGlobalConfigs] = useState<Record<string, unknown>>({});
-    const [repoConfigs, setRepoConfigs] = useState<Record<string, RepoConfig>>({});
+    // State initialization
+    const [globalConfigs, setGlobalConfigs] = useState<Record<string, unknown>>(value?.global || {});
+    const [repoConfigs, setRepoConfigs] = useState<Record<string, RepoConfig>>(value?.repos || {});
     const [configFields, setConfigFields] = useState<ConfigFieldSpec[]>([]);
     const [repos, setRepos] = useState<RepoInfo[]>(providedRepos || []);
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingRepos, setIsLoadingRepos] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Language detection state (moved from Child for persistence)
+    const [repoLanguages, setRepoLanguages] = useState<Record<string, string[]>>({});
+    const [languageLoading, setLanguageLoading] = useState<Record<string, boolean>>({});
 
     // Update repos if provided directly
     useEffect(() => {
@@ -127,6 +123,38 @@ export function FeatureConfigForm({
         fetchRepos();
         return () => { isCancelled = true; };
     }, [datasetId, providedRepos]);
+
+    // Detect languages for repos when they change
+    useEffect(() => {
+        if (repos.length === 0) return;
+
+        const detectLanguagesForRepos = async () => {
+            for (const repo of repos) {
+                // Skip if already loaded or loading
+                if (repoLanguages[repo.id] !== undefined || languageLoading[repo.id]) {
+                    continue;
+                }
+
+                setLanguageLoading(prev => ({ ...prev, [repo.id]: true }));
+                try {
+                    const result = await reposApi.detectLanguages(repo.full_name);
+                    setRepoLanguages(prev => ({
+                        ...prev,
+                        [repo.id]: result.languages.map(l => l.toLowerCase()),
+                    }));
+                } catch (err) {
+                    console.error(`Failed to detect languages for ${repo.full_name}:`, err);
+                    // Set empty array to prevent re-fetching
+                    setRepoLanguages(prev => ({ ...prev, [repo.id]: [] }));
+                } finally {
+                    setLanguageLoading(prev => ({ ...prev, [repo.id]: false }));
+                }
+            }
+        };
+
+        detectLanguagesForRepos();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [repos]);
 
     // Fetch config requirements when selected features change
     useEffect(() => {
@@ -285,7 +313,7 @@ export function FeatureConfigForm({
         );
     };
 
-    // If no features selected or no config fields, don't render
+    // If no features selected or no config fields, don't render config
     if (selectedFeaturesArray.length === 0 || (!isLoading && configFields.length === 0)) {
         return null;
     }
@@ -294,105 +322,93 @@ export function FeatureConfigForm({
     const hasRepoFields = repoFields.length > 0;
 
     return (
-        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-            <Card className="border-dashed">
-                <CollapsibleTrigger asChild>
-                    <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors py-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <Settings className="h-4 w-4 text-muted-foreground" />
-                                <CardTitle className="text-sm font-medium">
-                                    Feature Configuration
-                                </CardTitle>
-                                {isLoading ? (
-                                    <Skeleton className="h-5 w-16" />
-                                ) : configFields.length > 0 && (
-                                    <Badge variant="secondary" className="text-xs">
-                                        {configFields.length} field{configFields.length > 1 ? "s" : ""}
-                                    </Badge>
-                                )}
-                            </div>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                                {isOpen ? (
-                                    <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                    <ChevronDown className="h-4 w-4" />
-                                )}
-                            </Button>
-                        </div>
-                        <CardDescription className="text-xs">
-                            {isLoading
-                                ? "Loading configuration options..."
-                                : "Configure parameters for selected features"}
-                        </CardDescription>
-                    </CardHeader>
-                </CollapsibleTrigger>
+        <div className="space-y-6">
+            {/* Header Section */}
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <Settings className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="text-sm font-medium">
+                        Feature Configuration
+                    </h3>
+                    {isLoading ? (
+                        <Skeleton className="h-5 w-16" />
+                    ) : configFields.length > 0 && (
+                        <Badge variant="secondary" className="text-xs">
+                            {configFields.length} field{configFields.length > 1 ? "s" : ""}
+                        </Badge>
+                    )}
+                </div>
+            </div>
 
-                <CollapsibleContent>
-                    <CardContent className="pt-0 space-y-6">
-                        {error && (
-                            <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 text-destructive text-sm">
-                                <AlertCircle className="h-4 w-4" />
-                                {error}
-                            </div>
-                        )}
+            <p className="text-xs text-muted-foreground -mt-4">
+                {isLoading
+                    ? "Loading configuration options..."
+                    : "Configure parameters for selected features"}
+            </p>
 
-                        {isLoading ? (
-                            <div className="space-y-3">
-                                <Skeleton className="h-10 w-full" />
-                                <Skeleton className="h-10 w-full" />
-                            </div>
-                        ) : (
-                            <>
-                                {/* Global Settings Section */}
-                                {hasGlobalFields && (
-                                    <div className="space-y-3">
-                                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                                            <Globe className="h-4 w-4" />
-                                            Global Settings
-                                        </div>
+            {error && (
+                <div className="flex items-center gap-2 p-2 rounded-md bg-destructive/10 text-destructive text-sm">
+                    <AlertCircle className="h-4 w-4" />
+                    {error}
+                </div>
+            )}
 
-                                        {globalFields.map((field) => (
-                                            <div
-                                                key={field.name}
-                                                className="grid grid-cols-[140px_1fr] gap-3 items-start"
-                                            >
-                                                <Label
-                                                    htmlFor={field.name}
-                                                    className="text-sm pt-2 flex items-center gap-1"
-                                                >
-                                                    {field.name.replace(/_/g, " ")}
-                                                    {field.required && (
-                                                        <span className="text-destructive">*</span>
-                                                    )}
-                                                </Label>
-                                                <div className="flex flex-col gap-1">
-                                                    {renderGlobalConfigInput(field)}
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {field.description}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ))}
+            {isLoading ? (
+                <div className="space-y-3">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                </div>
+            ) : (
+                <>
+                    {/* Global Settings Section */}
+                    {hasGlobalFields && (
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                                <Globe className="h-4 w-4" />
+                                Global Settings
+                            </div>
+
+                            {globalFields.map((field) => (
+                                <div
+                                    key={field.name}
+                                    className="grid grid-cols-[140px_1fr] gap-3 items-start"
+                                >
+                                    <Label
+                                        htmlFor={field.name}
+                                        className="text-sm pt-2 flex items-center gap-1"
+                                    >
+                                        {field.name.replace(/_/g, " ")}
+                                        {field.required && (
+                                            <span className="text-destructive">*</span>
+                                        )}
+                                    </Label>
+                                    <div className="flex flex-col gap-1">
+                                        {renderGlobalConfigInput(field)}
+                                        <span className="text-xs text-muted-foreground">
+                                            {field.description}
+                                        </span>
                                     </div>
-                                )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
-                                {/* Repository Settings Section */}
-                                {hasRepoFields && (
-                                    <RepoConfigSection
-                                        repos={repos}
-                                        repoFields={repoFields}
-                                        repoConfigs={repoConfigs}
-                                        onChange={handleRepoConfigsChange}
-                                        disabled={disabled}
-                                        isLoading={isLoadingRepos}
-                                    />
-                                )}
-                            </>
-                        )}
-                    </CardContent>
-                </CollapsibleContent>
-            </Card>
-        </Collapsible>
+                    {/* Repository Settings Section */}
+                    {hasRepoFields && (
+                        <RepoConfigSection
+                            repos={repos}
+                            repoFields={repoFields}
+                            repoConfigs={repoConfigs}
+                            onChange={handleRepoConfigsChange}
+                            disabled={disabled}
+                            isLoading={isLoadingRepos}
+                            repoLanguages={repoLanguages}
+                            languageLoading={languageLoading}
+                            showValidationStatusColumn={showValidationStatusColumn}
+                        />
+                    )}
+                </>
+            )}
+        </div>
     );
 }

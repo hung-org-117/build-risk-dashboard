@@ -26,7 +26,6 @@ import type {
   DatasetRecord,
   DatasetTemplateRecord
 } from "@/types";
-import { UploadDatasetModal } from "./_components/UploadDatasetModal/index";
 import { useWebSocket } from "@/contexts/websocket-context";
 
 
@@ -229,7 +228,7 @@ export default function DatasetsPage() {
                 className="h-9"
               />
             </div>
-            <Button onClick={() => setUploadModalOpen(true)} className="gap-2">
+            <Button onClick={() => router.push("/projects/upload")} className="gap-2">
               <Upload className="h-4 w-4" /> Upload CSV
             </Button>
           </div>
@@ -286,7 +285,7 @@ export default function DatasetsPage() {
                         <p>No datasets uploaded yet.</p>
                         <Button
                           variant="outline"
-                          onClick={() => setUploadModalOpen(true)}
+                          onClick={() => router.push("/projects/upload")}
                         >
                           <Upload className="mr-2 h-4 w-4" /> Upload CSV
                         </Button>
@@ -303,13 +302,10 @@ export default function DatasetsPage() {
                           router.push(`/projects/${dataset.id}`);
                         } else {
                           // Open upload modal to continue setup
-                          try {
-                            const freshDataset = await datasetsApi.get(dataset.id);
-                            setResumeDataset(freshDataset);
-                            setUploadModalOpen(true);
-                          } catch (err) {
-                            console.error("Failed to fetch dataset:", err);
-                          }
+                          router.push("/projects/upload");
+                          // TODO: Support resuming specific dataset via URL param
+                          // setResumeDataset(freshDataset);
+                          // setUploadModalOpen(true);
                         }
                       }}
                     >
@@ -389,18 +385,6 @@ export default function DatasetsPage() {
           </div>
         </div>
       </Card>
-
-      {/* Upload Modal */}
-      <UploadDatasetModal
-        open={uploadModalOpen}
-        onOpenChange={(open) => {
-          setUploadModalOpen(open);
-          if (!open) setResumeDataset(null);
-        }}
-        onSuccess={handleUploadSuccess}
-        onDatasetCreated={() => loadDatasets(page, false)}
-        existingDataset={resumeDataset || undefined}
-      />
 
 
     </div>
