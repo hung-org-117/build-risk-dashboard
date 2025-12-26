@@ -35,6 +35,8 @@ import {
     type FeatureCompleteness,
     type BuildStatusBreakdown,
 } from "@/lib/api";
+import { FeatureDistributionChart } from "./FeatureDistributionChart";
+import { CorrelationMatrixChart } from "./CorrelationMatrixChart";
 
 interface StatisticsTabProps {
     datasetId: string;
@@ -293,6 +295,29 @@ export function StatisticsSection({ datasetId, versionId, versionStatus }: Stati
                 </Card>
             </div>
 
+            {/* Feature Analysis Section */}
+            <div className="space-y-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <Layers className="h-5 w-5" />
+                    Feature Analysis
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Feature Distributions */}
+                    <FeatureDistributionChart
+                        datasetId={datasetId}
+                        versionId={versionId}
+                        availableFeatures={feature_completeness.map(f => f.feature_name)}
+                    />
+
+                    {/* Correlation Matrix */}
+                    <CorrelationMatrixChart
+                        datasetId={datasetId}
+                        versionId={versionId}
+                    />
+                </div>
+            </div>
+
             {/* Feature Completeness Chart */}
             {feature_completeness.length > 0 && (
                 <Card>
@@ -499,8 +524,8 @@ interface FeatureCompletenessChartProps {
 }
 
 function FeatureCompletenessChart({ features }: FeatureCompletenessChartProps) {
-    // Show max 15 features, sorted by completeness (lowest first)
-    const displayFeatures = features.slice(0, 15);
+    // Show all features
+    const displayFeatures = features;
 
     const getCompletionColor = (percentage: number): string => {
         if (percentage >= 80) return "bg-green-500";
@@ -509,7 +534,7 @@ function FeatureCompletenessChart({ features }: FeatureCompletenessChartProps) {
     };
 
     return (
-        <div className="space-y-2 max-h-96 overflow-y-auto">
+        <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
             {displayFeatures.map((feature) => (
                 <div key={feature.feature_name} className="flex items-center gap-3">
                     <div className="w-32 truncate text-sm" title={feature.feature_name}>
@@ -531,11 +556,6 @@ function FeatureCompletenessChart({ features }: FeatureCompletenessChartProps) {
                     </Badge>
                 </div>
             ))}
-            {features.length > 15 && (
-                <p className="text-sm text-muted-foreground text-center pt-2">
-                    ... and {features.length - 15} more features
-                </p>
-            )}
         </div>
     );
 }

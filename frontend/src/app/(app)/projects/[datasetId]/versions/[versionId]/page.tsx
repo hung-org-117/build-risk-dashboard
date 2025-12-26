@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +76,22 @@ export default function VersionDetailPage() {
     const datasetId = params.datasetId;
     const versionId = params.versionId;
     const router = useRouter();
+    const searchParams = useSearchParams();
+
+    // Valid tabs
+    const validTabs = ["builds", "logs", "scans", "quality", "statistics"] as const;
+    type TabValue = typeof validTabs[number];
+
+    // Get tab from URL or default to "builds"
+    const tabFromUrl = searchParams.get("tab") as TabValue | null;
+    const activeTab: TabValue = tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "builds";
+
+    // Handler to update tab in URL
+    const handleTabChange = useCallback((value: string) => {
+        const newParams = new URLSearchParams(searchParams.toString());
+        newParams.set("tab", value);
+        router.push(`?${newParams.toString()}`, { scroll: false });
+    }, [router, searchParams]);
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -84,7 +100,6 @@ export default function VersionDetailPage() {
     const [expandedBuildId, setExpandedBuildId] = useState<string | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState("builds");
 
     // Fetch version data
     useEffect(() => {
@@ -376,16 +391,16 @@ export default function VersionDetailPage() {
                 </Card>
             </div>
 
-            {/* Normalization Preview */}
+            {/* Normalization Preview
             {version.status === "completed" && (
                 <NormalizationPreviewSection
                     datasetId={datasetId}
                     versionId={versionId}
                 />
-            )}
+            )} */}
 
             {/* Tabbed Content Area */}
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <Tabs value={activeTab} onValueChange={handleTabChange}>
                 <TabsList className="grid w-full grid-cols-5 mb-4">
                     <TabsTrigger value="builds" className="gap-2">
                         <Database className="h-4 w-4" />

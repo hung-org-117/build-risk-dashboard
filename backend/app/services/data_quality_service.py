@@ -48,7 +48,7 @@ class DataQualityService:
         self.quality_repo = DataQualityRepository(db)
         self.version_repo = DatasetVersionRepository(db)
         self.build_repo = DatasetEnrichmentBuildRepository(db)
-        self.feature_service = FeatureService(db)
+        self.feature_service = FeatureService()
 
     def evaluate_version(self, dataset_id: str, version_id: str, user_id: str) -> DataQualityReport:
         """
@@ -197,11 +197,12 @@ class DataQualityService:
         metadata = {}
 
         for feature in all_features:
-            if feature.name in selected_features:
-                metadata[feature.name] = {
-                    "data_type": feature.data_type,
-                    "valid_range": getattr(feature, "valid_range", None),
-                    "valid_values": getattr(feature, "valid_values", None),
+            feature_name = feature["name"]
+            if feature_name in selected_features:
+                metadata[feature_name] = {
+                    "data_type": feature.get("data_type", "unknown"),
+                    "valid_range": feature.get("valid_range"),
+                    "valid_values": feature.get("valid_values"),
                 }
 
         return metadata

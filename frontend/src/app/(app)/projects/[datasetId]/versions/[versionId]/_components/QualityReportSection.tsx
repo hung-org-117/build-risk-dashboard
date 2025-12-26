@@ -246,7 +246,7 @@ export function QualityReportSection({
                                     className="w-full text-xs"
                                     onClick={onViewDetails}
                                 >
-                                    View all {report.metrics.length} metrics
+                                    View all {report.feature_metrics.length} metrics
                                 </Button>
                             )}
                         </div>
