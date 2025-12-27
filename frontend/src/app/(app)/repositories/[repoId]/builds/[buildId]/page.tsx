@@ -12,6 +12,9 @@ import {
     Loader2,
     Search,
     XCircle,
+    Shield,
+    ShieldCheck,
+    ShieldAlert,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -341,6 +344,138 @@ export default function BuildDetailPage() {
                             <span>{formatDateTime(build.completed_at)}</span>
                         </div>
                     </div>
+                </CardContent>
+            </Card>
+
+            {/* Risk Prediction Card */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        {build.risk_level === "HIGH" && <ShieldAlert className="h-5 w-5 text-red-500" />}
+                        {build.risk_level === "MEDIUM" && <Shield className="h-5 w-5 text-amber-500" />}
+                        {build.risk_level === "LOW" && <ShieldCheck className="h-5 w-5 text-green-500" />}
+                        {!build.risk_level && <Shield className="h-5 w-5 text-muted-foreground" />}
+                        Risk Prediction
+                    </CardTitle>
+                    <CardDescription>
+                        ML-based build failure risk assessment
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {!build.has_prediction ? (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
+                            <Shield className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                            <p className="text-muted-foreground">
+                                Risk prediction not available yet.
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Prediction runs automatically after feature extraction.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Main Risk Display */}
+                            <div className="flex items-center justify-between p-4 rounded-lg border">
+                                <div>
+                                    <p className="text-sm text-muted-foreground">Risk Level</p>
+                                    <div className="mt-1">
+                                        {build.risk_level === "LOW" && (
+                                            <Badge variant="outline" className="border-green-500 text-green-600 text-lg px-3 py-1 gap-1">
+                                                <ShieldCheck className="h-4 w-4" /> Low Risk
+                                            </Badge>
+                                        )}
+                                        {build.risk_level === "MEDIUM" && (
+                                            <Badge variant="outline" className="border-amber-500 text-amber-600 text-lg px-3 py-1 gap-1">
+                                                <Shield className="h-4 w-4" /> Medium Risk
+                                            </Badge>
+                                        )}
+                                        {build.risk_level === "HIGH" && (
+                                            <Badge variant="destructive" className="text-lg px-3 py-1 gap-1">
+                                                <ShieldAlert className="h-4 w-4" /> High Risk
+                                            </Badge>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm text-muted-foreground">Confidence</p>
+                                    <p className="text-2xl font-bold">
+                                        {build.prediction_confidence !== undefined
+                                            ? `${(build.prediction_confidence * 100).toFixed(0)}%`
+                                            : "—"}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Probability Distribution */}
+                            {build.risk_probabilities && (
+                                <div className="space-y-2">
+                                    <p className="text-sm font-medium">Probability Distribution</p>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs w-16 text-green-600">Low</span>
+                                            <div className="flex-1 bg-slate-200 dark:bg-slate-800 rounded-full h-2">
+                                                <div
+                                                    className="bg-green-500 h-2 rounded-full"
+                                                    style={{ width: `${(build.risk_probabilities.LOW || 0) * 100}%` }}
+                                                />
+                                            </div>
+                                            <span className="text-xs w-10 text-right">
+                                                {((build.risk_probabilities.LOW || 0) * 100).toFixed(0)}%
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs w-16 text-amber-600">Medium</span>
+                                            <div className="flex-1 bg-slate-200 dark:bg-slate-800 rounded-full h-2">
+                                                <div
+                                                    className="bg-amber-500 h-2 rounded-full"
+                                                    style={{ width: `${(build.risk_probabilities.MEDIUM || 0) * 100}%` }}
+                                                />
+                                            </div>
+                                            <span className="text-xs w-10 text-right">
+                                                {((build.risk_probabilities.MEDIUM || 0) * 100).toFixed(0)}%
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs w-16 text-red-600">High</span>
+                                            <div className="flex-1 bg-slate-200 dark:bg-slate-800 rounded-full h-2">
+                                                <div
+                                                    className="bg-red-500 h-2 rounded-full"
+                                                    style={{ width: `${(build.risk_probabilities.HIGH || 0) * 100}%` }}
+                                                />
+                                            </div>
+                                            <span className="text-xs w-10 text-right">
+                                                {((build.risk_probabilities.HIGH || 0) * 100).toFixed(0)}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Metadata */}
+                            <div className="grid grid-cols-2 gap-4 text-sm pt-2 border-t">
+                                <div>
+                                    <span className="text-muted-foreground">Uncertainty:</span>{" "}
+                                    <span className="font-medium">
+                                        {build.uncertainty_score !== undefined
+                                            ? `±${(build.uncertainty_score * 100).toFixed(0)}%`
+                                            : "—"}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="text-muted-foreground">Model:</span>{" "}
+                                    <span className="font-mono text-xs">
+                                        {build.prediction_model_version || "—"}
+                                    </span>
+                                </div>
+                                {build.predicted_at && (
+                                    <div className="col-span-2">
+                                        <span className="text-muted-foreground">Predicted:</span>{" "}
+                                        <span>{formatDateTime(build.predicted_at)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
 

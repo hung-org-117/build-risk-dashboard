@@ -577,6 +577,10 @@ def _process_single_build(
         ExtractionStatus.PARTIAL.value,
     ):
         repo_config_repo.increment_builds_processed(ObjectId(repo_config.id))
+        # Trigger risk prediction for completed builds
+        from app.tasks.prediction_tasks import predict_build_risk
+
+        predict_build_risk.delay(build_id)
     elif updates["extraction_status"] == ExtractionStatus.FAILED.value:
         repo_config_repo.increment_builds_failed(ObjectId(repo_config.id))
 

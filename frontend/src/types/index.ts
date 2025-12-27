@@ -56,6 +56,15 @@ export interface Build {
   extraction_error?: string;
   missing_resources?: string[];  // Resources unavailable during extraction
   skipped_features?: string[];   // Features skipped due to missing resources
+
+  // Risk Prediction fields
+  has_prediction?: boolean;
+  risk_level?: 'LOW' | 'MEDIUM' | 'HIGH';
+  uncertainty_score?: number; // 0-1, higher = more uncertain
+  prediction_confidence?: number; // 0-1
+  risk_probabilities?: { LOW: number; MEDIUM: number; HIGH: number };
+  prediction_model_version?: string;
+  predicted_at?: string;
 }
 
 export interface BuildDetail extends Build {

@@ -14,6 +14,9 @@ import {
     Lock,
     GitBranch,
     ExternalLink,
+    ShieldAlert,
+    ShieldCheck,
+    Shield,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -197,6 +200,54 @@ function ExtractionStatusBadge({ status, hasTrainingData }: { status?: string; h
     }
 
     return <Badge variant="secondary" className="text-xs">{status || "Unknown"}</Badge>;
+}
+
+function RiskBadge({ riskLevel, uncertaintyScore }: { riskLevel?: string; uncertaintyScore?: number }) {
+    if (!riskLevel) {
+        return (
+            <Badge variant="outline" className="border-slate-400 text-slate-500 gap-1">
+                <Shield className="h-3 w-3" /> —
+            </Badge>
+        );
+    }
+
+    const level = riskLevel.toUpperCase();
+    const uncertaintyText = uncertaintyScore !== undefined ? `±${(uncertaintyScore * 100).toFixed(0)}%` : "";
+
+    if (level === "LOW") {
+        return (
+            <div className="flex items-center gap-1">
+                <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                    <ShieldCheck className="h-3 w-3" /> Low
+                </Badge>
+                {uncertaintyText && <span className="text-[10px] text-muted-foreground">{uncertaintyText}</span>}
+            </div>
+        );
+    }
+
+    if (level === "MEDIUM") {
+        return (
+            <div className="flex items-center gap-1">
+                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
+                    <Shield className="h-3 w-3" /> Medium
+                </Badge>
+                {uncertaintyText && <span className="text-[10px] text-muted-foreground">{uncertaintyText}</span>}
+            </div>
+        );
+    }
+
+    if (level === "HIGH") {
+        return (
+            <div className="flex items-center gap-1">
+                <Badge variant="destructive" className="gap-1">
+                    <ShieldAlert className="h-3 w-3" /> High
+                </Badge>
+                {uncertaintyText && <span className="text-[10px] text-muted-foreground">{uncertaintyText}</span>}
+            </div>
+        );
+    }
+
+    return <Badge variant="secondary">{riskLevel}</Badge>;
 }
 
 
@@ -504,6 +555,9 @@ export default function RepoBuildsPage() {
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">
                                         Extraction
                                     </th>
+                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
+                                        Risk
+                                    </th>
                                     <th className="px-6 py-3" />
                                 </tr>
                             </thead>
@@ -511,7 +565,7 @@ export default function RepoBuildsPage() {
                                 {builds.length === 0 ? (
                                     <tr>
                                         <td
-                                            colSpan={7}
+                                            colSpan={8}
                                             className="px-6 py-6 text-center text-sm text-muted-foreground"
                                         >
                                             No builds recorded yet.
@@ -563,6 +617,9 @@ export default function RepoBuildsPage() {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <ExtractionStatusBadge status={build.extraction_status} hasTrainingData={build.has_training_data} />
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <RiskBadge riskLevel={build.risk_level} uncertaintyScore={build.uncertainty_score} />
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-1">

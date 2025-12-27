@@ -103,36 +103,30 @@ class ModelTrainingBuild(BaseEntity):
         description="Number of features extracted",
     )
 
-    # ML-specific fields
-    is_labeled: bool = Field(
-        default=False,
-        description="Whether this build has been labeled for training",
-    )
-    label: Optional[str] = Field(
-        None,
-        description="Label for supervised learning (e.g., 'pass', 'fail')",
-    )
-    in_training_set: bool = Field(
-        default=False,
-        description="Whether this build is included in training set",
-    )
-    in_test_set: bool = Field(
-        default=False,
-        description="Whether this build is included in test set",
-    )
-
-    # Prediction tracking (if model has been applied)
+    # Bayesian Risk Prediction fields
     has_prediction: bool = Field(
         default=False,
         description="Whether a prediction exists for this build",
     )
-    predicted_label: Optional[str] = Field(
+    risk_level: Optional[str] = Field(
         None,
-        description="Predicted label from the model",
+        description="Risk level: LOW, MEDIUM, or HIGH",
+    )
+    uncertainty_score: Optional[float] = Field(
+        None,
+        description="Uncertainty of prediction (0-1, higher = more uncertain)",
+    )
+    risk_probabilities: Optional[Dict[str, float]] = Field(
+        None,
+        description="Probability distribution: {'LOW': 0.25, 'MEDIUM': 0.55, 'HIGH': 0.20}",
     )
     prediction_confidence: Optional[float] = Field(
         None,
         description="Confidence score of the prediction (0-1)",
+    )
+    prediction_model_version: Optional[str] = Field(
+        None,
+        description="Version of ML model that made the prediction",
     )
     predicted_at: Optional[datetime] = Field(
         None,
