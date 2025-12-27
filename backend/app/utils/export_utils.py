@@ -1,10 +1,3 @@
-"""
-Export Utilities - Common helpers for data export across services.
-
-Provides reusable streaming functions for CSV and JSON export.
-Each service uses these helpers with its own format_row function.
-"""
-
 import csv
 import io
 import json
@@ -17,7 +10,6 @@ def stream_csv(
     format_row_fn: Callable[[dict], dict],
     features: Optional[List[str]] = None,
     all_feature_keys: Optional[Set[str]] = None,
-    norm_params_map: Optional[Dict[str, Any]] = None,
 ) -> Generator[str, None, None]:
     """
     Stream CSV data from a MongoDB cursor.
@@ -27,7 +19,6 @@ def stream_csv(
         format_row_fn: Function to format each document to a row dict
         features: Optional list of specific features to include
         all_feature_keys: Optional set of all feature keys for consistent columns
-        norm_params_map: Optional normalization params map
 
     Yields:
         CSV data chunks
@@ -37,10 +28,6 @@ def stream_csv(
 
     for doc in cursor:
         row = format_row_fn(doc, features, all_feature_keys)
-
-        # Apply normalization if provided
-        if norm_params_map:
-            row = _apply_normalization(row, norm_params_map)
 
         if writer is None:
             fieldnames = list(row.keys())
@@ -60,7 +47,6 @@ def stream_json(
     cursor,
     format_row_fn: Callable[[dict], dict],
     features: Optional[List[str]] = None,
-    norm_params_map: Optional[Dict[str, Any]] = None,
 ) -> Generator[str, None, None]:
     """
     Stream JSON data as an array from a MongoDB cursor.
@@ -69,7 +55,6 @@ def stream_json(
         cursor: MongoDB cursor
         format_row_fn: Function to format each document to a row dict
         features: Optional list of specific features to include
-        norm_params_map: Optional normalization params map
 
     Yields:
         JSON data chunks
@@ -79,34 +64,11 @@ def stream_json(
     for doc in cursor:
         row = format_row_fn(doc, features, None)
 
-        # Apply normalization if provided
-        if norm_params_map:
-            row = _apply_normalization(row, norm_params_map)
-
         if not first:
             yield ",\n"
         yield json.dumps(row, default=str)
         first = False
     yield "\n]"
-
-
-def _apply_normalization(
-    row: Dict[str, Any],
-    norm_params_map: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Apply normalization to row values.
-
-    Args:
-        row: Feature values
-        norm_params_map: Pre-calculated normalization parameters
-
-    Returns:
-        Normalized row
-    """
-    from app.services.normalization_service import NormalizationService
-
-    return NormalizationService.normalize_row(row, norm_params_map)
 
 
 def write_csv_file(
@@ -116,7 +78,6 @@ def write_csv_file(
     features: Optional[List[str]] = None,
     all_feature_keys: Optional[Set[str]] = None,
     progress_callback: Optional[Callable[[int], None]] = None,
-    norm_params_map: Optional[Dict[str, Any]] = None,
 ) -> int:
     """
     Write export to CSV file.
@@ -128,7 +89,6 @@ def write_csv_file(
         features: Optional list of features to include
         all_feature_keys: All feature keys for consistent columns
         progress_callback: Optional callback(count) for progress updates
-        norm_params_map: Optional normalization params map
 
     Returns:
         Total row count written
@@ -139,10 +99,6 @@ def write_csv_file(
 
         for doc in cursor:
             row = format_row_fn(doc, features, all_feature_keys)
-
-            # Apply normalization if provided
-            if norm_params_map:
-                row = _apply_normalization(row, norm_params_map)
 
             if writer is None:
                 fieldnames = list(row.keys())
@@ -167,7 +123,6 @@ def write_json_file(
     format_row_fn: Callable[[dict], dict],
     features: Optional[List[str]] = None,
     progress_callback: Optional[Callable[[int], None]] = None,
-    norm_params_map: Optional[Dict[str, Any]] = None,
 ) -> int:
     """
     Write export to JSON file.
@@ -178,7 +133,6 @@ def write_json_file(
         format_row_fn: Function to format each document
         features: Optional list of features to include
         progress_callback: Optional callback(count) for progress updates
-        norm_params_map: Optional normalization params map
 
     Returns:
         Total row count written
@@ -190,10 +144,6 @@ def write_json_file(
 
         for doc in cursor:
             row = format_row_fn(doc, features, None)
-
-            # Apply normalization if provided
-            if norm_params_map:
-                row = _apply_normalization(row, norm_params_map)
 
             if not first:
                 f.write(",\n")

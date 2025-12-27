@@ -35,6 +35,7 @@ from app.repositories.data_quality_repository import DataQualityRepository
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.services.feature_service import FeatureService
+from app.tasks.pipeline.feature_dag._feature_definitions import get_feature_data_type
 
 logger = logging.getLogger(__name__)
 
@@ -134,18 +135,12 @@ class StatisticsService:
         if not target_features:
             return FeatureDistributionResponse(version_id=version_id, distributions={})
 
-        # Get feature metadata for data types
-        all_features = self.feature_service.list_features()
-        feature_types = {f["name"]: f["data_type"] for f in all_features}
-
         # Get all builds
         builds = self.build_repo.find_by_version(version_id)
 
         distributions: Dict[str, Any] = {}
 
         for feature_name in target_features:
-            data_type = feature_types.get(feature_name, "unknown")
-
             # Collect all values for this feature
             values = []
             for build in builds:
@@ -155,7 +150,12 @@ class StatisticsService:
             if not values:
                 continue
 
-            if data_type in ("integer", "float", "numeric"):
+            # Get data type from registry, fallback to inference
+            data_type = get_feature_data_type(feature_name)
+            if data_type == "unknown":
+                data_type = self._infer_data_type(values)
+
+            if data_type in ("integer", "float"):
                 dist = self._calculate_numeric_distribution(feature_name, values, bins=bins)
             else:
                 dist = self._calculate_categorical_distribution(feature_name, values, top_n=top_n)
@@ -258,6 +258,71 @@ class StatisticsService:
     # Private Helper Methods
     # =========================================================================
 
+    def _infer_data_type(self, values: List[Any]) -> str:
+        """
+        Infer data type from actual values.
+
+        Returns:
+            'integer', 'float', 'boolean', 'categorical', or 'unknown'
+        """
+        non_null_values = [v for v in values if v is not None and v != ""]
+
+        if not non_null_values:
+            return "unknown"
+
+        # Sample up to 100 values for type inference
+        sample = non_null_values[:100]
+
+        # Skip complex types (dicts, lists) - treat as categorical
+        if any(isinstance(v, (list, dict)) for v in sample):
+            return "categorical"
+
+        # Check if all values are boolean
+        bool_values = {True, False, "true", "false", "True", "False", 1, 0}
+        try:
+            if all(v in bool_values for v in sample):
+                return "boolean"
+        except TypeError:
+            # Unhashable type - not boolean
+            pass
+
+        # Check if all values are numeric
+        numeric_count = 0
+        int_count = 0
+        float_count = 0
+
+        for v in sample:
+            if isinstance(v, bool):
+                continue
+            elif isinstance(v, int):
+                numeric_count += 1
+                int_count += 1
+            elif isinstance(v, float):
+                numeric_count += 1
+                if v == int(v):
+                    int_count += 1
+                else:
+                    float_count += 1
+            elif isinstance(v, str):
+                try:
+                    f = float(v)
+                    numeric_count += 1
+                    if f == int(f):
+                        int_count += 1
+                    else:
+                        float_count += 1
+                except (ValueError, TypeError):
+                    pass
+
+        # If >80% are numeric, classify as numeric
+        if len(sample) > 0 and numeric_count / len(sample) >= 0.8:
+            if float_count > 0:
+                return "float"
+            return "integer"
+
+        # Otherwise categorical
+        return "categorical"
+
     def _calculate_version_stats(
         self, version, builds: List[DatasetEnrichmentBuild]
     ) -> VersionStatistics:
@@ -331,19 +396,19 @@ class StatisticsService:
             return []
 
         total = len(builds)
-        feature_service = self.feature_service
-        all_features = feature_service.list_features()
-        feature_types = {f["name"]: f["data_type"] for f in all_features}
-
         completeness_list: List[FeatureCompleteness] = []
 
         for feature in selected_features:
-            non_null = sum(
-                1
-                for b in builds
-                if b.features and feature in b.features and b.features[feature] is not None
-            )
+            # Collect values for this feature
+            values = [b.features[feature] for b in builds if b.features and feature in b.features]
+
+            non_null = sum(1 for v in values if v is not None)
             null_count = total - non_null
+
+            # Get data type from registry, fallback to inference
+            data_type = get_feature_data_type(feature)
+            if data_type == "unknown" and values:
+                data_type = self._infer_data_type(values)
 
             completeness_list.append(
                 FeatureCompleteness(
@@ -351,7 +416,7 @@ class StatisticsService:
                     non_null_count=non_null,
                     null_count=null_count,
                     completeness_pct=round(non_null / total * 100, 1) if total > 0 else 0,
-                    data_type=feature_types.get(feature, "unknown"),
+                    data_type=data_type,
                 )
             )
 

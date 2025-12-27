@@ -234,9 +234,6 @@ export function DataTab({ datasetId, dataset, onRefresh }: DataTabProps) {
                         <FolderGit2 className="h-5 w-5" />
                         Builds ({total} found)
                     </CardTitle>
-                    <CardDescription>
-                        These are the validated builds from your dataset. Create an enriched version in the Enrichment tab to extract features.
-                    </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
                     {loadingBuilds ? (
@@ -253,7 +250,7 @@ export function DataTab({ datasetId, dataset, onRefresh }: DataTabProps) {
                                             <TableHead>Repository</TableHead>
                                             <TableHead>Branch</TableHead>
                                             <TableHead>Commit</TableHead>
-                                            <TableHead>Result</TableHead>
+                                            <TableHead>Conclusion</TableHead>
                                             <TableHead>Duration</TableHead>
                                             <TableHead></TableHead>
                                         </TableRow>
@@ -322,16 +319,6 @@ export function DataTab({ datasetId, dataset, onRefresh }: DataTabProps) {
                     )}
                 </CardContent>
             </Card>
-
-            {/* Info Message */}
-            <Alert className="border-blue-200 bg-blue-50 dark:bg-blue-900/20">
-                <Database className="h-4 w-4 text-blue-600" />
-                <AlertDescription className="text-blue-600">
-                    To extract features from these builds, go to the <strong>Enrichment</strong> tab,
-                    select your desired features, and create a new version. Resource collection will
-                    happen automatically as part of the enrichment process.
-                </AlertDescription>
-            </Alert>
         </div>
     );
 }

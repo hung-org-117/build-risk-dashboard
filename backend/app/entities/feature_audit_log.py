@@ -21,16 +21,6 @@ class AuditLogCategory(str, Enum):
     DATASET_ENRICHMENT = "dataset_enrichment"
 
 
-class FeatureAuditLogStatus(str, Enum):
-    """Feature audit log status."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 class NodeExecutionStatus(str, Enum):
     """Node execution status."""
 
@@ -74,22 +64,6 @@ class NodeExecutionResult(BaseEntity):
 
 
 class FeatureAuditLog(BaseEntity):
-    """
-    Track a single pipeline execution.
-
-    This entity provides complete observability into pipeline runs:
-    - What was executed and when
-    - Which nodes succeeded/failed
-    - Performance metrics (duration, retry counts)
-    - Feature extraction results
-
-    References:
-    - raw_repo_id -> RawRepository
-    - raw_build_run_id -> RawBuildRun
-    - training_build_id -> ModelTrainingBuild (for MODEL_TRAINING category)
-    - enrichment_build_id -> DatasetEnrichmentBuild (for DATASET_ENRICHMENT category)
-    """
-
     class Config:
         collection = "feature_audit_logs"
         use_enum_values = True
@@ -137,7 +111,6 @@ class FeatureAuditLog(BaseEntity):
     )
 
     # Execution metadata
-    status: FeatureAuditLogStatus = FeatureAuditLogStatus.PENDING
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_ms: Optional[float] = None
@@ -164,13 +137,11 @@ class FeatureAuditLog(BaseEntity):
 
     def mark_started(self) -> "FeatureAuditLog":
         """Mark audit log as started."""
-        self.status = FeatureAuditLogStatus.RUNNING
         self.started_at = datetime.now(timezone.utc)
         return self
 
     def mark_completed(self, features: List[str]) -> "FeatureAuditLog":
         """Mark audit log as successfully completed."""
-        self.status = FeatureAuditLogStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
             self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
@@ -181,7 +152,6 @@ class FeatureAuditLog(BaseEntity):
 
     def mark_failed(self, error: str) -> "FeatureAuditLog":
         """Mark audit log as failed."""
-        self.status = FeatureAuditLogStatus.FAILED
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
             self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000

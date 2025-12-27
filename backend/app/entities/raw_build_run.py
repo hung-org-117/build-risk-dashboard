@@ -92,12 +92,6 @@ class RawBuildRun(BaseEntity):
         description="Final result when completed: success/failure/cancelled/skipped/timed_out/action_required/neutral/unknown",
     )
 
-    # Timestamps
-    created_at: Optional[datetime] = Field(
-        default=None,
-        description="When the build was created",
-    )
-
     started_at: Optional[datetime] = Field(
         default=None,
         description="When the build started running",

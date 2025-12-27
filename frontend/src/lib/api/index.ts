@@ -27,9 +27,16 @@ export { settingsApi, notificationsApi } from './settings';
 export { datasetScanApi, datasetVersionApi } from './versions';
 export { qualityApi, userSettingsApi } from './quality';
 export { statisticsApi, enrichmentLogsApi } from './statistics';
-export { comparisonApi } from './comparison';
+export { preprocessingApi } from './preprocessing';
 
-// Re-export types from admin
+export type {
+    NormalizationMethod,
+    NormalizationPreviewRequest,
+    FeatureStats,
+    FeaturePreview,
+    NormalizationPreviewResponse,
+} from './preprocessing';
+
 export type {
     UserListResponse,
     UserCreatePayload,
@@ -43,7 +50,6 @@ export type {
     RepoAccessResponse,
 } from './admin';
 
-// Re-export types from export
 export type {
     ExportPreviewResponse,
     ExportJobResponse,
@@ -51,16 +57,19 @@ export type {
     ExportJobListItem,
 } from './export';
 
-// Re-export types from versions
 export type {
     ScanResultItem,
     ScanResultsResponse,
     ScanSummaryResponse,
     EnrichedBuildData,
     VersionDataResponse,
+    NodeExecutionDetail,
+    AuditLogDetail,
+    RawBuildRunDetail,
+    EnrichmentBuildDetail,
+    EnrichmentBuildDetailResponse,
 } from './versions';
 
-// Re-export types from quality
 export type {
     QualityIssue,
     QualityMetric,
@@ -70,7 +79,6 @@ export type {
     UpdateUserSettingsRequest,
 } from './quality';
 
-// Re-export types from statistics
 export type {
     VersionStatistics,
     BuildStatusBreakdown,
@@ -88,17 +96,3 @@ export type {
     FeatureAuditLogDto,
     AuditLogListResponse,
 } from './statistics';
-
-// Re-export types from comparison
-export type {
-    ComparableVersion,
-    ComparableDataset,
-    CompareInternalRequest,
-    VersionSummary,
-    ExternalDatasetSummary,
-    FeatureComparison,
-    QualityComparison,
-    RowOverlap,
-    CompareResponse,
-    CompareExternalResponse,
-} from './comparison';

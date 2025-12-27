@@ -1,20 +1,5 @@
 """
 Feature metadata decorators for Hamilton DAG.
-
-Replaces the separate feature_metadata files by allowing metadata to be
-attached directly to Hamilton feature functions using custom decorators.
-
-Usage:
-    @feature_metadata(
-        display_name="Build ID",
-        description="Unique identifier for the workflow run",
-        category=FeatureCategory.WORKFLOW,
-        data_type=FeatureDataType.INTEGER,
-        required_resources=[FeatureResource.BUILD_RUN],
-    )
-    @tag(group="build_log")
-    def tr_build_id(build_run: BuildRunInput) -> int:
-        return int(build_run.ci_run_id)
 """
 
 from enum import Enum
@@ -117,16 +102,13 @@ def feature_metadata(
             "category": category.value if isinstance(category, Enum) else category,
             "data_type": data_type.value if isinstance(data_type, Enum) else data_type,
             "required_resources": [
-                r.value if isinstance(r, Enum) else r
-                for r in (required_resources or [])
+                r.value if isinstance(r, Enum) else r for r in (required_resources or [])
             ],
             "nullable": nullable,
             "example_value": example_value,
             "unit": unit,
             "output_format": (
-                output_format.value
-                if isinstance(output_format, Enum)
-                else output_format
+                output_format.value if isinstance(output_format, Enum) else output_format
             ),
             "output_formats": formats_dict,
             # Quality evaluation metadata

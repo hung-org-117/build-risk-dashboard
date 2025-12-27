@@ -25,7 +25,7 @@ class WidgetConfig(BaseEntity):
 class UserDashboardLayout(BaseEntity):
     """Stores per-user dashboard layout preferences."""
 
-    user_id: PyObjectId  # User who owns this layout
+    user_id: PyObjectId
     widgets: List[WidgetConfig] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

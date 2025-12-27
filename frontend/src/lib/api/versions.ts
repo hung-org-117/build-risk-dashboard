@@ -160,12 +160,11 @@ export const datasetVersionApi = {
     downloadExport: async (
         datasetId: string,
         versionId: string,
-        format: "csv" | "json" = "csv",
-        normalization: "none" | "minmax" | "zscore" | "robust" | "maxabs" | "log" | "decimal" = "none"
+        format: "csv" | "json" = "csv"
     ): Promise<Blob> => {
         const response = await api.get(
             `/datasets/${datasetId}/versions/${versionId}/export`,
-            { params: { format, normalization }, responseType: "blob" }
+            { params: { format }, responseType: "blob" }
         );
         return response.data;
     },
@@ -173,13 +172,12 @@ export const datasetVersionApi = {
     createExportJob: async (
         datasetId: string,
         versionId: string,
-        format: "csv" | "json" = "csv",
-        normalization: "none" | "minmax" | "zscore" | "robust" | "maxabs" | "log" | "decimal" = "none"
+        format: "csv" | "json" = "csv"
     ): Promise<{ job_id: string; status: string; total_rows: number }> => {
         const response = await api.post(
             `/datasets/${datasetId}/versions/${versionId}/export/async`,
             null,
-            { params: { format, normalization } }
+            { params: { format } }
         );
         return response.data;
     },
@@ -232,4 +230,93 @@ export const datasetVersionApi = {
         );
         return response.data;
     },
+
+    getBuildDetail: async (
+        datasetId: string,
+        versionId: string,
+        buildId: string
+    ): Promise<EnrichmentBuildDetailResponse> => {
+        const response = await api.get<EnrichmentBuildDetailResponse>(
+            `/datasets/${datasetId}/versions/${versionId}/builds/${buildId}`
+        );
+        return response.data;
+    },
 };
+
+// =============================================================================
+// Build Detail Types
+// =============================================================================
+
+export interface NodeExecutionDetail {
+    node_name: string;
+    status: string; // success, failed, skipped
+    started_at: string | null;
+    completed_at: string | null;
+    duration_ms: number;
+    features_extracted: string[];
+    resources_used: string[];
+    error: string | null;
+    warning: string | null;
+    skip_reason: string | null;
+    retry_count: number;
+}
+
+export interface AuditLogDetail {
+    id: string;
+    correlation_id: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    duration_ms: number | null;
+    nodes_executed: number;
+    nodes_succeeded: number;
+    nodes_failed: number;
+    nodes_skipped: number;
+    total_retries: number;
+    feature_count: number;
+    features_extracted: string[];
+    errors: string[];
+    warnings: string[];
+    node_results: NodeExecutionDetail[];
+}
+
+export interface RawBuildRunDetail {
+    id: string;
+    ci_run_id: string;
+    build_number: number | null;
+    repo_name: string;
+    branch: string;
+    commit_sha: string;
+    commit_message: string | null;
+    commit_author: string | null;
+    status: string;
+    conclusion: string;
+    created_at: string | null;
+    started_at: string | null;
+    completed_at: string | null;
+    duration_seconds: number | null;
+    web_url: string | null;
+    provider: string;
+    logs_available: boolean | null;
+    logs_expired: boolean;
+    is_bot_commit: boolean | null;
+}
+
+export interface EnrichmentBuildDetail {
+    id: string;
+    extraction_status: string;
+    extraction_error: string | null;
+    is_missing_commit: boolean;
+    missing_resources: string[];
+    skipped_features: string[];
+    feature_count: number;
+    expected_feature_count: number;
+    features: Record<string, unknown>;
+    scan_metrics: Record<string, unknown>;
+    enriched_at: string | null;
+}
+
+export interface EnrichmentBuildDetailResponse {
+    raw_build_run: RawBuildRunDetail;
+    enrichment_build: EnrichmentBuildDetail;
+    audit_log: AuditLogDetail | null;
+}

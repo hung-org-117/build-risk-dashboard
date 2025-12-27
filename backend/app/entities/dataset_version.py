@@ -26,19 +26,6 @@ class VersionStatus(str, Enum):
 
 
 class DatasetVersion(FeatureConfigBase):
-    """
-    Dataset version entity - inherits feature_configs from FeatureConfigBase.
-
-    feature_configs structure for datasets:
-    {
-        "lookback_days": 60,  # global config
-        "repos": {  # per-repo configs
-            "owner/repo1": {"source_languages": ["python"], "test_frameworks": ["pytest"]},
-            "owner/repo2": {"source_languages": ["javascript"], "test_frameworks": ["jest"]}
-        }
-    }
-    """
-
     class Config:
         collection_name = "dataset_versions"
         use_enum_values = True
@@ -64,8 +51,6 @@ class DatasetVersion(FeatureConfigBase):
         default_factory=lambda: {"sonarqube": {}, "trivy": {}},
         description="Scan tool config: {'sonarqube': {...}, 'trivy': {...}}",
     )
-
-    # feature_configs is inherited from FeatureConfigBase
 
     status: VersionStatus = VersionStatus.PENDING
 

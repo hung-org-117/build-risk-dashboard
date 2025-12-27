@@ -596,12 +596,15 @@ def validate_builds_chunk(
                     if hasattr(build_data.conclusion, "value")
                     else build_data.conclusion,
                     commit_sha=build_data.commit_sha,
+                    commit_message=build_data.commit_message,
+                    commit_author=build_data.commit_author,
                     branch=build_data.branch,
                     started_at=build_data.started_at,
                     completed_at=build_data.completed_at,
                     duration_seconds=build_data.duration_seconds,
                     web_url=build_data.web_url,
                     raw_data=build_data.raw_data,
+                    is_bot_commit=build_data.is_bot_commit or False,
                 )
 
                 # Check if build should be filtered for dataset

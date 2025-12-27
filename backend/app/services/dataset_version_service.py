@@ -11,7 +11,6 @@ from app.entities.dataset_version import DatasetVersion, VersionStatus
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.services.dataset_service import DatasetService
-from app.services.normalization_service import NormalizationMethod, NormalizationService
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +167,8 @@ class DatasetVersionService:
         user_id: str,
         format: str = "csv",
         features: Optional[List[str]] = None,
-        normalization: str = "none",
     ) -> ExportResult:
-        """Export version data from DB in specified format with optional normalization."""
+        """Export version data from DB in specified format."""
 
         dataset = self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
@@ -187,15 +185,6 @@ class DatasetVersionService:
                 status_code=400,
                 detail=f"Unsupported format: {format}. Use csv or json.",
             )
-
-        # Validate normalization method
-        try:
-            norm_method = NormalizationMethod(normalization)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid normalization: {normalization}. Use none/minmax/zscore.",
-            ) from exc
 
         # Get count to check if we have data
         count = self._enrichment_build_repo.count(
@@ -219,7 +208,6 @@ class DatasetVersionService:
             version_id=version_id,
             format=format,
             features=features or version.selected_features,
-            normalization=norm_method,
         )
 
         media_type = "text/csv" if format == "csv" else "application/json"
@@ -236,9 +224,8 @@ class DatasetVersionService:
         version_id: str,
         format: str,
         features: Optional[List[str]] = None,
-        normalization: NormalizationMethod = NormalizationMethod.NONE,
     ) -> Generator[str, None, None]:
-        """Stream enrichment builds as CSV or JSON with optional normalization."""
+        """Stream enrichment builds as CSV or JSON."""
         from app.utils.export_utils import format_feature_row, stream_csv, stream_json
 
         cursor = self._enrichment_build_repo.get_enriched_for_export(
@@ -254,22 +241,10 @@ class DatasetVersionService:
                 version_id=ObjectId(version_id),
             )
 
-        # Calculate normalization params if needed
-        norm_params_map = None
-        if normalization != NormalizationMethod.NONE:
-            norm_params_map = self._calculate_normalization_params(
-                dataset_id=dataset_id,
-                version_id=version_id,
-                features=features or all_feature_keys or [],
-                method=normalization,
-            )
-
         if format == "csv":
-            return stream_csv(
-                cursor, format_feature_row, features, all_feature_keys, norm_params_map
-            )
+            return stream_csv(cursor, format_feature_row, features, all_feature_keys)
         else:
-            return stream_json(cursor, format_feature_row, features, norm_params_map)
+            return stream_json(cursor, format_feature_row, features)
 
     # Async Export Methods (for large datasets)
     def create_export_job(
@@ -594,46 +569,152 @@ class DatasetVersionService:
             features=features,
         )
 
-    def _calculate_normalization_params(
-        self,
-        dataset_id: str,
-        version_id: str,
-        features: List[str],
-        method: NormalizationMethod,
-    ) -> dict:
-        """Calculate normalization parameters for all features."""
-        from typing import Dict
-
-        if method == NormalizationMethod.NONE:
-            return {}
-
-        # Collect all values for each feature (from both features and scan_metrics)
-        feature_values: Dict[str, list] = {f: [] for f in features}
-
-        cursor = self._enrichment_build_repo.get_enriched_for_export(
-            dataset_id=ObjectId(dataset_id),
-            version_id=ObjectId(version_id),
-        )
-
-        for doc in cursor:
-            # Merge features and scan_metrics
-            feature_dict = doc.get("features", {})
-            scan_metrics = doc.get("scan_metrics", {})
-            merged = {**feature_dict, **scan_metrics}
-
-            for feature_name in features:
-                if feature_name in merged:
-                    feature_values[feature_name].append(merged[feature_name])
-
-        # Calculate params
-        return NormalizationService.calculate_params_batch(feature_values, method)
-
     def _revoke_task(self, task_id: Optional[str]) -> None:
         """Revoke a Celery task if it exists."""
         if task_id:
             from app.celery_app import celery_app
 
             celery_app.control.revoke(task_id, terminate=True)
+
+    def get_enrichment_build_detail(
+        self,
+        dataset_id: str,
+        version_id: str,
+        build_id: str,
+        user_id: str,
+    ) -> dict:
+        """
+        Get complete details for a single enriched build.
+
+        Aggregates data from:
+        - DatasetEnrichmentBuild: Extracted features and status
+        - RawBuildRun: CI build metadata
+        - FeatureAuditLog: Extraction logs (optional)
+
+        Args:
+            build_id: ID of the DatasetEnrichmentBuild
+        """
+        from app.dtos.build import (
+            AuditLogDetail,
+            EnrichmentBuildDetail,
+            EnrichmentBuildDetailResponse,
+            NodeExecutionDetail,
+            RawBuildRunDetail,
+        )
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
+        from app.repositories.raw_build_run import RawBuildRunRepository
+
+        self._verify_dataset_access(dataset_id, user_id)
+        version = self._get_version(dataset_id, version_id)
+
+        # 1. Get enrichment build
+        enrichment_build = self._enrichment_build_repo.find_by_id(build_id)
+        if not enrichment_build:
+            raise HTTPException(status_code=404, detail="Build not found")
+
+        if str(enrichment_build.dataset_version_id) != version_id:
+            raise HTTPException(
+                status_code=404,
+                detail="Build does not belong to this version",
+            )
+
+        # 2. Get raw build run
+        raw_run_repo = RawBuildRunRepository(self._db)
+        raw_build_run = raw_run_repo.find_by_id(str(enrichment_build.raw_build_run_id))
+        if not raw_build_run:
+            raise HTTPException(status_code=404, detail="Raw build run not found")
+
+        # 3. Get audit log (optional - may not exist)
+        audit_log_repo = FeatureAuditLogRepository(self._db)
+        audit_log = audit_log_repo.find_by_enrichment_build(build_id)
+
+        # Build response DTOs
+        raw_build_detail = RawBuildRunDetail(
+            id=str(raw_build_run.id),
+            ci_run_id=raw_build_run.ci_run_id,
+            build_number=raw_build_run.build_number,
+            repo_name=raw_build_run.repo_name,
+            branch=raw_build_run.branch,
+            commit_sha=raw_build_run.commit_sha,
+            commit_message=raw_build_run.commit_message,
+            commit_author=raw_build_run.commit_author,
+            status=raw_build_run.status.value
+            if hasattr(raw_build_run.status, "value")
+            else str(raw_build_run.status),
+            conclusion=raw_build_run.conclusion.value
+            if hasattr(raw_build_run.conclusion, "value")
+            else str(raw_build_run.conclusion),
+            created_at=raw_build_run.created_at,
+            started_at=raw_build_run.started_at,
+            completed_at=raw_build_run.completed_at,
+            duration_seconds=raw_build_run.duration_seconds,
+            web_url=raw_build_run.web_url,
+            provider=raw_build_run.provider.value
+            if hasattr(raw_build_run.provider, "value")
+            else str(raw_build_run.provider),
+            logs_available=raw_build_run.logs_available,
+            logs_expired=raw_build_run.logs_expired,
+            is_bot_commit=raw_build_run.is_bot_commit,
+        )
+
+        enrichment_detail = EnrichmentBuildDetail(
+            id=str(enrichment_build.id),
+            extraction_status=enrichment_build.extraction_status.value
+            if hasattr(enrichment_build.extraction_status, "value")
+            else str(enrichment_build.extraction_status),
+            extraction_error=enrichment_build.extraction_error,
+            is_missing_commit=enrichment_build.is_missing_commit,
+            missing_resources=enrichment_build.missing_resources,
+            skipped_features=enrichment_build.skipped_features,
+            feature_count=enrichment_build.feature_count,
+            expected_feature_count=len(version.selected_features),
+            features=enrichment_build.features,
+            scan_metrics=enrichment_build.scan_metrics,
+            enriched_at=enrichment_build.enriched_at,
+        )
+
+        audit_detail = None
+        if audit_log:
+            node_results = [
+                NodeExecutionDetail(
+                    node_name=n.node_name,
+                    status=n.status.value if hasattr(n.status, "value") else str(n.status),
+                    started_at=n.started_at,
+                    completed_at=n.completed_at,
+                    duration_ms=n.duration_ms,
+                    features_extracted=n.features_extracted,
+                    resources_used=n.resources_used,
+                    error=n.error,
+                    warning=n.warning,
+                    skip_reason=n.skip_reason,
+                    retry_count=n.retry_count,
+                )
+                for n in audit_log.node_results
+            ]
+
+            audit_detail = AuditLogDetail(
+                id=str(audit_log.id),
+                correlation_id=audit_log.correlation_id,
+                started_at=audit_log.started_at,
+                completed_at=audit_log.completed_at,
+                duration_ms=audit_log.duration_ms,
+                nodes_executed=audit_log.nodes_executed,
+                nodes_succeeded=audit_log.nodes_succeeded,
+                nodes_failed=audit_log.nodes_failed,
+                nodes_skipped=audit_log.nodes_skipped,
+                total_retries=audit_log.total_retries,
+                feature_count=audit_log.feature_count,
+                features_extracted=audit_log.features_extracted,
+                errors=audit_log.errors,
+                warnings=audit_log.warnings,
+                node_results=node_results,
+            )
+
+        return EnrichmentBuildDetailResponse(
+            raw_build_run=raw_build_detail,
+            enrichment_build=enrichment_detail,
+            audit_log=audit_detail,
+        )
 
     def get_scan_status(
         self,

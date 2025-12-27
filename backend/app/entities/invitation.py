@@ -1,7 +1,3 @@
-"""
-Invitation Entity - Stores user invitation tokens for non-org members.
-"""
-
 import secrets
 from datetime import datetime, timedelta, timezone
 from enum import Enum

@@ -1,5 +1,3 @@
-"""Database entity models - represents the actual structure stored in MongoDB"""
-
 # CI Provider
 from app.ci_providers.models import CIProvider
 
@@ -38,7 +36,6 @@ from .export_job import ExportFormat, ExportJob, ExportStatus
 from .feature_audit_log import (
     AuditLogCategory,
     FeatureAuditLog,
-    FeatureAuditLogStatus,
     NodeExecutionResult,
     NodeExecutionStatus,
 )
@@ -69,17 +66,13 @@ __all__ = [
     "ModelSyncStatus",
     "DatasetRepoValidationStatus",
     "CIProvider",
-    # Raw data (shared)
     "RawRepository",
     "RawBuildRun",
-    # Model training flow
     "ModelRepoConfig",
     "ModelImportBuild",
     "ModelImportBuildStatus",
     "ModelTrainingBuild",
-    # Dataset enrichment flow
     "DatasetEnrichmentBuild",
-    # Dataset
     "DatasetProject",
     "DatasetMapping",
     "DatasetStats",
@@ -87,9 +80,6 @@ __all__ = [
     "DatasetValidationStatus",
     "DatasetBuild",
     "DatasetBuildStatus",
-    # Other
-    # Other
-    # "GithubInstallation",
     "OAuthIdentity",
     "User",
     "DatasetTemplate",
@@ -101,10 +91,8 @@ __all__ = [
     "ExportJob",
     "ExportStatus",
     "ExportFormat",
-    # Notifications
     "Notification",
     "NotificationType",
-    # Data Quality
     "DataQualityReport",
     "DataQualityMetric",
     "QualityEvaluationStatus",

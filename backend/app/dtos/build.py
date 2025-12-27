@@ -89,3 +89,107 @@ class BuildListResponse(BaseModel):
     total: int
     page: int
     size: int
+
+
+# =============================================================================
+# Enrichment Build Detail DTOs (for dataset version build detail page)
+# =============================================================================
+
+
+class NodeExecutionDetail(BaseModel):
+    """Detail of a single node execution within a pipeline run."""
+
+    node_name: str
+    status: str  # success, failed, skipped
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_ms: float = 0.0
+    features_extracted: List[str] = []
+    resources_used: List[str] = []
+    error: Optional[str] = None
+    warning: Optional[str] = None
+    skip_reason: Optional[str] = None
+    retry_count: int = 0
+
+
+class AuditLogDetail(BaseModel):
+    """Extraction audit log details from FeatureAuditLog."""
+
+    id: str
+    correlation_id: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[float] = None
+
+    # Node statistics
+    nodes_executed: int = 0
+    nodes_succeeded: int = 0
+    nodes_failed: int = 0
+    nodes_skipped: int = 0
+    total_retries: int = 0
+
+    # Feature summary
+    feature_count: int = 0
+    features_extracted: List[str] = []
+
+    # Issues
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    # Node execution details
+    node_results: List[NodeExecutionDetail] = []
+
+
+class RawBuildRunDetail(BaseModel):
+    """Build run info from RawBuildRun entity."""
+
+    id: str
+    ci_run_id: str
+    build_number: Optional[int] = None
+    repo_name: str = ""
+    branch: str = ""
+    commit_sha: str = ""
+    commit_message: Optional[str] = None
+    commit_author: Optional[str] = None
+    status: str = "unknown"
+    conclusion: str = "none"
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    web_url: Optional[str] = None
+    provider: str = "github_actions"
+    logs_available: Optional[bool] = None
+    logs_expired: bool = False
+    is_bot_commit: Optional[bool] = None
+
+
+class EnrichmentBuildDetail(BaseModel):
+    """Enrichment build info from DatasetEnrichmentBuild entity."""
+
+    id: str
+    extraction_status: str = "pending"
+    extraction_error: Optional[str] = None
+    is_missing_commit: bool = False
+    missing_resources: List[str] = []
+    skipped_features: List[str] = []
+    feature_count: int = 0
+    expected_feature_count: int = 0
+    features: Dict[str, Any] = {}
+    scan_metrics: Dict[str, Any] = {}
+    enriched_at: Optional[datetime] = None
+
+
+class EnrichmentBuildDetailResponse(BaseModel):
+    """
+    Complete build detail for dataset version enriched build.
+
+    Aggregates data from:
+    - RawBuildRun: CI build metadata
+    - DatasetEnrichmentBuild: Extracted features
+    - FeatureAuditLog: Extraction logs
+    """
+
+    raw_build_run: RawBuildRunDetail
+    enrichment_build: EnrichmentBuildDetail
+    audit_log: Optional[AuditLogDetail] = None

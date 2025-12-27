@@ -38,7 +38,6 @@ class TrivyCommitScan(BaseEntity):
     commit_sha: str = Field(..., description="Git commit SHA")
     repo_full_name: str = Field(..., description="Repository full name (owner/repo)")
 
-    # Raw repository reference - needed to derive worktree path for retry
     raw_repo_id: PyObjectId = Field(
         ...,
         description="RawRepository ID - used to derive worktree path for scan/retry",

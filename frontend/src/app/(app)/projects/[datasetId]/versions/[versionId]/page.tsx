@@ -20,32 +20,25 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+
 import { Progress } from "@/components/ui/progress";
 import {
     ArrowLeft,
     CheckCircle2,
-    ChevronDown,
     ChevronLeft,
     ChevronRight,
-    ChevronUp,
     Download,
     Loader2,
     AlertCircle,
     XCircle,
     AlertTriangle,
-    ExternalLink,
 } from "lucide-react";
 import { datasetVersionApi, type EnrichedBuildData } from "@/lib/api";
 import { ExportVersionModal } from "@/components/datasets/ExportVersionModal";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { VersionLogsSection, VersionScansSection, VersionDashboard, AnalysisSection, PreprocessingSection } from "./_components";
-import { Database, ScrollText, BarChart3, Shield, Settings2 } from "lucide-react";
+import { VersionScansSection, VersionDashboard, AnalysisSection, PreprocessingSection } from "./_components";
+import { Database, BarChart3, Shield, Settings2 } from "lucide-react";
 
 interface VersionData {
     id: string;
@@ -71,6 +64,19 @@ interface VersionDataResponse {
 
 const ITEMS_PER_PAGE = 20;
 
+/** CI Provider labels mapping from API values to display names */
+const CI_PROVIDER_LABELS: Record<string, string> = {
+    github_actions: "GitHub Actions",
+    circleci: "CircleCI",
+    travis_ci: "Travis CI",
+} as const;
+
+/** Get display label for CI provider */
+const getCIProviderLabel = (provider: string | null | undefined): string => {
+    if (!provider) return "—";
+    return CI_PROVIDER_LABELS[provider] || provider;
+};
+
 export default function VersionDetailPage() {
     const params = useParams<{ datasetId: string; versionId: string }>();
     const datasetId = params.datasetId;
@@ -78,8 +84,8 @@ export default function VersionDetailPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    // Valid tabs
-    const validTabs = ["builds", "logs", "scans", "analysis", "preprocessing"] as const;
+    // Valid tabs (removed "logs" - now available per-build in Build Detail page)
+    const validTabs = ["builds", "scans", "analysis", "preprocessing"] as const;
     type TabValue = typeof validTabs[number];
 
     // Get tab from URL or default to "builds"
@@ -97,7 +103,6 @@ export default function VersionDetailPage() {
     const [error, setError] = useState<string | null>(null);
     const [versionData, setVersionData] = useState<VersionDataResponse | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
-    const [expandedBuildId, setExpandedBuildId] = useState<string | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
 
@@ -161,137 +166,55 @@ export default function VersionDetailPage() {
         return config[status] || config.pending;
     };
 
-    // Toggle build expansion
-    const toggleBuildExpansion = (buildId: string) => {
-        setExpandedBuildId(expandedBuildId === buildId ? null : buildId);
-    };
+
 
     // Render Build Row Logic (reusable)
     const renderBuildRow = (build: EnrichedBuildData) => {
         const buildStatus = getBuildStatusConfig(build.extraction_status);
         const BuildStatusIcon = buildStatus.icon;
-        const isExpanded = expandedBuildId === build.id;
-        const featurePercent = (build.feature_count / build.expected_feature_count) * 100;
 
         return (
-            <Collapsible
+            <TableRow
                 key={build.id}
-                open={isExpanded}
-                onOpenChange={() => toggleBuildExpansion(build.id)}
-                asChild
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => router.push(`/projects/${datasetId}/versions/${versionId}/builds/${build.id}`)}
             >
-                <>
-                    <CollapsibleTrigger asChild>
-                        <TableRow className="cursor-pointer hover:bg-muted/50">
-                            <TableCell>
-                                {isExpanded ? (
-                                    <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                    <ChevronDown className="h-4 w-4" />
-                                )}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">
-                                <span className={build.web_url ? "text-blue-600 hover:underline" : ""}>
-                                    {build.web_url ? (
-                                        <Link href={build.web_url} target="_blank" onClick={(e) => e.stopPropagation()}>
-                                            #{build.raw_build_run_id.slice(-8)}
-                                        </Link>
-                                    ) : (
-                                        `#${build.raw_build_run_id.slice(-8)}`
-                                    )}
-                                </span>
-                            </TableCell>
-                            <TableCell className="max-w-[200px] truncate">
-                                <div className="flex items-center gap-2">
-                                    <a
-                                        href={`https://github.com/${build.repo_full_name}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="hover:underline flex items-center gap-1"
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        {build.repo_full_name}
-                                        <ExternalLink className="h-3 w-3 opacity-50" />
-                                    </a>
-                                </div>
-                            </TableCell>
-                            <TableCell>
-                                <span className="capitalize">{build.provider || "—"}</span>
-                            </TableCell>
-                            <TableCell>
-                                <Badge
-                                    variant="outline"
-                                    className={buildStatus.color}
-                                >
-                                    <BuildStatusIcon className="mr-1 h-3 w-3" />
-                                    {buildStatus.label}
-                                </Badge>
-                            </TableCell>
-                            <TableCell>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm">
-                                        {build.feature_count}/{build.expected_feature_count}
-                                    </span>
-                                    <Progress
-                                        value={featurePercent}
-                                        className="h-2 w-16"
-                                    />
-                                </div>
-                            </TableCell>
-                            <TableCell>
-                                {build.skipped_features.length > 0 ? (
-                                    <Badge variant="secondary">
-                                        {build.skipped_features.length}
-                                    </Badge>
-                                ) : (
-                                    "—"
-                                )}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">
-                                {formatRelativeTime(build.enriched_at)}
-                            </TableCell>
-                        </TableRow>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent asChild>
-                        <tr>
-                            <td colSpan={7} className="p-0">
-                                <div className="border-t bg-muted/30 p-4">
-                                    {build.missing_resources.length > 0 && (
-                                        <div className="mb-4 rounded-md bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
-                                            <strong>Missing Resources:</strong>{" "}
-                                            {build.missing_resources.join(", ")}
-                                        </div>
-                                    )}
-                                    <div className="rounded-md border bg-background max-h-[500px] overflow-y-auto">
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow>
-                                                    <TableHead className="w-[300px]">Feature</TableHead>
-                                                    <TableHead>Value</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {Object.entries(build.features)
-                                                    .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
-                                                    .map(([key, value]) => (
-                                                        <TableRow key={key}>
-                                                            <TableCell className="font-medium text-xs">
-                                                                {key}
-                                                            </TableCell>
-                                                            <TableCell className="font-mono text-sm break-all">
-                                                                {formatValue(value, true)}
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    ))}
-                                            </TableBody>
-                                        </Table>
-                                    </div>
-                                </div>
-                            </td>
-                        </tr>
-                    </CollapsibleContent>
-                </>
-            </Collapsible>
+                <TableCell className="font-mono text-sm">
+                    #{build.raw_build_run_id.slice(-8)}
+                </TableCell>
+                <TableCell className="max-w-[200px] truncate">
+                    {build.repo_full_name}
+                </TableCell>
+                <TableCell>
+                    <span>{getCIProviderLabel(build.provider)}</span>
+                </TableCell>
+                <TableCell>
+                    <Badge
+                        variant="outline"
+                        className={buildStatus.color}
+                    >
+                        <BuildStatusIcon className="mr-1 h-3 w-3" />
+                        {buildStatus.label}
+                    </Badge>
+                </TableCell>
+                <TableCell>
+                    <span className="text-sm">
+                        {build.feature_count}/{build.expected_feature_count}
+                    </span>
+                </TableCell>
+                <TableCell>
+                    {build.skipped_features.length > 0 ? (
+                        <Badge variant="secondary">
+                            {build.skipped_features.length}
+                        </Badge>
+                    ) : (
+                        "—"
+                    )}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                    {formatRelativeTime(build.enriched_at)}
+                </TableCell>
+            </TableRow>
         );
     };
 
@@ -374,10 +297,6 @@ export default function VersionDetailPage() {
                         <Database className="h-4 w-4" />
                         Builds
                     </TabsTrigger>
-                    <TabsTrigger value="logs" className="gap-2">
-                        <ScrollText className="h-4 w-4" />
-                        Logs
-                    </TabsTrigger>
                     <TabsTrigger value="scans" className="gap-2">
                         <Shield className="h-4 w-4" />
                         Scans
@@ -411,7 +330,6 @@ export default function VersionDetailPage() {
                                     <Table className="table-fixed w-full">
                                         <TableHeader>
                                             <TableRow>
-                                                <TableHead className="w-[40px]"></TableHead>
                                                 <TableHead className="w-[100px]">Build ID</TableHead>
                                                 <TableHead className="w-[200px]">Repository</TableHead>
                                                 <TableHead className="w-[100px]">CI Provider</TableHead>
@@ -458,24 +376,6 @@ export default function VersionDetailPage() {
                             </div>
                         </div>
                     )}
-                </TabsContent>
-
-                {/* Logs Tab */}
-                <TabsContent value="logs">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Feature Extraction Logs</CardTitle>
-                            <CardDescription>
-                                Audit logs for feature extraction runs in this version
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <VersionLogsSection
-                                datasetId={datasetId}
-                                versionId={versionId}
-                            />
-                        </CardContent>
-                    </Card>
                 </TabsContent>
 
                 {/* Scans Tab */}

@@ -80,7 +80,7 @@ export const VersionHistory = memo(function VersionHistory({
                     <div className="flex items-center justify-between">
                         <div>
                             <CardTitle className="flex items-center gap-2">
-                                📚 Version History
+                                Version History
                             </CardTitle>
                             <CardDescription>
                                 {completedVersions.length} version(s) created

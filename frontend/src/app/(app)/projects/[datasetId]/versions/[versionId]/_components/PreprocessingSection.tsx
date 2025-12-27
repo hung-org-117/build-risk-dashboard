@@ -44,8 +44,7 @@ import {
     TrendingUp,
     Lock,
 } from "lucide-react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+import { preprocessingApi, type NormalizationPreviewResponse, type NormalizationMethod, type FeaturePreview } from "@/lib/api";
 
 interface PreprocessingSectionProps {
     datasetId: string;
@@ -53,17 +52,13 @@ interface PreprocessingSectionProps {
     versionStatus: string;
 }
 
-interface NormalizationMethod {
-    value: string;
+interface NormalizationMethodOption {
+    value: NormalizationMethod;
     label: string;
     description: string;
 }
 
-interface PreviewRow {
-    [key: string]: number | string | null;
-}
-
-const NORMALIZATION_METHODS: NormalizationMethod[] = [
+const NORMALIZATION_METHODS: NormalizationMethodOption[] = [
     { value: "none", label: "None", description: "No transformation applied" },
     { value: "minmax", label: "Min-Max", description: "Scale to [0, 1] range" },
     { value: "zscore", label: "Z-Score", description: "Standardize to μ=0, σ=1" },
@@ -83,32 +78,29 @@ export function PreprocessingSection({
     const [isOutlierOpen, setIsOutlierOpen] = useState(false);
 
     // Normalization state
-    const [normMethod, setNormMethod] = useState("none");
-    const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
-    const [previewFeatures, setPreviewFeatures] = useState<string[]>([]);
+    const [normMethod, setNormMethod] = useState<NormalizationMethod>("none");
+    const [previewData, setPreviewData] = useState<NormalizationPreviewResponse | null>(null);
     const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
     const isVersionCompleted = versionStatus === "completed";
 
-    const fetchNormalizationPreview = useCallback(async (method: string) => {
+    const fetchNormalizationPreview = useCallback(async (method: NormalizationMethod) => {
         if (!isVersionCompleted || method === "none") {
-            setPreviewData([]);
+            setPreviewData(null);
             return;
         }
 
         setIsLoadingPreview(true);
         try {
-            const res = await fetch(
-                `${API_BASE}/datasets/${datasetId}/versions/${versionId}/preprocess/preview?method=${method}&limit=5`,
-                { credentials: "include" }
+            const data = await preprocessingApi.previewNormalization(
+                datasetId,
+                versionId,
+                { method, sample_size: 5 }
             );
-            if (res.ok) {
-                const data = await res.json();
-                setPreviewData(data.sample_data || []);
-                setPreviewFeatures(data.selected_features?.slice(0, 4) || []);
-            }
+            setPreviewData(data);
         } catch (err) {
             console.error("Failed to fetch normalization preview:", err);
+            setPreviewData(null);
         } finally {
             setIsLoadingPreview(false);
         }
@@ -120,13 +112,11 @@ export function PreprocessingSection({
         }
     }, [isNormalizationOpen, normMethod, fetchNormalizationPreview]);
 
-    const formatValue = (value: number | string | null): string => {
+    const formatValue = (value: number | null | undefined): string => {
         if (value === null || value === undefined) return "—";
-        if (typeof value === "number") {
-            return Number.isInteger(value) ? value.toString() : value.toFixed(4);
-        }
-        return String(value);
+        return value.toFixed(4);
     };
+
 
     if (!isVersionCompleted) {
         return (
@@ -186,7 +176,7 @@ export function PreprocessingSection({
                             {/* Method Selector */}
                             <div className="flex items-center gap-4">
                                 <span className="text-sm font-medium w-24">Method:</span>
-                                <Select value={normMethod} onValueChange={setNormMethod}>
+                                <Select value={normMethod} onValueChange={(v) => setNormMethod(v as NormalizationMethod)}>
                                     <SelectTrigger className="w-48">
                                         <SelectValue />
                                     </SelectTrigger>
@@ -217,44 +207,59 @@ export function PreprocessingSection({
                             {normMethod !== "none" && (
                                 <div className="border rounded-lg overflow-hidden">
                                     <div className="bg-muted/30 px-4 py-2 text-sm font-medium">
-                                        Preview (5 sample rows)
+                                        Preview (sample values for each feature)
                                     </div>
                                     {isLoadingPreview ? (
                                         <div className="flex items-center justify-center py-8">
                                             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                                         </div>
-                                    ) : previewData.length > 0 ? (
+                                    ) : previewData && Object.keys(previewData.features).length > 0 ? (
                                         <div className="overflow-x-auto">
                                             <Table>
                                                 <TableHeader>
                                                     <TableRow>
-                                                        <TableHead className="w-12">#</TableHead>
-                                                        {previewFeatures.map((feat) => (
-                                                            <TableHead key={feat} className="min-w-[180px]">
-                                                                <div className="flex items-center gap-1 text-xs">
-                                                                    <span className="truncate">{feat}</span>
-                                                                </div>
-                                                            </TableHead>
-                                                        ))}
+                                                        <TableHead className="w-40">Feature</TableHead>
+                                                        <TableHead className="min-w-[250px]">Original</TableHead>
+                                                        <TableHead className="w-10"></TableHead>
+                                                        <TableHead className="min-w-[250px]">Transformed</TableHead>
+                                                        <TableHead className="w-32">Stats Change</TableHead>
                                                     </TableRow>
                                                 </TableHeader>
                                                 <TableBody>
-                                                    {previewData.slice(0, 5).map((row, idx) => (
-                                                        <TableRow key={idx}>
-                                                            <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                                                            {previewFeatures.map((feat) => (
-                                                                <TableCell key={feat} className="font-mono text-xs">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="text-muted-foreground">
-                                                                            {formatValue(row[`${feat}_raw`])}
-                                                                        </span>
-                                                                        <ArrowRight className="h-3 w-3 text-muted-foreground/50" />
-                                                                        <span className="text-blue-600 font-medium">
-                                                                            {formatValue(row[`${feat}_normalized`])}
-                                                                        </span>
-                                                                    </div>
-                                                                </TableCell>
-                                                            ))}
+                                                    {(Object.entries(previewData.features) as [string, FeaturePreview][]).map(([feat, data]) => (
+                                                        <TableRow key={feat}>
+                                                            <TableCell className="font-medium">
+                                                                <div className="truncate max-w-[140px]" title={feat}>
+                                                                    {feat}
+                                                                </div>
+                                                                <Badge variant="outline" className="text-xs mt-1">
+                                                                    {data.data_type}
+                                                                </Badge>
+                                                            </TableCell>
+                                                            <TableCell className="font-mono text-xs">
+                                                                <div className="text-muted-foreground">
+                                                                    [{data.original.sample.map((v: number) => formatValue(v)).join(", ")}]
+                                                                </div>
+                                                                <div className="text-xs mt-1">
+                                                                    μ={formatValue(data.original.stats.mean)}, σ={formatValue(data.original.stats.std)}
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <ArrowRight className="h-4 w-4 text-muted-foreground/50" />
+                                                            </TableCell>
+                                                            <TableCell className="font-mono text-xs">
+                                                                <div className="text-blue-600 font-medium">
+                                                                    [{data.transformed.sample.map((v: number) => formatValue(v)).join(", ")}]
+                                                                </div>
+                                                                <div className="text-xs mt-1">
+                                                                    μ={formatValue(data.transformed.stats.mean)}, σ={formatValue(data.transformed.stats.std)}
+                                                                </div>
+                                                            </TableCell>
+                                                            <TableCell className="text-xs">
+                                                                <div className="space-y-1">
+                                                                    <div>range: [{formatValue(data.transformed.stats.min)}, {formatValue(data.transformed.stats.max)}]</div>
+                                                                </div>
+                                                            </TableCell>
                                                         </TableRow>
                                                     ))}
                                                 </TableBody>
@@ -262,7 +267,7 @@ export function PreprocessingSection({
                                         </div>
                                     ) : (
                                         <div className="py-8 text-center text-muted-foreground text-sm">
-                                            No preview data available
+                                            {previewData?.message || "No preview data available"}
                                         </div>
                                     )}
                                 </div>

@@ -143,38 +143,6 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         )
         return RawBuildRun(**doc)
 
-    def upsert_build_run(
-        self,
-        raw_repo_id: ObjectId,
-        build_id: str,
-        **kwargs,
-    ) -> RawBuildRun:
-        """
-        Upsert a build run by repo and build_id.
-
-        Note: This method doesn't include provider in the unique key.
-        Consider using upsert_by_business_key for better deduplication.
-        """
-        # Extract provider from kwargs if available
-        provider = kwargs.get("provider")
-        if provider:
-            return self.upsert_by_business_key(raw_repo_id, build_id, provider, **kwargs)
-
-        # Legacy behavior: upsert by (raw_repo_id, build_id) only
-        update_data = {
-            "raw_repo_id": raw_repo_id,
-            "ci_run_id": build_id,
-            **{k: v for k, v in kwargs.items() if v is not None},
-        }
-
-        doc = self.collection.find_one_and_update(
-            {"raw_repo_id": raw_repo_id, "ci_run_id": build_id},
-            {"$set": update_data},
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
-        return RawBuildRun(**doc)
-
     def get_latest_run(
         self,
         raw_repo_id: ObjectId,

@@ -40,6 +40,7 @@ import {
 } from "@/lib/api";
 import { FeatureDistributionChart } from "./FeatureDistributionChart";
 import { CorrelationMatrixChart } from "./CorrelationMatrixChart";
+import { FeatureDistributionCarousel } from "./FeatureDistributionCarousel";
 
 interface AnalysisSectionProps {
     datasetId: string;
@@ -274,7 +275,15 @@ export function AnalysisSection({ datasetId, versionId, versionStatus }: Analysi
                         </CardHeader>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                        <CardContent className="pt-0">
+                        <CardContent className="pt-0 space-y-4">
+                            {/* Horizontal Carousel with Lazy Loading */}
+                            <FeatureDistributionCarousel
+                                datasetId={datasetId}
+                                versionId={versionId}
+                                features={feature_completeness.map(f => f.feature_name)}
+                            />
+
+                            {/* Detail Charts Grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <FeatureDistributionChart
                                     datasetId={datasetId}

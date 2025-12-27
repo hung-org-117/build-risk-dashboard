@@ -17,11 +17,7 @@ from app.tasks.pipeline.shared.resources import (
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
 # Task Resolution Functions
-# =============================================================================
-
-
 def _resolve_dependencies(tasks: List[str]) -> List[str]:
     """
     Resolve all task dependencies recursively.
@@ -35,7 +31,6 @@ def _resolve_dependencies(tasks: List[str]) -> List[str]:
         if task in seen:
             return
         seen.add(task)
-        # Add dependencies first
         for dep in TASK_DEPENDENCIES.get(task, []):
             add_with_deps(dep)
         resolved.append(task)

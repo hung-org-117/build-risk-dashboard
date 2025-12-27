@@ -14,7 +14,7 @@ class DatasetRepoStats(BaseEntity):
 
     # References
     dataset_id: PyObjectId
-    raw_repo_id: PyObjectId  # Link to RawRepository
+    raw_repo_id: PyObjectId
 
     # Repo info (denormalized for convenience)
     full_name: str

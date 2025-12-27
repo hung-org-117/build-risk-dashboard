@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 from app.entities.feature_audit_log import (
     AuditLogCategory,
     FeatureAuditLog,
-    FeatureAuditLogStatus,
     NodeExecutionResult,
     NodeExecutionStatus,
 )
@@ -30,7 +29,6 @@ def _save_audit_log(
     raw_repo: RawRepository,
     raw_build_run: RawBuildRun,
     pipeline: HamiltonPipeline,
-    status: str,
     features: List[str],
     errors: List[str],
     category: AuditLogCategory,
@@ -47,7 +45,6 @@ def _save_audit_log(
         raw_repo: RawRepository entity
         raw_build_run: RawBuildRun entity
         pipeline: HamiltonPipeline instance (with execution results)
-        status: Execution status ("completed" or "failed")
         features: List of extracted feature names
         errors: List of error messages
         category: Pipeline category (model_training or dataset_enrichment)
@@ -71,11 +68,6 @@ def _save_audit_log(
             category=category,
             raw_repo_id=raw_repo.id,
             raw_build_run_id=raw_build_run.id,
-            status=(
-                FeatureAuditLogStatus.COMPLETED
-                if status == "completed"
-                else FeatureAuditLogStatus.FAILED
-            ),
             feature_count=len(features),
             features_extracted=features,
             errors=errors,
@@ -248,7 +240,6 @@ def extract_features_for_build(
                 raw_repo=raw_repo,
                 raw_build_run=raw_build_run,
                 pipeline=pipeline,
-                status="completed",
                 features=list(formatted_features.keys()),
                 errors=[],
                 category=category,
@@ -272,7 +263,6 @@ def extract_features_for_build(
                 raw_repo=raw_repo,
                 raw_build_run=raw_build_run,
                 pipeline=pipeline,
-                status="failed",
                 features=[],
                 errors=[str(e)],
                 category=category,
