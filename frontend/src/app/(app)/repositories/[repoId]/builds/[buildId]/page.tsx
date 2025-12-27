@@ -183,19 +183,16 @@ export default function BuildDetailPage() {
 
     const [build, setBuild] = useState<BuildDetail | null>(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [featureSearch, setFeatureSearch] = useState("");
 
     useEffect(() => {
         const loadBuild = async () => {
             setLoading(true);
-            setError(null);
             try {
                 const data = await buildApi.getById(repoId, buildId);
                 setBuild(data);
             } catch (err) {
                 console.error(err);
-                setError("Unable to load build details.");
             } finally {
                 setLoading(false);
             }
@@ -222,7 +219,7 @@ export default function BuildDetailPage() {
         );
     }
 
-    if (error || !build) {
+    if (!build) {
         return (
             <div className="space-y-6">
                 <Button
@@ -234,12 +231,12 @@ export default function BuildDetailPage() {
                     <ArrowLeft className="h-4 w-4" />
                     Back to Builds
                 </Button>
-                <Card className="border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
+                <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-900/20">
                     <CardHeader>
-                        <CardTitle className="text-red-700 dark:text-red-300">
-                            Error
+                        <CardTitle className="text-amber-700 dark:text-amber-300">
+                            Build Not Found
                         </CardTitle>
-                        <CardDescription>{error || "Build not found"}</CardDescription>
+                        <CardDescription>The requested build could not be loaded.</CardDescription>
                     </CardHeader>
                 </Card>
             </div>

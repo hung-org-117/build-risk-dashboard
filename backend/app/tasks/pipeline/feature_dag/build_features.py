@@ -151,10 +151,9 @@ def tr_duration(build_run: BuildRunInput) -> float:
 )
 def tr_log_lan_all(feature_config: FeatureConfigInput) -> List[str]:
     """All source languages for the repository."""
-    return [
-        lang.lower()
-        for lang in feature_config.get("source_languages", [], scope="repo")
-    ] or [""]
+    return [lang.lower() for lang in feature_config.get("source_languages", [], scope="repo")] or [
+        ""
+    ]
 
 
 @feature_metadata(
@@ -181,7 +180,7 @@ def gh_project_name(repo: RepoInput) -> str:
 @tag(group="metadata")
 def gh_lang(repo: RepoInput) -> Optional[str]:
     """Primary programming language."""
-    return repo.main_lang
+    return repo.main_lang.lower() if repo.main_lang else None
 
 
 @feature_metadata(
@@ -249,9 +248,7 @@ def _is_pr_build(build_run: BuildRunInput) -> bool:
 
     elif ci_provider == "travis_ci":
         # Travis uses pull_request (bool) or pull_req (PR number)
-        return (
-            raw_data.get("pull_request", False) or raw_data.get("pull_req") is not None
-        )
+        return raw_data.get("pull_request", False) or raw_data.get("pull_req") is not None
 
     elif ci_provider == "circleci":
         # Circle CI: check for pull_requests array or branch pattern
@@ -296,15 +293,11 @@ def _resolve_travis_trigger_commit(build_run: BuildRunInput) -> str:
 
     if match:
         actual_sha = match.group(1)
-        logger.info(
-            f"Resolved Travis virtual commit {commit_sha[:8]} to actual {actual_sha[:8]}"
-        )
+        logger.info(f"Resolved Travis virtual commit {commit_sha[:8]} to actual {actual_sha[:8]}")
         return actual_sha
 
     # Fallback: return original commit_sha
-    logger.debug(
-        f"Could not resolve Travis virtual commit from message: {commit_message[:50]}"
-    )
+    logger.debug(f"Could not resolve Travis virtual commit from message: {commit_message[:50]}")
     return commit_sha
 
 
@@ -381,9 +374,7 @@ def _find_primary_pr(payload: dict) -> Optional[dict]:
         base_repo_name = pr.get("base", {}).get("repo", {}).get("name", "?")
 
         if base_repo_id == repo_id:
-            logger.info(
-                f"Found primary PR #{pr_number} (base.repo.id matches repository.id)"
-            )
+            logger.info(f"Found primary PR #{pr_number} (base.repo.id matches repository.id)")
             return pr
         else:
             logger.debug(
@@ -391,9 +382,7 @@ def _find_primary_pr(payload: dict) -> Optional[dict]:
                 f"(id={base_repo_id}) != repo_id={repo_id}"
             )
 
-    logger.debug(
-        f"No primary PR found among {len(pull_requests)} PRs (all are fork PRs)"
-    )
+    logger.debug(f"No primary PR found among {len(pull_requests)} PRs (all are fork PRs)")
     return None
 
 
@@ -486,9 +475,7 @@ def gh_pr_created_at(
 
     try:
         full_name = github_client.full_name
-        logger.debug(
-            f"Fetching PR #{pr_number} details from GitHub API for {full_name}"
-        )
+        logger.debug(f"Fetching PR #{pr_number} details from GitHub API for {full_name}")
         pr_details = github_client.client.get_pull_request(full_name, pr_number)
         created_at = pr_details.get("created_at")
         logger.debug(f"PR #{pr_number} created_at: {created_at}")

@@ -37,7 +37,7 @@ from app.ci_providers import CIProvider, get_ci_provider, get_provider_config
 from app.ci_providers.models import BuildStatus
 from app.config import settings
 from app.core.tracing import TracingContext
-from app.entities.enums import ModelImportStatus
+from app.entities.enums import ExtractionStatus, ModelImportStatus
 from app.entities.model_import_build import ModelImportBuild, ModelImportBuildStatus
 from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.repositories.model_import_build import ModelImportBuildRepository
@@ -294,7 +294,7 @@ def fetch_builds_until_existing(
                 continue
 
             # Check if RawBuildRun already exists
-            existing_run = build_run_repo.find_by_ci_run_id(ObjectId(raw_repo_id), build.build_id)
+            existing_run = build_run_repo.find_by_build_id(ObjectId(raw_repo_id), build.build_id)
 
             if existing_run:
                 # Check if ModelTrainingBuild exists and is processed
@@ -305,9 +305,9 @@ def fetch_builds_until_existing(
                     ObjectId(raw_repo_id), existing_run.id
                 )
 
-                if training_build and training_build.extraction_status.value in (
-                    "completed",
-                    "partial",
+                if training_build and training_build.extraction_status in (
+                    ExtractionStatus.COMPLETED,
+                    ExtractionStatus.PARTIAL,
                 ):
                     existing_on_page += 1
                     continue

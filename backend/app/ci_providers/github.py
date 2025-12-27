@@ -90,9 +90,7 @@ class GitHubActionsProvider(CIProviderInterface):
 
         get_rate_limiter().wait()
 
-    def _get_github_client(
-        self, repo_name: Optional[str] = None, installation_id: Optional[str] = None
-    ):
+    def _get_github_client(self, repo_name: Optional[str] = None):
         """
         Get GitHubClient for API calls.
 
@@ -103,7 +101,6 @@ class GitHubActionsProvider(CIProviderInterface):
 
         Args:
             repo_name: Repository full name (owner/repo) to check org membership
-            installation_id: Explicit installation ID override (bypasses org check)
         """
         from app.services.github.github_client import (
             GitHubClient,
@@ -112,13 +109,9 @@ class GitHubActionsProvider(CIProviderInterface):
         )
         from app.services.model_repository_service import is_org_repo
 
-        # If explicit installation_id provided, use it directly
-        if installation_id:
-            return get_app_github_client(installation_id)
-
         # Check if repo belongs to org and use installation token
         if repo_name and is_org_repo(repo_name) and settings.GITHUB_INSTALLATION_ID:
-            return get_app_github_client(settings.GITHUB_INSTALLATION_ID)
+            return get_app_github_client()
 
         # If direct token configured, use it
         if self._has_direct_token():
@@ -136,7 +129,6 @@ class GitHubActionsProvider(CIProviderInterface):
         only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
-        installation_id: Optional[str] = None,
     ) -> List[BuildData]:
         """Fetch workflow runs from GitHub Actions (single page)."""
         builds = []
@@ -151,7 +143,7 @@ class GitHubActionsProvider(CIProviderInterface):
         if only_completed:
             params["status"] = "completed"
 
-        with self._get_github_client(repo_name, installation_id) as client:
+        with self._get_github_client(repo_name) as client:
             response = client.list_workflow_runs(repo_name, params)
             runs = response.get("workflow_runs", [])
 
@@ -187,32 +179,28 @@ class GitHubActionsProvider(CIProviderInterface):
 
         return builds[:limit] if limit else builds
 
-    async def fetch_build_details(
-        self, build_id: str, installation_id: Optional[str] = None
-    ) -> Optional[BuildData]:
+    async def fetch_build_details(self, build_id: str) -> Optional[BuildData]:
         """Fetch detailed information for a specific workflow run."""
         if ":" in build_id:
             repo_name, run_id = build_id.rsplit(":", 1)
         else:
             return None
 
-        with self._get_github_client(repo_name, installation_id) as client:
+        with self._get_github_client(repo_name) as client:
             try:
                 run = client.get_workflow_run(repo_name, int(run_id))
                 return self._parse_workflow_run(run, repo_name)
             except Exception:
                 return None
 
-    async def fetch_build_jobs(
-        self, build_id: str, installation_id: Optional[str] = None
-    ) -> List[JobData]:
+    async def fetch_build_jobs(self, build_id: str) -> List[JobData]:
         """Fetch jobs within a workflow run."""
         if ":" in build_id:
             repo_name, run_id = build_id.rsplit(":", 1)
         else:
             return []
 
-        with self._get_github_client(repo_name, installation_id) as client:
+        with self._get_github_client(repo_name) as client:
             jobs_data = client.list_workflow_jobs(repo_name, int(run_id))
             return [self._parse_job(job) for job in jobs_data]
 
@@ -220,7 +208,6 @@ class GitHubActionsProvider(CIProviderInterface):
         self,
         build_id: str,
         job_id: Optional[str] = None,
-        installation_id: Optional[str] = None,
     ) -> List[LogFile]:
         """Fetch logs for a workflow run or specific job."""
         from app.services.github.exceptions import GithubLogsUnavailableError
@@ -232,7 +219,7 @@ class GitHubActionsProvider(CIProviderInterface):
 
         logs = []
 
-        with self._get_github_client(repo_name, installation_id) as client:
+        with self._get_github_client(repo_name) as client:
             if job_id:
                 try:
                     content = client.download_job_logs(repo_name, int(job_id))

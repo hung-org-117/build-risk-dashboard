@@ -362,6 +362,7 @@ export interface RepoSuggestion {
   private: boolean;
   owner?: string;
   html_url?: string;
+  github_repo_id?: number;
 }
 
 export interface RepoSuggestionResponse {

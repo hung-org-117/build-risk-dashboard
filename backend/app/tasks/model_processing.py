@@ -41,6 +41,7 @@ def start_model_processing(
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
     only_with_logs: bool = False,
+    sync_until_existing: bool = False,
 ) -> Dict[str, Any]:
     """
     Orchestrator: Start ingestion for repo, then dispatch processing.
@@ -83,6 +84,7 @@ def start_model_processing(
             max_builds=max_builds,
             since_days=since_days,
             only_with_logs=only_with_logs,
+            sync_until_existing=sync_until_existing,
             correlation_id=correlation_id,
         )
 

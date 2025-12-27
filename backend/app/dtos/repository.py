@@ -91,6 +91,7 @@ class RepoSuggestion(BaseModel):
     private: bool = False
     owner: Optional[str] = None
     html_url: Optional[str] = None
+    github_repo_id: Optional[int] = None
 
 
 class RepoSuggestionListResponse(BaseModel):

@@ -33,21 +33,18 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         )
         return ModelTrainingBuild(**doc) if doc else None
 
-    def find_by_repo_and_run_id(
+    def find_by_raw_build_run_id(
         self,
-        repo_id: str,
-        ci_run_id: int,
+        raw_repo_id: ObjectId,
+        raw_build_run_id: ObjectId,
     ) -> Optional[ModelTrainingBuild]:
-        """Convenience method - finds by repo_id and ci_run_id (denormalized)."""
-        # Query by raw_repo_id and looking for matching build_number/workflow reference
+        """Find build by raw repo and raw build run."""
         doc = self.collection.find_one(
             {
-                "model_repo_config_id": self.ensure_object_id(repo_id),
+                "raw_repo_id": raw_repo_id,
+                "raw_build_run_id": raw_build_run_id,
             }
         )
-        # For backward compatibility, look up in raw_workflow_runs to find the actual build
-        if not doc:
-            return None
         return ModelTrainingBuild(**doc) if doc else None
 
     def list_by_repo(

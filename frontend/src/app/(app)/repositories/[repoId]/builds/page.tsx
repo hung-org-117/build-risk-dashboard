@@ -209,7 +209,6 @@ export default function RepoBuildsPage() {
     const [builds, setBuilds] = useState<Build[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
 
@@ -231,7 +230,6 @@ export default function RepoBuildsPage() {
             setRepo(data);
         } catch (err) {
             console.error(err);
-            setError("Unable to load repository details.");
         }
     }, [repoId]);
 
@@ -243,7 +241,6 @@ export default function RepoBuildsPage() {
             // For now, we rely on WebSocket or polling to update the list eventually
         } catch (err) {
             console.error("Failed to trigger sync", err);
-            setError("Failed to trigger sync.");
         } finally {
             setSyncing(false);
         }
@@ -267,7 +264,6 @@ export default function RepoBuildsPage() {
                 setPage(pageNumber);
             } catch (err) {
                 console.error(err);
-                setError("Unable to load builds.");
             } finally {
                 setLoading(false);
                 setTableLoading(false);
@@ -377,18 +373,7 @@ export default function RepoBuildsPage() {
                 </div>
             </div>
 
-            {
-                error ? (
-                    <Card className="border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
-                        <CardHeader>
-                            <CardTitle className="text-red-700 dark:text-red-300">
-                                Error
-                            </CardTitle>
-                            <CardDescription>{error}</CardDescription>
-                        </CardHeader>
-                    </Card>
-                ) : null
-            }
+
 
             {/* Repository Info Card */}
             {repo && (
@@ -592,7 +577,6 @@ export default function RepoBuildsPage() {
                                                                 await buildApi.reprocess(repoId, build.id);
                                                             } catch (err) {
                                                                 console.error("Failed to reprocess build", err);
-                                                                setError("Failed to reprocess build.");
                                                             } finally {
                                                                 setReprocessingBuilds((prev) => ({ ...prev, [build.id]: false }));
                                                             }

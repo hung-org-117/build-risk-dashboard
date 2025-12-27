@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from bson.objectid import ObjectId
 from hamilton.function_modifiers import extract_fields, tag
 
 from app.tasks.pipeline.feature_dag._inputs import (
@@ -129,7 +130,9 @@ def git_commit_info(
         last_commit_sha = hexsha
 
         # Check if this commit has a build in DB
-        existing_build = raw_build_runs.find_one({"commit_sha": hexsha, "raw_repo_id": repo.id})
+        existing_build = raw_build_runs.find_one(
+            {"commit_sha": hexsha, "raw_repo_id": ObjectId(repo.id)}
+        )
 
         if existing_build:
             status = "build_found"
@@ -547,7 +550,7 @@ def _get_pr_mergers(
     try:
         cursor = raw_build_runs.find(
             {
-                "raw_repo_id": repo_id,
+                "raw_repo_id": ObjectId(repo_id),
                 "created_at": {"$gte": start_date, "$lte": end_date},
             }
         )

@@ -273,7 +273,7 @@ async def exchange_code_for_token(
     accessible_repos = await sync_user_github_repos(access_token)
     if accessible_repos:
         db.users.update_one(
-            {"_id": user_doc["_id"]},
+            {"_id": user_doc.id},
             {
                 "$set": {
                     "github_accessible_repos": accessible_repos,

@@ -115,7 +115,6 @@ export default function OverviewPage() {
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
   const [availableWidgets, setAvailableWidgets] = useState<WidgetDefinition[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1200);
@@ -147,7 +146,6 @@ export default function OverviewPage() {
 
     const loadData = async () => {
       setLoading(true);
-      setError(null);
 
       try {
         const [summaryResult, layoutResult, widgetsResult, buildsResult] = await Promise.all([
@@ -167,11 +165,6 @@ export default function OverviewPage() {
         setAvailableWidgets(widgetsResult);
       } catch (err) {
         console.error("Failed to load overview data", err);
-        if (isActive) {
-          setError(
-            "Unable to load overview data. Please check the backend API."
-          );
-        }
       } finally {
         if (isActive) {
           setLoading(false);
@@ -341,24 +334,18 @@ export default function OverviewPage() {
     );
   }
 
-  if (error || !summary || !summary.metrics) {
+  if (!summary || !summary.metrics) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <Card className="w-full max-w-md border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-900/20">
+        <Card className="w-full max-w-md border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-900/20">
           <CardHeader>
-            <CardTitle className="text-red-600 dark:text-red-300">
-              Unable to load data
+            <CardTitle className="text-amber-600 dark:text-amber-300">
+              No data available
             </CardTitle>
             <CardDescription>
-              {error ?? "Overview data is not yet available."}
+              Overview data is not yet available. Import repositories or create datasets to get started.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Check the backend FastAPI and ensure the endpoint{" "}
-              <code>/api/dashboard/summary</code> is operational.
-            </p>
-          </CardContent>
         </Card>
       </div>
     );

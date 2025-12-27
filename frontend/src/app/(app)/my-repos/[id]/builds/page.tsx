@@ -94,7 +94,6 @@ export default function UserBuildsPage() {
     const [builds, setBuilds] = useState<Build[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
 
@@ -107,7 +106,6 @@ export default function UserBuildsPage() {
             setRepo(data);
         } catch (err) {
             console.error(err);
-            setError("Unable to load repository details.");
         }
     }, [repoId]);
 
@@ -125,7 +123,6 @@ export default function UserBuildsPage() {
                 setPage(pageNumber);
             } catch (err) {
                 console.error(err);
-                setError("Unable to load builds.");
             } finally {
                 setLoading(false);
                 setTableLoading(false);
@@ -193,14 +190,7 @@ export default function UserBuildsPage() {
                 </div>
             </div>
 
-            {error && (
-                <Card className="border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
-                    <CardHeader>
-                        <CardTitle className="text-red-700 dark:text-red-300">Error</CardTitle>
-                        <CardDescription>{error}</CardDescription>
-                    </CardHeader>
-                </Card>
-            )}
+
 
             {repo && (
                 <Card>

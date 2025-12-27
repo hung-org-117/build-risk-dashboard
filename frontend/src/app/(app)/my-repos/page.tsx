@@ -38,7 +38,6 @@ export default function UserReposPage() {
     const [repositories, setRepositories] = useState<RepositoryRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     const [searchQuery, setSearchQuery] = useState("");
     const debouncedSearchQuery = useDebounce(searchQuery, 500);
@@ -58,10 +57,8 @@ export default function UserReposPage() {
                 setRepositories(data.items);
                 setTotal(data.total);
                 setPage(pageNumber);
-                setError(null);
             } catch (err) {
                 console.error(err);
-                setError("Unable to load repositories.");
             } finally {
                 setLoading(false);
                 setTableLoading(false);
@@ -104,20 +101,7 @@ export default function UserReposPage() {
         );
     }
 
-    if (error) {
-        return (
-            <div className="flex min-h-[60vh] items-center justify-center">
-                <Card className="w-full max-w-md border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
-                    <CardHeader>
-                        <CardTitle className="text-red-700 dark:text-red-300">
-                            Unable to load data
-                        </CardTitle>
-                        <CardDescription>{error}</CardDescription>
-                    </CardHeader>
-                </Card>
-            </div>
-        );
-    }
+
 
     return (
         <div className="space-y-6">

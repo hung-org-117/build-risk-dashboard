@@ -99,11 +99,9 @@ class RepositoryService:
         for payload in payloads:
             target_user_id = user_id
 
-            from app.config import settings
-
             is_org_owned = is_org_repo(payload.full_name)
             if is_org_owned:
-                client_ctx = get_app_github_client(self.db, settings.GITHUB_INSTALLATION_ID)
+                client_ctx = get_app_github_client()
             else:
                 client_ctx = get_user_github_client(self.db, user_id)
 
@@ -215,6 +213,7 @@ class RepositoryService:
                             "private": bool(repo.get("private")),
                             "owner": repo.get("owner", {}).get("login"),
                             "html_url": repo.get("html_url"),
+                            "github_repo_id": repo.get("id"),
                         }
                     )
         except Exception as e:
@@ -286,6 +285,7 @@ class RepositoryService:
                                 "private": bool(repo.get("private")),
                                 "owner": owner,
                                 "html_url": repo.get("html_url"),
+                                "github_repo_id": repo.get("id"),
                             }
                         )
 
@@ -307,6 +307,7 @@ class RepositoryService:
                             "private": False,
                             "owner": owner,
                             "html_url": repo.get("html_url"),
+                            "github_repo_id": repo.get("id"),
                         }
                     )
         except Exception as e:

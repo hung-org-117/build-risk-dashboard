@@ -180,20 +180,21 @@ export default function ImportRepositoriesPage() {
     }, [performSearch]);
 
     const toggleSelection = (repo: RepoSuggestion) => {
+        const repoId = String(repo.github_repo_id);
         setSelectedRepos((prev) => {
             const next = { ...prev };
-            if (next[repo.full_name]) {
-                delete next[repo.full_name];
+            if (next[repoId]) {
+                delete next[repoId];
                 setBaseConfigs((current) => {
                     const updated = { ...current };
-                    delete updated[repo.full_name];
+                    delete updated[repoId];
                     return updated;
                 });
             } else {
-                next[repo.full_name] = repo;
+                next[repoId] = repo;
                 setBaseConfigs((current) => ({
                     ...current,
-                    [repo.full_name]: {
+                    [repoId]: {
                         ci_provider: CIProvider.GITHUB_ACTIONS,
                         max_builds: null,
                         since_days: null,
@@ -212,7 +213,8 @@ export default function ImportRepositoriesPage() {
             return;
         }
         if (!activeRepo || !selectedRepos[activeRepo]) {
-            setActiveRepo(selectedList[0].full_name);
+            // Using ID as key
+            setActiveRepo(String(selectedList[0].github_repo_id));
         }
     }, [selectedList, activeRepo, selectedRepos]);
 
@@ -232,8 +234,9 @@ export default function ImportRepositoriesPage() {
 
         try {
             const payloads: RepoImportPayload[] = selectedList.map((repo) => {
-                const baseConfig = baseConfigs[repo.full_name];
-                const dynamicRepoConfig = featureConfigs.repos[repo.full_name] || {};
+                const repoId = String(repo.github_repo_id);
+                const baseConfig = baseConfigs[repoId];
+                const dynamicRepoConfig = featureConfigs.repos[repoId] || {};
 
                 return {
                     full_name: repo.full_name,
@@ -244,7 +247,7 @@ export default function ImportRepositoriesPage() {
                     feature_configs: {
                         global: featureConfigs.global,
                         repos: {
-                            [repo.full_name]: dynamicRepoConfig,
+                            [repoId]: dynamicRepoConfig,
                         },
                     },
                 };
@@ -262,7 +265,7 @@ export default function ImportRepositoriesPage() {
     const featureFormFeatures = useMemo(() => new Set(selectedFeatures), [selectedFeatures]);
 
     const featureFormRepos = useMemo(() => selectedList.map(r => ({
-        id: r.full_name,
+        id: String(r.github_repo_id),
         full_name: r.full_name,
         validation_status: "unknown"
     })), [selectedList]);
@@ -464,9 +467,9 @@ function Step1Content({
                     ) : (
                         privateMatches.map((repo) => (
                             <RepoItem
-                                key={repo.full_name}
+                                key={repo.github_repo_id}
                                 repo={repo}
-                                isSelected={!!selectedRepos[repo.full_name]}
+                                isSelected={!!selectedRepos[String(repo.github_repo_id)]}
                                 onToggle={() => toggleSelection(repo)}
                             />
                         ))
@@ -490,9 +493,9 @@ function Step1Content({
                     ) : (
                         publicMatches.map((repo) => (
                             <RepoItem
-                                key={repo.full_name}
+                                key={repo.github_repo_id}
                                 repo={repo}
-                                isSelected={!!selectedRepos[repo.full_name]}
+                                isSelected={!!selectedRepos[String(repo.github_repo_id)]}
                                 onToggle={() => toggleSelection(repo)}
                             />
                         ))
@@ -537,12 +540,12 @@ function Step2Content({
             <div className="flex gap-2 overflow-x-auto pb-2">
                 {selectedList.map((repo) => (
                     <button
-                        key={repo.full_name}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeRepo === repo.full_name
+                        key={repo.github_repo_id}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeRepo === String(repo.github_repo_id)
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted hover:bg-muted/80"
                             }`}
-                        onClick={() => setActiveRepo(repo.full_name)}
+                        onClick={() => setActiveRepo(String(repo.github_repo_id))}
                     >
                         {repo.full_name.split("/")[1]}
                     </button>
@@ -683,7 +686,7 @@ function SelectedReposPreview({
         <div className="space-y-2">
             {selectedList.map((repo) => (
                 <div
-                    key={repo.full_name}
+                    key={repo.github_repo_id}
                     className="flex items-center justify-between gap-2 rounded-lg border bg-background p-3"
                 >
                     <div className="min-w-0 flex-1">
