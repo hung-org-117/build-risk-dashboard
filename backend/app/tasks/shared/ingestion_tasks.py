@@ -266,6 +266,7 @@ def create_worktree_chunk(
         worktrees_skipped = 0
         worktrees_failed = 0
         fork_commits_replayed = 0
+        failed_commits: list[str] = []  # Track which commits failed
 
         for sha in commit_shas:
             worktree_path = worktrees_dir / sha[:12]
@@ -354,12 +355,15 @@ def create_worktree_chunk(
                     f"cmd={e.cmd}, returncode={e.returncode}, stderr={e.stderr}"
                 )
                 worktrees_failed += 1
+                failed_commits.append(sha)
             except subprocess.TimeoutExpired as e:
                 logger.error(f"{log_ctx} Timeout creating worktree for {sha[:8]}: {e}")
                 worktrees_failed += 1
+                failed_commits.append(sha)
             except Exception as e:
                 logger.exception(f"{log_ctx} Unexpected error creating worktree for {sha[:8]}: {e}")
                 worktrees_failed += 1
+                failed_commits.append(sha)
 
         logger.info(
             f"{log_ctx} Completed: created={worktrees_created}, "
@@ -373,6 +377,7 @@ def create_worktree_chunk(
                 "worktrees_skipped": worktrees_skipped,
                 "worktrees_failed": worktrees_failed,
                 "fork_commits_replayed": fork_commits_replayed,
+                "failed_commits": failed_commits,  # Per-build tracking
             }
         )
 
@@ -389,6 +394,7 @@ def create_worktree_chunk(
                 "worktrees_skipped": worktrees_skipped,
                 "worktrees_failed": worktrees_failed + remaining,
                 "fork_commits_replayed": fork_commits_replayed,
+                "failed_commits": failed_commits,
                 "error": f"Timeout: {remaining} commits not processed",
             }
         )
@@ -638,11 +644,13 @@ def download_logs_chunk(
         logs_expired = 0
         logs_skipped = 0
         max_log_size = settings.GIT_MAX_LOG_SIZE_MB * 1024 * 1024
+        failed_log_ids: list[str] = []
+        expired_log_ids: list[str] = []
 
         max_consecutive = int(redis_client.get(f"{session_key}:max_expired") or 10)
 
         async def download_one(build_id: str) -> str:
-            nonlocal logs_downloaded, logs_expired, logs_skipped
+            nonlocal logs_downloaded, logs_expired, logs_skipped, failed_log_ids, expired_log_ids
 
             # Check stop flag before each download
             if redis_client.get(f"{session_key}:stop"):
@@ -707,6 +715,7 @@ def download_logs_chunk(
                             {"logs_available": False, "logs_expired": True},
                         )
                     logs_expired += 1
+                    expired_log_ids.append(build_id)
 
                     # Update consecutive counter in Redis
                     consecutive = redis_client.incr(f"{session_key}:consecutive")
@@ -736,6 +745,7 @@ def download_logs_chunk(
                     return "downloaded"
                 else:
                     logs_expired += 1
+                    expired_log_ids.append(build_id)
                     return "expired"
 
             except GithubLogsUnavailableError:
@@ -745,12 +755,14 @@ def download_logs_chunk(
                         {"logs_available": False, "logs_expired": True},
                     )
                 logs_expired += 1
+                expired_log_ids.append(build_id)
                 consecutive = redis_client.incr(f"{session_key}:consecutive")
                 if consecutive >= max_consecutive:
                     redis_client.set(f"{session_key}:stop", 1, ex=3600)
                 return "expired"
             except Exception as e:
                 logger.exception(f"{log_ctx} Failed to download logs for build {build_id}: {e}")
+                failed_log_ids.append(build_id)
                 return "failed"
 
         loop = asyncio.new_event_loop()
@@ -771,6 +783,8 @@ def download_logs_chunk(
         result["logs_downloaded"] = logs_downloaded
         result["logs_expired"] = logs_expired
         result["logs_skipped"] = logs_skipped
+        result["failed_log_ids"] = failed_log_ids
+        result["expired_log_ids"] = expired_log_ids
         return result
 
     except SoftTimeLimitExceeded:

@@ -237,7 +237,7 @@ class HamiltonPipeline:
             "feature_config": prepared.inputs.feature_config,
             "build_logs": prepared.inputs.build_logs,
             "raw_build_runs": self.db.get_collection("raw_build_runs"),
-            "model_training_builds": self.db.get_collection("model_training_builds"),
+            "feature_vectors": self.db.get_collection("feature_vectors"),
         }
 
         if prepared.github_client:
@@ -289,7 +289,7 @@ class HamiltonPipeline:
             "repo": repo,
             "build_run": build_run,
             "raw_build_runs": self.db.get_collection("raw_build_runs"),
-            "model_training_builds": self.db.get_collection("model_training_builds"),
+            "feature_vectors": self.db.get_collection("feature_vectors"),
         }
 
         if feature_config:

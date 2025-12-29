@@ -1,10 +1,20 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, Clock, Loader2, RotateCcw, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Loader2, RotateCcw, XCircle, SkipForward } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+
+// Resource status from FeatureResource enum values
+type ResourceStatusCounts = Record<string, number>;
+
+interface ResourceStatus {
+    git_history?: ResourceStatusCounts;
+    git_worktree?: ResourceStatusCounts;
+    build_logs?: ResourceStatusCounts;
+}
 
 interface ImportProgress {
     import_builds: {
@@ -15,6 +25,7 @@ interface ImportProgress {
         failed: number;
         total: number;
     };
+    resource_status?: ResourceStatus;
     training_builds: {
         pending: number;
         completed: number;
@@ -43,6 +54,83 @@ type PhaseInfo = {
     isActive: boolean;
     canRetry: boolean;
 };
+
+// Resource name mapping for display
+const RESOURCE_DISPLAY_NAMES: Record<string, string> = {
+    git_history: "Git Clone",
+    git_worktree: "Worktrees",
+    build_logs: "Build Logs",
+};
+
+function ResourceStatusDisplay({ resourceStatus }: { resourceStatus?: ResourceStatus }) {
+    if (!resourceStatus) return null;
+
+    const resources = ["git_history", "git_worktree", "build_logs"] as const;
+
+    // Check if any resource has data
+    const hasData = resources.some(r => resourceStatus[r] && Object.keys(resourceStatus[r] || {}).length > 0);
+    if (!hasData) return null;
+
+    return (
+        <div className="mt-4 pt-4 border-t">
+            <p className="text-sm font-medium mb-2">Resource Status</p>
+            <div className="grid gap-2">
+                {resources.map(resourceKey => {
+                    const counts = resourceStatus[resourceKey];
+                    if (!counts || Object.keys(counts).length === 0) return null;
+
+                    const displayName = RESOURCE_DISPLAY_NAMES[resourceKey] || resourceKey;
+                    const completed = counts["completed"] || 0;
+                    const failed = counts["failed"] || 0;
+                    const skipped = counts["skipped"] || 0;
+                    const pending = counts["pending"] || 0;
+                    const inProgress = counts["in_progress"] || 0;
+                    const total = completed + failed + skipped + pending + inProgress;
+
+                    // Determine status icon and color
+                    let StatusIcon = Clock;
+                    let statusColor = "text-slate-400";
+                    let badgeVariant: "default" | "secondary" | "destructive" | "outline" = "outline";
+                    let statusText = "Pending";
+
+                    if (skipped === total && total > 0) {
+                        StatusIcon = SkipForward;
+                        statusColor = "text-slate-400";
+                        badgeVariant = "secondary";
+                        statusText = "Skipped";
+                    } else if (failed > 0) {
+                        StatusIcon = XCircle;
+                        statusColor = "text-red-500";
+                        badgeVariant = "destructive";
+                        statusText = `${failed} Failed`;
+                    } else if (inProgress > 0) {
+                        StatusIcon = Loader2;
+                        statusColor = "text-blue-500";
+                        badgeVariant = "default";
+                        statusText = "In Progress";
+                    } else if (completed === total && total > 0) {
+                        StatusIcon = CheckCircle2;
+                        statusColor = "text-green-500";
+                        badgeVariant = "outline";
+                        statusText = "Completed";
+                    }
+
+                    return (
+                        <div key={resourceKey} className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2">
+                                <StatusIcon className={cn("h-4 w-4", statusColor, StatusIcon === Loader2 && "animate-spin")} />
+                                <span className="text-muted-foreground">{displayName}</span>
+                            </div>
+                            <Badge variant={badgeVariant} className="text-xs font-normal">
+                                {statusText}
+                            </Badge>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
 
 function getPhaseInfo(status: string, progress: ImportProgress | null): PhaseInfo | null {
     if (!progress) return null;
@@ -241,6 +329,11 @@ export function CurrentPhaseCard({ status, progress, isLoading, onRetryFailed }:
                     <p className="text-sm text-muted-foreground">
                         Pipeline is queued and will start shortly...
                     </p>
+                )}
+
+                {/* Resource Status Display - shown during/after ingestion */}
+                {progress?.resource_status && (
+                    <ResourceStatusDisplay resourceStatus={progress.resource_status} />
                 )}
             </CardContent>
         </Card>

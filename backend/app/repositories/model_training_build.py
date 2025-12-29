@@ -276,8 +276,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         build_status: Optional[str] = None,
     ):
         """
-        Get cursor for streaming export of builds.
+        Get cursor for streaming export of builds with features from FeatureVector.
 
+        Uses $lookup aggregation to join with feature_vectors collection.
         Returns a cursor (not materialized list) for memory-efficient streaming.
 
         Args:
@@ -287,24 +288,49 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             build_status: Optional filter by build status
 
         Returns:
-            MongoDB cursor for iteration
+            MongoDB aggregation cursor for iteration
         """
-        query: Dict[str, Any] = {
+        match_query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
             "extraction_status": ExtractionStatus.COMPLETED.value,
         }
 
         if start_date or end_date:
-            query["build_created_at"] = {}
+            match_query["build_created_at"] = {}
             if start_date:
-                query["build_created_at"]["$gte"] = start_date
+                match_query["build_created_at"]["$gte"] = start_date
             if end_date:
-                query["build_created_at"]["$lte"] = end_date
+                match_query["build_created_at"]["$lte"] = end_date
 
         if build_status:
-            query["build_status"] = build_status
+            match_query["build_status"] = build_status
 
-        return self.collection.find(query).sort("build_created_at", 1).batch_size(100)
+        pipeline = [
+            {"$match": match_query},
+            {"$sort": {"build_created_at": 1}},
+            # Join with feature_vectors to get features
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "feature_vector",
+                }
+            },
+            # Unwind to get single feature_vector document
+            {"$unwind": {"path": "$feature_vector", "preserveNullAndEmptyArrays": True}},
+            # Add features field from feature_vector
+            {
+                "$addFields": {
+                    "features": {"$ifNull": ["$feature_vector.features", {}]},
+                    "feature_count": {"$ifNull": ["$feature_vector.feature_count", 0]},
+                }
+            },
+            # Remove the temporary feature_vector field
+            {"$project": {"feature_vector": 0}},
+        ]
+
+        return self.collection.aggregate(pipeline, batchSize=100)
 
     def get_all_feature_keys(
         self,
@@ -316,6 +342,8 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """
         Get all unique feature keys from completed builds for consistent CSV columns.
 
+        Joins with feature_vectors collection to get feature keys.
+
         Args:
             model_repo_config_id: The ModelRepoConfig ID
             start_date: Optional filter
@@ -325,24 +353,35 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         Returns:
             Set of feature key names
         """
-        query: Dict[str, Any] = {
+        match_query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
             "extraction_status": ExtractionStatus.COMPLETED.value,
         }
 
         if start_date or end_date:
-            query["build_created_at"] = {}
+            match_query["build_created_at"] = {}
             if start_date:
-                query["build_created_at"]["$gte"] = start_date
+                match_query["build_created_at"]["$gte"] = start_date
             if end_date:
-                query["build_created_at"]["$lte"] = end_date
+                match_query["build_created_at"]["$lte"] = end_date
 
         if build_status:
-            query["build_status"] = build_status
+            match_query["build_status"] = build_status
 
         pipeline = [
-            {"$match": query},
-            {"$project": {"feature_keys": {"$objectToArray": "$features"}}},
+            {"$match": match_query},
+            # Join with feature_vectors
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "feature_vector",
+                }
+            },
+            {"$unwind": {"path": "$feature_vector", "preserveNullAndEmptyArrays": False}},
+            # Extract feature keys from feature_vector.features
+            {"$project": {"feature_keys": {"$objectToArray": "$feature_vector.features"}}},
             {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
         ]

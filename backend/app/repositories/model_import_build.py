@@ -4,13 +4,18 @@ ModelImportBuild Repository - Database operations for model import builds.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from bson import ObjectId
 from pymongo import ReturnDocument
 from pymongo.synchronous.client_session import ClientSession
 
-from app.entities.model_import_build import ModelImportBuild, ModelImportBuildStatus
+from app.entities.model_import_build import (
+    ModelImportBuild,
+    ModelImportBuildStatus,
+    ResourceStatus,
+)
 from app.repositories.base import BaseRepository
 
 if TYPE_CHECKING:
@@ -196,3 +201,283 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
             session=session,
         )
         return result.deleted_count
+
+    # ========== Resource Status Tracking Methods ==========
+
+    def update_resource_status(
+        self,
+        build_id: str,
+        resource: str,
+        status: ResourceStatus,
+        error: Optional[str] = None,
+    ) -> bool:
+        """
+        Update status for a specific resource on a build.
+
+        Args:
+            build_id: ModelImportBuild ID
+            resource: Resource name (e.g., 'clone', 'worktree', 'logs')
+            status: New status
+            error: Optional error message
+
+        Returns:
+            True if updated successfully
+        """
+        now = datetime.utcnow()
+        update: dict = {
+            f"resource_status.{resource}.status": status.value,
+        }
+
+        if error:
+            update[f"resource_status.{resource}.error"] = error
+
+        if status == ResourceStatus.COMPLETED:
+            update[f"resource_status.{resource}.completed_at"] = now
+        elif status == ResourceStatus.IN_PROGRESS:
+            update[f"resource_status.{resource}.started_at"] = now
+
+        result = self.collection.update_one(
+            {"_id": ObjectId(build_id)},
+            {"$set": update},
+        )
+        return result.modified_count > 0
+
+    def update_resource_status_batch(
+        self,
+        config_id: str,
+        resource: str,
+        status: ResourceStatus,
+        error: Optional[str] = None,
+    ) -> int:
+        """
+        Update resource status for all INGESTING builds in a repo config.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            resource: Resource name
+            status: New status
+            error: Optional error message
+
+        Returns:
+            Number of builds updated
+        """
+        now = datetime.utcnow()
+        update: dict = {
+            f"resource_status.{resource}.status": status.value,
+        }
+
+        if error:
+            update[f"resource_status.{resource}.error"] = error
+
+        if status == ResourceStatus.COMPLETED:
+            update[f"resource_status.{resource}.completed_at"] = now
+        elif status == ResourceStatus.IN_PROGRESS:
+            update[f"resource_status.{resource}.started_at"] = now
+
+        result = self.collection.update_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "status": ModelImportBuildStatus.INGESTING.value,
+            },
+            {"$set": update},
+        )
+        return result.modified_count
+
+    def init_resource_status(
+        self,
+        config_id: str,
+        required_resources: List[str],
+    ) -> int:
+        """
+        Initialize resource_status for all INGESTING builds.
+
+        Sets required resources to PENDING and others to SKIPPED.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            required_resources: List of resource names needed by template
+
+        Returns:
+            Number of builds updated
+        """
+        from app.tasks.pipeline.shared.resources import FeatureResource
+
+        # Get all ingestion-related resources from FeatureResource enum
+        ingestion_resources = [
+            FeatureResource.GIT_HISTORY.value,  # "git_history"
+            FeatureResource.GIT_WORKTREE.value,  # "git_worktree"
+            FeatureResource.BUILD_LOGS.value,  # "build_logs"
+        ]
+
+        # Build initial resource_status dict
+        resource_status = {}
+        for res in ingestion_resources:
+            if res in required_resources:
+                resource_status[res] = {
+                    "status": ResourceStatus.PENDING.value,
+                    "error": None,
+                    "started_at": None,
+                    "completed_at": None,
+                }
+            else:
+                resource_status[res] = {
+                    "status": ResourceStatus.SKIPPED.value,
+                    "error": None,
+                    "started_at": None,
+                    "completed_at": None,
+                }
+
+        result = self.collection.update_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "status": ModelImportBuildStatus.INGESTING.value,
+            },
+            {
+                "$set": {
+                    "resource_status": resource_status,
+                    "required_resources": required_resources,
+                }
+            },
+        )
+        return result.modified_count
+
+    def find_by_failed_resource(
+        self,
+        config_id: str,
+        resource: str,
+    ) -> List[ModelImportBuild]:
+        """Find builds with a specific failed resource."""
+        return self.find_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                f"resource_status.{resource}.status": ResourceStatus.FAILED.value,
+            }
+        )
+
+    def update_resource_by_commits(
+        self,
+        config_id: str,
+        resource: str,
+        failed_commits: List[str],
+        status: ResourceStatus,
+        error: Optional[str] = None,
+    ) -> int:
+        """
+        Update resource status for builds matching specific commit SHAs.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            resource: Resource name (e.g., git_worktree)
+            failed_commits: List of commit SHAs that failed
+            status: Status for failed builds
+            error: Error message
+
+        Returns:
+            Number of builds updated
+        """
+        now = datetime.utcnow()
+        update: dict = {
+            f"resource_status.{resource}.status": status.value,
+            f"resource_status.{resource}.completed_at": now,
+        }
+        if error:
+            update[f"resource_status.{resource}.error"] = error
+
+        result = self.collection.update_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "status": ModelImportBuildStatus.INGESTING.value,
+                "commit_sha": {"$in": failed_commits},
+            },
+            {"$set": update},
+        )
+        return result.modified_count
+
+    def update_resource_by_ci_run_ids(
+        self,
+        config_id: str,
+        resource: str,
+        ci_run_ids: List[str],
+        status: ResourceStatus,
+        error: Optional[str] = None,
+    ) -> int:
+        """
+        Update resource status for builds matching specific CI run IDs.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            resource: Resource name (e.g., build_logs)
+            ci_run_ids: List of CI run IDs (e.g., GitHub Actions run IDs)
+            status: Status for builds
+            error: Error message
+
+        Returns:
+            Number of builds updated
+        """
+        now = datetime.utcnow()
+        update: dict = {
+            f"resource_status.{resource}.status": status.value,
+            f"resource_status.{resource}.completed_at": now,
+        }
+        if error:
+            update[f"resource_status.{resource}.error"] = error
+
+        result = self.collection.update_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "status": ModelImportBuildStatus.INGESTING.value,
+                "ci_run_id": {"$in": ci_run_ids},
+            },
+            {"$set": update},
+        )
+        return result.modified_count
+
+    def get_resource_status_summary(self, config_id: str) -> dict:
+        """
+        Get aggregated resource status counts for a repo config.
+
+        Returns structure like:
+        {
+            "git_history": {"completed": 10, "failed": 2},
+            "git_worktree": {"completed": 8, "failed": 4},
+            "build_logs": {"completed": 5, "skipped": 6}
+        }
+        """
+        from app.tasks.pipeline.shared.resources import FeatureResource
+
+        ingestion_resources = [
+            FeatureResource.GIT_HISTORY.value,
+            FeatureResource.GIT_WORKTREE.value,
+            FeatureResource.BUILD_LOGS.value,
+        ]
+
+        # Build dynamic projection
+        project_fields = {}
+        facet_fields = {}
+        for res in ingestion_resources:
+            field_name = res.replace(".", "_") + "_status"
+            project_fields[field_name] = f"$resource_status.{res}.status"
+            facet_fields[res] = [
+                {"$group": {"_id": f"${field_name}", "count": {"$sum": 1}}},
+            ]
+
+        pipeline = [
+            {"$match": {"model_repo_config_id": ObjectId(config_id)}},
+            {"$project": project_fields},
+            {"$facet": facet_fields},
+        ]
+
+        results = list(self.collection.aggregate(pipeline))
+        if not results:
+            return {}
+
+        facets = results[0]
+        summary = {}
+
+        for resource in ingestion_resources:
+            summary[resource] = {}
+            for item in facets.get(resource, []):
+                if item["_id"]:
+                    summary[resource][item["_id"]] = item["count"]
+
+        return summary

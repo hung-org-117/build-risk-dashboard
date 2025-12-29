@@ -26,7 +26,7 @@ class FeatureResource(str, Enum):
 
     # Collection access
     RAW_BUILD_RUNS = "raw_build_runs"  # raw_build_runs collection
-    MODEL_TRAINING_BUILDS = "model_training_builds"  # model_training_builds collection
+    FEATURE_VECTORS = "feature_vectors"  # feature_vectors collection (single source of truth)
 
     # Git resources (require ingestion)
     GIT_HISTORY = "git_history"  # Git bare repo (clone_repo task)
@@ -92,9 +92,9 @@ INPUT_REGISTRY: Dict[str, InputSpec] = {
         resource=FeatureResource.RAW_BUILD_RUNS,
         is_core=True,
     ),
-    "model_training_builds": InputSpec(
-        name="model_training_builds",
-        resource=FeatureResource.MODEL_TRAINING_BUILDS,
+    "feature_vectors": InputSpec(
+        name="feature_vectors",
+        resource=FeatureResource.FEATURE_VECTORS,
         is_core=True,
     ),
     # Git resources - require ingestion

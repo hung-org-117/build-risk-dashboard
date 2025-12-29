@@ -3,12 +3,17 @@ Shared Processing Helpers - Common feature extraction logic.
 
 These helpers are used by both model_processing.py and enrichment_processing.py
 to extract features using the Hamilton pipeline.
+
+Features are stored in FeatureVector (single source of truth).
 """
 
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
+
+from app.entities.enums import ExtractionStatus
 from app.entities.feature_audit_log import (
     AuditLogCategory,
     FeatureAuditLog,
@@ -18,6 +23,7 @@ from app.entities.feature_audit_log import (
 from app.entities.raw_build_run import RawBuildRun
 from app.entities.raw_repository import RawRepository
 from app.repositories.feature_audit_log import FeatureAuditLogRepository
+from app.repositories.feature_vector import FeatureVectorRepository
 from app.tasks.pipeline.feature_dag._metadata import format_features_for_storage
 from app.tasks.pipeline.hamilton_runner import HamiltonPipeline
 
@@ -75,8 +81,6 @@ def _save_audit_log(
 
         # Set output entity reference based on category
         if output_build_id:
-            from bson import ObjectId
-
             if category == AuditLogCategory.MODEL_TRAINING:
                 audit_log.training_build_id = ObjectId(output_build_id)
             else:
@@ -84,12 +88,8 @@ def _save_audit_log(
 
         # Set version_id and dataset_id for enrichment category
         if version_id:
-            from bson import ObjectId
-
             audit_log.version_id = ObjectId(version_id)
         if dataset_id:
-            from bson import ObjectId
-
             audit_log.dataset_id = ObjectId(dataset_id)
 
         if execution_result:
@@ -121,10 +121,7 @@ def _save_audit_log(
                 # Populate feature values if this node corresponds to a requested feature
                 if node_info.success and node_info.node_name in features:
                     node_result.features_extracted = [node_info.node_name]
-                    # Only store result if available (it should be for successful nodes)
                     if hasattr(node_info, "result") and node_info.result is not None:
-                        # Store as-is (PyMongo handles basic types, convert to str if suspect)
-                        # For now we assume feature values are serializable
                         node_result.feature_values = {node_info.node_name: node_info.result}
 
                 audit_log.add_node_result(node_result)
@@ -163,10 +160,13 @@ def extract_features_for_build(
     """
     Extract features for a single build using HamiltonPipeline.
 
+    Features are saved to FeatureVector (single source of truth).
+
     Always returns a result dict containing:
     - status: "completed", "partial", or "failed"
     - features: Extracted features dict (formatted for storage)
     - feature_count: Number of features extracted
+    - feature_vector_id: ObjectId of the FeatureVector document
     - errors: List of error messages
     - warnings: List of warning messages
     - is_missing_commit: Whether the commit was missing from repo
@@ -185,11 +185,12 @@ def extract_features_for_build(
         dataset_id: Dataset ID (for DATASET_ENRICHMENT category)
 
     Returns:
-        Dictionary with status, features, errors, warnings, etc.
+        Dictionary with status, features, feature_vector_id, errors, warnings, etc.
     """
     from app.tasks.pipeline.input_preparer import prepare_pipeline_input
 
     pipeline = None
+    feature_vector_repo = FeatureVectorRepository(db)
 
     try:
         # Prepare all inputs and filter features by available resources
@@ -211,10 +212,33 @@ def extract_features_for_build(
         skipped_features = list(pipeline.skipped_features) if pipeline else []
         missing_resources = list(pipeline.missing_resources) if pipeline else []
 
+        # Determine extraction status
+        if skipped_features:
+            extraction_status = ExtractionStatus.PARTIAL
+        else:
+            extraction_status = ExtractionStatus.COMPLETED
+
+        # Get tr_prev_build for temporal chain indexing
+        tr_prev_build = formatted_features.get("tr_prev_build")
+
+        # Save to FeatureVector (single source of truth)
+        feature_vector = feature_vector_repo.upsert_features(
+            raw_repo_id=raw_repo.id,
+            raw_build_run_id=raw_build_run.id,
+            features=formatted_features,
+            extraction_status=extraction_status,
+            dag_version="1.0",
+            tr_prev_build=tr_prev_build,
+            is_missing_commit=not prepared.is_commit_available,
+            missing_resources=missing_resources,
+            skipped_features=skipped_features,
+        )
+
         result = {
-            "status": "completed",
+            "status": extraction_status.value,
             "features": formatted_features,
             "feature_count": len(formatted_features),
+            "feature_vector_id": feature_vector.id,
             "errors": [],
             "warnings": [],
             "is_missing_commit": not prepared.is_commit_available,
@@ -224,7 +248,6 @@ def extract_features_for_build(
 
         # Adjust status if features were skipped
         if skipped_features:
-            result["status"] = "partial"
             result["warnings"].append(
                 f"Skipped {len(skipped_features)} features: {skipped_features}. "
                 f"Missing resources: {missing_resources}"
@@ -256,6 +279,21 @@ def extract_features_for_build(
             exc_info=True,
         )
 
+        # Save failed FeatureVector
+        try:
+            feature_vector = feature_vector_repo.upsert_features(
+                raw_repo_id=raw_repo.id,
+                raw_build_run_id=raw_build_run.id,
+                features={},
+                extraction_status=ExtractionStatus.FAILED,
+                extraction_error=str(e),
+                dag_version="1.0",
+            )
+            feature_vector_id = feature_vector.id
+        except Exception as save_error:
+            logger.warning(f"Failed to save failed FeatureVector: {save_error}")
+            feature_vector_id = None
+
         # Save failed audit log
         if save_run and pipeline:
             _save_audit_log(
@@ -275,6 +313,7 @@ def extract_features_for_build(
             "status": "failed",
             "features": {},
             "feature_count": 0,
+            "feature_vector_id": feature_vector_id,
             "errors": [str(e)],
             "warnings": [],
             "is_missing_commit": False,

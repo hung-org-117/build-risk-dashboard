@@ -8,13 +8,14 @@ Key design principles:
 - Session tracking: Links build to ModelRepoConfig
 - Status tracking: Tracks build through fetch → ingestion → processing
 - Query-based flow: Enables DB queries instead of state passing
+- Per-resource tracking: Extensible resource_status dict for granular error tracking
 """
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.entities.base import BaseEntity, PyObjectId
 
@@ -34,6 +35,25 @@ class ModelImportBuildStatus(str, Enum):
 
     # Error state
     FAILED = "failed"  # Any stage failed
+
+
+class ResourceStatus(str, Enum):
+    """Status of a single resource in ingestion."""
+
+    PENDING = "pending"  # Not started
+    IN_PROGRESS = "in_progress"  # Currently being fetched/created
+    COMPLETED = "completed"  # Successfully completed
+    FAILED = "failed"  # Failed with error
+    SKIPPED = "skipped"  # Not required by template
+
+
+class ResourceStatusEntry(BaseModel):
+    """Status entry for a single resource."""
+
+    status: ResourceStatus = ResourceStatus.PENDING
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
 
 class ModelImportBuild(BaseEntity):
@@ -65,10 +85,16 @@ class ModelImportBuild(BaseEntity):
         description="Pipeline status: FETCHED → INGESTING → INGESTED or FAILED",
     )
 
-    # Error tracking (single field for any stage)
-    ingestion_error: Optional[str] = Field(
-        None,
-        description="Error message if ingestion failed (clone, worktree, or logs)",
+    # Per-resource status tracking (extensible)
+    resource_status: Dict[str, ResourceStatusEntry] = Field(
+        default_factory=dict,
+        description="Per-resource status. Keys: 'clone', 'worktree', 'logs', etc.",
+    )
+
+    # Required resources for this build (from template)
+    required_resources: List[str] = Field(
+        default_factory=list,
+        description="Resources required by template for this build",
     )
 
     # Denormalized fields for quick access (avoid joins)

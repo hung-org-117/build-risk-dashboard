@@ -85,6 +85,32 @@ class ModelTrainingBuildDocument(TypedDict, total=False):
 ModelTrainingBuildsCollection = Collection[ModelTrainingBuildDocument]
 
 
+class FeatureVectorDocument(TypedDict, total=False):
+    """
+    TypedDict representing a feature_vectors MongoDB document.
+
+    Matches the FeatureVector entity schema for type-safe queries.
+    Single source of truth for extracted features.
+    """
+
+    _id: ObjectId
+    raw_repo_id: ObjectId
+    raw_build_run_id: ObjectId
+    dag_version: str
+    computed_at: Optional[datetime]
+    tr_prev_build: Optional[str]
+    extraction_status: str
+    features: Dict[str, Any]
+    feature_count: int
+    missing_resources: List[str]
+    skipped_features: List[str]
+    created_at: Optional[datetime]
+
+
+# Type alias for feature_vectors collection
+FeatureVectorsCollection = Collection[FeatureVectorDocument]
+
+
 @dataclass
 class GitHistoryInput:
     """Git history access - bare repo for commit operations (no worktree)."""

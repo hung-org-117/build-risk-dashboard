@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     PROCESSING_BUILDS_PER_BATCH: int = 50  # Builds processed per enrichment batch
 
     # --- Prediction Phase (risk prediction) ---
-    PREDICTION_BUILDS_PER_BATCH: int = 50  # Builds predicted per batch
+    PREDICTION_BUILDS_PER_BATCH: int = 10  # Builds predicted per batch
 
     # --- Validation Phase (CSV/repo validation) ---
     VALIDATION_CSV_CHUNK_SIZE: int = 1000  # Rows per CSV chunk

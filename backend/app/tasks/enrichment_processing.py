@@ -604,13 +604,12 @@ def process_enrichment_batch(
                     dataset_build_id=dataset_build.id,
                     extraction_status=ExtractionStatus.PENDING,
                     extraction_error=None,
-                    features={},
                     enriched_at=None,
                 )
                 saved_enrichment = enrichment_build_repo.insert_one(new_enrichment_build)
                 enrichment_build_id = str(saved_enrichment.id)
 
-            # Extract Features using DatasetVersion for config
+            # Extract Features using DatasetVersion for config (saves to FeatureVector)
             extraction_result = _extract_features_for_enrichment(
                 db=self.db,
                 dataset_build=dataset_build,
@@ -631,25 +630,17 @@ def process_enrichment_batch(
             else:
                 extraction_status = ExtractionStatus.PENDING
 
-            extracted_features = extraction_result["features"]
             extraction_error = (
                 extraction_result["errors"][0] if extraction_result["errors"] else None
             )
 
-            # Build update dict with Graceful Degradation tracking
+            # Update DatasetEnrichmentBuild with feature_vector_id reference
             update_data = {
+                "feature_vector_id": extraction_result.get("feature_vector_id"),
                 "extraction_status": extraction_status,
                 "extraction_error": extraction_error,
-                "features": extracted_features,
-                "feature_count": len(extracted_features) if extracted_features else 0,
                 "enriched_at": datetime.now(),
             }
-
-            # Track missing resources and skipped features
-            if extraction_result.get("missing_resources"):
-                update_data["missing_resources"] = extraction_result["missing_resources"]
-            if extraction_result.get("skipped_features"):
-                update_data["skipped_features"] = extraction_result["skipped_features"]
 
             enrichment_build_repo.update_one(enrichment_build_id, update_data)
 

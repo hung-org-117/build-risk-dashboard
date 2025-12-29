@@ -1,17 +1,17 @@
 """
 ModelTrainingBuild Entity - Build for ML model training.
 
-This entity stores extracted features from builds used for ML model training.
-It's optimized for the model training flow with relevant fields.
+This entity tracks builds in the model training flow.
+Features are stored in FeatureVector (referenced by feature_vector_id).
 
 Key design principles:
-- Model training specific: Only fields relevant for ML training
-- Lightweight: Optimized for feature extraction and model input
-- References raw data: Links to raw_repository and raw_workflow_run
+- References FeatureVector for feature storage (single source of truth)
+- Stores prediction results and metadata
+- Lightweight tracking entity
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from pydantic import Field
 
@@ -21,10 +21,9 @@ from app.entities.enums import ExtractionStatus
 
 class ModelTrainingBuild(BaseEntity):
     """
-    Build with extracted features for ML model training.
+    Build tracking for ML model training flow.
 
-    This entity stores features extracted from builds for training
-    build failure prediction models.
+    Features are stored in FeatureVector entity, referenced by feature_vector_id.
     """
 
     class Config:
@@ -51,6 +50,12 @@ class ModelTrainingBuild(BaseEntity):
         description="Reference to model_import_builds",
     )
 
+    # ** FEATURE VECTOR REFERENCE (single source of truth) **
+    feature_vector_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to feature_vectors table (stores extracted features)",
+    )
+
     # Build metadata (denormalized for quick access)
     head_sha: Optional[str] = Field(
         None,
@@ -66,7 +71,7 @@ class ModelTrainingBuild(BaseEntity):
         description="Build creation time (denormalized)",
     )
 
-    # Extraction status
+    # Extraction status (mirrors FeatureVector.extraction_status for quick queries)
     extraction_status: ExtractionStatus = Field(
         default=ExtractionStatus.PENDING,
         description="Feature extraction status",
@@ -75,33 +80,6 @@ class ModelTrainingBuild(BaseEntity):
         None,
         description="Error message if extraction failed",
     )
-    is_missing_commit: bool = Field(
-        default=False,
-        description="Whether the commit is missing from the repository",
-    )
-    missing_resources: list = Field(
-        default_factory=list,
-        description="Resources unavailable during extraction (e.g., 'git_worktree', 'build_logs')",
-    )
-    skipped_features: list = Field(
-        default_factory=list,
-        description="Features skipped due to missing resources",
-    )
-
-    # ** FEATURES - The actual extracted feature values **
-    features: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="""
-        Extracted features as key-value pairs.
-        This is the main data payload for ML training.
-        """,
-    )
-
-    # Feature metadata
-    feature_count: int = Field(
-        default=0,
-        description="Number of features extracted",
-    )
 
     # Ground truth label (for supervised learning)
     label: Optional[str] = Field(
@@ -109,7 +87,7 @@ class ModelTrainingBuild(BaseEntity):
         description="Ground truth label (e.g., 'pass', 'fail', 'LOW', 'MEDIUM', 'HIGH')",
     )
 
-    # Normalized features for prediction input
+    # Normalized features for prediction input (cached for performance)
     normalized_features: Dict[str, float] = Field(
         default_factory=dict,
         description="Standardized features sent to prediction API",

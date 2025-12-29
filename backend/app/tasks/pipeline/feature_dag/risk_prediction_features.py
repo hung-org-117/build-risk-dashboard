@@ -8,9 +8,9 @@ from hamilton.function_modifiers import extract_fields, tag
 
 from app.tasks.pipeline.feature_dag._inputs import (
     BuildRunInput,
+    FeatureVectorsCollection,
     GitHistoryInput,
     GitHubClientInput,
-    ModelTrainingBuildsCollection,
     RawBuildRunsCollection,
     RepoInput,
 )
@@ -60,14 +60,14 @@ def _calculate_shannon_entropy(file_changes: List[int]) -> float:
     data_type=FeatureDataType.JSON,
     required_resources=[
         FeatureResource.RAW_BUILD_RUNS,
-        FeatureResource.MODEL_TRAINING_BUILDS,
+        FeatureResource.FEATURE_VECTORS,
         FeatureResource.GIT_HISTORY,
     ],
 )
 @tag(group="risk_temporal")
 def prev_build_history_features(
     raw_build_runs: RawBuildRunsCollection,
-    model_training_builds: ModelTrainingBuildsCollection,
+    feature_vectors: FeatureVectorsCollection,
     repo: RepoInput,
     tr_prev_build: Optional[str],
 ) -> Dict[str, Any]:
@@ -113,16 +113,16 @@ def prev_build_history_features(
 
             prev_builds.append(build_doc)
 
-            # Get next previous build from model_training_builds (which has tr_prev_build)
-            training_doc = model_training_builds.find_one(
+            # Get next previous build from feature_vectors (which has tr_prev_build)
+            feature_doc = feature_vectors.find_one(
                 {
                     "raw_repo_id": ObjectId(repo.id),
                     "raw_build_run_id": build_doc.get("_id"),
                 }
             )
 
-            if training_doc and training_doc.get("features", {}).get("tr_prev_build"):
-                current_build_id = training_doc["features"]["tr_prev_build"]
+            if feature_doc and feature_doc.get("features", {}).get("tr_prev_build"):
+                current_build_id = feature_doc["features"]["tr_prev_build"]
             else:
                 break
 
@@ -165,24 +165,24 @@ def prev_build_history_features(
                         fail_count += 1
             result["fail_rate_last_10"] = round(fail_count / len(last_10), 4)
 
-        # 4. avg_src_churn_last_5 - average src churn from model_training_builds
+        # 4. avg_src_churn_last_5 - average src churn from feature_vectors
         # Use the same chain-based approach
-        prev_training_builds = []
+        prev_feature_vectors = []
         for build_doc in prev_builds[:5]:
-            training_doc = model_training_builds.find_one(
+            feature_doc = feature_vectors.find_one(
                 {
                     "raw_repo_id": ObjectId(repo.id),
                     "raw_build_run_id": build_doc.get("_id"),
                     "extraction_status": "completed",
                 }
             )
-            if training_doc:
-                prev_training_builds.append(training_doc)
+            if feature_doc:
+                prev_feature_vectors.append(feature_doc)
 
-        if prev_training_builds:
+        if prev_feature_vectors:
             src_churns = []
-            for tb in prev_training_builds:
-                features = tb.get("features", {})
+            for fv in prev_feature_vectors:
+                features = fv.get("features", {})
                 if "git_diff_src_churn" in features:
                     churn_val = features["git_diff_src_churn"]
                     if churn_val is not None:
@@ -202,7 +202,7 @@ def prev_build_history_features(
     description="Current churn compared to average of last 5 builds (matching feature_extractors.py)",
     category=FeatureCategory.GIT_DIFF,
     data_type=FeatureDataType.FLOAT,
-    required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.MODEL_TRAINING_BUILDS],
+    required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.FEATURE_VECTORS],
 )
 @tag(group="risk_churn")
 def churn_ratio_vs_avg(

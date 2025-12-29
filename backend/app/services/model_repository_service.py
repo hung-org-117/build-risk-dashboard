@@ -345,11 +345,16 @@ class RepositoryService:
 
     def trigger_sync(self, repo_id: str, user_id: str):
         """
-        Trigger a sync to fetch new builds for a repository.
+        Trigger a sync to fetch new builds for a repository (ingestion only).
 
         Uses sync_until_existing mode: fetches from newest builds until
-        hitting existing processed builds, then stops.
+        hitting existing builds, then stops.
+
+        Processing is NOT started automatically - user must manually
+        click "Start Processing" to process the new builds.
         """
+        from app.tasks.model_ingestion import ingest_model_builds
+
         repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
         if not repo_doc:
             raise HTTPException(
@@ -363,11 +368,11 @@ class RepositoryService:
                 detail="Repository is already being imported. Please wait for completion.",
             )
 
-        # Update status to queued/importing
+        # Update status to queued/ingesting
         self.repo_config.update_repository(repo_id, {"status": ModelImportStatus.QUEUED.value})
 
-        # Trigger import task with sync_until_existing mode
-        start_model_processing.delay(
+        # Trigger INGESTION only (not processing) with sync_until_existing mode
+        ingest_model_builds.delay(
             repo_config_id=repo_id,
             ci_provider=(
                 repo_doc.ci_provider.value
@@ -378,7 +383,7 @@ class RepositoryService:
             only_with_logs=getattr(repo_doc, "only_with_logs", False),
         )
 
-        return {"status": "queued"}
+        return {"status": "queued", "phase": "ingestion"}
 
     def trigger_reprocess_failed(self, repo_id: str):
         """
@@ -551,6 +556,9 @@ class RepositoryService:
         total_processed = prediction_stats.get("total_processed", 0)
         pending_prediction = max(0, total_processed - with_prediction - prediction_failed)
 
+        # Get per-resource status summary (git_history, git_worktree, build_logs)
+        resource_status_summary = import_build_repo.get_resource_status_summary(repo_id)
+
         return {
             "repo_id": repo_id,
             "status": repo_doc.status.value
@@ -565,6 +573,8 @@ class RepositoryService:
                 "failed": import_status_counts.get("failed", 0),
                 "total": sum(import_status_counts.values()),
             },
+            # Per-resource status breakdown
+            "resource_status": resource_status_summary,
             # Processing phase (ModelTrainingBuild)
             "training_builds": {
                 "pending": extraction_counts.get("pending", 0),

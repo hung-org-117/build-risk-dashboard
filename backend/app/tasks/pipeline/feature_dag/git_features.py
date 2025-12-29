@@ -130,8 +130,10 @@ def git_commit_info(
         last_commit_sha = hexsha
 
         # Check if this commit has a build in DB
+        # Sort by created_at DESC to get the most recent build (in case of multiple builds per commit)
         existing_build = raw_build_runs.find_one(
-            {"commit_sha": hexsha, "raw_repo_id": ObjectId(repo.id)}
+            {"commit_sha": hexsha, "raw_repo_id": ObjectId(repo.id)},
+            sort=[("created_at", -1)],
         )
 
         if existing_build:

@@ -53,8 +53,16 @@ from app.tasks.shared import build_ingestion_workflow
 logger = logging.getLogger(__name__)
 
 
-def get_required_resources_for_template(db, template_name: str = "TravisTorrent Full") -> set:
-    """Get required resources based on dataset template."""
+def get_required_resources_for_template(db, template_name: str = "Risk Prediction") -> set:
+    """Get required resources based on dataset template.
+
+    Args:
+        db: Database instance
+        template_name: Template name to look up (default: "Risk Prediction")
+
+    Returns:
+        Set of required resource names for feature extraction
+    """
     template_repo = DatasetTemplateRepository(db)
     template = template_repo.find_by_name(template_name)
     if template and template.feature_names:
@@ -655,9 +663,11 @@ def dispatch_ingestion(
         },
     )
 
-    # Get required resources
+    # Get required resources based on template
     required_resources = get_required_resources_for_template(self.db)
     tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
+
+    import_build_repo.init_resource_status(repo_config_id, list(required_resources))
 
     logger.info(f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}")
 
@@ -717,30 +727,133 @@ def aggregate_model_ingestion_results(
     """
     Chord callback after ingestion workflow completes.
 
-    Marks builds as INGESTED and sets final ingestion status.
+    Parses results to update per-resource status, then marks builds as INGESTED.
     Does NOT auto-dispatch processing - user triggers Phase 2 manually.
     """
+    from bson import ObjectId
+
+    from app.entities.model_import_build import ResourceStatus
+    from app.tasks.pipeline.shared.resources import FeatureResource
+
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
     import_build_repo = ModelImportBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
 
-    # Mark all INGESTING builds as INGESTED
-    updated_count = import_build_repo.update_many_by_status(
-        repo_config_id,
-        from_status=ModelImportBuildStatus.INGESTING.value,
-        updates={
-            "status": ModelImportBuildStatus.INGESTED.value,
-            "ingested_at": datetime.utcnow(),
-        },
+    # Collect failed items from task results
+    clone_failed = False
+    clone_error = None
+    failed_commits: list[str] = []
+    failed_log_ids: list[str] = []
+    expired_log_ids: list[str] = []
+
+    if isinstance(results, list):
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            # Check clone result (git_history) - affects ALL builds
+            if r.get("status") == "failed" and "Clone" in r.get("error", ""):
+                clone_failed = True
+                clone_error = r.get("error")
+            if r.get("status") in ("timeout", "failed") and r.get("path") is None:
+                clone_failed = True
+                clone_error = r.get("error")
+
+            # Collect failed commits from worktree chunks
+            if "failed_commits" in r:
+                failed_commits.extend(r["failed_commits"])
+
+            # Collect failed log IDs from log chunks
+            if "failed_log_ids" in r:
+                failed_log_ids.extend(r["failed_log_ids"])
+            if "expired_log_ids" in r:
+                expired_log_ids.extend(r["expired_log_ids"])
+
+    elif isinstance(results, dict):
+        if results.get("status") == "failed":
+            clone_failed = True
+            clone_error = results.get("error")
+
+    # === Update resource status per-build ===
+
+    # 1. git_history: ALL builds get same status (clone is repo-level)
+    if clone_failed:
+        import_build_repo.update_resource_status_batch(
+            repo_config_id,
+            FeatureResource.GIT_HISTORY.value,
+            ResourceStatus.FAILED,
+            clone_error,
+        )
+    else:
+        import_build_repo.update_resource_status_batch(
+            repo_config_id, FeatureResource.GIT_HISTORY.value, ResourceStatus.COMPLETED
+        )
+
+    # 2. git_worktree: Mark failed commits, then mark rest as completed
+    if failed_commits:
+        import_build_repo.update_resource_by_commits(
+            repo_config_id,
+            FeatureResource.GIT_WORKTREE.value,
+            failed_commits,
+            ResourceStatus.FAILED,
+            "Worktree creation failed",
+        )
+    # Mark remaining as completed
+    import_build_repo.update_resource_status_batch(
+        repo_config_id, FeatureResource.GIT_WORKTREE.value, ResourceStatus.COMPLETED
     )
+
+    # 3. build_logs: Mark failed/expired logs, then mark rest as completed
+    all_failed_logs = failed_log_ids + expired_log_ids
+    if all_failed_logs:
+        import_build_repo.update_resource_by_ci_run_ids(
+            repo_config_id,
+            FeatureResource.BUILD_LOGS.value,
+            all_failed_logs,
+            ResourceStatus.FAILED,
+            "Log download failed or expired",
+        )
+    # Mark remaining as completed
+    import_build_repo.update_resource_status_batch(
+        repo_config_id, FeatureResource.BUILD_LOGS.value, ResourceStatus.COMPLETED
+    )
+
+    # === Determine per-build final status ===
+    # A build is INGESTED if all required resources are COMPLETED
+    # A build is FAILED if any required resource is FAILED
+
+    # Mark builds as FAILED if clone failed (all builds)
+    if clone_failed:
+        import_build_repo.update_many_by_status(
+            repo_config_id,
+            from_status=ModelImportBuildStatus.INGESTING.value,
+            updates={"status": ModelImportBuildStatus.FAILED.value},
+        )
+    else:
+        # Mark builds with failed worktrees as FAILED
+        if failed_commits:
+            import_build_repo.collection.update_many(
+                {
+                    "model_repo_config_id": ObjectId(repo_config_id),
+                    "status": ModelImportBuildStatus.INGESTING.value,
+                    "commit_sha": {"$in": failed_commits},
+                },
+                {"$set": {"status": ModelImportBuildStatus.FAILED.value}},
+            )
+        # Mark remaining INGESTING builds as INGESTED
+        import_build_repo.update_many_by_status(
+            repo_config_id,
+            from_status=ModelImportBuildStatus.INGESTING.value,
+            updates={
+                "status": ModelImportBuildStatus.INGESTED.value,
+                "ingested_at": datetime.utcnow(),
+            },
+        )
 
     # Count by status to determine final state
     status_counts = import_build_repo.count_by_status(repo_config_id)
     ingested = status_counts.get(ModelImportBuildStatus.INGESTED.value, 0)
     failed = status_counts.get(ModelImportBuildStatus.FAILED.value, 0)
-
-    logger.debug(f"{corr_prefix} Updated {updated_count} builds to INGESTED")
 
     # Determine final ingestion status
     if failed > 0:
@@ -757,6 +870,9 @@ def aggregate_model_ingestion_results(
 
     logger.info(f"{corr_prefix}[aggregate_ingestion] {msg}")
 
+    # Get resource status summary for stats
+    resource_summary = import_build_repo.get_resource_status_summary(repo_config_id)
+
     publish_status(
         repo_config_id,
         final_status.value,
@@ -764,6 +880,7 @@ def aggregate_model_ingestion_results(
         stats={
             "builds_ingested": ingested,
             "builds_failed": failed,
+            "resource_status": resource_summary,
         },
     )
 
@@ -772,6 +889,7 @@ def aggregate_model_ingestion_results(
         "final_status": final_status.value,
         "builds_ingested": ingested,
         "builds_failed": failed,
+        "resource_status": resource_summary,
     }
 
 
@@ -793,8 +911,6 @@ def handle_ingestion_chord_error(
 ) -> Dict[str, Any]:
     """
     Error callback for ingestion chord failure.
-
-    Principle: Never fail the whole pipeline for a single build failure.
 
     When ingestion chord fails (clone_repo, create_worktrees, etc.):
     1. Mark all INGESTING builds as FAILED with ingestion_error

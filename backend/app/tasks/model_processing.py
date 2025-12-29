@@ -140,8 +140,7 @@ def dispatch_build_processing(
     1. Create ModelTrainingBuild for each raw_build_run (with PENDING status)
     2. Dispatch process_workflow_run tasks in batches
     """
-
-    from celery import chord, group
+    from celery import chain
 
     from app.entities.enums import ExtractionStatus
     from app.entities.model_repo_config import ModelImportStatus
@@ -151,8 +150,6 @@ def dispatch_build_processing(
     from app.repositories.raw_build_run import RawBuildRunRepository
 
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-
-    batch_size = settings.PROCESSING_BUILDS_PER_BATCH
 
     model_build_repo = ModelTrainingBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -171,29 +168,37 @@ def dispatch_build_processing(
     raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
     build_run_map = {str(r.id): r for r in raw_build_runs}
 
+    # Get import builds and filter to only INGESTED status
+    from app.entities.model_import_build import ModelImportBuildStatus as ImportStatus
+
     import_builds = import_build_repo.find_by_raw_build_run_ids(repo_config_id, raw_build_run_ids)
-    import_build_map = {str(ib.raw_build_run_id): ib for ib in import_builds}
+    # Only process builds that are INGESTED (have all resources)
+    ingested_builds = [ib for ib in import_builds if ib.status == ImportStatus.INGESTED]
+
+    # Sort by created_at ascending (oldest first) for temporal features
+    ingested_builds.sort(
+        key=lambda ib: build_run_map.get(str(ib.raw_build_run_id), ib).created_at or ib.created_at
+    )
 
     run_oids = [ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)]
     existing_builds_map = model_build_repo.find_existing_by_raw_build_run_ids(
         ObjectId(raw_repo_id), run_oids
     )
 
-    # Step 1: Create ModelTrainingBuild for each raw_build_run
+    # Step 1: Create ModelTrainingBuild for INGESTED builds only (in order)
     created_count = 0
     skipped_existing = 0
+    skipped_not_ready = 0
     model_build_ids = []
 
-    for run_id_str in raw_build_run_ids:
+    # Process in temporal order: oldest → newest
+    for import_build in ingested_builds:
+        run_id_str = str(import_build.raw_build_run_id)
+
         # O(1) lookup from maps
         raw_build_run = build_run_map.get(run_id_str)
         if not raw_build_run:
             logger.warning(f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping")
-            continue
-
-        import_build = import_build_map.get(run_id_str)
-        if not import_build:
-            logger.warning(f"ModelImportBuild not found for {run_id_str}, skipping")
             continue
 
         # Check if already exists and processed
@@ -221,10 +226,14 @@ def dispatch_build_processing(
         if was_created:
             created_count += 1
 
+    # Count not-ready builds (FAILED ingestion)
+    skipped_not_ready = len(import_builds) - len(ingested_builds)
+
     logger.info(
         f"{corr_prefix} Created {created_count} new builds, "
         f"skipped {skipped_existing} already processed, "
-        f"dispatching {len(model_build_ids)} for processing"
+        f"skipped {skipped_not_ready} not ready (failed ingestion), "
+        f"dispatching {len(model_build_ids)} for processing (temporal order)"
     )
 
     # Update status to PROCESSING - feature extraction begins
@@ -235,63 +244,63 @@ def dispatch_build_processing(
     publish_status(
         repo_config_id,
         "processing",
-        f"Scheduling {len(model_build_ids)} builds for processing...",
+        f"Scheduling {len(model_build_ids)} builds for sequential processing...",
         stats={
             "builds_fetched": len(raw_build_run_ids),
-            "builds_processed": skipped_existing,  # Already processed builds
+            "builds_processed": skipped_existing,
             "builds_failed": 0,
         },
     )
 
-    # Step 2: Split builds into batches and dispatch batch tasks
-    batch_tasks = []
+    # Step 2: Sequential processing using chain (oldest → newest)
+    # This ensures tr_prev_build is populated correctly for temporal features
     model_build_id_strs = [str(bid) for bid in model_build_ids]
     total_builds = len(model_build_id_strs)
 
-    # Calculate total batches upfront for correct logging
-    import math
-
-    total_batches = math.ceil(total_builds / batch_size) if total_builds > 0 else 0
-
-    for chunk_start in range(0, total_builds, batch_size):
-        chunk = model_build_id_strs[chunk_start : chunk_start + batch_size]
-        batch_tasks.append(
-            process_build_batch.si(
-                repo_config_id=repo_config_id,
-                model_build_ids=chunk,
-                batch_index=len(batch_tasks),
-                total_batches=total_batches,
-                correlation_id=correlation_id,
-            )
+    if total_builds == 0:
+        # No builds to process
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.IMPORTED.value},
         )
+        publish_status(repo_config_id, "imported", "No pending builds to process")
+        return {"repo_config_id": repo_config_id, "dispatched": 0}
 
-    logger.info(
-        f"{corr_prefix} Dispatching {total_batches} batch tasks "
-        f"({total_builds} builds, batch_size={batch_size})"
-    )
+    # Create sequential tasks - process builds one by one
+    sequential_tasks = [
+        process_workflow_run.si(
+            repo_config_id=repo_config_id,
+            model_build_id=build_id,
+            is_reprocess=False,
+            correlation_id=correlation_id,
+        )
+        for build_id in model_build_id_strs
+    ]
 
-    # Dispatch chord: all batches run in parallel, then finalize is called
-    chord(
-        group(batch_tasks),
-        finalize_model_processing.s(
+    logger.info(f"{corr_prefix} Dispatching {total_builds} builds for sequential processing")
+
+    # Chain: B1 → B2 → B3 → ... → finalize
+    # Each build processes after the previous one completes
+    workflow = chain(
+        *sequential_tasks,
+        finalize_model_processing.si(
+            results=[],  # Results will be aggregated from DB
             repo_config_id=repo_config_id,
             created_count=created_count,
             correlation_id=correlation_id,
         ),
-    ).apply_async()
+    )
+    workflow.apply_async()
 
     publish_status(
         repo_config_id,
         "processing",
-        f"Processing {total_builds} builds in {total_batches} batches...",
+        f"Processing {total_builds} builds sequentially (oldest → newest)...",
     )
 
     return {
         "repo_config_id": repo_config_id,
-        "created": created_count,
         "dispatched": total_builds,
-        "batches": total_batches,
-        "status": "processing",
     }
 
 
@@ -364,14 +373,27 @@ def finalize_model_processing(
 
     # Dispatch batch prediction for all successfully processed builds
     if success_count > 0:
+        from celery import group
+
         # Get IDs of processed builds that need prediction
         builds_for_prediction = model_build_repo.find_builds_needing_prediction(
             ObjectId(repo_config_id)
         )
         if builds_for_prediction:
             build_ids = [str(b.id) for b in builds_for_prediction]
-            logger.info(f"{corr_prefix} Dispatching batch prediction for {len(build_ids)} builds")
-            predict_builds_batch.delay(build_ids)
+            batch_size = settings.PREDICTION_BUILDS_PER_BATCH
+
+            # Split into batches and dispatch in parallel
+            batches = [build_ids[i : i + batch_size] for i in range(0, len(build_ids), batch_size)]
+
+            logger.info(
+                f"{corr_prefix} Dispatching {len(batches)} prediction batches "
+                f"({len(build_ids)} builds, batch_size={batch_size})"
+            )
+
+            # Run all prediction batches in parallel
+            prediction_tasks = [predict_builds_batch.si(batch) for batch in batches]
+            group(prediction_tasks).apply_async()
 
     return {
         "repo_config_id": repo_config_id,
@@ -582,7 +604,8 @@ def _process_single_build(
     """
     Process a single build within a batch.
 
-    Extracted helper to keep process_build_batch clean.
+    Features are saved to FeatureVector (single source of truth).
+    ModelTrainingBuild stores reference via feature_vector_id.
     """
     # Find the ModelTrainingBuild
     model_build = model_build_repo.find_one(
@@ -609,7 +632,7 @@ def _process_single_build(
 
     build_id = str(model_build.id)
 
-    # Extract features using shared helper
+    # Extract features using shared helper (saves to FeatureVector)
     from app.entities.feature_audit_log import AuditLogCategory
 
     result = extract_features_for_build(
@@ -623,10 +646,9 @@ def _process_single_build(
         category=AuditLogCategory.MODEL_TRAINING,
     )
 
-    # Update build with results
+    # Update ModelTrainingBuild with feature_vector_id reference
     updates = {
-        "features": format_features_for_storage(result.get("features", {})),
-        "feature_count": result.get("feature_count", 0),
+        "feature_vector_id": result.get("feature_vector_id"),
     }
 
     if result["status"] == "completed":
@@ -640,13 +662,6 @@ def _process_single_build(
         updates["extraction_error"] = "; ".join(result["errors"])
     elif result.get("warnings"):
         updates["extraction_error"] = "Warning: " + "; ".join(result["warnings"])
-
-    if result.get("is_missing_commit"):
-        updates["is_missing_commit"] = True
-    if result.get("missing_resources"):
-        updates["missing_resources"] = result["missing_resources"]
-    if result.get("skipped_features"):
-        updates["skipped_features"] = result["skipped_features"]
 
     model_build_repo.update_one(build_id, updates)
 
@@ -682,7 +697,7 @@ def _process_single_build(
     }
 
 
-# Task 4: Process a single build (legacy, kept for backward compatibility)
+# Task 4: Process a single build
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -756,9 +771,9 @@ def process_workflow_run(
             logger.error(f"{corr_prefix} RawRepository {repo_config.raw_repo_id} not found")
             return {"status": "error", "message": "RawRepository not found"}
 
-        # Always use TravisTorrent Full template features
+        # Always use Risk Prediction template features
         template_repo = DatasetTemplateRepository(self.db)
-        template = template_repo.find_by_name("TravisTorrent Full")
+        template = template_repo.find_by_name("Risk Prediction")
         feature_names = template.feature_names if template else []
 
         # Create GitHub client for GITHUB_API features
@@ -887,14 +902,14 @@ def reprocess_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str
     """
     Reprocess only FAILED builds for a repository.
 
-    Uses chord with finalize callback to ensure status is updated properly.
+    Uses sequential chain to ensure temporal features work correctly.
 
     This is useful when:
     - Some builds failed due to transient errors (network, rate limits)
     - Feature extractors have been fixed
     - You want to retry only the failed builds, not all builds
     """
-    from celery import chord, group
+    from celery import chain
 
     correlation_id = str(uuid.uuid4())
     TracingContext.set(
@@ -921,6 +936,9 @@ def reprocess_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str
             "builds_queued": 0,
             "message": "No failed builds to reprocess",
         }
+
+    # Sort by build_created_at (oldest first) for temporal features
+    failed_builds.sort(key=lambda b: b.build_created_at or b.created_at)
 
     # Reset failed builds to PENDING
     build_ids = []
@@ -949,11 +967,11 @@ def reprocess_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str
     publish_status(
         repo_config_id,
         "processing",
-        f"Retrying {len(build_ids)} failed builds...",
+        f"Retrying {len(build_ids)} failed builds sequentially...",
         stats={"builds_failed": len(failed_builds)},
     )
 
-    # Build processing tasks
+    # Build sequential processing tasks (oldest → newest)
     processing_tasks = [
         process_workflow_run.si(
             repo_config_id=repo_config_id,
@@ -964,10 +982,11 @@ def reprocess_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str
         for build_id in build_ids
     ]
 
-    # Use chord with finalize callback to properly update status
-    workflow = chord(
-        group(processing_tasks),
-        finalize_model_processing.s(
+    # Sequential chain: B1 → B2 → B3 → ... → finalize
+    workflow = chain(
+        *processing_tasks,
+        finalize_model_processing.si(
+            results=[],
             repo_config_id=repo_config_id,
             created_count=len(build_ids),
             correlation_id=correlation_id,
@@ -975,7 +994,7 @@ def reprocess_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str
     )
     workflow.apply_async()
 
-    logger.info(f"Dispatched chord with {len(build_ids)} reprocess tasks for {repo_config_id}")
+    logger.info(f"Dispatched sequential chain with {len(build_ids)} reprocess tasks")
 
     return {
         "status": "queued",
@@ -1006,15 +1025,17 @@ def predict_builds_batch(
     Batch prediction for multiple builds.
 
     More efficient than individual predict calls.
-    Uses batch prediction endpoint if available.
+    Fetches features from FeatureVector collection.
     After prediction, increments builds_completed count on repo config.
     """
+    from app.repositories.feature_vector import FeatureVectorRepository
     from app.services.prediction_service import PredictionService
 
     if not model_build_ids:
         return {"status": "completed", "processed": 0}
 
     model_build_repo = ModelTrainingBuildRepository(self.db)
+    feature_vector_repo = FeatureVectorRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
     prediction_service = PredictionService()
 
@@ -1028,17 +1049,44 @@ def predict_builds_batch(
             continue
         if model_build.predicted_label and not model_build.prediction_error:
             continue  # Already predicted
-        if not model_build.features:
+
+        # Fetch features from FeatureVector
+        if not model_build.feature_vector_id:
             model_build_repo.update_one(
                 build_id,
-                {"prediction_error": "No features available"},
+                {"prediction_error": "No feature_vector_id available"},
             )
             continue
+
+        feature_vector = feature_vector_repo.find_by_id(model_build.feature_vector_id)
+        if not feature_vector or not feature_vector.features:
+            model_build_repo.update_one(
+                build_id,
+                {"prediction_error": "FeatureVector not found or empty"},
+            )
+            continue
+
+        # Fetch temporal history (5 previous builds) for LSTM
+        temporal_history = None
+        tr_prev_build_id = feature_vector.tr_prev_build
+        if tr_prev_build_id:
+            try:
+                history_vectors = feature_vector_repo.walk_temporal_chain(
+                    raw_repo_id=feature_vector.raw_repo_id,
+                    starting_ci_run_id=tr_prev_build_id,
+                    max_depth=5,
+                )
+                if history_vectors:
+                    # Convert to list of feature dicts (newest to oldest)
+                    temporal_history = [v.features for v in history_vectors]
+            except Exception as e:
+                logger.warning(f"Failed to fetch temporal history for {build_id}: {e}")
 
         builds_to_predict.append(
             {
                 "id": build_id,
-                "features": model_build.features,
+                "features": feature_vector.features,
+                "temporal_history": temporal_history,
                 "repo_config_id": model_build.model_repo_config_id,
             }
         )
@@ -1047,9 +1095,16 @@ def predict_builds_batch(
     if not builds_to_predict:
         return {"status": "completed", "processed": 0, "skipped": len(model_build_ids)}
 
-    # Batch predict
-    feature_list = [b["features"] for b in builds_to_predict]
-    results = prediction_service.predict_batch(feature_list)
+    # Predict with temporal history
+    results = []
+    for build_info in builds_to_predict:
+        result = prediction_service.predict(
+            features=build_info["features"],
+            temporal_history=build_info["temporal_history"],
+        )
+        # Normalize features for storage
+        normalized = prediction_service.normalize_features(build_info["features"])
+        results.append((normalized, result))
 
     # Store results and count by repo_config
     succeeded = 0

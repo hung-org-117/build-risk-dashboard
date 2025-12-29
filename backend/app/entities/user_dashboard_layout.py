@@ -31,7 +31,7 @@ class UserDashboardLayout(BaseEntity):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-# Default widgets for new users
+# Default widgets for new users (using 12-column grid to match frontend)
 DEFAULT_WIDGETS = [
     WidgetConfig(
         widget_id="total_builds",
@@ -39,34 +39,34 @@ DEFAULT_WIDGETS = [
         title="Total Builds",
         x=0,
         y=0,
-        w=1,
+        w=3,  # 3/12 = 25% width
         h=1,
     ),
     WidgetConfig(
         widget_id="success_rate",
         widget_type="stat",
         title="Success Rate",
-        x=1,
+        x=3,
         y=0,
-        w=1,
+        w=3,  # 3/12 = 25% width
         h=1,
     ),
     WidgetConfig(
         widget_id="avg_duration",
         widget_type="stat",
         title="Avg Duration",
-        x=2,
+        x=6,
         y=0,
-        w=1,
+        w=3,  # 3/12 = 25% width
         h=1,
     ),
     WidgetConfig(
         widget_id="active_repos",
         widget_type="stat",
         title="Active Repos",
-        x=3,
+        x=9,
         y=0,
-        w=1,
+        w=3,  # 3/12 = 25% width
         h=1,
     ),
     WidgetConfig(
@@ -75,16 +75,16 @@ DEFAULT_WIDGETS = [
         title="Repository Distribution",
         x=0,
         y=1,
-        w=2,
-        h=2,
+        w=6,  # 6/12 = 50% width
+        h=3,
     ),
     WidgetConfig(
         widget_id="recent_builds",
         widget_type="table",
         title="Recent Builds",
-        x=2,
+        x=6,
         y=1,
-        w=2,
-        h=2,
+        w=6,  # 6/12 = 50% width
+        h=3,
     ),
 ]

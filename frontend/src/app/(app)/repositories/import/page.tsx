@@ -159,7 +159,7 @@ export default function ImportRepositoriesPage() {
         if (selectedFeatures.length > 0) return;
         setTemplatesLoading(true);
         try {
-            const template = await datasetsApi.getTemplateByName("TravisTorrent Full");
+            const template = await datasetsApi.getTemplateByName("Risk Prediction");
             setSelectedFeatures(template.feature_names || []);
         } catch (err) {
             console.error("Failed to load selected template:", err);

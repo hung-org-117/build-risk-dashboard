@@ -117,6 +117,35 @@ class PredictionService:
                 error=str(e),
             )
 
+    def normalize_features(
+        self,
+        features: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Normalize features for storage/display.
+
+        Extracts only the model-relevant features and ensures correct types.
+        """
+        if not self.is_model_loaded():
+            return features
+
+        try:
+            # Get feature names from model service
+            from app.services.risk_model.inference import STATIC_FEATURES, TEMPORAL_FEATURES
+
+            normalized = {}
+            for f in TEMPORAL_FEATURES + STATIC_FEATURES:
+                val = features.get(f)
+                if val is None:
+                    normalized[f] = 0.0
+                elif isinstance(val, bool):
+                    normalized[f] = 1.0 if val else 0.0
+                else:
+                    normalized[f] = float(val) if val is not None else 0.0
+            return normalized
+        except Exception:
+            return features
+
     def predict_batch(
         self,
         feature_list: List[Dict[str, Any]],

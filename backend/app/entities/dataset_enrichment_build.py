@@ -1,14 +1,13 @@
 """
 DatasetEnrichmentBuild Entity - Build for dataset enrichment.
 
-This entity stores extracted features from builds for dataset enrichment.
-It's optimized for the dataset enrichment flow with CSV tracking.
+This entity tracks builds in the dataset enrichment flow.
+Features are stored in FeatureVector (referenced by feature_vector_id).
 
 Key design principles:
-- Dataset enrichment specific: Only fields relevant for enrichment
-- CSV tracking: Links back to original CSV rows
-- Lightweight: Optimized for dataset export
-- References raw data: Links to raw_repository and raw_workflow_run
+- References FeatureVector for feature storage (single source of truth)
+- Tracks CSV origin and dataset version
+- Stores scan metrics separately (SonarQube, Trivy)
 """
 
 from datetime import datetime
@@ -22,10 +21,9 @@ from app.entities.enums import ExtractionStatus
 
 class DatasetEnrichmentBuild(BaseEntity):
     """
-    Build with extracted features for dataset enrichment.
+    Build tracking for dataset enrichment flow.
 
-    This entity stores features extracted from builds discovered in
-    uploaded datasets, with tracking back to original CSV rows.
+    Features are stored in FeatureVector entity, referenced by feature_vector_id.
     """
 
     class Config:
@@ -56,7 +54,13 @@ class DatasetEnrichmentBuild(BaseEntity):
         description="Reference to dataset_builds table",
     )
 
-    # Extraction status
+    # ** FEATURE VECTOR REFERENCE (single source of truth) **
+    feature_vector_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to feature_vectors table (stores extracted features)",
+    )
+
+    # Extraction status (mirrors FeatureVector.extraction_status for quick queries)
     extraction_status: ExtractionStatus = Field(
         default=ExtractionStatus.PENDING,
         description="Feature extraction status",
@@ -65,35 +69,11 @@ class DatasetEnrichmentBuild(BaseEntity):
         None,
         description="Error message if extraction failed",
     )
-    is_missing_commit: bool = Field(
-        default=False,
-        description="Whether the commit is missing from the repository",
-    )
-    missing_resources: list = Field(
-        default_factory=list,
-        description="Resources unavailable during extraction (e.g., 'git_worktree', 'build_logs')",
-    )
-    skipped_features: list = Field(
-        default_factory=list,
-        description="Features skipped due to missing resources",
-    )
-
-    # ** DAG FEATURES - Features extracted by Hamilton pipeline **
-    features: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="DAG extracted features (gh_*, tr_*, etc.). Main pipeline output.",
-    )
 
     # ** SCAN METRICS - Results from scan tools (backfilled asynchronously) **
     scan_metrics: Dict[str, Any] = Field(
         default_factory=dict,
         description="Scan tool metrics (sonar_*, trivy_*). Backfilled after scan completion.",
-    )
-
-    # Feature metadata - counts ONLY DAG features (not scan metrics)
-    feature_count: int = Field(
-        default=0,
-        description="Number of DAG features extracted",
     )
 
     enriched_at: Optional[datetime] = Field(
