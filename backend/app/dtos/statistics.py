@@ -80,11 +80,7 @@ class VersionStatisticsResponse(BaseModel):
     evaluated_at: Optional[datetime] = None
 
 
-# =============================================================================
 # Feature Distribution DTOs
-# =============================================================================
-
-
 class HistogramBin(BaseModel):
     """Single bin in a histogram."""
 
@@ -148,11 +144,7 @@ class FeatureDistributionResponse(BaseModel):
     )
 
 
-# =============================================================================
 # Correlation Matrix DTOs
-# =============================================================================
-
-
 class CorrelationPair(BaseModel):
     """A significant correlation pair."""
 
@@ -172,36 +164,3 @@ class CorrelationMatrixResponse(BaseModel):
         default_factory=list,
         description="Pairs with |correlation| > 0.7",
     )
-
-
-# =============================================================================
-# Provenance DTOs (Phase 3)
-# =============================================================================
-
-
-class FeatureProvenanceRecord(BaseModel):
-    """Provenance record for a single feature value."""
-
-    feature_name: str
-    value: Any
-
-    # Collection metadata
-    collected_at: datetime
-    collection_method: str  # "github_api", "git_history", "build_log", "scan"
-    source_resource: str  # Resource identifier
-
-    # Pipeline context
-    correlation_id: Optional[str] = None
-    task_id: Optional[str] = None
-
-    # Quality indicators
-    is_imputed: bool = False
-    confidence_score: float = 1.0
-
-
-class BuildProvenanceResponse(BaseModel):
-    """Provenance records for a build."""
-
-    build_id: str
-    version_id: str
-    features: List[FeatureProvenanceRecord] = Field(default_factory=list)

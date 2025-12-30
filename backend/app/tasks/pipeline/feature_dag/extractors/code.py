@@ -25,14 +25,7 @@ from app.tasks.pipeline.feature_dag._inputs import (
     RawBuildRunsCollection,
     RepoInput,
 )
-from app.tasks.pipeline.feature_dag._metadata import (
-    FeatureCategory,
-    FeatureDataType,
-    FeatureResource,
-    OutputFormat,
-    feature_metadata,
-    requires_config,
-)
+from app.tasks.pipeline.feature_dag._metadata import requires_config
 from app.tasks.pipeline.feature_dag.analyzers import (
     _count_test_cases,
     _is_doc_file,
@@ -63,20 +56,6 @@ logger = logging.getLogger(__name__)
     }
 )
 @tag(group="git")
-@feature_metadata(
-    display_name="Git Commit Info",
-    description="Commits included in build and previous build reference",
-    category=FeatureCategory.GIT_HISTORY,
-    data_type=FeatureDataType.JSON,
-    required_resources=[
-        FeatureResource.GIT_HISTORY,
-        FeatureResource.RAW_BUILD_RUNS,
-        FeatureResource.BUILD_RUN,
-    ],
-    output_formats={
-        "git_all_built_commits": OutputFormat.HASH_SEPARATED,
-    },
-)
 def git_commit_info(
     git_history: GitHistoryInput,
     repo: RepoInput,
@@ -171,13 +150,6 @@ def git_commit_info(
     }
 )
 @tag(group="git")
-@feature_metadata(
-    display_name="Git Diff Features",
-    description="Diff statistics: file counts, churn, test changes",
-    category=FeatureCategory.GIT_HISTORY,
-    data_type=FeatureDataType.JSON,
-    required_resources=[FeatureResource.GIT_HISTORY],
-)
 def git_diff_features(
     git_history: GitHistoryInput,
     tr_log_lan_all: List[str],
@@ -314,13 +286,6 @@ LOOKBACK_DAYS = 90
 CHUNK_SIZE = 50
 
 
-@feature_metadata(
-    display_name="Commits on Files Touched",
-    description="Number of commits that touched files modified in this build (last N days)",
-    category=FeatureCategory.GIT_HISTORY,
-    data_type=FeatureDataType.INTEGER,
-    required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.BUILD_RUN],
-)
 @tag(group="git")
 @requires_config(
     lookback_days={
@@ -395,17 +360,6 @@ def gh_num_commits_on_files_touched(
         return 0
 
 
-@feature_metadata(
-    display_name="Team Size",
-    description="Number of unique contributors in last 90 days",
-    category=FeatureCategory.TEAM,
-    data_type=FeatureDataType.INTEGER,
-    required_resources=[
-        FeatureResource.GIT_HISTORY,
-        FeatureResource.RAW_BUILD_RUNS,
-        FeatureResource.BUILD_RUN,
-    ],
-)
 @tag(group="git")
 def gh_team_size(
     git_history: GitHistoryInput,
@@ -447,17 +401,6 @@ def gh_team_size(
     return len(core_team)
 
 
-@feature_metadata(
-    display_name="By Core Team Member",
-    description="Whether build author is a core team member",
-    category=FeatureCategory.TEAM,
-    data_type=FeatureDataType.BOOLEAN,
-    required_resources=[
-        FeatureResource.GIT_HISTORY,
-        FeatureResource.RAW_BUILD_RUNS,
-        FeatureResource.BUILD_RUN,
-    ],
-)
 @tag(group="git")
 def gh_by_core_team_member(
     git_history: GitHistoryInput,
@@ -573,13 +516,6 @@ def _get_pr_mergers(
 
 
 # Cooperation Features
-@feature_metadata(
-    display_name="Distinct Authors",
-    description="Number of unique commit authors in this build",
-    category=FeatureCategory.TEAM,
-    data_type=FeatureDataType.INTEGER,
-    required_resources=[FeatureResource.GIT_HISTORY],
-)
 @tag(group="git")
 def num_of_distinct_authors(
     git_history: GitHistoryInput,
@@ -603,13 +539,6 @@ def num_of_distinct_authors(
     return len(authors)
 
 
-@feature_metadata(
-    display_name="Total File Revisions",
-    description="Total number of prior revisions on files touched by this build",
-    category=FeatureCategory.COOPERATION,
-    data_type=FeatureDataType.INTEGER,
-    required_resources=[FeatureResource.GIT_HISTORY],
-)
 @tag(group="git")
 def total_number_of_revisions(
     git_history: GitHistoryInput,

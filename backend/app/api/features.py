@@ -42,12 +42,9 @@ def get_features_by_node():
 
 @router.get("/", response_model=FeatureListResponse)
 def list_features(
-    category: Optional[str] = Query(None, description="Filter by category"),
-    source: Optional[str] = Query(None, description="Filter by source"),
     extractor_node: Optional[str] = Query(None, description="Filter by extractor node"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
 ):
-    features = service.list_features(category, source, extractor_node, is_active)
+    features = service.list_features(extractor_node=extractor_node)
     return FeatureListResponse(
         total=len(features),
         items=[
@@ -56,17 +53,12 @@ def list_features(
                 name=f["name"],
                 display_name=f["display_name"],
                 description=f["description"],
-                category=f["category"],
-                source=f["source"],
                 extractor_node=f["extractor_node"],
                 depends_on_features=f.get("depends_on", []),
-                depends_on_resources=f.get("depends_on_resources", []),
                 data_type=f["data_type"],
-                nullable=False,
-                is_active=f["is_active"],
-                is_deprecated=False,
-                example_value=None,
-                unit=None,
+                nullable=f.get("nullable", False),
+                example_value=f.get("example_value"),
+                unit=f.get("unit"),
             )
             for f in features
         ],
@@ -109,17 +101,12 @@ def get_feature(feature_name: str):
         name=metadata["name"],
         display_name=metadata["display_name"],
         description=metadata["description"],
-        category=metadata["category"],
-        source=metadata["source"],
         extractor_node=metadata["extractor_node"],
         depends_on_features=metadata.get("depends_on", []),
-        depends_on_resources=metadata.get("depends_on_resources", []),
         data_type=metadata["data_type"],
-        nullable=False,
-        is_active=metadata["is_active"],
-        is_deprecated=False,
-        example_value=None,
-        unit=None,
+        nullable=metadata.get("nullable", False),
+        example_value=metadata.get("example_value"),
+        unit=metadata.get("unit"),
     )
 
 

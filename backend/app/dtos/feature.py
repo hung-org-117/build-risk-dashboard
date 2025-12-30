@@ -12,15 +12,10 @@ class FeatureDefinitionResponse(BaseModel):
     name: str
     display_name: str
     description: str
-    category: str
-    source: str
     extractor_node: str
     depends_on_features: List[str]
-    depends_on_resources: List[str]
     data_type: str
     nullable: bool = False
-    is_active: bool = True
-    is_deprecated: bool = False
     example_value: Optional[str] = None
     unit: Optional[str] = None
 
@@ -40,7 +35,6 @@ class FeatureSummaryResponse(BaseModel):
 
     total_features: int
     active_features: int
-    deprecated_features: int
     by_category: dict
     by_source: dict
     by_node: dict

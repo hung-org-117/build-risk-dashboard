@@ -1,21 +1,27 @@
-from app.tasks.pipeline.feature_dag import (
-    build_features,
-    devops_features,
-    git_features,
-    github_features,
-    history_features,
-    log_features,
-    repo_features,
-    risk_prediction_features,
+"""Feature DAG package.
+
+Organized into:
+- extractors/: Feature extraction functions
+- registry/: Feature definitions (future)
+- analyzers/: Code analysis utilities
+- languages/: Language-specific patterns
+- log_parsers/: CI log parsing
+"""
+
+from app.tasks.pipeline.feature_dag.extractors import (
+    build,
+    ci,
+    code,
+    collaboration,
+    repository,
+    temporal,
 )
 
 __all__ = [
-    "git_features",
-    "build_features",
-    "github_features",
-    "repo_features",
-    "log_features",
-    "devops_features",
-    "history_features",
-    "risk_prediction_features",
+    "build",
+    "ci",
+    "code",
+    "collaboration",
+    "repository",
+    "temporal",
 ]

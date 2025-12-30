@@ -12,9 +12,7 @@ from app.tasks.pipeline.shared.resources import FeatureResource
 
 logger = logging.getLogger(__name__)
 
-# Input resources derived from FeatureResource enum (source of truth)
-# These are passed as inputs to Hamilton, not computed features
-# Also includes Hamilton parameter name aliases (e.g., github_client for github_api)
+
 INPUT_RESOURCES = {r.value for r in FeatureResource} | {"github_client"}
 
 
@@ -74,9 +72,13 @@ class FeatureService:
         return mapping, extract_field_parents
 
     def _extract_feature_info(self) -> Dict[str, Dict[str, Any]]:
-        """Extract metadata about all features from Hamilton driver."""
+        """Extract metadata about all features from Hamilton driver and FEATURE_REGISTRY."""
         if self._feature_info_cache:
             return self._feature_info_cache
+
+        from app.tasks.pipeline.feature_dag._feature_definitions import (
+            get_feature_definition,
+        )
 
         driver = self._build_pipeline_for_dag_only()
 
@@ -93,18 +95,16 @@ class FeatureService:
                 continue
 
             # Skip input resources (not actual features)
-            # Uses module-level INPUT_RESOURCES derived from FeatureResource enum
             if var_name in INPUT_RESOURCES:
                 continue
 
-            # Skip parent functions with @extract_fields (their fields are included separately)
+            # Skip parent functions with @extract_fields
             if var_name in extract_field_parents:
                 continue
 
-            # Determine extractor node from module mapping (source of truth)
+            # Determine extractor node from module mapping
             extractor = feature_to_module.get(var_name)
             if not extractor:
-                # Feature not found in any module - log warning and skip
                 logger.warning(
                     f"Feature '{var_name}' not found in module mapping. "
                     f"Ensure it's defined in one of HAMILTON_MODULES or is an extracted field."
@@ -112,52 +112,47 @@ class FeatureService:
                 continue
 
             try:
-                # Get upstream dependencies for this variable
+                # Get upstream dependencies for DAG visualization
                 upstream_nodes = driver.what_is_upstream_of(var_name)
-                # Convert HamiltonNode objects to names
                 depends_on = [
                     n.name if hasattr(n, "name") else str(n)
                     for n in upstream_nodes
                     if (n.name if hasattr(n, "name") else str(n)) != var_name
                 ]
 
-                # Try to get docstring
-                doc = ""
-                if var_name in feature_to_module:
-                    # Find the function in the module
-                    for module in self._feature_modules:
-                        if hasattr(module, var_name):
-                            obj = getattr(module, var_name)
-                            if inspect.isfunction(obj) or callable(obj):
-                                doc = (obj.__doc__ or "").strip()
-                                break
-
-                description = doc.split("\n")[0] if doc else var_name
-
-                feature_info[var_name] = {
-                    "name": var_name,
-                    "display_name": var_name.replace("_", " ").title(),
-                    "description": description,
-                    "depends_on": depends_on,
-                    "extractor_node": extractor,
-                    "category": "feature",
-                    "source": extractor,
-                    "data_type": "any",
-                    "is_active": True,
-                }
+                # Get metadata from FEATURE_REGISTRY (single source of truth)
+                defn = get_feature_definition(var_name)
+                if defn:
+                    feature_info[var_name] = {
+                        "name": var_name,
+                        "display_name": defn.display_name,
+                        "description": defn.description,
+                        "depends_on": depends_on,
+                        "extractor_node": extractor,
+                        "data_type": defn.data_type.value,
+                        "nullable": defn.nullable,
+                        "unit": defn.unit,
+                        "example_value": defn.example_value,
+                    }
+                else:
+                    # Fallback for features not in registry
+                    feature_info[var_name] = {
+                        "name": var_name,
+                        "display_name": var_name.replace("_", " ").title(),
+                        "description": var_name,
+                        "depends_on": depends_on,
+                        "extractor_node": extractor,
+                        "data_type": "unknown",
+                    }
             except Exception as e:
                 logger.debug(f"Warning extracting {var_name}: {e}")
-                # Add with no dependencies as fallback
                 feature_info[var_name] = {
                     "name": var_name,
                     "display_name": var_name.replace("_", " ").title(),
                     "description": var_name,
                     "depends_on": [],
                     "extractor_node": extractor,
-                    "category": "feature",
-                    "source": extractor,
-                    "data_type": "any",
-                    "is_active": True,
+                    "data_type": "unknown",
                 }
 
         self._feature_info_cache = feature_info
@@ -373,11 +368,8 @@ class FeatureService:
                     "display_name": info["display_name"],
                     "description": info["description"],
                     "data_type": info["data_type"],
-                    "is_active": info["is_active"],
                     "depends_on_features": [d for d in info["depends_on"] if d in feature_info],
-                    "depends_on_resources": [
-                        d for d in info["depends_on"] if d not in feature_info
-                    ],
+                    "extractor_node": node,
                 }
             )
 
@@ -431,23 +423,14 @@ class FeatureService:
 
     def list_features(
         self,
-        category: Optional[str] = None,
-        source: Optional[str] = None,
         extractor_node: Optional[str] = None,
-        is_active: Optional[bool] = None,
     ) -> List[Dict]:
         """List all feature definitions with optional filters."""
         feature_info = self._extract_feature_info()
         features = [info for name, info in feature_info.items() if name not in DEFAULT_FEATURES]
 
-        if category:
-            features = [f for f in features if f["category"] == category]
-        if source:
-            features = [f for f in features if f["source"] == source]
         if extractor_node:
             features = [f for f in features if f["extractor_node"] == extractor_node]
-        if is_active is not None:
-            features = [f for f in features if f["is_active"] == is_active]
 
         return features
 
@@ -479,32 +462,9 @@ class FeatureService:
         return {
             "total_features": len(features),
             "active_features": sum(1 for f in features if f["is_active"]),
-            "deprecated_features": 0,
             "by_category": by_category,
             "by_source": by_source,
             "by_node": by_node,
-        }
-
-    def get_supported_languages(self) -> Dict:
-        """Get supported programming languages."""
-        return {
-            "languages": [
-                {
-                    "name": "Java",
-                    "supported": True,
-                    "strategy": "JavaLanguageStrategy",
-                },
-                {
-                    "name": "Python",
-                    "supported": True,
-                    "strategy": "PythonLanguageStrategy",
-                },
-                {
-                    "name": "JavaScript",
-                    "supported": True,
-                    "strategy": "JavaScriptLanguageStrategy",
-                },
-            ]
         }
 
     def validate_features(self, features: List[str]) -> Dict:

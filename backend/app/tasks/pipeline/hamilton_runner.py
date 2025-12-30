@@ -21,17 +21,8 @@ from hamilton import driver
 
 from app.config import settings
 from app.paths import HAMILTON_CACHE_DIR
-from app.tasks.pipeline.constants import DEFAULT_FEATURES
+from app.tasks.pipeline.constants import DEFAULT_FEATURES, HAMILTON_MODULES
 from app.tasks.pipeline.execution_tracker import ExecutionResult, ExecutionTracker
-from app.tasks.pipeline.feature_dag import (
-    build_features,
-    devops_features,
-    git_features,
-    github_features,
-    history_features,
-    log_features,
-    repo_features,
-)
 from app.tasks.pipeline.feature_dag._inputs import (
     BuildLogsInput,
     BuildRunInput,
@@ -122,15 +113,7 @@ class HamiltonPipeline:
 
     def _build_driver(self) -> driver.Driver:
         """Build Hamilton driver with all feature modules and optional caching."""
-        builder = driver.Builder().with_modules(
-            git_features,
-            build_features,
-            github_features,
-            log_features,
-            repo_features,
-            history_features,
-            devops_features,
-        )
+        builder = driver.Builder().with_modules(*HAMILTON_MODULES)
 
         # Add caching if enabled
         if self._enable_cache:
@@ -156,22 +139,11 @@ class HamiltonPipeline:
     def _get_all_feature_names(self) -> Set[str]:
         """Get all actual feature output names (excludes inputs and intermediate nodes).
 
-        Uses build_metadata_registry() to get only features with @feature_metadata decorator,
-        which are the actual output features defined in the feature DAG modules.
+        Uses build_metadata_registry() to get features from FEATURE_REGISTRY.
         """
         from app.tasks.pipeline.feature_dag._metadata import build_metadata_registry
 
-        registry = build_metadata_registry(
-            [
-                git_features,
-                build_features,
-                github_features,
-                log_features,
-                repo_features,
-                history_features,
-                devops_features,
-            ]
-        )
+        registry = build_metadata_registry(HAMILTON_MODULES)
         return set(registry.keys())
 
     def get_active_features(self) -> Set[str]:

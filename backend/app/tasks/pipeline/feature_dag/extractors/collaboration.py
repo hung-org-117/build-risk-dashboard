@@ -10,15 +10,8 @@ from app.tasks.pipeline.feature_dag._inputs import (
     BuildRunInput,
     FeatureVectorsCollection,
     GitHistoryInput,
-    GitHubClientInput,
     RawBuildRunsCollection,
     RepoInput,
-)
-from app.tasks.pipeline.feature_dag._metadata import (
-    FeatureCategory,
-    FeatureDataType,
-    FeatureResource,
-    feature_metadata,
 )
 from app.tasks.pipeline.utils.git_utils import (
     get_files_in_commit,
@@ -52,17 +45,6 @@ def _calculate_shannon_entropy(file_changes: List[int]) -> float:
         "fail_rate_last_10": Optional[float],
         "avg_src_churn_last_5": Optional[float],
     }
-)
-@feature_metadata(
-    display_name="Previous Build History Features",
-    description="Temporal features from previous builds based on linear commit history",
-    category=FeatureCategory.BUILD_HISTORY,
-    data_type=FeatureDataType.JSON,
-    required_resources=[
-        FeatureResource.RAW_BUILD_RUNS,
-        FeatureResource.FEATURE_VECTORS,
-        FeatureResource.GIT_HISTORY,
-    ],
 )
 @tag(group="risk_temporal")
 def prev_build_history_features(
@@ -197,17 +179,10 @@ def prev_build_history_features(
     return result
 
 
-@feature_metadata(
-    display_name="Churn Ratio vs Average",
-    description="Current churn compared to average of last 5 builds (matching feature_extractors.py)",
-    category=FeatureCategory.GIT_DIFF,
-    data_type=FeatureDataType.FLOAT,
-    required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.FEATURE_VECTORS],
-)
 @tag(group="risk_churn")
 def churn_ratio_vs_avg(
     git_diff_src_churn: int,
-    avg_src_churn_last_5: float,
+    avg_src_churn_last_5: Optional[float],
 ) -> float:
     """
     Compare current churn vs average of last 5 builds.
@@ -216,7 +191,8 @@ def churn_ratio_vs_avg(
     Formula: current_churn / (avg_churn + 1)
     The +1 prevents division by zero when avg is 0.
     """
-    return round(git_diff_src_churn / (avg_src_churn_last_5 + 1), 4)
+    avg = avg_src_churn_last_5 if avg_src_churn_last_5 is not None else 0.0
+    return round(git_diff_src_churn / (avg + 1), 4)
 
 
 @extract_fields(
@@ -224,13 +200,6 @@ def churn_ratio_vs_avg(
         "change_entropy": Optional[float],
         "files_modified_ratio": Optional[float],
     }
-)
-@feature_metadata(
-    display_name="Change Entropy Features",
-    description="Shannon entropy of file changes (matching risk_features_enrichment.py)",
-    category=FeatureCategory.GIT_DIFF,
-    data_type=FeatureDataType.JSON,
-    required_resources=[FeatureResource.GIT_HISTORY],
 )
 @tag(group="risk_entropy")
 def change_entropy_features(
@@ -291,16 +260,6 @@ def change_entropy_features(
         "author_ownership": Optional[float],
         "days_since_last_author_commit": Optional[float],
     }
-)
-@feature_metadata(
-    display_name="Author Experience Features",
-    description="Features based on author's history (matching risk_features_enrichment.py)",
-    category=FeatureCategory.COMMITTER,
-    data_type=FeatureDataType.JSON,
-    required_resources=[
-        FeatureResource.GIT_HISTORY,
-        FeatureResource.BUILD_RUN,
-    ],
 )
 @tag(group="risk_author")
 def author_experience_features(
@@ -446,13 +405,6 @@ def author_experience_features(
         "build_hour_risk_score": Optional[float],
     }
 )
-@feature_metadata(
-    display_name="Build Time Risk Features",
-    description="Cyclic time encoding and risk score (matching risk_features_enrichment.py)",
-    category=FeatureCategory.METADATA,
-    data_type=FeatureDataType.JSON,
-    required_resources=[FeatureResource.BUILD_RUN],
-)
 @tag(group="risk_time")
 def build_time_risk_features(
     build_run: BuildRunInput,
@@ -499,50 +451,5 @@ def build_time_risk_features(
 
     except Exception:
         pass
-
-    return result
-
-
-@extract_fields(
-    {
-        "gh_has_bug_label": Optional[bool],
-    }
-)
-@feature_metadata(
-    display_name="Has Bug Label",
-    description="True if associated PRs have 'bug' or 'fix' labels",
-    category=FeatureCategory.METADATA,
-    data_type=FeatureDataType.BOOLEAN,
-    required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
-)
-@tag(group="risk_metadata")
-def gh_has_bug_label_feature(
-    gh_pull_req_num: Optional[int],
-    github_client: GitHubClientInput,
-) -> Dict[str, Any]:
-    """
-    Check if PR has bug-related labels.
-    Matches feature_extractors.py::extract_pr_features - checks for "bug" or "fix" in labels
-
-    Uses gh_pull_req_num from build_features.py as input.
-    """
-    result = {"gh_has_bug_label": False}
-
-    if not gh_pull_req_num:
-        return result
-
-    try:
-        full_name = github_client.full_name
-        pr_details = github_client.client.get_pull_request(full_name, gh_pull_req_num)
-
-        # Labels can be list of dicts with "name" key
-        labels = pr_details.get("labels", [])
-        label_names = [lbl.get("name", "") if isinstance(lbl, dict) else str(lbl) for lbl in labels]
-
-        result["gh_has_bug_label"] = any(
-            "bug" in label.lower() or "fix" in label.lower() for label in label_names
-        )
-    except Exception as e:
-        logger.warning(f"Failed to fetch PR #{gh_pull_req_num} labels: {e}")
 
     return result

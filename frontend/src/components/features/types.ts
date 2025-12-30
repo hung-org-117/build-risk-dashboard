@@ -40,10 +40,11 @@ export interface FeatureDefinition {
     display_name: string;
     description: string;
     data_type: string;
-    is_active: boolean;
     depends_on_features: string[];
-    depends_on_resources: string[];
-    node: string;
+    extractor_node: string;
+    nullable?: boolean;
+    example_value?: string;
+    unit?: string;
 }
 
 export interface NodeInfo {

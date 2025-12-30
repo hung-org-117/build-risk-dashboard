@@ -3,7 +3,7 @@ Data Quality Service - Core evaluation logic for dataset quality assessment.
 
 Evaluates enriched datasets and calculates quality scores based on:
 - Completeness: % features non-null
-- Validity: % values within valid range (from @feature_metadata)
+- Validity: % values within valid range (from FEATURE_REGISTRY)
 - Consistency: % builds with all selected features
 - Coverage: % successfully enriched builds
 

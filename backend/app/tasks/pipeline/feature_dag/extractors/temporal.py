@@ -19,12 +19,6 @@ from app.tasks.pipeline.feature_dag._inputs import (
     RawBuildRunsCollection,
     RepoInput,
 )
-from app.tasks.pipeline.feature_dag._metadata import (
-    FeatureCategory,
-    FeatureDataType,
-    FeatureResource,
-    feature_metadata,
-)
 from app.tasks.pipeline.feature_dag._similarity import compute_similarity
 
 logger = logging.getLogger(__name__)
@@ -41,13 +35,6 @@ RECENT_BUILDS_COUNT = 5
 # =============================================================================
 
 
-@feature_metadata(
-    display_name="Day of Week",
-    description="Day of week when build was triggered (Monday-Sunday)",
-    category=FeatureCategory.BUILD_HISTORY,
-    data_type=FeatureDataType.STRING,
-    required_resources=[FeatureResource.BUILD_RUN],
-)
 @tag(group="time")
 def day_week(build_run: BuildRunInput) -> Optional[str]:
     """
@@ -72,14 +59,6 @@ def day_week(build_run: BuildRunInput) -> Optional[str]:
     return day_names[created_at.weekday()]
 
 
-@feature_metadata(
-    display_name="Time of Day",
-    description="Hour of day when build was triggered (0-23 UTC)",
-    category=FeatureCategory.BUILD_HISTORY,
-    data_type=FeatureDataType.INTEGER,
-    required_resources=[FeatureResource.BUILD_RUN],
-    unit="hour",
-)
 @tag(group="time")
 def time_of_day(build_run: BuildRunInput) -> Optional[int]:
     """
@@ -110,13 +89,6 @@ def time_of_day(build_run: BuildRunInput) -> Optional[int]:
         "same_committer": Optional[bool],
         "time_since_prev_build": Optional[float],
     }
-)
-@feature_metadata(
-    display_name="Build History Features",
-    description="Features linking current build to previous build",
-    category=FeatureCategory.BUILD_HISTORY,
-    data_type=FeatureDataType.JSON,
-    required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
 )
 @tag(group="history")
 def build_history_features(
@@ -207,13 +179,6 @@ def _get_author_from_raw(raw_build: dict) -> Optional[str]:
         "committer_recent_fail_history": Optional[float],
     }
 )
-@feature_metadata(
-    display_name="Committer Fail Rate",
-    description="Historical fail rate of the committer",
-    category=FeatureCategory.COMMITTER,
-    data_type=FeatureDataType.JSON,
-    required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-)
 @tag(group="committer")
 def committer_fail_history_features(
     raw_build_runs: RawBuildRunsCollection,
@@ -284,13 +249,6 @@ def committer_fail_history_features(
     return result
 
 
-@feature_metadata(
-    display_name="Committer Avg Experience",
-    description="Average number of builds per committer in project before this build",
-    category=FeatureCategory.COMMITTER,
-    data_type=FeatureDataType.FLOAT,
-    required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-)
 @tag(group="committer")
 def committer_avg_exp(
     raw_build_runs: RawBuildRunsCollection,
@@ -359,13 +317,6 @@ def committer_avg_exp(
         "project_fail_history": Optional[float],
         "project_fail_recent": Optional[float],
     }
-)
-@feature_metadata(
-    display_name="Project Fail Rate",
-    description="Historical fail rate of the project",
-    category=FeatureCategory.BUILD_HISTORY,
-    data_type=FeatureDataType.JSON,
-    required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
 )
 @tag(group="project")
 def project_fail_history_features(

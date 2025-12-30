@@ -3,9 +3,7 @@ Feature metadata decorators for Hamilton DAG.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
-
-from app.tasks.pipeline.shared.resources import FeatureResource
+from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
 F = TypeVar("F", bound=Callable)
 
@@ -51,130 +49,41 @@ class OutputFormat(str, Enum):
     PIPE_SEPARATED = "pipe"  # "a|b|c"
 
 
-def feature_metadata(
-    display_name: str,
-    description: str,
-    category: FeatureCategory,
-    data_type: FeatureDataType,
-    required_resources: Optional[List[FeatureResource]] = None,
-    nullable: bool = True,
-    example_value: Optional[str] = None,
-    unit: Optional[str] = None,
-    output_format: Optional[OutputFormat] = None,
-    output_formats: Optional[Dict[str, OutputFormat]] = None,
-    # Quality evaluation parameters
-    valid_range: Optional[Tuple[float, float]] = None,
-    valid_values: Optional[List[str]] = None,
-) -> Callable[[F], F]:
-    """
-    Decorator to attach metadata to a Hamilton feature function.
-
-    Args:
-        display_name: Human-readable name for UI display
-        description: Detailed description of what the feature represents
-        category: Feature category (from FeatureCategory enum)
-        data_type: Output data type (from FeatureDataType enum)
-        required_resources: List of resources needed to compute this feature
-        nullable: Whether the feature can be None
-        example_value: Example output value
-        unit: Unit of measurement if applicable
-        output_format: How to format list values for storage (for single-value features)
-        output_formats: Dict mapping field names to formats (for @extract_fields features)
-                       Example: {"git_all_built_commits": OutputFormat.HASH_SEPARATED}
-        valid_range: Tuple of (min, max) for numeric features, used by Quality Evaluation
-        valid_values: List of allowed values for categorical features
-
-    Returns:
-        Decorator function that attaches metadata to the function
-    """
-
-    def decorator(func: F) -> F:
-        # Convert output_formats dict values to strings
-        formats_dict = {}
-        if output_formats:
-            for k, v in output_formats.items():
-                formats_dict[k] = v.value if isinstance(v, Enum) else v
-
-        # Store metadata as function attributes
-        func.__hamilton_metadata__ = {
-            "display_name": display_name,
-            "description": description,
-            "category": category.value if isinstance(category, Enum) else category,
-            "data_type": data_type.value if isinstance(data_type, Enum) else data_type,
-            "required_resources": [
-                r.value if isinstance(r, Enum) else r for r in (required_resources or [])
-            ],
-            "nullable": nullable,
-            "example_value": example_value,
-            "unit": unit,
-            "output_format": (
-                output_format.value if isinstance(output_format, Enum) else output_format
-            ),
-            "output_formats": formats_dict,
-            # Quality evaluation metadata
-            "valid_range": valid_range,
-            "valid_values": valid_values,
-        }
-        return func
-
-    return decorator
-
-
-def get_feature_metadata(func: Callable) -> Optional[Dict[str, Any]]:
-    """
-    Extract metadata from a feature function.
-
-    Args:
-        func: Hamilton feature function
-
-    Returns:
-        Dictionary of metadata if present, None otherwise
-    """
-    return getattr(func, "__hamilton_metadata__", None)
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
 
 def build_metadata_registry(modules: list) -> Dict[str, Dict[str, Any]]:
     """
-    Build a registry of all feature metadata from Hamilton feature modules.
+    Build a registry of all feature metadata.
 
-    Also registers extracted field names (from @extract_fields) with their
-    parent function's metadata so resource detection works for individual fields.
+    NOTE: This function now uses FEATURE_REGISTRY as the source of truth,
+    ignoring the modules parameter (kept for backwards compatibility).
 
     Args:
-        modules: List of Hamilton feature modules to scan
+        modules: List of Hamilton feature modules (ignored, kept for compatibility)
 
     Returns:
         Dictionary mapping feature names to their metadata
     """
+    from app.tasks.pipeline.feature_dag._feature_definitions import FEATURE_REGISTRY
+
     registry = {}
-
-    for module in modules:
-        # Get all functions from module
-        for name in dir(module):
-            if name.startswith("_"):
-                continue
-
-            attr = getattr(module, name)
-
-            # Skip non-callable items
-            if not callable(attr):
-                continue
-
-            # Check if function has Hamilton metadata
-            metadata = get_feature_metadata(attr)
-            if metadata:
-                registry[name] = metadata
-
-                # Also check for @extract_fields decorator
-                # Hamilton stores extract_fields info in func.transform attribute
-                transforms = getattr(attr, "transform", [])
-                for t in transforms:
-                    # Check if this is an extract_fields transform
-                    if hasattr(t, "fields") and isinstance(t.fields, dict):
-                        for field_name in t.fields.keys():
-                            # Register extracted field name with same metadata
-                            registry[field_name] = metadata
-
+    for name, defn in FEATURE_REGISTRY.items():
+        registry[name] = {
+            "display_name": defn.display_name,
+            "description": defn.description,
+            "category": defn.category.value,
+            "data_type": defn.data_type.value,
+            "required_resources": [r.value for r in defn.required_resources],
+            "nullable": defn.nullable,
+            "example_value": defn.example_value,
+            "unit": defn.unit,
+            "output_format": defn.output_format.value if defn.output_format else None,
+            "valid_range": defn.valid_range,
+            "valid_values": defn.valid_values,
+        }
     return registry
 
 
@@ -259,17 +168,17 @@ def format_features_for_storage(
     - Input resource names (git_history, git_worktree, etc.)
     - Non-serializable objects (custom dataclasses, Path objects)
 
+    Uses FEATURE_REGISTRY for output_format metadata.
+
     Args:
         features: Dictionary of extracted features
     Returns:
         Dictionary with formatted values ready for DB storage
     """
-    # Lazy load to avoid circular import
-    from app.tasks.pipeline.constants import HAMILTON_MODULES
+    from app.tasks.pipeline.feature_dag._feature_definitions import FEATURE_REGISTRY
     from app.tasks.pipeline.shared.resources import get_input_resource_names
 
     input_resource_names = get_input_resource_names()
-    registry = build_metadata_registry(HAMILTON_MODULES)
     result = {}
 
     for name, value in features.items():
@@ -281,25 +190,9 @@ def format_features_for_storage(
         if not _is_serializable(value):
             continue
 
-        # Get output format from metadata
-        metadata = registry.get(name, {})
-
-        # First check output_formats dict (for @extract_fields features)
-        output_formats_dict = metadata.get("output_formats", {})
-        output_format_str = output_formats_dict.get(name)
-
-        # Fall back to output_format (for single-value features)
-        if not output_format_str:
-            output_format_str = metadata.get("output_format")
-
-        # Convert string to enum if needed
-        if output_format_str:
-            try:
-                output_format = OutputFormat(output_format_str)
-            except ValueError:
-                output_format = OutputFormat.RAW
-        else:
-            output_format = OutputFormat.RAW
+        # Get output format from FEATURE_REGISTRY (single source of truth)
+        defn = FEATURE_REGISTRY.get(name)
+        output_format = defn.output_format if defn and defn.output_format else OutputFormat.RAW
 
         if value is None:
             result[name] = None
