@@ -1,12 +1,10 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
     ArrowLeft,
-    ArrowRight,
     ExternalLink,
-    GitBranch,
     Globe,
     Loader2,
     Lock,
@@ -21,14 +19,14 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWebSocket } from "@/contexts/websocket-context";
-import { reposApi } from "@/lib/api";
-import { formatTimestamp } from "@/lib/utils";
-import type { RepoDetail } from "@/types";
+import { buildApi, reposApi } from "@/lib/api";
+import type { Build, RepoDetail } from "@/types";
 
-import { ActionPanel } from "../_components/ActionPanel";
-import { CurrentPhaseCard } from "../_components/CurrentPhaseCard";
-import { PipelineStepper } from "../_components/PipelineStepper";
+import { OverviewTab } from "./_tabs/OverviewTab";
+import { BuildsTab } from "./_tabs/BuildsTab";
+import { IssuesTab } from "./_tabs/IssuesTab";
 
 interface ImportProgress {
     import_builds: {
@@ -54,10 +52,21 @@ interface ImportProgress {
 export default function RepoDetailPage() {
     const params = useParams();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const repoId = params.repoId as string;
+
+    // Read tab from URL or default to "overview"
+    const tabFromUrl = searchParams.get("tab") || "overview";
+    const validTabs = ["overview", "builds", "issues"];
+    const currentTab = validTabs.includes(tabFromUrl) ? tabFromUrl : "overview";
+
+    const handleTabChange = (value: string) => {
+        router.push(`/repositories/${repoId}?tab=${value}`, { scroll: false });
+    };
 
     const [repo, setRepo] = useState<RepoDetail | null>(null);
     const [progress, setProgress] = useState<ImportProgress | null>(null);
+    const [builds, setBuilds] = useState<Build[]>([]);
     const [loading, setLoading] = useState(true);
     const [progressLoading, setProgressLoading] = useState(true);
 
@@ -95,24 +104,32 @@ export default function RepoDetailPage() {
         }
     }, [repoId]);
 
+    const loadBuilds = useCallback(async () => {
+        try {
+            const data = await buildApi.getByRepo(repoId, { skip: 0, limit: 5 });
+            setBuilds(data.items);
+        } catch (err) {
+            console.error(err);
+        }
+    }, [repoId]);
+
     useEffect(() => {
         loadRepo();
         loadProgress();
-    }, [loadRepo, loadProgress]);
+        loadBuilds();
+    }, [loadRepo, loadProgress, loadBuilds]);
 
-    // WebSocket subscription for repo updates
+    // WebSocket subscription
     useEffect(() => {
         const unsubscribe = subscribe("REPO_UPDATE", (data: any) => {
             if (data.repo_id === repoId) {
                 loadRepo();
                 loadProgress();
+                loadBuilds();
             }
         });
-
-        return () => {
-            unsubscribe();
-        };
-    }, [subscribe, loadRepo, loadProgress, repoId]);
+        return () => unsubscribe();
+    }, [subscribe, loadRepo, loadProgress, loadBuilds, repoId]);
 
     // Action handlers
     const handleStartProcessing = async () => {
@@ -179,15 +196,6 @@ export default function RepoDetailPage() {
         }
     };
 
-    const handleRetryFailed = () => {
-        const status = repo?.status?.toLowerCase() || "";
-        if (status === "ingestion_partial") {
-            handleRetryIngestion();
-        } else if (status === "partial" || status === "failed") {
-            handleRetryProcessing();
-        }
-    };
-
     if (loading) {
         return (
             <div className="flex min-h-[60vh] items-center justify-center">
@@ -216,11 +224,6 @@ export default function RepoDetailPage() {
             </div>
         );
     }
-
-    const hasIngestionFailed = (progress?.import_builds.failed || 0) > 0;
-    const hasProcessingFailed = (progress?.training_builds.failed || 0) > 0;
-    const hasPredictionFailed = (progress?.training_builds.prediction_failed || 0) > 0;
-    const hasFailed = hasIngestionFailed || hasProcessingFailed || hasPredictionFailed;
 
     return (
         <div className="space-y-6">
@@ -273,136 +276,58 @@ export default function RepoDetailPage() {
                 )}
             </div>
 
-            {/* Pipeline Stepper */}
-            <Card>
-                <CardHeader className="pb-4">
-                    <CardTitle className="text-lg">Pipeline Progress</CardTitle>
-                    <CardDescription>
-                        Track the import and processing pipeline for this repository
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <PipelineStepper status={repo.status} progress={progress} />
-                </CardContent>
-            </Card>
+            {/* Tabs */}
+            <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
+                <TabsList className="w-full grid grid-cols-3">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="builds">Builds</TabsTrigger>
+                    <TabsTrigger value="issues" className="gap-1">
+                        Issues
+                        {((progress?.import_builds.failed || 0) + (progress?.training_builds.failed || 0) + (progress?.training_builds.prediction_failed || 0)) > 0 && (
+                            <Badge variant="destructive" className="ml-1 h-5 px-1.5 text-xs">
+                                {(progress?.import_builds.failed || 0) + (progress?.training_builds.failed || 0) + (progress?.training_builds.prediction_failed || 0)}
+                            </Badge>
+                        )}
+                    </TabsTrigger>
+                </TabsList>
 
-            {/* Current Phase + Actions */}
-            <div className="grid gap-6 md:grid-cols-3">
-                <div className="md:col-span-2">
-                    <CurrentPhaseCard
-                        status={repo.status}
+                <TabsContent value="overview" className="space-y-6">
+                    <OverviewTab
+                        repo={repo}
                         progress={progress}
-                        isLoading={progressLoading}
-                        onRetryFailed={hasFailed ? handleRetryFailed : undefined}
+                        builds={builds}
+                        onSync={handleSync}
+                        onRetryIngestion={handleRetryIngestion}
+                        onStartProcessing={handleStartProcessing}
+                        onRetryProcessing={handleRetryProcessing}
+                        onRetryPrediction={handleRetryPrediction}
+                        syncLoading={syncLoading}
+                        retryIngestionLoading={retryIngestionLoading}
+                        startProcessingLoading={startProcessingLoading}
+                        retryProcessingLoading={retryProcessingLoading}
+                        retryPredictionLoading={retryPredictionLoading}
                     />
-                </div>
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-lg">Actions</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-2">
-                        <ActionPanel
-                            status={repo.status}
-                            hasFailed={hasFailed}
-                            hasIngestionFailed={hasIngestionFailed}
-                            hasProcessingFailed={hasProcessingFailed}
-                            hasPredictionFailed={hasPredictionFailed}
-                            isStartProcessingLoading={startProcessingLoading}
-                            isSyncLoading={syncLoading}
-                            isRetryIngestionLoading={retryIngestionLoading}
-                            isRetryProcessingLoading={retryProcessingLoading}
-                            isRetryPredictionLoading={retryPredictionLoading}
-                            onStartProcessing={handleStartProcessing}
-                            onSync={handleSync}
-                            onRetryIngestion={handleRetryIngestion}
-                            onRetryProcessing={handleRetryProcessing}
-                            onRetryPrediction={handleRetryPrediction}
-                        />
-                    </CardContent>
-                </Card>
-            </div>
+                </TabsContent>
 
-            {/* Stats Grid */}
-            <div className="grid gap-4 md:grid-cols-4">
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardDescription>Fetched</CardDescription>
-                        <CardTitle className="text-2xl">
-                            {repo.builds_fetched.toLocaleString()}
-                        </CardTitle>
-                    </CardHeader>
-                </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardDescription>Ingested</CardDescription>
-                        <CardTitle className="text-2xl">
-                            {(progress?.import_builds.ingested || 0).toLocaleString()}
-                        </CardTitle>
-                    </CardHeader>
-                </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardDescription>Processed</CardDescription>
-                        <CardTitle className="text-2xl">
-                            {(repo.builds_processed || 0).toLocaleString()}
-                        </CardTitle>
-                    </CardHeader>
-                </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardDescription>Failed</CardDescription>
-                        <CardTitle className="text-2xl text-red-600">
-                            {(repo.builds_failed || 0).toLocaleString()}
-                        </CardTitle>
-                    </CardHeader>
-                </Card>
-            </div>
+                <TabsContent value="builds">
+                    <BuildsTab repoId={repoId} repoName={repo.full_name} />
+                </TabsContent>
 
-            {/* Repository Info */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg">Repository Info</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex flex-wrap gap-6 text-sm">
-                        <div className="flex items-center gap-2">
-                            <GitBranch className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-muted-foreground">Default branch:</span>
-                            <span className="font-medium">{repo.default_branch || "main"}</span>
-                        </div>
-                        {repo.main_lang && (
-                            <div className="flex items-center gap-2">
-                                <span className="text-muted-foreground">Language:</span>
-                                <Badge variant="outline">{repo.main_lang}</Badge>
-                            </div>
-                        )}
-                        <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">CI Provider:</span>
-                            <Badge variant="outline">{repo.ci_provider}</Badge>
-                        </div>
-                        {repo.last_synced_at && (
-                            <div className="flex items-center gap-2">
-                                <span className="text-muted-foreground">Last synced:</span>
-                                <span className="font-medium">
-                                    {formatTimestamp(repo.last_synced_at)}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* View Builds Link */}
-            <div className="flex justify-center">
-                <Button
-                    variant="outline"
-                    onClick={() => router.push(`/repositories/${repoId}/builds`)}
-                    className="gap-2"
-                >
-                    View All Builds
-                    <ArrowRight className="h-4 w-4" />
-                </Button>
-            </div>
+                <TabsContent value="issues">
+                    <IssuesTab
+                        repoId={repoId}
+                        failedIngestionCount={progress?.import_builds.failed || 0}
+                        failedExtractionCount={progress?.training_builds.failed || 0}
+                        failedPredictionCount={progress?.training_builds.prediction_failed || 0}
+                        onRetryIngestion={handleRetryIngestion}
+                        onRetryExtraction={handleRetryProcessing}
+                        onRetryPrediction={handleRetryPrediction}
+                        retryIngestionLoading={retryIngestionLoading}
+                        retryExtractionLoading={retryProcessingLoading}
+                        retryPredictionLoading={retryPredictionLoading}
+                    />
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }

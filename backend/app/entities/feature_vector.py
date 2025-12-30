@@ -91,3 +91,9 @@ class FeatureVector(BaseEntity):
         default=0,
         description="Number of features extracted",
     )
+
+    # ** SCAN METRICS - Results from scan tools (backfilled asynchronously) **
+    scan_metrics: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Scan tool metrics (sonar_*, trivy_*). Backfilled after scan completion.",
+    )

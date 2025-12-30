@@ -1,7 +1,13 @@
 "use client";
 
-import { Loader2, Play, RefreshCw, RotateCcw } from "lucide-react";
+import { AlertTriangle, Loader2, Play, RefreshCw, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ActionPanelProps {
     status: string;
@@ -19,6 +25,9 @@ interface ActionPanelProps {
     onRetryIngestion: () => void;
     onRetryProcessing: () => void;
     onRetryPrediction: () => void;
+    // Sync blocked state - when pending/failed processing builds exist
+    pendingProcessingCount?: number;
+    failedProcessingCount?: number;
 }
 
 export function ActionPanel({
@@ -37,8 +46,11 @@ export function ActionPanel({
     onRetryIngestion,
     onRetryProcessing,
     onRetryPrediction,
+    pendingProcessingCount = 0,
+    failedProcessingCount = 0,
 }: ActionPanelProps) {
     const statusLower = status.toLowerCase();
+    const isSyncBlocked = pendingProcessingCount > 0 || failedProcessingCount > 0;
     const isProcessing = ["queued", "ingesting", "processing"].includes(statusLower);
 
     // Primary action based on status
@@ -92,6 +104,35 @@ export function ActionPanel({
         }
 
         // Default - Sync new builds
+        if (isSyncBlocked) {
+            return (
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span>
+                                <Button
+                                    variant="outline"
+                                    disabled
+                                    className="gap-2"
+                                >
+                                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                    Sync Blocked
+                                </Button>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>
+                                {pendingProcessingCount > 0 && `${pendingProcessingCount} pending`}
+                                {pendingProcessingCount > 0 && failedProcessingCount > 0 && ", "}
+                                {failedProcessingCount > 0 && `${failedProcessingCount} failed`} builds.
+                                Process or retry them first.
+                            </p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            );
+        }
+
         return (
             <Button
                 onClick={onSync}
@@ -122,22 +163,51 @@ export function ActionPanel({
         ].includes(statusLower);
 
         if (showSyncAsSecondary) {
-            actions.push(
-                <Button
-                    key="sync"
-                    variant="outline"
-                    onClick={onSync}
-                    disabled={isSyncLoading || isProcessing}
-                    className="gap-2"
-                >
-                    {isSyncLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                        <RefreshCw className="h-4 w-4" />
-                    )}
-                    Sync New Builds
-                </Button>
-            );
+            if (isSyncBlocked) {
+                actions.push(
+                    <TooltipProvider key="sync-blocked">
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span>
+                                    <Button
+                                        variant="outline"
+                                        disabled
+                                        className="gap-2"
+                                    >
+                                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                        Sync Blocked
+                                    </Button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                <p>
+                                    {pendingProcessingCount > 0 && `${pendingProcessingCount} pending`}
+                                    {pendingProcessingCount > 0 && failedProcessingCount > 0 && ", "}
+                                    {failedProcessingCount > 0 && `${failedProcessingCount} failed`} builds.
+                                    Process or retry them first.
+                                </p>
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                );
+            } else {
+                actions.push(
+                    <Button
+                        key="sync"
+                        variant="outline"
+                        onClick={onSync}
+                        disabled={isSyncLoading || isProcessing}
+                        className="gap-2"
+                    >
+                        {isSyncLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                            <RefreshCw className="h-4 w-4" />
+                        )}
+                        Sync New Builds
+                    </Button>
+                );
+            }
         }
 
         // Retry ingestion failures

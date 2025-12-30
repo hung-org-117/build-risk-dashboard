@@ -20,8 +20,13 @@ class VersionStatus(str, Enum):
 
     PENDING = "pending"
     INGESTING = "ingesting"  # Clone/worktree/download logs phase
+    INGESTING_COMPLETE = (
+        "ingesting_complete"  # Ingestion done, waiting for user to start processing
+    )
+    INGESTING_PARTIAL = "ingesting_partial"  # Some builds failed ingestion
     PROCESSING = "processing"  # Feature extraction phase
-    COMPLETED = "completed"
+    COMPLETED = "completed"  # All builds processed successfully
+    PARTIAL = "partial"  # Some builds succeeded, some failed processing
     FAILED = "failed"
     CANCELLED = "cancelled"
 

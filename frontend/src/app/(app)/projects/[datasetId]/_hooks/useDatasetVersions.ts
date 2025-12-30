@@ -10,7 +10,7 @@ export interface DatasetVersion {
     name: string;
     description: string | null;
     selected_features: string[];
-    status: "pending" | "ingesting" | "processing" | "completed" | "failed" | "cancelled";
+    status: "pending" | "ingesting" | "ingesting_complete" | "ingesting_partial" | "processing" | "completed" | "partial" | "failed" | "cancelled";
     total_rows: number;
     processed_rows: number;
     enriched_rows: number;
@@ -78,6 +78,10 @@ export interface UseDatasetVersionsReturn {
     cancelVersion: (versionId: string) => Promise<void>;
     deleteVersion: (versionId: string) => Promise<void>;
     downloadVersion: (versionId: string, format?: "csv" | "json") => void;
+    // Processing control
+    startProcessing: (versionId: string) => Promise<void>;
+    retryIngestion: (versionId: string) => Promise<void>;
+    retryProcessing: (versionId: string) => Promise<void>;
 }
 
 export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn {
@@ -91,9 +95,9 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
     const [skip, setSkip] = useState(0);
     const [limit] = useState(10);
 
-    // Find active (processing) version
+    // Find active (processing or ingesting) version
     const activeVersion = versions.find(
-        (v) => v.status === "pending" || v.status === "ingesting" || v.status === "processing"
+        (v) => ["pending", "ingesting", "ingesting_complete", "ingesting_partial", "processing"].includes(v.status)
     ) || null;
 
     const hasMore = skip + versions.length < total;
@@ -246,6 +250,48 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
         [datasetId]
     );
 
+    // Start processing phase
+    const startProcessing = useCallback(
+        async (versionId: string) => {
+            try {
+                await api.post(`/datasets/${datasetId}/versions/${versionId}/start-processing`);
+                await refresh();
+            } catch (err: unknown) {
+                console.error("Failed to start processing:", err);
+                setError(err instanceof Error ? err.message : "Failed to start processing");
+            }
+        },
+        [datasetId, refresh]
+    );
+
+    // Retry failed ingestion
+    const retryIngestion = useCallback(
+        async (versionId: string) => {
+            try {
+                await api.post(`/datasets/${datasetId}/versions/${versionId}/retry-ingestion`);
+                await refresh();
+            } catch (err: unknown) {
+                console.error("Failed to retry ingestion:", err);
+                setError(err instanceof Error ? err.message : "Failed to retry ingestion");
+            }
+        },
+        [datasetId, refresh]
+    );
+
+    // Retry failed processing
+    const retryProcessing = useCallback(
+        async (versionId: string) => {
+            try {
+                await api.post(`/datasets/${datasetId}/versions/${versionId}/retry-processing`);
+                await refresh();
+            } catch (err: unknown) {
+                console.error("Failed to retry processing:", err);
+                setError(err instanceof Error ? err.message : "Failed to retry processing");
+            }
+        },
+        [datasetId, refresh]
+    );
+
     return {
         versions,
         activeVersion,
@@ -266,6 +312,10 @@ export function useDatasetVersions(datasetId: string): UseDatasetVersionsReturn 
         cancelVersion,
         deleteVersion,
         downloadVersion,
+        // Processing control
+        startProcessing,
+        retryIngestion,
+        retryProcessing,
     };
 }
 

@@ -67,8 +67,7 @@ export const reposApi = {
     getImportProgress: async (repoId: string) => {
         const response = await api.get<{
             repo_id: string;
-            import_status: string;
-            import_version: number;
+            status: string;
             import_builds: {
                 pending: number;
                 fetched: number;
@@ -77,19 +76,41 @@ export const reposApi = {
                 failed: number;
                 total: number;
             };
+            resource_status: Record<string, Record<string, number>>;
             training_builds: {
                 pending: number;
+                in_progress: number;
                 completed: number;
                 partial: number;
                 failed: number;
                 total: number;
+                with_prediction: number;
+                pending_prediction: number;
+                prediction_failed: number;
             };
             summary: {
-                total_builds_imported: number;
-                total_builds_processed: number;
-                total_builds_failed: number;
+                builds_fetched: number;
+                builds_completed: number;
+                builds_failed: number;
             };
         }>(`/repos/${repoId}/import-progress`);
+        return response.data;
+    },
+    getFailedImportBuilds: async (repoId: string, limit: number = 50) => {
+        const response = await api.get<{
+            repo_id: string;
+            total: number;
+            failed_builds: Array<{
+                id: string;
+                ci_run_id: string;
+                commit_sha: string;
+                ingestion_error?: string;
+                resource_errors: Record<string, string>;
+                fetched_at?: string;
+            }>;
+        }>(`/repos/${repoId}/import-progress/failed`, {
+            params: { limit },
+        });
         return response.data;
     },
     retryPredictions: async (repoId: string) => {

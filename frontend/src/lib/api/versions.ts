@@ -241,6 +241,37 @@ export const datasetVersionApi = {
         );
         return response.data;
     },
+
+    // Processing Phase Control
+    startProcessing: async (
+        datasetId: string,
+        versionId: string
+    ): Promise<{ status: string; task_id: string; message: string }> => {
+        const response = await api.post(
+            `/datasets/${datasetId}/versions/${versionId}/start-processing`
+        );
+        return response.data;
+    },
+
+    retryIngestion: async (
+        datasetId: string,
+        versionId: string
+    ): Promise<{ status: string; task_id: string; message: string }> => {
+        const response = await api.post(
+            `/datasets/${datasetId}/versions/${versionId}/retry-ingestion`
+        );
+        return response.data;
+    },
+
+    retryProcessing: async (
+        datasetId: string,
+        versionId: string
+    ): Promise<{ status: string; task_id: string; message: string }> => {
+        const response = await api.post(
+            `/datasets/${datasetId}/versions/${versionId}/retry-processing`
+        );
+        return response.data;
+    },
 };
 
 // =============================================================================

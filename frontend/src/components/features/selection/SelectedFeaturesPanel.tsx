@@ -36,7 +36,7 @@ interface DisplayFeature {
     name: string;
     display_name: string;
     description: string;
-    node: string;
+    extractor_node: string;  // Changed from 'node' to match FeatureDefinition
 }
 
 interface SelectedFeaturesPanelProps {
@@ -97,7 +97,7 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
 
         selectedFeatures.forEach((featureName) => {
             const featureDef = allFeatures.find((f) => f.name === featureName);
-            const node = featureDef?.node || "other";
+            const node = featureDef?.extractor_node || "other";
 
             if (!groups[node]) groups[node] = [];
 
@@ -106,7 +106,7 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
                     name: featureName,
                     display_name: featureName,
                     description: "",
-                    node: "other",
+                    extractor_node: "other",
                 }
             );
         });

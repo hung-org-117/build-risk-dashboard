@@ -302,6 +302,73 @@ async def retry_commit_scan(
 
 
 # =========================================================================
+# Processing Phase Control Endpoints
+# =========================================================================
+
+
+@router.post("/{version_id}/start-processing")
+async def start_version_processing(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.MANAGE_DATASETS)),
+):
+    """
+    Start processing phase after ingestion completes.
+
+    Only allowed when version status is INGESTING_COMPLETE or INGESTING_PARTIAL.
+    Dispatches sequential feature extraction for temporal feature support.
+    """
+    version_service = DatasetVersionService(db)
+    return version_service.start_processing(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+    )
+
+
+@router.post("/{version_id}/retry-ingestion")
+async def retry_failed_ingestion(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.MANAGE_DATASETS)),
+):
+    """
+    Retry failed ingestion builds.
+
+    Resets FAILED DatasetImportBuild records and re-triggers ingestion.
+    Only allowed when status is INGESTING_PARTIAL or FAILED.
+    """
+    version_service = DatasetVersionService(db)
+    return version_service.retry_failed_ingestion(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+    )
+
+
+@router.post("/{version_id}/retry-processing")
+async def retry_failed_processing(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.MANAGE_DATASETS)),
+):
+    """
+    Retry failed processing (feature extraction) builds.
+
+    Resets FAILED DatasetEnrichmentBuild records and re-dispatches extraction.
+    """
+    version_service = DatasetVersionService(db)
+    return version_service.retry_failed_processing(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+    )
+
+
+# =========================================================================
 # Async Export Endpoints (for large datasets)
 # =========================================================================
 

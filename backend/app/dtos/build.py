@@ -40,6 +40,10 @@ class BuildSummary(BaseModel):
     extraction_error: Optional[str] = None
     missing_resources: List[str] = []
 
+    # Prediction
+    predicted_label: Optional[str] = None
+    prediction_confidence: Optional[float] = None
+
     class Config:
         populate_by_name = True
 
@@ -77,6 +81,12 @@ class BuildDetail(BaseModel):
     feature_count: int = 0
     extraction_error: Optional[str] = None
     features: Dict[str, Any] = {}
+
+    # Prediction results
+    predicted_label: Optional[str] = None  # LOW, MEDIUM, HIGH
+    prediction_confidence: Optional[float] = None  # 0-1 score
+    prediction_uncertainty: Optional[float] = None
+    predicted_at: Optional[datetime] = None
 
     class Config:
         populate_by_name = True

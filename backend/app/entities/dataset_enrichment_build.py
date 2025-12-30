@@ -11,7 +11,7 @@ Key design principles:
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import Field
 
@@ -68,12 +68,6 @@ class DatasetEnrichmentBuild(BaseEntity):
     extraction_error: Optional[str] = Field(
         None,
         description="Error message if extraction failed",
-    )
-
-    # ** SCAN METRICS - Results from scan tools (backfilled asynchronously) **
-    scan_metrics: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Scan tool metrics (sonar_*, trivy_*). Backfilled after scan completion.",
     )
 
     enriched_at: Optional[datetime] = Field(

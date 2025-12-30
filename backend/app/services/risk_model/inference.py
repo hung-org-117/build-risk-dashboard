@@ -207,17 +207,23 @@ class RiskModelService:
 
             seq = self._create_sequence(history_temporal)
 
-            # Scale features
             if self._scaler_temporal:
                 seq_flat = seq.reshape(-1, len(TEMPORAL_FEATURES))
-                seq_flat = self._scaler_temporal.transform(seq_flat)
+                import pandas as pd
+
+                seq_df = pd.DataFrame(seq_flat, columns=TEMPORAL_FEATURES)
+                seq_flat = self._scaler_temporal.transform(seq_df)
                 seq = seq_flat.reshape(1, -1, len(TEMPORAL_FEATURES))
             else:
                 seq = seq.reshape(1, -1, len(TEMPORAL_FEATURES))
 
             static_arr = np.array([static_values], dtype=np.float32)
             if self._scaler_static:
-                static_arr = self._scaler_static.transform(static_arr)
+                # Fix sklearn warning: pass DataFrame with column names
+                import pandas as pd
+
+                static_df = pd.DataFrame(static_arr, columns=STATIC_FEATURES)
+                static_arr = self._scaler_static.transform(static_df)
 
             # Convert to tensors
             seq_tensor = torch.tensor(seq, dtype=torch.float32).to(self._device)

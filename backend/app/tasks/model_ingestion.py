@@ -132,7 +132,7 @@ def ingest_model_builds(
 
     logger.info(f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}")
 
-    publish_status(repo_config_id, "ingesting", "Starting fetch...")
+    publish_status(repo_config_id, "fetching", "Fetching builds from CI...")
 
     # Route to appropriate fetch strategy
     if sync_until_existing:
@@ -261,14 +261,40 @@ def fetch_builds_until_existing(
             "only_completed": True,
         }
 
-        # Fetch page
-        loop = asyncio.new_event_loop()
+        # Fetch page with error handling
         try:
-            asyncio.set_event_loop(loop)
-            builds = loop.run_until_complete(ci_instance.fetch_builds(full_name, **fetch_kwargs))
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                builds = loop.run_until_complete(
+                    ci_instance.fetch_builds(full_name, **fetch_kwargs)
+                )
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+        except Exception as e:
+            error_msg = f"Failed to fetch builds from CI API: {str(e)}"
+            logger.error(f"{log_ctx} {error_msg}", exc_info=True)
+
+            # Update repo status to FAILED
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {
+                    "status": ModelImportStatus.FAILED.value,
+                    "error_message": error_msg,
+                },
+            )
+            publish_status(
+                repo_config_id,
+                "failed",
+                f"Sync failed: {error_msg}",
+            )
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "pages_fetched": page - 1,
+                "new_builds": total_new_builds,
+            }
 
         if not builds:
             logger.info(f"{log_ctx} Page {page}: No builds returned, stopping")
@@ -446,14 +472,24 @@ def fetch_builds_batch(
         "only_completed": True,
     }
 
-    # Fetch page
-    loop = asyncio.new_event_loop()
+    # Fetch page with error handling
     try:
-        asyncio.set_event_loop(loop)
-        builds = loop.run_until_complete(ci_instance.fetch_builds(full_name, **fetch_kwargs))
-    finally:
-        loop.close()
-        asyncio.set_event_loop(None)
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            builds = loop.run_until_complete(ci_instance.fetch_builds(full_name, **fetch_kwargs))
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+    except Exception as e:
+        error_msg = f"Failed to fetch builds page {page}: {str(e)}"
+        logger.error(f"{log_ctx} {error_msg}", exc_info=True)
+        return {
+            "page": page,
+            "builds": 0,
+            "has_more": False,
+            "error": error_msg,
+        }
 
     if not builds:
         logger.info(f"{log_ctx} No builds found")
@@ -616,6 +652,10 @@ def aggregate_fetch_results(
         repo_config_id,
         "ingesting",
         f"Preparing resources for {total_fetched} builds...",
+        stats={
+            "builds_fetched": total_fetched,
+            "builds_ingested": 0,
+        },
     )
 
     return {
@@ -692,12 +732,13 @@ def dispatch_ingestion(
 
     if ingestion_workflow:
         logger.info(f"{log_ctx} Dispatching ingestion chord")
-        # Use link_error to handle chord failures gracefully
+        # Use on_error on callback to handle chord failures gracefully
+        # (link_error doesn't work with chord groups)
         error_callback = handle_ingestion_chord_error.s(
             repo_config_id=repo_config_id,
             correlation_id=correlation_id,
         )
-        chord(ingestion_workflow, callback).apply_async(link_error=error_callback)
+        chord(ingestion_workflow, callback.on_error(error_callback)).apply_async()
     else:
         logger.info(f"{log_ctx} No ingestion needed, marking as complete")
         # No ingestion tasks needed - directly mark as complete
@@ -863,9 +904,18 @@ def aggregate_model_ingestion_results(
         final_status = ModelImportStatus.INGESTION_COMPLETE
         msg = f"Ingestion complete: {ingested} builds ready. Start processing when ready."
 
+    # Update repo config with final status and timestamps
+    now = datetime.utcnow()
+    total_builds = ingested + failed
     repo_config_repo.update_repository(
         repo_config_id,
-        {"status": final_status.value},
+        {
+            "status": final_status.value,
+            "last_synced_at": now,
+            "builds_fetched": total_builds,
+            "builds_ingested": ingested,
+            "builds_failed": failed,
+        },
     )
 
     logger.info(f"{corr_prefix}[aggregate_ingestion] {msg}")
@@ -878,8 +928,10 @@ def aggregate_model_ingestion_results(
         final_status.value,
         msg,
         stats={
+            "builds_fetched": total_builds,
             "builds_ingested": ingested,
             "builds_failed": failed,
+            "last_synced_at": now.isoformat(),
             "resource_status": resource_summary,
         },
     )

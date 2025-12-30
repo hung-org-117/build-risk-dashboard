@@ -14,6 +14,7 @@ from app.dtos import (
     RepoSearchResponse,
     RepoSuggestionListResponse,
 )
+from app.entities.enums import ExtractionStatus
 from app.entities.feature_audit_log import AuditLogCategory
 from app.entities.model_repo_config import ModelImportStatus
 from app.repositories.model_repo_config import ModelRepoConfigRepository
@@ -353,6 +354,7 @@ class RepositoryService:
         Processing is NOT started automatically - user must manually
         click "Start Processing" to process the new builds.
         """
+        from app.repositories.model_training_build import ModelTrainingBuildRepository
         from app.tasks.model_ingestion import ingest_model_builds
 
         repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
@@ -366,6 +368,24 @@ class RepositoryService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Repository is already being imported. Please wait for completion.",
+            )
+
+        # Check for pending/failed training builds (temporal dependency check)
+        training_build_repo = ModelTrainingBuildRepository(self.db)
+        pending_count = training_build_repo.count_by_config(
+            ObjectId(repo_id), ExtractionStatus.PENDING
+        )
+        failed_count = training_build_repo.count_by_config(
+            ObjectId(repo_id), ExtractionStatus.FAILED
+        )
+
+        if pending_count > 0 or failed_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot sync: {pending_count} pending and {failed_count} failed builds. "
+                    "Process or retry these builds first to maintain temporal feature integrity."
+                ),
             )
 
         # Update status to queued/ingesting
@@ -593,6 +613,29 @@ class RepositoryService:
                 "builds_completed": repo_doc.builds_completed,
                 "builds_failed": repo_doc.builds_failed,
             },
+        }
+
+    def get_failed_import_builds(self, repo_id: str, limit: int = 50) -> dict:
+        """
+        Get failed import builds with error details for UI display.
+
+        Returns list of failed builds with their errors (ingestion_error + resource_errors).
+        """
+        from app.repositories.model_import_build import ModelImportBuildRepository
+
+        repo_doc = self.repo_config.find_by_id(repo_id)
+        if not repo_doc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Repository not found")
+
+        import_build_repo = ModelImportBuildRepository(self.db)
+        failed_builds = import_build_repo.get_failed_with_errors(repo_id, limit)
+
+        return {
+            "repo_id": repo_id,
+            "total": len(failed_builds),
+            "failed_builds": failed_builds,
         }
 
     def detect_languages(self, full_name: str, current_user: dict) -> dict:

@@ -71,7 +71,6 @@ class ModelTrainingBuild(BaseEntity):
         description="Build creation time (denormalized)",
     )
 
-    # Extraction status (mirrors FeatureVector.extraction_status for quick queries)
     extraction_status: ExtractionStatus = Field(
         default=ExtractionStatus.PENDING,
         description="Feature extraction status",
@@ -79,6 +78,14 @@ class ModelTrainingBuild(BaseEntity):
     extraction_error: Optional[str] = Field(
         None,
         description="Error message if extraction failed",
+    )
+    extraction_started_at: Optional[datetime] = Field(
+        None,
+        description="When feature extraction started",
+    )
+    extracted_at: Optional[datetime] = Field(
+        None,
+        description="When feature extraction completed",
     )
 
     # Ground truth label (for supervised learning)

@@ -38,6 +38,7 @@ class ExtractionStatus(str, Enum):
     """Feature extraction status for builds."""
 
     PENDING = "pending"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     PARTIAL = "partial"
     FAILED = "failed"

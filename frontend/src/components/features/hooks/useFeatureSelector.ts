@@ -78,15 +78,12 @@ export function useFeatureSelector(): UseFeatureSelectorReturn {
         loadData();
     }, []);
 
-    // All features flattened (with node info)
+    // All features flattened - features already have extractor_node from API
     const allFeatures = useMemo(() => {
         const features: FeatureDefinition[] = [];
         extractorNodes.forEach((nodeInfo) => {
             nodeInfo.features.forEach((f) => {
-                features.push({
-                    ...f,
-                    node: nodeInfo.name,
-                });
+                features.push(f);
             });
         });
         return features;
@@ -177,8 +174,8 @@ export function useFeatureSelector(): UseFeatureSelectorReturn {
         const nodes = new Set<string>();
         selectedFeatures.forEach((featureName) => {
             const feature = allFeatures.find((f) => f.name === featureName);
-            if (feature?.node) {
-                nodes.add(feature.node);
+            if (feature?.extractor_node) {
+                nodes.add(feature.extractor_node);
             }
         });
         return Array.from(nodes);

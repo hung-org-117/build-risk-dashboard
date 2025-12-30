@@ -13,6 +13,7 @@ import { reposApi } from "@/lib/api";
 interface ImportProgressDisplayProps {
     repoId: string;
     totalFetched: number;
+    totalIngested: number;
     totalProcessed: number;
     totalFailed: number;
     importStatus: string;
@@ -42,6 +43,7 @@ interface ImportProgress {
 export function ImportProgressDisplay({
     repoId,
     totalFetched,
+    totalIngested,
     totalProcessed,
     totalFailed,
     importStatus,
@@ -66,11 +68,35 @@ export function ImportProgressDisplay({
         }
     }, [isOpen, repoId, progress, loading]);
 
-    const processedPercent =
-        totalFetched > 0 ? Math.round((totalProcessed / totalFetched) * 100) : 0;
+    // Smart display based on status phase
+    const isFetchingPhase = importStatus === "fetching" || importStatus === "queued";
+    const isIngestionPhase = importStatus === "ingesting" || importStatus === "ingestion_complete" || importStatus === "ingestion_partial";
+    const isProcessingPhase = importStatus === "processing" || importStatus === "imported" || importStatus === "partial";
 
-    const isActive = importStatus === "ingesting" || importStatus === "processing" || importStatus === "queued";
-    const isComplete = totalFetched > 0 && totalProcessed >= totalFetched && totalFailed === 0;
+    // Display logic based on phase:
+    // - Fetching: show fetched builds (no denominator until complete)
+    // - Ingestion: show ingested/fetched
+    // - Processing: show completed/ingested
+    let displayCount: number;
+    let displayTotal: number;
+
+    if (isProcessingPhase) {
+        displayCount = totalProcessed;
+        displayTotal = totalIngested > 0 ? totalIngested : totalFetched;
+    } else if (isIngestionPhase) {
+        displayCount = totalIngested;
+        displayTotal = totalFetched;
+    } else {
+        // Fetching/queued - show fetched so far
+        displayCount = totalFetched;
+        displayTotal = 0; // Unknown during fetching
+    }
+
+    const processedPercent =
+        displayTotal > 0 ? Math.round((displayCount / displayTotal) * 100) : 0;
+
+    const isActive = importStatus === "fetching" || importStatus === "ingesting" || importStatus === "processing" || importStatus === "queued";
+    const isComplete = displayTotal > 0 && displayCount >= displayTotal && totalFailed === 0;
 
     return (
         <TooltipProvider>
@@ -82,7 +108,11 @@ export function ImportProgressDisplay({
                     >
                         <div className="flex items-center gap-2 text-sm">
                             <span className="font-medium">
-                                {totalProcessed}/{totalFetched}
+                                {isFetchingPhase ? (
+                                    displayCount > 0 ? `${displayCount} fetched` : "—"
+                                ) : (
+                                    `${displayCount}/${displayTotal}`
+                                )}
                             </span>
                             {isComplete ? (
                                 <span className="text-green-600 dark:text-green-400">✓</span>
@@ -91,18 +121,22 @@ export function ImportProgressDisplay({
                                     ({totalFailed} failed)
                                 </span>
                             ) : null}
-                            <span className="text-muted-foreground text-xs">
-                                ({processedPercent}%)
-                            </span>
+                            {!isFetchingPhase && (
+                                <span className="text-muted-foreground text-xs">
+                                    ({processedPercent}%)
+                                </span>
+                            )}
                         </div>
-                        {totalFetched > 0 && (
+                        {displayTotal > 0 && (
                             <div className="h-1.5 w-28 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                                 <div
                                     className={`h-full transition-all ${totalFailed > 0
                                         ? "bg-red-500"
-                                        : isActive
-                                            ? "bg-blue-500 animate-pulse"
-                                            : "bg-green-500"
+                                        : isFetchingPhase
+                                            ? "bg-cyan-500 animate-pulse"
+                                            : isActive
+                                                ? "bg-blue-500 animate-pulse"
+                                                : "bg-green-500"
                                         }`}
                                     style={{ width: `${processedPercent}%` }}
                                 />

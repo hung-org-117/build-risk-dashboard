@@ -1,5 +1,5 @@
 """
-ModelImportBuild Repository - Database operations for model import builds.
+DatasetImportBuild Repository - Database operations for dataset import builds.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ from bson import ObjectId
 from pymongo import ReturnDocument
 from pymongo.synchronous.client_session import ClientSession
 
-from app.entities.model_import_build import (
-    ModelImportBuild,
-    ModelImportBuildStatus,
+from app.entities.dataset_import_build import (
+    DatasetImportBuild,
+    DatasetImportBuildStatus,
     ResourceStatus,
 )
 from app.repositories.base import BaseRepository
@@ -22,103 +22,57 @@ if TYPE_CHECKING:
     pass
 
 
-class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
-    """Repository for ModelImportBuild operations."""
+class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
+    """Repository for DatasetImportBuild operations."""
 
     def __init__(self, db):
-        super().__init__(db, "model_import_builds", ModelImportBuild)
+        super().__init__(db, "dataset_import_builds", DatasetImportBuild)
 
-    def find_by_repo_config(
+    def find_by_version(
         self,
-        config_id: str,
-        status: Optional[ModelImportBuildStatus] = None,
-    ) -> List[ModelImportBuild]:
+        version_id: str,
+        status: Optional[DatasetImportBuildStatus] = None,
+    ) -> List[DatasetImportBuild]:
         """
-        Find all builds for a repo config, optionally filtered by status.
+        Find all builds for a dataset version, optionally filtered by status.
 
         Args:
-            config_id: ModelRepoConfig ID
+            version_id: DatasetVersion ID
             status: Optional status filter
 
         Returns:
-            List of ModelImportBuild entities
+            List of DatasetImportBuild entities
         """
-        query = {"model_repo_config_id": ObjectId(config_id)}
+        query = {"dataset_version_id": ObjectId(version_id)}
         if status:
             query["status"] = status.value if hasattr(status, "value") else status
         return self.find_many(query)
 
-    def find_fetched_builds(self, config_id: str) -> List[ModelImportBuild]:
-        """Find successfully fetched builds."""
-        return self.find_by_repo_config(config_id, status=ModelImportBuildStatus.FETCHED)
+    def find_pending_builds(self, version_id: str) -> List[DatasetImportBuild]:
+        """Find pending builds for ingestion."""
+        return self.find_by_version(version_id, status=DatasetImportBuildStatus.PENDING)
 
-    def find_failed_imports(self, config_id: str) -> List[ModelImportBuild]:
+    def find_ingesting_builds(self, version_id: str) -> List[DatasetImportBuild]:
+        """Find builds currently ingesting."""
+        return self.find_by_version(version_id, status=DatasetImportBuildStatus.INGESTING)
+
+    def find_ingested_builds(self, version_id: str) -> List[DatasetImportBuild]:
+        """Find successfully ingested builds."""
+        return self.find_by_version(version_id, status=DatasetImportBuildStatus.INGESTED)
+
+    def find_failed_imports(self, version_id: str) -> List[DatasetImportBuild]:
         """Find failed import builds for retry."""
-        return self.find_by_repo_config(config_id, status=ModelImportBuildStatus.FAILED)
+        return self.find_by_version(version_id, status=DatasetImportBuildStatus.FAILED)
 
-    def get_failed_with_errors(self, config_id: str, limit: int = 50) -> List[dict]:
+    def count_by_status(self, version_id: str) -> dict:
         """
-        Get failed import builds with error details for UI display.
-
-        Returns list of dicts with:
-        - ci_run_id, commit_sha, status
-        - ingestion_error (general error)
-        - resource_errors (per-resource errors)
-        """
-        pipeline = [
-            {
-                "$match": {
-                    "model_repo_config_id": ObjectId(config_id),
-                    "status": ModelImportBuildStatus.FAILED.value,
-                }
-            },
-            {"$limit": limit},
-            {
-                "$project": {
-                    "_id": 1,
-                    "ci_run_id": 1,
-                    "commit_sha": 1,
-                    "status": 1,
-                    "ingestion_error": 1,
-                    "resource_status": 1,
-                    "fetched_at": 1,
-                }
-            },
-        ]
-
-        results = list(self.collection.aggregate(pipeline))
-
-        # Transform to extract error messages
-        failed_builds = []
-        for doc in results:
-            resource_errors = {}
-            for res_name, res_data in (doc.get("resource_status") or {}).items():
-                if isinstance(res_data, dict) and res_data.get("status") == "failed":
-                    resource_errors[res_name] = res_data.get("error", "Unknown error")
-
-            failed_builds.append(
-                {
-                    "id": str(doc["_id"]),
-                    "ci_run_id": doc.get("ci_run_id"),
-                    "commit_sha": doc.get("commit_sha", "")[:8],
-                    "status": doc.get("status"),
-                    "ingestion_error": doc.get("ingestion_error"),
-                    "resource_errors": resource_errors,
-                    "fetched_at": doc.get("fetched_at"),
-                }
-            )
-
-        return failed_builds
-
-    def count_by_status(self, config_id: str) -> dict:
-        """
-        Get count of builds by status for a repo config.
+        Get count of builds by status for a dataset version.
 
         Returns:
             Dict mapping status -> count
         """
         pipeline = [
-            {"$match": {"model_repo_config_id": ObjectId(config_id)}},
+            {"$match": {"dataset_version_id": ObjectId(version_id)}},
             {"$group": {"_id": "$status", "count": {"$sum": 1}}},
         ]
         results = list(self.collection.aggregate(pipeline))
@@ -126,7 +80,7 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
     def update_many_by_status(
         self,
-        config_id: str,
+        version_id: str,
         from_status: str,
         updates: dict,
     ) -> int:
@@ -134,7 +88,7 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         Update all builds with given status.
 
         Args:
-            config_id: ModelRepoConfig ID
+            version_id: DatasetVersion ID
             from_status: Current status to filter
             updates: Fields to update
 
@@ -143,14 +97,14 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         """
         result = self.collection.update_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
+                "dataset_version_id": ObjectId(version_id),
                 "status": from_status,
             },
             {"$set": updates},
         )
         return result.modified_count
 
-    def bulk_insert(self, builds: List[ModelImportBuild]) -> List[ModelImportBuild]:
+    def bulk_insert(self, builds: List[DatasetImportBuild]) -> List[DatasetImportBuild]:
         """Insert multiple builds in one operation."""
         if not builds:
             return []
@@ -164,55 +118,61 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
     def find_by_business_key(
         self,
-        config_id: str,
-        raw_build_run_id: str,
-    ) -> Optional[ModelImportBuild]:
-        """Find by unique business key (config + raw_build_run)."""
+        version_id: str,
+        dataset_build_id: str,
+    ) -> Optional[DatasetImportBuild]:
+        """Find by unique business key (version + dataset_build)."""
         return self.find_one(
             {
-                "model_repo_config_id": ObjectId(config_id),
-                "raw_build_run_id": ObjectId(raw_build_run_id),
+                "dataset_version_id": ObjectId(version_id),
+                "dataset_build_id": ObjectId(dataset_build_id),
             }
         )
 
     def upsert_by_business_key(
         self,
-        config_id: str,
+        version_id: str,
+        dataset_build_id: str,
+        raw_repo_id: str,
         raw_build_run_id: str,
-        status: ModelImportBuildStatus,
+        status: DatasetImportBuildStatus,
         ci_run_id: str,
         commit_sha: str,
-    ) -> ModelImportBuild:
+        repo_full_name: str = "",
+    ) -> DatasetImportBuild:
         """
-        Atomic upsert by business key (config + raw_build_run).
+        Atomic upsert by business key (version + dataset_build).
 
         Uses atomic find_one_and_update for thread safety.
         This prevents duplicate records when the same task runs concurrently.
         """
         update_data = {
-            "model_repo_config_id": ObjectId(config_id),
+            "dataset_version_id": ObjectId(version_id),
+            "dataset_build_id": ObjectId(dataset_build_id),
+            "raw_repo_id": ObjectId(raw_repo_id),
             "raw_build_run_id": ObjectId(raw_build_run_id),
             "status": status.value if hasattr(status, "value") else status,
             "ci_run_id": ci_run_id,
             "commit_sha": commit_sha,
+            "repo_full_name": repo_full_name,
         }
 
         doc = self.collection.find_one_and_update(
             {
-                "model_repo_config_id": ObjectId(config_id),
-                "raw_build_run_id": ObjectId(raw_build_run_id),
+                "dataset_version_id": ObjectId(version_id),
+                "dataset_build_id": ObjectId(dataset_build_id),
             },
-            {"$set": update_data, "$setOnInsert": {"created_at": ObjectId().generation_time}},
+            {"$set": update_data, "$setOnInsert": {"created_at": datetime.utcnow()}},
             upsert=True,
             return_document=ReturnDocument.AFTER,
         )
-        return ModelImportBuild(**doc)
+        return DatasetImportBuild(**doc)
 
     def find_by_raw_build_run_ids(
         self,
-        config_id: str,
+        version_id: str,
         raw_build_run_ids: List[str],
-    ) -> List[ModelImportBuild]:
+    ) -> List[DatasetImportBuild]:
         """Batch query: Find all import builds by their raw_build_run_ids."""
         if not raw_build_run_ids:
             return []
@@ -223,35 +183,65 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
         return self.find_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
+                "dataset_version_id": ObjectId(version_id),
                 "raw_build_run_id": {"$in": oids},
             }
         )
 
-    def get_commit_shas(self, config_id: str) -> List[str]:
-        """Get unique commit SHAs for ingestion."""
+    def find_by_dataset_build_ids(
+        self,
+        version_id: str,
+        dataset_build_ids: List[str],
+    ) -> List[DatasetImportBuild]:
+        """Batch query: Find all import builds by their dataset_build_ids."""
+        if not dataset_build_ids:
+            return []
+
+        oids = [ObjectId(bid) for bid in dataset_build_ids if ObjectId.is_valid(bid)]
+        if not oids:
+            return []
+
+        return self.find_many(
+            {
+                "dataset_version_id": ObjectId(version_id),
+                "dataset_build_id": {"$in": oids},
+            }
+        )
+
+    def get_commit_shas_by_repo(self, version_id: str, raw_repo_id: str) -> List[str]:
+        """Get unique commit SHAs for a specific repo in version."""
         query = {
-            "model_repo_config_id": ObjectId(config_id),
-            "status": ModelImportBuildStatus.FETCHED.value,
+            "dataset_version_id": ObjectId(version_id),
+            "raw_repo_id": ObjectId(raw_repo_id),
+            "status": {
+                "$in": [
+                    DatasetImportBuildStatus.PENDING.value,
+                    DatasetImportBuildStatus.INGESTING.value,
+                ]
+            },
         }
         result = self.collection.distinct("commit_sha", query)
         return [sha for sha in result if sha]
 
-    def get_ci_run_ids(self, config_id: str) -> List[str]:
-        """Get CI run IDs for log download."""
+    def get_ci_run_ids_by_repo(self, version_id: str, raw_repo_id: str) -> List[str]:
+        """Get CI run IDs for a specific repo in version."""
         query = {
-            "model_repo_config_id": ObjectId(config_id),
-            "status": ModelImportBuildStatus.FETCHED.value,
+            "dataset_version_id": ObjectId(version_id),
+            "raw_repo_id": ObjectId(raw_repo_id),
+            "status": {
+                "$in": [
+                    DatasetImportBuildStatus.PENDING.value,
+                    DatasetImportBuildStatus.INGESTING.value,
+                ]
+            },
         }
         result = self.collection.distinct("ci_run_id", query)
         return list(result)
 
-    def delete_by_repo_config(
-        self, model_repo_config_id: ObjectId, session: ClientSession | None = None
-    ) -> int:
-        """Delete all import builds for a repo config."""
+    def delete_by_version(self, version_id: str, session: ClientSession | None = None) -> int:
+        """Delete all import builds for a dataset version."""
         result = self.collection.delete_many(
-            {"model_repo_config_id": model_repo_config_id},
+            {"dataset_version_id": ObjectId(version_id)},
             session=session,
         )
         return result.deleted_count
@@ -269,7 +259,7 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         Update status for a specific resource on a build.
 
         Args:
-            build_id: ModelImportBuild ID
+            build_id: DatasetImportBuild ID
             resource: Resource name (e.g., 'clone', 'worktree', 'logs')
             status: New status
             error: Optional error message
@@ -298,16 +288,16 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
     def update_resource_status_batch(
         self,
-        config_id: str,
+        version_id: str,
         resource: str,
         status: ResourceStatus,
         error: Optional[str] = None,
     ) -> int:
         """
-        Update resource status for all INGESTING builds in a repo config.
+        Update resource status for all INGESTING builds in a version.
 
         Args:
-            config_id: ModelRepoConfig ID
+            version_id: DatasetVersion ID
             resource: Resource name
             status: New status
             error: Optional error message
@@ -330,8 +320,52 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
         result = self.collection.update_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
-                "status": ModelImportBuildStatus.INGESTING.value,
+                "dataset_version_id": ObjectId(version_id),
+                "status": DatasetImportBuildStatus.INGESTING.value,
+            },
+            {"$set": update},
+        )
+        return result.modified_count
+
+    def update_resource_status_for_repo(
+        self,
+        version_id: str,
+        raw_repo_id: str,
+        resource: str,
+        status: ResourceStatus,
+        error: Optional[str] = None,
+    ) -> int:
+        """
+        Update resource status for builds of a specific repo in version.
+
+        Args:
+            version_id: DatasetVersion ID
+            raw_repo_id: RawRepository ID
+            resource: Resource name
+            status: New status
+            error: Optional error message
+
+        Returns:
+            Number of builds updated
+        """
+        now = datetime.utcnow()
+        update: dict = {
+            f"resource_status.{resource}.status": status.value,
+        }
+
+        if error:
+            update[f"resource_status.{resource}.error"] = error
+
+        if status == ResourceStatus.COMPLETED:
+            update[f"resource_status.{resource}.completed_at"] = now
+        elif status == ResourceStatus.IN_PROGRESS:
+            update[f"resource_status.{resource}.started_at"] = now
+
+        result = self.collection.update_many(
+            {
+                "dataset_version_id": ObjectId(version_id),
+                "raw_repo_id": ObjectId(raw_repo_id),
+                "status": DatasetImportBuildStatus.INGESTING.value,
             },
             {"$set": update},
         )
@@ -339,17 +373,17 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
     def init_resource_status(
         self,
-        config_id: str,
+        version_id: str,
         required_resources: List[str],
     ) -> int:
         """
-        Initialize resource_status for all INGESTING builds.
+        Initialize resource_status for all PENDING builds.
 
         Sets required resources to PENDING and others to SKIPPED.
 
         Args:
-            config_id: ModelRepoConfig ID
-            required_resources: List of resource names needed by template
+            version_id: DatasetVersion ID
+            required_resources: List of resource names needed
 
         Returns:
             Number of builds updated
@@ -383,13 +417,67 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
         result = self.collection.update_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
-                "status": ModelImportBuildStatus.INGESTING.value,
+                "dataset_version_id": ObjectId(version_id),
+                "status": DatasetImportBuildStatus.PENDING.value,
             },
             {
                 "$set": {
                     "resource_status": resource_status,
                     "required_resources": required_resources,
+                    "status": DatasetImportBuildStatus.INGESTING.value,
+                    "ingestion_started_at": datetime.utcnow(),
+                }
+            },
+        )
+        return result.modified_count
+
+    def mark_ingested_batch(self, version_id: str) -> int:
+        """
+        Mark all INGESTING builds as INGESTED.
+
+        Call this after all resources are completed successfully.
+
+        Returns:
+            Number of builds updated
+        """
+        result = self.collection.update_many(
+            {
+                "dataset_version_id": ObjectId(version_id),
+                "status": DatasetImportBuildStatus.INGESTING.value,
+            },
+            {
+                "$set": {
+                    "status": DatasetImportBuildStatus.INGESTED.value,
+                    "ingested_at": datetime.utcnow(),
+                }
+            },
+        )
+        return result.modified_count
+
+    def mark_failed_by_resource(
+        self,
+        version_id: str,
+        resource: str,
+    ) -> int:
+        """
+        Mark builds as FAILED if a specific resource failed.
+
+        Args:
+            version_id: DatasetVersion ID
+            resource: Resource that failed
+
+        Returns:
+            Number of builds marked as failed
+        """
+        result = self.collection.update_many(
+            {
+                "dataset_version_id": ObjectId(version_id),
+                "status": DatasetImportBuildStatus.INGESTING.value,
+                f"resource_status.{resource}.status": ResourceStatus.FAILED.value,
+            },
+            {
+                "$set": {
+                    "status": DatasetImportBuildStatus.FAILED.value,
                 }
             },
         )
@@ -397,20 +485,21 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
     def find_by_failed_resource(
         self,
-        config_id: str,
+        version_id: str,
         resource: str,
-    ) -> List[ModelImportBuild]:
+    ) -> List[DatasetImportBuild]:
         """Find builds with a specific failed resource."""
         return self.find_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
+                "dataset_version_id": ObjectId(version_id),
                 f"resource_status.{resource}.status": ResourceStatus.FAILED.value,
             }
         )
 
     def update_resource_by_commits(
         self,
-        config_id: str,
+        version_id: str,
+        raw_repo_id: str,
         resource: str,
         failed_commits: List[str],
         status: ResourceStatus,
@@ -420,7 +509,8 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         Update resource status for builds matching specific commit SHAs.
 
         Args:
-            config_id: ModelRepoConfig ID
+            version_id: DatasetVersion ID
+            raw_repo_id: RawRepository ID
             resource: Resource name (e.g., git_worktree)
             failed_commits: List of commit SHAs that failed
             status: Status for failed builds
@@ -439,8 +529,9 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
         result = self.collection.update_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
-                "status": ModelImportBuildStatus.INGESTING.value,
+                "dataset_version_id": ObjectId(version_id),
+                "raw_repo_id": ObjectId(raw_repo_id),
+                "status": DatasetImportBuildStatus.INGESTING.value,
                 "commit_sha": {"$in": failed_commits},
             },
             {"$set": update},
@@ -449,7 +540,8 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
     def update_resource_by_ci_run_ids(
         self,
-        config_id: str,
+        version_id: str,
+        raw_repo_id: str,
         resource: str,
         ci_run_ids: List[str],
         status: ResourceStatus,
@@ -459,9 +551,10 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         Update resource status for builds matching specific CI run IDs.
 
         Args:
-            config_id: ModelRepoConfig ID
+            version_id: DatasetVersion ID
+            raw_repo_id: RawRepository ID
             resource: Resource name (e.g., build_logs)
-            ci_run_ids: List of CI run IDs (e.g., GitHub Actions run IDs)
+            ci_run_ids: List of CI run IDs
             status: Status for builds
             error: Error message
 
@@ -478,17 +571,18 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
 
         result = self.collection.update_many(
             {
-                "model_repo_config_id": ObjectId(config_id),
-                "status": ModelImportBuildStatus.INGESTING.value,
+                "dataset_version_id": ObjectId(version_id),
+                "raw_repo_id": ObjectId(raw_repo_id),
+                "status": DatasetImportBuildStatus.INGESTING.value,
                 "ci_run_id": {"$in": ci_run_ids},
             },
             {"$set": update},
         )
         return result.modified_count
 
-    def get_resource_status_summary(self, config_id: str) -> dict:
+    def get_resource_status_summary(self, version_id: str) -> dict:
         """
-        Get aggregated resource status counts for a repo config.
+        Get aggregated resource status counts for a dataset version.
 
         Returns structure like:
         {
@@ -516,7 +610,7 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
             ]
 
         pipeline = [
-            {"$match": {"model_repo_config_id": ObjectId(config_id)}},
+            {"$match": {"dataset_version_id": ObjectId(version_id)}},
             {"$project": project_fields},
             {"$facet": facet_fields},
         ]
@@ -535,3 +629,34 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
                     summary[resource][item["_id"]] = item["count"]
 
         return summary
+
+    def get_progress_by_repo(self, version_id: str) -> List[dict]:
+        """
+        Get ingestion progress grouped by repository.
+
+        Returns list of:
+        {
+            "raw_repo_id": ObjectId,
+            "repo_full_name": str,
+            "pending": int,
+            "ingesting": int,
+            "ingested": int,
+            "failed": int,
+            "total": int
+        }
+        """
+        pipeline = [
+            {"$match": {"dataset_version_id": ObjectId(version_id)}},
+            {
+                "$group": {
+                    "_id": "$raw_repo_id",
+                    "repo_full_name": {"$first": "$repo_full_name"},
+                    "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+                    "ingesting": {"$sum": {"$cond": [{"$eq": ["$status", "ingesting"]}, 1, 0]}},
+                    "ingested": {"$sum": {"$cond": [{"$eq": ["$status", "ingested"]}, 1, 0]}},
+                    "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+                    "total": {"$sum": 1},
+                }
+            },
+        ]
+        return list(self.collection.aggregate(pipeline))

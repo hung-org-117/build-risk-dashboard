@@ -30,6 +30,58 @@ function formatTimestamp(value?: string) {
     }
 }
 
+// Status badge component for pipeline status display
+function RepoStatusBadge({ status }: { status: string }) {
+    switch (status) {
+        case "imported":
+            return (
+                <Badge variant="outline" className="border-green-500 text-green-600">
+                    Ready
+                </Badge>
+            );
+        case "ingesting":
+        case "processing":
+            return (
+                <Badge variant="default" className="bg-blue-500">
+                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    {status === "ingesting" ? "Ingesting" : "Processing"}
+                </Badge>
+            );
+        case "ingestion_complete":
+            return (
+                <Badge variant="outline" className="border-green-500 text-green-600">
+                    Ingested ✓
+                </Badge>
+            );
+        case "ingestion_partial":
+            return (
+                <Badge variant="outline" className="border-amber-500 text-amber-600">
+                    Ingested (Partial)
+                </Badge>
+            );
+        case "partial":
+            return (
+                <Badge variant="outline" className="border-amber-500 text-amber-600">
+                    Partial
+                </Badge>
+            );
+        case "failed":
+            return (
+                <Badge variant="destructive">
+                    Failed
+                </Badge>
+            );
+        case "queued":
+            return (
+                <Badge variant="secondary">
+                    Queued
+                </Badge>
+            );
+        default:
+            return <Badge variant="secondary">{status}</Badge>;
+    }
+}
+
 const PAGE_SIZE = 20;
 
 export default function UserReposPage() {
@@ -171,18 +223,7 @@ export default function UserReposPage() {
                                                 {repo.full_name}
                                             </td>
                                             <td className="px-6 py-4">
-                                                {repo.status === "imported" ? (
-                                                    <Badge variant="outline" className="border-green-500 text-green-600">
-                                                        Ready
-                                                    </Badge>
-                                                ) : repo.status === "ingesting" || repo.status === "processing" ? (
-                                                    <Badge variant="default" className="bg-blue-500">
-                                                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                                        Syncing
-                                                    </Badge>
-                                                ) : (
-                                                    <Badge variant="secondary">{repo.status}</Badge>
-                                                )}
+                                                <RepoStatusBadge status={repo.status} />
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
                                                 {formatTimestamp(repo.last_scanned_at)}

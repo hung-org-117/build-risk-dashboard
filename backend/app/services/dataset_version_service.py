@@ -911,3 +911,113 @@ class DatasetVersionService:
 
         else:
             raise HTTPException(status_code=400, detail=f"Invalid tool type: {tool_type}")
+
+    # =========================================================================
+    # Processing Phase Control (matching model pipeline)
+    # =========================================================================
+
+    def start_processing(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+    ) -> dict:
+        """
+        Manually trigger processing phase after ingestion completes.
+
+        Only allowed when status is INGESTING_COMPLETE or INGESTING_PARTIAL.
+        """
+        self._verify_dataset_access(dataset_id, user_id)
+        version = self._get_version(dataset_id, version_id)
+
+        valid_statuses = [
+            VersionStatus.INGESTING_COMPLETE,
+            VersionStatus.INGESTING_PARTIAL,
+        ]
+        if version.status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot start processing: status is {version.status}. "
+                f"Expected: {[s.value for s in valid_statuses]}",
+            )
+
+        from app.tasks.enrichment_processing import start_enrichment_processing
+
+        task = start_enrichment_processing.delay(version_id)
+
+        return {
+            "status": "dispatched",
+            "task_id": task.id,
+            "message": "Processing phase started",
+        }
+
+    def retry_failed_ingestion(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+    ) -> dict:
+        """
+        Retry failed ingestion builds for a version.
+
+        Resets FAILED DatasetImportBuild records and re-triggers ingestion.
+        """
+        self._verify_dataset_access(dataset_id, user_id)
+        version = self._get_version(dataset_id, version_id)
+
+        # Only allow retry if ingestion partial or failed
+        valid_statuses = [
+            VersionStatus.INGESTING_PARTIAL,
+            VersionStatus.FAILED,
+        ]
+        if version.status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot retry ingestion: status is {version.status}",
+            )
+
+        from app.tasks.enrichment_processing import reingest_failed_builds
+
+        task = reingest_failed_builds.delay(version_id)
+
+        return {
+            "status": "dispatched",
+            "task_id": task.id,
+            "message": "Ingestion retry started",
+        }
+
+    def retry_failed_processing(
+        self,
+        dataset_id: str,
+        version_id: str,
+        user_id: str,
+    ) -> dict:
+        """
+        Retry failed processing (enrichment) builds for a version.
+
+        Resets FAILED DatasetEnrichmentBuild records and re-dispatches extraction.
+        """
+        self._verify_dataset_access(dataset_id, user_id)
+        version = self._get_version(dataset_id, version_id)
+
+        # Only allow retry if partial or failed
+        valid_statuses = [
+            VersionStatus.PARTIAL,
+            VersionStatus.FAILED,
+            VersionStatus.COMPLETED,  # Allow retry even on completed
+        ]
+        if version.status not in valid_statuses:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot retry processing: status is {version.status}",
+            )
+
+        from app.tasks.enrichment_processing import reprocess_failed_enrichment_builds
+
+        task = reprocess_failed_enrichment_builds.delay(version_id)
+
+        return {
+            "status": "dispatched",
+            "task_id": task.id,
+            "message": "Processing retry started",
+        }

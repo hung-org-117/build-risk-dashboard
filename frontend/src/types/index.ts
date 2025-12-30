@@ -56,6 +56,10 @@ export interface Build {
   extraction_error?: string;
   missing_resources?: string[];  // Resources unavailable during extraction
   skipped_features?: string[];   // Features skipped due to missing resources
+
+  // Prediction
+  predicted_label?: string;
+  prediction_confidence?: number;
 }
 
 export interface BuildDetail extends Build {
@@ -66,6 +70,12 @@ export interface BuildDetail extends Build {
 
   // Training features
   features: Record<string, unknown>;
+
+  // Prediction results
+  predicted_label?: string;
+  prediction_confidence?: number;
+  prediction_uncertainty?: number;
+  predicted_at?: string;
 }
 
 export interface DatasetMapping {
@@ -254,10 +264,10 @@ export interface RepositoryRecord {
   // Stats
   builds_fetched: number;
   builds_ingested: number;
-  builds_processed: number;
+  builds_completed: number;
   builds_failed: number;
   // Status
-  status: "queued" | "ingesting" | "ingestion_complete" | "ingestion_partial" | "processing" | "imported" | "partial" | "failed";
+  status: "queued" | "fetching" | "ingesting" | "ingestion_complete" | "ingestion_partial" | "processing" | "imported" | "partial" | "failed";
   error_message?: string;
   last_synced_at?: string;
   notes?: string;

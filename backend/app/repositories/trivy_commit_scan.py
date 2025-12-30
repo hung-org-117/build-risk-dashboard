@@ -29,6 +29,19 @@ class TrivyCommitScanRepository(BaseRepository[TrivyCommitScan]):
             query["status"] = status.value
         return self.find_many(query, sort=[("created_at", -1)])
 
+    def count_by_version(self, version_id: ObjectId) -> int:
+        """Count all scans for a version."""
+        return self.collection.count_documents({"dataset_version_id": version_id})
+
+    def count_by_version_and_status(self, version_id: ObjectId, status: TrivyScanStatus) -> int:
+        """Count scans for a version filtered by status."""
+        return self.collection.count_documents(
+            {
+                "dataset_version_id": version_id,
+                "status": status.value,
+            }
+        )
+
     def find_by_version_and_commit(
         self,
         version_id: ObjectId,

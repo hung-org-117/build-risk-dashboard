@@ -19,6 +19,7 @@ class ModelImportStatus(str, Enum):
     """Status of the model repository import process."""
 
     QUEUED = "queued"
+    FETCHING = "fetching"  # Fetching builds from CI API
     INGESTING = "ingesting"  # Clone/worktree/download logs phase
     INGESTION_COMPLETE = "ingestion_complete"  # Phase 1 done, all builds ingested
     INGESTION_PARTIAL = "ingestion_partial"  # Phase 1 done, some builds failed
@@ -26,7 +27,6 @@ class ModelImportStatus(str, Enum):
     IMPORTED = "imported"  # All builds processed successfully
     PARTIAL = "partial"  # Some builds succeeded, some failed
     FAILED = "failed"  # Critical error, pipeline failed
-    PAUSED = "paused"
 
 
 class ModelRepoConfig(FeatureConfigBase):
@@ -98,6 +98,10 @@ class ModelRepoConfig(FeatureConfigBase):
     builds_fetched: int = Field(
         default=0,
         description="Number of builds fetched from CI API",
+    )
+    builds_ingested: int = Field(
+        default=0,
+        description="Number of builds ingested (logs downloaded, worktrees created)",
     )
     builds_completed: int = Field(
         default=0,

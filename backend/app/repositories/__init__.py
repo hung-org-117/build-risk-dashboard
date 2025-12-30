@@ -6,6 +6,7 @@ from .dataset_build_repository import DatasetBuildRepository
 
 # Dataset enrichment flow repositories
 from .dataset_enrichment_build import DatasetEnrichmentBuildRepository
+from .dataset_import_build import DatasetImportBuildRepository
 
 # Dataset repositories
 from .dataset_repository import DatasetRepository
@@ -36,6 +37,7 @@ __all__ = [
     "ModelTrainingBuildRepository",
     # Dataset enrichment flow
     "DatasetEnrichmentBuildRepository",
+    "DatasetImportBuildRepository",
     "DatasetRepository",
     "DatasetBuildRepository",
     "OAuthIdentityRepository",

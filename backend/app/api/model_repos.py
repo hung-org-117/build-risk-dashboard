@@ -145,6 +145,24 @@ def get_import_progress(
     return service.get_import_progress(repo_id)
 
 
+@router.get("/{repo_id}/import-progress/failed")
+def get_failed_import_builds(
+    repo_id: str = Path(..., description="Repository id (Mongo ObjectId)"),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get failed import builds with error details.
+
+    Returns list of builds that failed during ingestion with:
+    - ingestion_error: General error message
+    - resource_errors: Per-resource error messages (git_history, git_worktree, build_logs)
+    """
+    service = RepositoryService(db)
+    return service.get_failed_import_builds(repo_id, limit)
+
+
 @router.post("/{repo_id}/sync-run")
 def trigger_sync(
     repo_id: str,

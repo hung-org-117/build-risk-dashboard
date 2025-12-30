@@ -1,14 +1,14 @@
 """
-ModelImportBuild Entity - Tracks builds through the import pipeline.
+DatasetImportBuild Entity - Tracks builds through the dataset ingestion pipeline.
 
-This entity links builds to a ModelRepoConfig and tracks their progress
-through fetch → ingestion → processing stages.
+This entity links builds to a DatasetVersion and tracks their progress
+through ingestion stages (clone → worktree → logs).
 
 Key design principles:
-- Session tracking: Links build to ModelRepoConfig
-- Status tracking: Tracks build through fetch → ingestion → processing
-- Query-based flow: Enables DB queries instead of state passing
+- Version tracking: Links build to DatasetVersion
+- Status tracking: Tracks build through PENDING → INGESTING → INGESTED
 - Per-resource tracking: Extensible resource_status dict for granular error tracking
+- Query-based flow: Enables DB queries instead of state passing
 """
 
 from datetime import datetime
@@ -20,21 +20,18 @@ from pydantic import BaseModel, Field
 from app.entities.base import BaseEntity, PyObjectId
 
 
-class ModelImportBuildStatus(str, Enum):
-    """Status of a build in the import pipeline."""
+class DatasetImportBuildStatus(str, Enum):
+    """Status of a build in the dataset ingestion pipeline."""
 
     # Initial state
-    PENDING = "pending"  # Queued for fetch
-
-    # Fetch stage
-    FETCHED = "fetched"  # Build info fetched from CI API
+    PENDING = "pending"  # Queued for ingestion
 
     # Ingestion stage (clone, worktree, logs)
     INGESTING = "ingesting"  # Ingestion in progress
-    INGESTED = "ingested"  # Resources ready for processing
+    INGESTED = "ingested"  # Resources ready for enrichment
 
     # Error state
-    FAILED = "failed"  # Any stage failed
+    FAILED = "failed"  # Ingestion failed
 
 
 class ResourceStatus(str, Enum):
@@ -56,33 +53,44 @@ class ResourceStatusEntry(BaseModel):
     completed_at: Optional[datetime] = None
 
 
-class ModelImportBuild(BaseEntity):
+class DatasetImportBuild(BaseEntity):
     """
-    Tracks a build through the import pipeline.
+    Tracks a build through the dataset ingestion pipeline.
 
-    Links RawBuildRun to ModelRepoConfig for import session tracking.
-    Tracks status from fetch through ingestion to processing.
+    Links DatasetBuild (CSV row) to DatasetVersion for ingestion tracking.
+    Tracks status from pending through ingestion stages.
     """
 
     class Config:
-        collection = "model_import_builds"
+        collection = "dataset_import_builds"
         use_enum_values = True
 
-    model_repo_config_id: PyObjectId = Field(
+    # Parent references
+    dataset_version_id: PyObjectId = Field(
         ...,
-        description="Reference to model_repo_configs",
+        description="Reference to dataset_versions",
     )
 
-    # Link to raw build data
+    dataset_build_id: PyObjectId = Field(
+        ...,
+        description="Reference to dataset_builds (CSV row)",
+    )
+
+    # Raw data references
+    raw_repo_id: PyObjectId = Field(
+        ...,
+        description="Reference to raw_repositories",
+    )
+
     raw_build_run_id: PyObjectId = Field(
         ...,
         description="Reference to raw_build_runs - the source build data",
     )
 
     # Pipeline status
-    status: ModelImportBuildStatus = Field(
-        default=ModelImportBuildStatus.FETCHED,
-        description="Pipeline status: FETCHED → INGESTING → INGESTED or FAILED",
+    status: DatasetImportBuildStatus = Field(
+        default=DatasetImportBuildStatus.PENDING,
+        description="Pipeline status: PENDING → INGESTING → INGESTED or FAILED",
     )
 
     # Per-resource status tracking (extensible)
@@ -91,15 +99,15 @@ class ModelImportBuild(BaseEntity):
         description="Per-resource status. Keys: 'clone', 'worktree', 'logs', etc.",
     )
 
-    # Required resources for this build (from template)
+    # Required resources for this build
     required_resources: List[str] = Field(
         default_factory=list,
-        description="Resources required by template for this build",
+        description="Resources required for this build",
     )
 
     # Denormalized fields for quick access (avoid joins)
     ci_run_id: str = Field(
-        ...,
+        default="",
         description="CI run ID (denormalized from RawBuildRun)",
     )
 
@@ -108,10 +116,15 @@ class ModelImportBuild(BaseEntity):
         description="Commit SHA (denormalized from RawBuildRun)",
     )
 
+    repo_full_name: str = Field(
+        default="",
+        description="Repository full name (denormalized)",
+    )
+
     # Timestamps for tracking
-    fetched_at: datetime = Field(
+    created_at: datetime = Field(
         default_factory=datetime.utcnow,
-        description="When this build was fetched from CI provider",
+        description="When this import build was created",
     )
 
     ingestion_started_at: Optional[datetime] = Field(
@@ -122,10 +135,4 @@ class ModelImportBuild(BaseEntity):
     ingested_at: Optional[datetime] = Field(
         None,
         description="When ingestion completed successfully",
-    )
-
-    # General ingestion error (not specific to a resource)
-    ingestion_error: Optional[str] = Field(
-        None,
-        description="Error message if ingestion failed",
     )

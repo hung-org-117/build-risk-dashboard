@@ -54,11 +54,12 @@ class RepoResponse(BaseModel):
     test_frameworks: List[TestFramework] = Field(default_factory=list)
     source_languages: List[str] = Field(default_factory=list)
     builds_fetched: int = 0
+    builds_ingested: int = 0
     builds_completed: int = 0
     builds_failed: int = 0
     status: Optional[str] = Field(
         default="imported",
-        description="Pipeline status: queued, ingesting, processing, imported, failed",
+        description="Pipeline status: queued, fetching, ingesting, processing, imported, failed",
     )
     error_message: Optional[str] = None
     last_synced_at: Optional[datetime] = None

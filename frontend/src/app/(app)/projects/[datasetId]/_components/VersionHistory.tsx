@@ -29,7 +29,9 @@ import {
     FileSpreadsheet,
     FileText,
     Loader2,
+    Play,
     RefreshCw,
+    RotateCcw,
     Trash2,
     X,
     XCircle,
@@ -46,7 +48,16 @@ interface VersionHistoryProps {
     onDownload: (versionId: string, format?: ExportFormat) => void;
     onDelete: (versionId: string) => void;
     onCancel: (versionId: string) => void;
+    // Processing control
+    onStartProcessing: (versionId: string) => void;
+    onRetryIngestion: (versionId: string) => void;
+    onRetryProcessing: (versionId: string) => void;
 }
+
+// Status types that are "active" (in progress)
+const ACTIVE_STATUSES = ["pending", "ingesting", "processing"];
+// Status types that can trigger start processing
+const CAN_START_PROCESSING = ["ingesting_complete", "ingesting_partial"];
 
 export const VersionHistory = memo(function VersionHistory({
     datasetId,
@@ -56,15 +67,18 @@ export const VersionHistory = memo(function VersionHistory({
     onDownload,
     onDelete,
     onCancel,
+    onStartProcessing,
+    onRetryIngestion,
+    onRetryProcessing,
 }: VersionHistoryProps) {
     const router = useRouter();
 
     // Separate active version from completed ones
-    const activeVersion = versions.find(
-        (v) => v.status === "pending" || v.status === "ingesting" || v.status === "processing"
-    );
+    const activeVersion = versions.find((v) => ACTIVE_STATUSES.includes(v.status));
+    // Versions waiting for user action
+    const waitingVersion = versions.find((v) => CAN_START_PROCESSING.includes(v.status));
     const completedVersions = versions.filter(
-        (v) => v.status !== "pending" && v.status !== "ingesting" && v.status !== "processing"
+        (v) => !ACTIVE_STATUSES.includes(v.status) && !CAN_START_PROCESSING.includes(v.status)
     );
 
     return (
@@ -72,6 +86,15 @@ export const VersionHistory = memo(function VersionHistory({
             {/* Active Version Progress */}
             {activeVersion && (
                 <ActiveVersionCard version={activeVersion} onCancel={onCancel} />
+            )}
+
+            {/* Waiting for user action - Start Processing */}
+            {waitingVersion && (
+                <WaitingVersionCard
+                    version={waitingVersion}
+                    onStartProcessing={() => onStartProcessing(waitingVersion.id)}
+                    onRetryIngestion={() => onRetryIngestion(waitingVersion.id)}
+                />
             )}
 
             {/* Version History */}
@@ -175,14 +198,69 @@ function ActiveVersionCard({ version, onCancel }: ActiveVersionCardProps) {
     );
 }
 
+// Card for versions waiting for user action (ingesting complete/partial)
+interface WaitingVersionCardProps {
+    version: DatasetVersion;
+    onStartProcessing: () => void;
+    onRetryIngestion: () => void;
+}
+
+function WaitingVersionCard({ version, onStartProcessing, onRetryIngestion }: WaitingVersionCardProps) {
+    const isPartial = version.status === "ingesting_partial";
+
+    return (
+        <Card className={isPartial
+            ? "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
+            : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20"
+        }>
+            <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                        <CheckCircle2 className={`h-4 w-4 ${isPartial ? "text-amber-500" : "text-green-500"}`} />
+                        {isPartial ? "Ingestion Partial" : "Ingestion Complete"}: {version.name}
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                        {isPartial && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={onRetryIngestion}
+                            >
+                                <RotateCcw className="mr-1 h-4 w-4" />
+                                Retry Failed
+                            </Button>
+                        )}
+                        <Button
+                            size="sm"
+                            onClick={onStartProcessing}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            <Play className="mr-1 h-4 w-4" />
+                            Start Processing
+                        </Button>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <p className="text-sm text-muted-foreground">
+                    {version.enriched_rows} / {version.total_rows} builds ingested.
+                    {isPartial && ` ${version.failed_rows} failed.`}
+                    {" "}Click &quot;Start Processing&quot; to begin feature extraction.
+                </p>
+            </CardContent>
+        </Card>
+    );
+}
+
 interface VersionCardProps {
     version: DatasetVersion;
     onView: () => void;
     onDownload: (format: ExportFormat) => void;
     onDelete: () => void;
+    onRetryProcessing?: () => void;
 }
 
-function VersionCard({ version, onView, onDownload, onDelete }: VersionCardProps) {
+function VersionCard({ version, onView, onDownload, onDelete, onRetryProcessing }: VersionCardProps) {
     const [downloading, setDownloading] = useState(false);
 
     const statusConfig: Record<
@@ -193,6 +271,11 @@ function VersionCard({ version, onView, onDownload, onDelete }: VersionCardProps
             icon: CheckCircle2,
             color: "text-green-500",
             label: "Completed",
+        },
+        partial: {
+            icon: AlertCircle,
+            color: "text-amber-500",
+            label: "Partial",
         },
         failed: {
             icon: XCircle,

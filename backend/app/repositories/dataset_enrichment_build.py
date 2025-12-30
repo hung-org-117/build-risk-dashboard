@@ -86,6 +86,82 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
 
         return self.find_many({"dataset_version_id": oid})
 
+    def find_by_import_build(
+        self,
+        import_build_id: str | ObjectId,
+    ) -> Optional[DatasetEnrichmentBuild]:
+        """Find enrichment build by its import build ID."""
+        oid = self._to_object_id(import_build_id)
+        if not oid:
+            return None
+        doc = self.collection.find_one({"dataset_import_build_id": oid})
+        return DatasetEnrichmentBuild(**doc) if doc else None
+
+    def upsert_for_import_build(
+        self,
+        dataset_version_id: str,
+        dataset_build_id: str,
+        dataset_import_build_id: str,
+        raw_build_run_id: str,
+    ) -> DatasetEnrichmentBuild:
+        """
+        Create or get DatasetEnrichmentBuild for an import build.
+
+        Returns existing if already created, creates new if not.
+        """
+        import_oid = ObjectId(dataset_import_build_id)
+
+        # Try to find existing
+        existing = self.collection.find_one({"dataset_import_build_id": import_oid})
+        if existing:
+            return DatasetEnrichmentBuild(**existing)
+
+        # Create new
+        now = datetime.utcnow()
+        doc = {
+            "dataset_version_id": ObjectId(dataset_version_id),
+            "dataset_build_id": ObjectId(dataset_build_id),
+            "dataset_import_build_id": import_oid,
+            "raw_build_run_id": ObjectId(raw_build_run_id),
+            "extraction_status": ExtractionStatus.PENDING.value,
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = self.collection.insert_one(doc)
+        doc["_id"] = result.inserted_id
+        return DatasetEnrichmentBuild(**doc)
+
+    def aggregate_stats_by_version(
+        self,
+        version_id: str | ObjectId,
+    ) -> Dict[str, int]:
+        """
+        Get extraction stats for a version.
+
+        Returns: {completed: N, partial: N, failed: N, pending: N}
+        """
+        oid = self._to_object_id(version_id)
+        if not oid:
+            return {"completed": 0, "partial": 0, "failed": 0, "pending": 0}
+
+        pipeline = [
+            {"$match": {"dataset_version_id": oid}},
+            {
+                "$group": {
+                    "_id": "$extraction_status",
+                    "count": {"$sum": 1},
+                }
+            },
+        ]
+
+        stats = {"completed": 0, "partial": 0, "failed": 0, "pending": 0}
+        for doc in self.collection.aggregate(pipeline):
+            status = doc["_id"]
+            if status in stats:
+                stats[status] = doc["count"]
+
+        return stats
+
     def update_extraction_status(
         self,
         build_id: ObjectId,
@@ -345,10 +421,10 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         prefix: str = "sonar_",
     ) -> int:
         """
-        Backfill scan metrics to ALL builds in a version matching commit_sha.
+        Backfill scan metrics to FeatureVector for ALL builds in a version matching commit_sha.
 
-        This is called when a scan completes to update all enrichment builds
-        in the same version that were triggered by the same commit.
+        This is called when a scan completes to update FeatureVector.scan_metrics
+        for all enrichment builds in the same version that were triggered by the same commit.
 
         Args:
             version_id: DatasetVersion ID
@@ -357,9 +433,10 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
             prefix: Feature prefix ('sonar_' or 'trivy_')
 
         Returns:
-            Number of documents updated.
+            Number of FeatureVector documents updated.
         """
         # Find all enrichment builds in this version with matching commit
+        # and get their feature_vector_id
         pipeline = [
             {"$match": {"dataset_version_id": version_id}},
             {
@@ -372,24 +449,67 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
             },
             {"$unwind": "$build_run"},
             {"$match": {"build_run.commit_sha": commit_sha}},
-            {"$project": {"_id": 1}},
+            {"$match": {"feature_vector_id": {"$ne": None}}},
+            {"$project": {"feature_vector_id": 1}},
         ]
 
-        matching_ids = [doc["_id"] for doc in self.collection.aggregate(pipeline)]
+        matching_docs = list(self.collection.aggregate(pipeline))
+        feature_vector_ids = [
+            doc["feature_vector_id"] for doc in matching_docs if doc.get("feature_vector_id")
+        ]
 
-        if not matching_ids:
+        if not feature_vector_ids:
             return 0
 
-        # Write to scan_metrics field with prefix
+        # Write to FeatureVector.scan_metrics with prefix
         set_ops = {f"scan_metrics.{prefix}{k}": v for k, v in scan_features.items()}
         set_ops["updated_at"] = datetime.utcnow()
 
-        result = self.collection.update_many(
-            {"_id": {"$in": matching_ids}},
+        feature_vectors_collection = self.db["feature_vectors"]
+        result = feature_vectors_collection.update_many(
+            {"_id": {"$in": feature_vector_ids}},
             {"$set": set_ops},
         )
 
         return result.modified_count
+
+    def mark_in_progress_as_failed(
+        self,
+        version_id: str,
+        error_message: str,
+    ) -> int:
+        """
+        Mark all IN_PROGRESS enrichment builds as FAILED.
+
+        Used when processing chain fails to mark incomplete builds.
+        """
+        result = self.collection.update_many(
+            {
+                "dataset_version_id": ObjectId(version_id),
+                "extraction_status": ExtractionStatus.IN_PROGRESS.value,
+            },
+            {
+                "$set": {
+                    "extraction_status": ExtractionStatus.FAILED.value,
+                    "extraction_error": error_message,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        return result.modified_count
+
+    def count_by_status(
+        self,
+        version_id: ObjectId,
+        status: str,
+    ) -> int:
+        """Count enrichment builds by status for a version."""
+        return self.collection.count_documents(
+            {
+                "dataset_version_id": version_id,
+                "extraction_status": status,
+            }
+        )
 
     def _update_feature_count(self, build_id: ObjectId) -> None:
         """Recalculate feature_count based on features dict size."""
@@ -408,73 +528,60 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         """
         Get scan metrics status for a version.
 
-        Counts builds by presence of sonar_*/trivy_* in scan_metrics field.
+        Uses CommitScan collections for simpler queries instead of
+        scanning embedded scan_metrics fields.
         """
-        pipeline = [
-            {"$match": {"dataset_version_id": version_id}},
-            {
-                "$project": {
-                    "has_sonar": {
-                        "$gt": [
-                            {
-                                "$size": {
-                                    "$filter": {
-                                        "input": {
-                                            "$objectToArray": {"$ifNull": ["$scan_metrics", {}]}
-                                        },
-                                        "cond": {
-                                            "$regexMatch": {"input": "$$this.k", "regex": "^sonar_"}
-                                        },
-                                    }
-                                }
-                            },
-                            0,
-                        ]
-                    },
-                    "has_trivy": {
-                        "$gt": [
-                            {
-                                "$size": {
-                                    "$filter": {
-                                        "input": {
-                                            "$objectToArray": {"$ifNull": ["$scan_metrics", {}]}
-                                        },
-                                        "cond": {
-                                            "$regexMatch": {"input": "$$this.k", "regex": "^trivy_"}
-                                        },
-                                    }
-                                }
-                            },
-                            0,
-                        ]
-                    },
-                    "extraction_status": 1,
-                }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "total": {"$sum": 1},
-                    "with_sonar": {"$sum": {"$cond": ["$has_sonar", 1, 0]}},
-                    "with_trivy": {"$sum": {"$cond": ["$has_trivy", 1, 0]}},
-                    "completed": {
-                        "$sum": {"$cond": [{"$eq": ["$extraction_status", "completed"]}, 1, 0]}
-                    },
-                }
-            },
-        ]
+        from app.entities.sonar_commit_scan import SonarScanStatus
+        from app.entities.trivy_commit_scan import TrivyScanStatus
+        from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
-        results = list(self.collection.aggregate(pipeline))
-        if not results:
-            return {"total": 0, "with_sonar": 0, "with_trivy": 0, "completed": 0}
+        sonar_repo = SonarCommitScanRepository(self.db)
+        trivy_repo = TrivyCommitScanRepository(self.db)
 
-        data = results[0]
+        # Count scans by status - simple indexed queries
+        sonar_total = sonar_repo.count_by_version(version_id)
+        sonar_completed = sonar_repo.count_by_version_and_status(
+            version_id, SonarScanStatus.COMPLETED
+        )
+        sonar_failed = sonar_repo.count_by_version_and_status(version_id, SonarScanStatus.FAILED)
+
+        trivy_total = trivy_repo.count_by_version(version_id)
+        trivy_completed = trivy_repo.count_by_version_and_status(
+            version_id, TrivyScanStatus.COMPLETED
+        )
+        trivy_failed = trivy_repo.count_by_version_and_status(version_id, TrivyScanStatus.FAILED)
+
+        # Get enrichment build count
+        total_builds = self.collection.count_documents({"dataset_version_id": version_id})
+        completed_builds = self.collection.count_documents(
+            {
+                "dataset_version_id": version_id,
+                "extraction_status": "completed",
+            }
+        )
+
         return {
-            "total": data.get("total", 0),
-            "with_sonar": data.get("with_sonar", 0),
-            "with_trivy": data.get("with_trivy", 0),
-            "completed": data.get("completed", 0),
-            "scan_complete": data.get("with_sonar", 0) > 0 or data.get("with_trivy", 0) > 0,
+            "total": total_builds,
+            "completed": completed_builds,
+            "sonar": {
+                "total": sonar_total,
+                "completed": sonar_completed,
+                "failed": sonar_failed,
+                "pending": sonar_total - sonar_completed - sonar_failed,
+            },
+            "trivy": {
+                "total": trivy_total,
+                "completed": trivy_completed,
+                "failed": trivy_failed,
+                "pending": trivy_total - trivy_completed - trivy_failed,
+            },
+            "with_sonar": sonar_completed,
+            "with_trivy": trivy_completed,
+            "scan_complete": (
+                (sonar_total == 0 or sonar_completed == sonar_total)
+                and (trivy_total == 0 or trivy_completed == trivy_total)
+            ),
         }
 
     def list_by_version_with_details(

@@ -22,6 +22,7 @@ from .dataset_build import DatasetBuild, DatasetBuildStatus
 
 # Dataset enrichment flow entities
 from .dataset_enrichment_build import DatasetEnrichmentBuild
+from .dataset_import_build import DatasetImportBuild, DatasetImportBuildStatus
 from .dataset_template import DatasetTemplate
 
 # Shared enums
@@ -68,6 +69,8 @@ __all__ = [
     "ModelImportBuildStatus",
     "ModelTrainingBuild",
     "DatasetEnrichmentBuild",
+    "DatasetImportBuild",
+    "DatasetImportBuildStatus",
     "DatasetProject",
     "DatasetMapping",
     "DatasetStats",

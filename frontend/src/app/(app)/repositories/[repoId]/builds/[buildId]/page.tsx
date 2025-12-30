@@ -110,6 +110,34 @@ function ExtractionStatusBadge({ status }: { status: string }) {
     return <Badge variant="secondary">{status}</Badge>;
 }
 
+function RiskBadge({ level, confidence }: { level: string; confidence?: number }) {
+    const l = level.toUpperCase();
+    const confLabel = confidence ? ` (${(confidence * 100).toFixed(0)}%)` : "";
+
+    if (l === "LOW") {
+        return (
+            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                <CheckCircle2 className="h-3 w-3" /> Low Risk{confLabel}
+            </Badge>
+        );
+    }
+    if (l === "MEDIUM") {
+        return (
+            <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
+                <AlertTriangle className="h-3 w-3" /> Medium Risk{confLabel}
+            </Badge>
+        );
+    }
+    if (l === "HIGH") {
+        return (
+            <Badge variant="destructive" className="gap-1">
+                <XCircle className="h-3 w-3" /> High Risk{confLabel}
+            </Badge>
+        );
+    }
+    return <Badge variant="secondary">{level}</Badge>;
+}
+
 function formatDateTime(value?: string | null): string {
     if (!value) return "—";
     try {
@@ -225,7 +253,7 @@ export default function BuildDetailPage() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.push(`/repositories/${repoId}/builds`)}
+                    onClick={() => router.push(`/repositories/${repoId}?tab=builds`)}
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
@@ -250,7 +278,7 @@ export default function BuildDetailPage() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.push(`/repositories/${repoId}/builds`)}
+                    onClick={() => router.push(`/repositories/${repoId}?tab=builds`)}
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
@@ -343,6 +371,54 @@ export default function BuildDetailPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Risk Prediction */}
+            {build.has_training_data && build.predicted_label && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            Risk Prediction
+                            <RiskBadge
+                                level={build.predicted_label}
+                                confidence={build.prediction_confidence ?? undefined}
+                            />
+                        </CardTitle>
+                        <CardDescription>
+                            ML model prediction for this build
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Risk Level</p>
+                                <p className="font-medium mt-1">{build.predicted_label}</p>
+                            </div>
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Confidence</p>
+                                <p className="font-medium mt-1">
+                                    {build.prediction_confidence
+                                        ? `${(build.prediction_confidence * 100).toFixed(1)}%`
+                                        : "—"}
+                                </p>
+                            </div>
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Uncertainty</p>
+                                <p className="font-medium mt-1">
+                                    {build.prediction_uncertainty
+                                        ? build.prediction_uncertainty.toFixed(3)
+                                        : "—"}
+                                </p>
+                            </div>
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Predicted At</p>
+                                <p className="font-medium mt-1 text-sm">
+                                    {formatDateTime(build.predicted_at)}
+                                </p>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Extracted Features */}
             <Card>

@@ -60,68 +60,118 @@ class BuildService:
         if not config:
             return BuildListResponse(items=[], total=0, page=1, size=limit)
 
-        # Query model_training_builds as primary source
-        query: Dict[str, Any] = {"model_repo_config_id": config_oid}
-
-        # Apply extraction_status filter
         if extraction_status:
+            # Query model_training_builds as primary source when filtering by status
+            query: Dict[str, Any] = {"model_repo_config_id": config_oid}
             query["extraction_status"] = extraction_status
 
-        # Apply search filter
-        if q:
-            or_conditions = []
-            if q.isdigit():
-                or_conditions.append({"build_number": int(q)})
-            or_conditions.append({"head_sha": {"$regex": q, "$options": "i"}})
-            if or_conditions:
-                query["$or"] = or_conditions
+            if q:
+                or_conditions = []
+                if q.isdigit():
+                    or_conditions.append({"build_number": int(q)})
+                or_conditions.append({"head_sha": {"$regex": q, "$options": "i"}})
+                if or_conditions:
+                    query["$or"] = or_conditions
 
-        # Get total and paginated training builds
-        total = self.db.model_training_builds.count_documents(query)
-        training_cursor = (
-            self.db.model_training_builds.find(query)
-            .sort("build_created_at", -1)
-            .skip(skip)
-            .limit(limit)
-        )
-        training_builds = list(training_cursor)
-
-        if not training_builds:
-            return BuildListResponse(items=[], total=total, page=skip // limit + 1, size=limit)
-
-        # Get corresponding RawBuildRuns for additional data
-        raw_ids = [t["raw_build_run_id"] for t in training_builds]
-        raw_cursor = self.db.raw_build_runs.find({"_id": {"$in": raw_ids}})
-        raw_map = {doc["_id"]: doc for doc in raw_cursor}
-
-        # Build response items
-        items = []
-        for training in training_builds:
-            raw = raw_map.get(training["raw_build_run_id"], {})
-
-            items.append(
-                BuildSummary(
-                    _id=str(training["raw_build_run_id"]),
-                    build_number=training.get("build_number") or raw.get("build_number"),
-                    build_id=raw.get("build_id", ""),
-                    conclusion=raw.get("conclusion", "unknown"),
-                    commit_sha=training.get("head_sha") or raw.get("commit_sha", ""),
-                    branch=raw.get("branch", ""),
-                    created_at=training.get("build_created_at") or raw.get("created_at"),
-                    completed_at=raw.get("completed_at"),
-                    duration_seconds=raw.get("duration_seconds"),
-                    web_url=raw.get("web_url"),
-                    logs_available=raw.get("logs_available"),
-                    logs_expired=raw.get("logs_expired", False),
-                    # Training data - always available since we query from training builds
-                    has_training_data=True,
-                    training_build_id=str(training["_id"]),
-                    extraction_status=training.get("extraction_status"),
-                    feature_count=training.get("feature_count", 0),
-                    extraction_error=training.get("extraction_error"),
-                    missing_resources=training.get("missing_resources", []),
-                )
+            total = self.db.model_training_builds.count_documents(query)
+            training_cursor = (
+                self.db.model_training_builds.find(query)
+                .sort("build_created_at", -1)
+                .skip(skip)
+                .limit(limit)
             )
+            training_builds = list(training_cursor)
+
+            if not training_builds:
+                return BuildListResponse(items=[], total=total, page=skip // limit + 1, size=limit)
+
+            raw_ids = [t["raw_build_run_id"] for t in training_builds]
+            raw_cursor = self.db.raw_build_runs.find({"_id": {"$in": raw_ids}})
+            raw_map = {doc["_id"]: doc for doc in raw_cursor}
+
+            items = []
+            for training in training_builds:
+                raw = raw_map.get(training["raw_build_run_id"], {})
+                items.append(
+                    BuildSummary(
+                        _id=str(training["raw_build_run_id"]),
+                        build_number=training.get("build_number") or raw.get("build_number"),
+                        build_id=raw.get("build_id", ""),
+                        conclusion=raw.get("conclusion", "unknown"),
+                        commit_sha=training.get("head_sha") or raw.get("commit_sha", ""),
+                        branch=raw.get("branch", ""),
+                        created_at=training.get("build_created_at") or raw.get("created_at"),
+                        completed_at=raw.get("completed_at"),
+                        duration_seconds=raw.get("duration_seconds"),
+                        web_url=raw.get("web_url"),
+                        logs_available=raw.get("logs_available"),
+                        logs_expired=raw.get("logs_expired", False),
+                        has_training_data=True,
+                        training_build_id=str(training["_id"]),
+                        extraction_status=training.get("extraction_status"),
+                        feature_count=training.get("feature_count", 0),
+                        extraction_error=training.get("extraction_error"),
+                        missing_resources=training.get("missing_resources", []),
+                    )
+                )
+
+        else:
+            # Query RawBuildRun as primary source (show all ingested builds)
+            query = {"raw_repo_id": config.raw_repo_id}
+
+            if q:
+                or_conditions = []
+                if q.isdigit():
+                    or_conditions.append({"build_number": int(q)})
+                or_conditions.append({"commit_sha": {"$regex": q, "$options": "i"}})
+                if or_conditions:
+                    query["$or"] = or_conditions
+
+            total = self.db.raw_build_runs.count_documents(query)
+            raw_cursor = (
+                self.db.raw_build_runs.find(query).sort("created_at", -1).skip(skip).limit(limit)
+            )
+            raw_builds = list(raw_cursor)
+
+            if not raw_builds:
+                return BuildListResponse(items=[], total=total, page=skip // limit + 1, size=limit)
+
+            # Left join with model_training_builds
+            raw_ids = [b["_id"] for b in raw_builds]
+            training_cursor = self.db.model_training_builds.find(
+                {"raw_build_run_id": {"$in": raw_ids}, "model_repo_config_id": config_oid}
+            )
+            training_map = {doc["raw_build_run_id"]: doc for doc in training_cursor}
+
+            items = []
+            for raw in raw_builds:
+                training = training_map.get(raw["_id"])
+                items.append(
+                    BuildSummary(
+                        _id=str(raw["_id"]),
+                        build_number=raw.get("build_number"),
+                        build_id=raw.get("build_id", ""),
+                        conclusion=raw.get("conclusion", "unknown"),
+                        commit_sha=raw.get("commit_sha", ""),
+                        branch=raw.get("branch", ""),
+                        created_at=raw.get("created_at"),
+                        completed_at=raw.get("completed_at"),
+                        duration_seconds=raw.get("duration_seconds"),
+                        web_url=raw.get("web_url"),
+                        logs_available=raw.get("logs_available"),
+                        logs_expired=raw.get("logs_expired", False),
+                        has_training_data=training is not None,
+                        training_build_id=str(training["_id"]) if training else None,
+                        extraction_status=training.get("extraction_status") if training else None,
+                        feature_count=training.get("feature_count", 0) if training else 0,
+                        extraction_error=training.get("extraction_error") if training else None,
+                        missing_resources=training.get("missing_resources", []) if training else [],
+                        predicted_label=training.get("predicted_label") if training else None,
+                        prediction_confidence=training.get("prediction_confidence")
+                        if training
+                        else None,
+                    )
+                )
 
         return BuildListResponse(
             items=items,
@@ -134,9 +184,13 @@ class BuildService:
         """
         Get detailed build info by RawBuildRun._id.
 
+        Features are fetched from FeatureVector (single source of truth).
+
         Args:
             build_id: RawBuildRun._id (MongoDB ObjectId string)
         """
+        from app.repositories.feature_vector import FeatureVectorRepository
+
         try:
             oid = ObjectId(build_id)
         except Exception:
@@ -149,6 +203,16 @@ class BuildService:
         # Get training data if exists
         training = self.model_training_build_repo.find_by_workflow_run(raw.raw_repo_id, oid)
         training_dict = training.model_dump() if training else None
+
+        # Get features from FeatureVector (single source of truth)
+        features = {}
+        feature_count = 0
+        if training and training.feature_vector_id:
+            fv_repo = FeatureVectorRepository(self.db)
+            fv = fv_repo.find_by_id(training.feature_vector_id)
+            if fv:
+                features = fv.features or {}
+                feature_count = fv.feature_count or len(features)
 
         return BuildDetail(
             _id=str(raw.id),
@@ -170,9 +234,18 @@ class BuildService:
             has_training_data=training_dict is not None,
             training_build_id=str(training.id) if training else None,
             extraction_status=training_dict.get("extraction_status") if training_dict else None,
-            feature_count=training_dict.get("feature_count", 0) if training_dict else 0,
+            feature_count=feature_count,
             extraction_error=training_dict.get("extraction_error") if training_dict else None,
-            features=training_dict.get("features", {}) if training_dict else {},
+            features=features,
+            # Prediction results
+            predicted_label=training_dict.get("predicted_label") if training_dict else None,
+            prediction_confidence=training_dict.get("prediction_confidence")
+            if training_dict
+            else None,
+            prediction_uncertainty=training_dict.get("prediction_uncertainty")
+            if training_dict
+            else None,
+            predicted_at=training_dict.get("predicted_at") if training_dict else None,
         )
 
     def get_recent_builds(self, limit: int = 10, current_user: dict = None) -> List[BuildSummary]:

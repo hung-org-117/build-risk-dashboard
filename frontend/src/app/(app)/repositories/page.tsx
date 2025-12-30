@@ -337,6 +337,8 @@ export default function AdminReposPage() {
                       <td className="px-6 py-4">
                         {repo.status === "queued" ? (
                           <Badge variant="secondary">Queued</Badge>
+                        ) : repo.status === "fetching" ? (
+                          <Badge variant="default" className="bg-cyan-500 hover:bg-cyan-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Fetching</Badge>
                         ) : repo.status === "ingesting" ? (
                           <Badge variant="default" className="bg-blue-500 hover:bg-blue-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Ingesting</Badge>
                         ) : repo.status === "ingestion_complete" ? (
@@ -360,7 +362,8 @@ export default function AdminReposPage() {
                         <ImportProgressDisplay
                           repoId={repo.id}
                           totalFetched={repo.builds_fetched}
-                          totalProcessed={repo.builds_processed}
+                          totalIngested={repo.builds_ingested}
+                          totalProcessed={repo.builds_completed}
                           totalFailed={repo.builds_failed}
                           importStatus={repo.status}
                         />
