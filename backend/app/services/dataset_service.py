@@ -248,6 +248,7 @@ class DatasetService:
     def delete_dataset(self, dataset_id: str, user_id: str) -> None:
         """Delete a dataset and all associated data atomically using transaction."""
         from app.database.mongo import get_transaction
+        from app.repositories.data_quality_repository import DataQualityRepository
         from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
         from app.repositories.dataset_version import DatasetVersionRepository
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
@@ -260,6 +261,7 @@ class DatasetService:
         repo_stats_repo = DatasetRepoStatsRepository(self.db)
         version_repo = DatasetVersionRepository(self.db)
         audit_log_repo = FeatureAuditLogRepository(self.db)
+        quality_repo = DataQualityRepository(self.db)
 
         # Use transaction to ensure all deletes happen atomically
         with get_transaction() as session:
@@ -288,6 +290,10 @@ class DatasetService:
             # Delete versions (DatasetVersion)
             deleted_versions = version_repo.delete_by_dataset(dataset_id, session=session)
             logger.info(f"Deleted {deleted_versions} versions for dataset {dataset_id}")
+
+            # Delete quality reports (DataQualityReport)
+            deleted_quality = quality_repo.delete_by_dataset(dataset_id, session=session)
+            logger.info(f"Deleted {deleted_quality} quality reports for dataset {dataset_id}")
 
             # Delete the dataset document (DatasetProject)
             self.repo.delete_one(dataset_id, session=session)

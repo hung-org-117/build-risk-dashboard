@@ -27,10 +27,6 @@ from app.services.risk_model.model import (
 
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# Feature definitions matching training (hunglt/training.py)
-# =============================================================================
-
 # Temporal features (used in LSTM sequence - build history patterns)
 TEMPORAL_FEATURES = [
     "is_prev_failed",
@@ -62,7 +58,7 @@ STATIC_FEATURES = [
     "gh_repo_num_commits",
     "gh_test_lines_per_kloc",
     "gh_test_cases_per_kloc",
-    "gh_asserts_cases_per_kloc",  # Note: plural 'cases' to match model training
+    "gh_asserts_cases_per_kloc",
     # Team features
     "gh_team_size",
     "author_ownership",

@@ -98,3 +98,20 @@ class DataQualityRepository(BaseRepository[DataQualityReport]):
                 "status": {"$in": ["pending", "running"]},
             }
         )
+
+    def delete_by_dataset(self, dataset_id: str, session=None) -> int:
+        """
+        Delete all quality reports for a dataset (cleanup).
+
+        Args:
+            dataset_id: Dataset ID
+            session: Optional MongoDB session for transactions
+
+        Returns:
+            Number of deleted documents
+        """
+        result = self.collection.delete_many(
+            {"dataset_id": ObjectId(dataset_id)},
+            session=session,
+        )
+        return result.deleted_count

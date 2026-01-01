@@ -545,6 +545,7 @@ class DatasetVersionService:
     def delete_version(self, dataset_id: str, version_id: str, user_id: str) -> None:
         """Delete a version and its enrichment builds atomically. Permission validated at API layer."""
         from app.database.mongo import get_transaction
+        from app.repositories.data_quality_repository import DataQualityRepository
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
 
         self._verify_dataset_access(dataset_id, user_id)
@@ -554,6 +555,7 @@ class DatasetVersionService:
             self._revoke_task(version.task_id)
 
         audit_log_repo = FeatureAuditLogRepository(self._db)
+        quality_repo = DataQualityRepository(self._db)
 
         # Use transaction for atomic deletion
         with get_transaction() as session:
@@ -561,17 +563,21 @@ class DatasetVersionService:
             audit_deleted = audit_log_repo.delete_by_version_id(version_id, session=session)
             logger.info(f"Deleted {audit_deleted} audit logs for version {version_id}")
 
-            # 2. Delete associated enrichment builds
+            # 2. Delete associated quality reports
+            quality_deleted = quality_repo.delete_by_version(version_id, session=session)
+            logger.info(f"Deleted {quality_deleted} quality reports for version {version_id}")
+
+            # 3. Delete associated enrichment builds
             deleted_enrichment = self._enrichment_build_repo.delete_by_version(
                 version_id, session=session
             )
             logger.info(f"Deleted {deleted_enrichment} enrichment builds for version {version_id}")
 
-            # 3. Delete associated import builds
+            # 4. Delete associated import builds
             deleted_import = self._import_build_repo.delete_by_version(version_id, session=session)
             logger.info(f"Deleted {deleted_import} import builds for version {version_id}")
 
-            # 4. Delete the version
+            # 5. Delete the version
             self._repo.delete(version_id, session=session)
             logger.info(f"Deleted version {version_id} for dataset {dataset_id}")
 

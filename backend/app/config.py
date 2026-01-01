@@ -50,9 +50,6 @@ class Settings(BaseSettings):
     TRAVIS_TOKEN: Optional[str] = None
     TRAVIS_BASE_URL: str = "https://api.travis-ci.com"
 
-    # ML Model / Prediction
-    PREDICTION_API_URL: str = "http://localhost:8001/predict"
-
     # Celery / RabbitMQ
     CELERY_BROKER_URL: str = "amqp://myuser:mypass@localhost:5672//"
     REDIS_URL: str = "redis://localhost:6379/0"

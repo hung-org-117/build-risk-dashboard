@@ -117,7 +117,7 @@ class TrivySettings(BaseEntity):
     """
 
     # Connection settings (optional - for server mode)
-    server_url: Optional[str] = None
+    server_url: str = "http://localhost:4954"
 
     # Default config content (editable in UI)
     # Used when user doesn't provide custom config during scan

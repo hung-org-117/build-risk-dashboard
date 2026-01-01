@@ -44,7 +44,7 @@ services:
   # MongoDB Database (Replica Set)
   # =========================================
   mongo:
-    image: mongo:6
+    image: mongo:7
     container_name: server-mongo
     command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
