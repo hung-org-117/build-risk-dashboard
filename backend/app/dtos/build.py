@@ -89,6 +89,8 @@ class BuildDetail(BaseModel):
     prediction_confidence: Optional[float] = None  # 0-1 score
     prediction_uncertainty: Optional[float] = None
     predicted_at: Optional[datetime] = None
+    prediction_status: Optional[str] = None
+    prediction_error: Optional[str] = None
 
     class Config:
         populate_by_name = True

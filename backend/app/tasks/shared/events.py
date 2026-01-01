@@ -38,7 +38,8 @@ def publish_event(event_type: str, payload: Dict[str, Any]) -> bool:
     try:
         redis_client = _get_redis_client()
         message = json.dumps({"type": event_type, "payload": payload})
-        redis_client.publish(EVENTS_CHANNEL, message)
+        result = redis_client.publish(EVENTS_CHANNEL, message)
+        logger.info(f"Published {event_type} to {result} subscribers: {payload}")
         return True
     except Exception as e:
         logger.error(f"Failed to publish event {event_type}: {e}")

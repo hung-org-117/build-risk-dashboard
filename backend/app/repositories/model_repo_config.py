@@ -191,6 +191,22 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         )
         return ModelRepoConfig(**doc) if doc else None
 
+    def decrement_builds_processing_failed(
+        self,
+        config_id: ObjectId,
+        count: int = 1,
+    ) -> Optional[ModelRepoConfig]:
+        """Decrement builds_processing_failed when retry succeeds."""
+        doc = self.collection.find_one_and_update(
+            {"_id": config_id},
+            {
+                "$inc": {"builds_processing_failed": -count},
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+            return_document=True,
+        )
+        return ModelRepoConfig(**doc) if doc else None
+
     def hard_delete(self, config_id: ObjectId, session: "ClientSession | None" = None) -> int:
         """Hard delete a config (permanently removes from DB)."""
         result = self.collection.delete_one({"_id": config_id}, session=session)

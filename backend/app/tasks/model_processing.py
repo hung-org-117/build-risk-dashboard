@@ -424,7 +424,7 @@ def finalize_model_processing(
         )
 
         # Run all prediction batches in parallel
-        prediction_tasks = [predict_builds_batch.si(batch) for batch in batches]
+        prediction_tasks = [predict_builds_batch.si(repo_config_id, batch) for batch in batches]
         group(prediction_tasks).apply_async()
 
     # Cleanup Redis tracker keys
@@ -774,7 +774,7 @@ def retry_failed_builds(self: ModelPipelineTask, repo_config_id: str) -> Dict[st
             prediction_only_ids[i : i + batch_size]
             for i in range(0, len(prediction_only_ids), batch_size)
         ]
-        prediction_tasks = [predict_builds_batch.si(batch) for batch in batches]
+        prediction_tasks = [predict_builds_batch.si(repo_config_id, batch) for batch in batches]
         group(prediction_tasks).apply_async()
         tasks_dispatched += len(prediction_only_ids)
         logger.info(
@@ -904,6 +904,7 @@ def handle_processing_chain_error(
 )
 def predict_builds_batch(
     self: ModelPipelineTask,
+    repo_config_id: str,
     model_build_ids: List[str],
 ) -> Dict[str, Any]:
     """
@@ -927,7 +928,6 @@ def predict_builds_batch(
 
         # Collect features for all builds and track repo config ids
         builds_to_predict = []
-        repo_config_ids = set()
 
         for build_id in model_build_ids:
             model_build = model_build_repo.find_by_id(ObjectId(build_id))
@@ -974,16 +974,18 @@ def predict_builds_batch(
                 except Exception as e:
                     logger.warning(f"Failed to fetch temporal history for {build_id}: {e}")
 
+            # Track if this was a previously failed prediction (for retry stats)
+            was_previously_failed = model_build.prediction_status == ExtractionStatus.FAILED.value
+
             builds_to_predict.append(
                 {
                     "id": build_id,
                     "features": feature_vector.features,
                     "feature_vector_id": feature_vector.id,
                     "temporal_history": temporal_history,
-                    "repo_config_id": model_build.model_repo_config_id,
+                    "was_previously_failed": was_previously_failed,
                 }
             )
-            repo_config_ids.add(model_build.model_repo_config_id)
 
         if not builds_to_predict:
             return {"status": "completed", "processed": 0, "skipped": len(model_build_ids)}
@@ -1022,11 +1024,9 @@ def predict_builds_batch(
             )
             results.append(result)
 
-        # Store results and count by repo_config
+        # Store results
         succeeded = 0
         failed = 0
-        completed_by_repo = {}  # repo_config_id -> count of successful predictions
-        failed_by_repo = {}  # repo_config_id -> count of failed predictions
 
         for i, build_info in enumerate(builds_to_predict):
             if i >= len(results):
@@ -1047,33 +1047,57 @@ def predict_builds_batch(
                 updates["prediction_status"] = ExtractionStatus.FAILED.value
                 updates["prediction_error"] = prediction.error
                 failed += 1
-                # Track failed by repo config for batch increment
-                repo_id = build_info["repo_config_id"]
-                failed_by_repo[repo_id] = failed_by_repo.get(repo_id, 0) + 1
             else:
                 updates["prediction_status"] = ExtractionStatus.COMPLETED.value
                 updates["prediction_error"] = None
                 succeeded += 1
-                # Track completed by repo config for batch increment
-                repo_id = build_info["repo_config_id"]
-                completed_by_repo[repo_id] = completed_by_repo.get(repo_id, 0) + 1
 
             model_build_repo.update_one(build_info["id"], updates)
 
             # Publish WebSocket event for real-time UI update
             publish_build_update(
-                str(build_info["repo_config_id"]),
+                repo_config_id,
                 build_info["id"],
                 updates["prediction_status"],
             )
 
-        # Increment builds_completed for each repo config (batch)
-        for repo_config_id, count in completed_by_repo.items():
-            repo_config_repo.increment_builds_completed(repo_config_id, count)
+        # Update stats: decrement fails for retried builds, increment for new failures
+        retried_success_count = 0
+        new_failure_count = 0
 
-        # Increment builds_processing_failed for prediction failures
-        for repo_config_id, count in failed_by_repo.items():
-            repo_config_repo.increment_builds_processing_failed(repo_config_id, count)
+        for i, build_info in enumerate(builds_to_predict):
+            if i >= len(results):
+                continue
+            prediction = results[i]
+            was_failed = build_info.get("was_previously_failed", False)
+
+            if not prediction.error and was_failed:
+                retried_success_count += 1
+            elif prediction.error and not was_failed:
+                new_failure_count += 1
+
+        # Update repo config stats
+        if retried_success_count > 0:
+            repo_config_repo.decrement_builds_processing_failed(
+                ObjectId(repo_config_id), retried_success_count
+            )
+        if new_failure_count > 0:
+            repo_config_repo.increment_builds_processing_failed(
+                ObjectId(repo_config_id), new_failure_count
+            )
+
+        # Notify UI about repo stats changes
+        if retried_success_count > 0 or new_failure_count > 0:
+            config = repo_config_repo.find_by_id(repo_config_id)
+            if config:
+                publish_status(
+                    repo_config_id,
+                    config.status,
+                    stats={
+                        "builds_completed": config.builds_completed,
+                        "builds_processing_failed": config.builds_processing_failed,
+                    },
+                )
 
         logger.info(f"Batch prediction: {succeeded} succeeded, {failed} failed")
 
