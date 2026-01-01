@@ -49,6 +49,7 @@ from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.pipeline.shared.resources import FeatureResource
 from app.tasks.shared import build_ingestion_workflow
+from app.tasks.shared.events import publish_ingestion_build_update
 
 logger = logging.getLogger(__name__)
 
@@ -815,6 +816,17 @@ def dispatch_ingestion(
 
     import_build_repo.init_resource_status(repo_config_id, list(required_resources))
 
+    # Publish IN_PROGRESS status for all resources
+    total_builds = len(commit_shas)
+    for resource in required_resources:
+        publish_ingestion_build_update(
+            repo_id=repo_config_id,
+            resource=resource.value,
+            status="in_progress",
+            builds_affected=total_builds,
+            pipeline_type="model",
+        )
+
     logger.info(f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}")
 
     # Build ingestion workflow
@@ -827,6 +839,8 @@ def dispatch_ingestion(
         commit_shas=commit_shas,
         ci_provider=ci_provider,
         correlation_id=correlation_id,
+        pipeline_id=repo_config_id,
+        pipeline_type="model",
     )
 
     # Callback only marks builds as INGESTED and sets final ingestion status
@@ -940,6 +954,7 @@ def aggregate_model_ingestion_results(
         import_build_repo.update_resource_status_batch(
             repo_config_id, FeatureResource.GIT_HISTORY.value, ResourceStatus.COMPLETED
         )
+        # Note: WebSocket publish moved to clone_repo task in shared/ingestion_tasks.py
 
     # 2. git_worktree: Mark failed commits as FAILED, then mark created commits as COMPLETED
     if failed_commits:

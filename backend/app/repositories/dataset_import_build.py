@@ -720,9 +720,6 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
         # Build aggregation pipeline
         pipeline = [
             {"$match": match_query},
-            {"$sort": {"created_at": -1}},
-            {"$skip": skip},
-            {"$limit": limit},
             # Join with raw_build_runs to get CI build details
             {
                 "$lookup": {
@@ -733,6 +730,10 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
                 }
             },
             {"$unwind": {"path": "$raw_build_run", "preserveNullAndEmptyArrays": True}},
+            # Sort by RawBuildRun.created_at (CI build creation time)
+            {"$sort": {"raw_build_run.created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
             # Project final shape
             {
                 "$project": {

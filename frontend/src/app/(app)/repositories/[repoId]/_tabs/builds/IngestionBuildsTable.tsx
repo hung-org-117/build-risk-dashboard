@@ -106,12 +106,55 @@ export function IngestionBuildsTable({
     }, []);
 
     useEffect(() => {
-        const unsubscribe = subscribe("BUILD_UPDATE", (data: any) => {
+        const unsubscribeBuild = subscribe("BUILD_UPDATE", (data: any) => {
             if (data.repo_id === repoId) {
                 loadBuilds(page);
             }
         });
-        return () => unsubscribe();
+
+        const unsubscribeIngestion = subscribe("INGESTION_BUILD_UPDATE", (data: any) => {
+            // Check if this update is for our repo (model pipeline)
+            if (data.repo_id === repoId && data.pipeline_type === "model") {
+                const { resource, status, commit_shas, build_ids } = data;
+
+                // Granular update based on resource type
+                setBuilds((prevBuilds) =>
+                    prevBuilds.map((build) => {
+                        let shouldUpdate = false;
+
+                        if (resource === "git_history") {
+                            // git_history: Update ALL builds (clone is repo-level)
+                            shouldUpdate = true;
+                        } else if (resource === "git_worktree" && commit_shas?.length) {
+                            // git_worktree: Update builds with matching commit_sha
+                            shouldUpdate = commit_shas.includes(build.commit_sha);
+                        } else if (resource === "build_logs" && build_ids?.length) {
+                            // build_logs: Update builds with matching build_id
+                            shouldUpdate = build_ids.includes(build.build_id);
+                        }
+
+                        if (shouldUpdate) {
+                            return {
+                                ...build,
+                                resource_status: {
+                                    ...build.resource_status,
+                                    [resource]: {
+                                        ...build.resource_status?.[resource],
+                                        status: status,
+                                    },
+                                },
+                            };
+                        }
+                        return build;
+                    })
+                );
+            }
+        });
+
+        return () => {
+            unsubscribeBuild();
+            unsubscribeIngestion();
+        };
     }, [subscribe, loadBuilds, page, repoId]);
 
     const toggleRow = (id: string) => {

@@ -265,7 +265,9 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
             result.append(feature_vector)
 
             # Get the tr_prev_build from the dedicated field (or fallback to features)
-            current_ci_run_id = feature_vector.tr_prev_build or feature_vector.features.get("tr_prev_build")
+            current_ci_run_id = feature_vector.tr_prev_build or feature_vector.features.get(
+                "tr_prev_build"
+            )
 
         return result
 
@@ -306,6 +308,20 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
         """Delete all feature vectors for a repository."""
         result = self.collection.delete_many(
             {"raw_repo_id": raw_repo_id},
+            session=session,
+        )
+        return result.deleted_count
+
+    def delete_by_ids(
+        self,
+        feature_vector_ids: List[ObjectId],
+        session=None,
+    ) -> int:
+        """Delete feature vectors by their IDs (for cascade delete from enrichment builds)."""
+        if not feature_vector_ids:
+            return 0
+        result = self.collection.delete_many(
+            {"_id": {"$in": feature_vector_ids}},
             session=session,
         )
         return result.deleted_count

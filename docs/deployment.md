@@ -66,24 +66,23 @@ nano .env
 Cập nhật các giá trị trong `.env`:
 
 ```bash
-# Domain của bạn
-DOMAIN_NAME=your-domain.com
+# Domain hoặc IP của bạn (không bắt buộc cho HTTP-only)
+DOMAIN_NAME=your-domain-or-ip
 
 # Generate secrets
 SECRET_KEY=$(openssl rand -hex 32)
 NEXTAUTH_SECRET=$(openssl rand -hex 32)
 
-# Cập nhật URLs
-NEXT_PUBLIC_API_URL=https://your-domain.com/api
-NEXTAUTH_URL=https://your-domain.com
+# Cập nhật URLs (HTTP-only)
+NEXT_PUBLIC_API_URL=http://your-domain-or-ip/api
+NEXT_PUBLIC_WS_URL=ws://your-domain-or-ip/api/ws/events
+NEXTAUTH_URL=http://your-domain-or-ip
 ```
 
 ### 3. Cấu hình Nginx
 
-```bash
-# Thay thế domain trong nginx config
-sed -i 's/${DOMAIN_NAME}/your-domain.com/g' nginx/nginx.conf
-```
+`nginx/nginx.conf` hiện dùng `server_name _;` nên không cần chỉnh khi dùng IP.
+Nếu muốn ràng buộc theo domain, hãy sửa `server_name` thủ công.
 
 ---
 
@@ -116,45 +115,10 @@ cat ~/.ssh/github_deploy
 
 ## Thiết lập SSL
 
-### Sử dụng Let's Encrypt (Free SSL)
-
-#### 1. Tạo thư mục certbot
-
-```bash
-mkdir -p certbot/www certbot/conf
-```
-
-#### 2. Chạy Nginx tạm thời (HTTP only)
-
-Tạm thời comment out SSL config trong `nginx/nginx.conf`:
-
-```bash
-# Chạy nginx chỉ với HTTP
-docker compose -f docker-compose.prod.yml up -d nginx
-```
-
-#### 3. Lấy certificate
-
-```bash
-docker compose -f docker-compose.prod.yml run --rm certbot certonly \
-  --webroot \
-  --webroot-path=/var/www/certbot \
-  -d your-domain.com \
-  -d www.your-domain.com \
-  --email your-email@example.com \
-  --agree-tos \
-  --no-eff-email
-```
-
-#### 4. Khôi phục SSL config và restart
-
-```bash
-docker compose -f docker-compose.prod.yml restart nginx
-```
-
-#### 5. Tự động renew (Đã cấu hình trong docker-compose)
-
-Certbot container sẽ tự động renew certificate mỗi 12 giờ.
+Hiện `docker-compose.prod.yml` và `nginx/nginx.conf` chỉ cấu hình HTTP (port 80).
+Nếu bạn chỉ dùng IP thì có thể bỏ qua phần này.
+Nếu cần HTTPS, bạn phải bổ sung TLS termination (ví dụ: Nginx + Certbot hoặc load balancer)
+và cập nhật compose/nginx tương ứng.
 
 ---
 
@@ -166,9 +130,8 @@ cd ~/build-risk-dashboard
 # Đảm bảo .env đã được cấu hình
 cat .env
 
-# Chạy deployment script
-chmod +x scripts/deploy.sh
-./scripts/deploy.sh
+# Chạy deployment
+docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 ```
 
 ### Kiểm tra services
@@ -223,7 +186,7 @@ git tag -l
 git checkout v1.0.0
 
 # Chạy lại deployment
-./scripts/deploy.sh
+docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 ```
 
 ---
@@ -275,7 +238,7 @@ docker compose -f docker-compose.prod.yml restart celery-worker celery-beat
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         Google VM                                    │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                     Nginx (443/80)                           │    │
+│  │                     Nginx (80)                               │    │
 │  │              SSL Termination + Reverse Proxy                 │    │
 │  └─────────────┬──────────────────────────────┬────────────────┘    │
 │                │                              │                      │

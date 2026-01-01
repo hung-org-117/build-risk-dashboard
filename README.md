@@ -26,8 +26,11 @@ A comprehensive CI/CD risk assessment platform with SonarQube code quality integ
 │   │   └── main.py           # FastAPI app entry point
 │   ├── pyproject.toml
 │   └── Dockerfile
-├── frontend/          # Next.js web application
-├── docker-compose.yml # Infrastructure definitions
+├── frontend/               # Next.js web application
+├── docker-compose.prod.yml # Full-stack deployment (Nginx + app + workers + monitoring)
+├── docker-compose.server.yml # Remote server services (MongoDB, RabbitMQ, Redis, SonarQube, Trivy)
+├── .env.prod.example       # Production compose env template
+├── .env.server.example     # Server compose env template
 └── README.md
 ```
 
@@ -38,7 +41,7 @@ A comprehensive CI/CD risk assessment platform with SonarQube code quality integ
 Start the required databases and message brokers:
 
 ```bash
-docker-compose up -d mongo rabbitmq redis
+docker compose -f docker-compose.prod.yml up -d mongo rabbitmq redis
 ```
 
 This will start:
@@ -138,11 +141,11 @@ This will start:
 
 ### 4. SonarQube & Trivy Setup (Optional)
 
-Both services are included in the docker-compose.yml:
+Both services are included in `docker-compose.prod.yml`:
 
 ```bash
-# Start all infrastructure including SonarQube and Trivy
-docker-compose up -d
+# Start SonarQube and Trivy (and their dependencies)
+docker compose -f docker-compose.prod.yml up -d sonarqube trivy
 ```
 
 This starts:
@@ -169,26 +172,25 @@ TRIVY_SKIP_DIRS=node_modules,vendor,.git
 
 ## Docker Compose Deployment
 
-Run the entire stack with Docker Compose:
+Run the entire stack with Docker Compose (single-host production-style):
 
 ```bash
-# Set environment variables
-export GITHUB_APP_ID=your_app_id
-export GITHUB_CLIENT_ID=your_client_id
-export GITHUB_CLIENT_SECRET=your_client_secret
-export GITHUB_WEBHOOK_SECRET=your_webhook_secret
-export SECRET_KEY=your_secret_key
+# Create environment file
+cp .env.prod.example .env
+nano .env  # Fill in values
 
 # Start all services
-docker-compose up -d
+docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
 This starts:
 - MongoDB, RabbitMQ, Redis (infrastructure)
-- Backend API (port 8000)
-- Frontend (port 3000)
+- Nginx reverse proxy (port 80)
+- Backend API (port 8000, behind Nginx)
+- Frontend (served by Nginx)
 - Celery Worker and Beat
 - SonarQube (port 9000) and Trivy (port 4954)
+- Grafana (port 3001)
 
 ## Remote Server Development
 
@@ -201,8 +203,7 @@ For resource-intensive tasks (SonarQube, Trivy, Celery workers), you can run all
    # Clone and setup
    git clone <repo-url>
    cd build-risk-dashboard
-   ./scripts/setup-server.sh
-   
+
    # Configure
    cp .env.server.example .env.server
    nano .env.server  # Fill in values
@@ -211,10 +212,19 @@ For resource-intensive tasks (SonarQube, Trivy, Celery workers), you can run all
    docker compose -f docker-compose.server.yml --env-file .env.server up -d
    ```
 
+   See `docs/SERVER_DEPLOYMENT_DEBIAN.md` for full server provisioning (vm.max_map_count, firewall, Trivy cache, etc.).
+
 2. **On your local machine:**
    ```bash
    # Terminal 1: SSH port forward (keep open)
-   ./scripts/ssh-forward-server.sh user@server-ip
+   ssh -N \
+     -L 27017:localhost:27017 \
+     -L 5672:localhost:5672 \
+     -L 15672:localhost:15672 \
+     -L 6379:localhost:6379 \
+     -L 9000:localhost:9000 \
+     -L 4954:localhost:4954 \
+     user@server-ip
    
    # Terminal 2: Backend API
    cd backend
@@ -342,19 +352,19 @@ npm run build
 ### MongoDB Connection Issues
 ```bash
 # Check if containers are running
-docker-compose ps
+docker compose -f docker-compose.prod.yml ps
 
 # View MongoDB logs
-docker-compose logs mongo
+docker compose -f docker-compose.prod.yml logs mongo
 ```
 
 ### Celery Worker Not Processing Tasks
 ```bash
 # Verify RabbitMQ is running
-docker-compose ps rabbitmq
+docker compose -f docker-compose.prod.yml ps rabbitmq
 
 # Check worker logs
-docker-compose logs celery-worker
+docker compose -f docker-compose.prod.yml logs celery-worker
 
 # Test RabbitMQ connection
 curl -u myuser:mypass http://localhost:15672/api/queues

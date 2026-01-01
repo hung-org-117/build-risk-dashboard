@@ -164,7 +164,8 @@ class RiskModelService:
             lstm_dropout = checkpoint.get("lstm_dropout", LSTM_DROPOUT)
             temporal_dropout = checkpoint.get("temporal_dropout", TEMPORAL_DROPOUT)
             self._seq_len = checkpoint.get("seq_len", SEQ_LEN)
-            self._min_seq_len = checkpoint.get("min_seq_len", MIN_SEQ_LEN)
+            # ALWAYS use MIN_SEQ_LEN from code (not checkpoint) to allow prediction with limited history
+            self._min_seq_len = MIN_SEQ_LEN
 
             # Initialize model with checkpoint parameters
             self._model = BayesianRiskModel(

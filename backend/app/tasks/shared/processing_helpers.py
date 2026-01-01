@@ -241,7 +241,9 @@ def extract_features_for_build(
             extraction_status = ExtractionStatus.COMPLETED
 
         # Get tr_prev_build for temporal chain indexing
-        tr_prev_build = formatted_features.get("tr_prev_build")
+        # Ensure it's a string (MongoDB may return Int64 for numeric-looking values)
+        tr_prev_build_raw = formatted_features.get("tr_prev_build")
+        tr_prev_build = str(tr_prev_build_raw) if tr_prev_build_raw is not None else None
 
         # Save to FeatureVector (single source of truth)
         feature_vector = feature_vector_repo.upsert_features(

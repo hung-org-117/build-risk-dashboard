@@ -43,6 +43,8 @@ class BuildSummary(BaseModel):
     # Prediction
     predicted_label: Optional[str] = None
     prediction_confidence: Optional[float] = None
+    prediction_status: Optional[str] = None
+    prediction_error: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -194,6 +196,8 @@ class TrainingBuildSummary(BaseModel):
     predicted_label: Optional[str] = None  # LOW, MEDIUM, HIGH
     prediction_confidence: Optional[float] = None
     prediction_uncertainty: Optional[float] = None
+    prediction_error: Optional[str] = None
+    prediction_status: str = "pending"
     predicted_at: Optional[datetime] = None
 
     class Config:

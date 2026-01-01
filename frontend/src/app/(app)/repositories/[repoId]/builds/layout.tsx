@@ -28,14 +28,12 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
     } = useRepo();
 
     const [retryIngestionLoading, setRetryIngestionLoading] = useState(false);
-    const [retryProcessingLoading, setRetryProcessingLoading] = useState(false);
 
     const repoStatus = repo?.status || "";
     const isSyncing = SYNCING_STATUSES.includes(repoStatus.toLowerCase());
     const canStartProcessing = ["ingested", "processed"].includes(repoStatus.toLowerCase());
 
     const failedIngestionCount = progress?.import_builds.missing_resource_retryable || 0;
-    const failedProcessingCount = (progress?.training_builds.failed || 0) + (progress?.training_builds.prediction_failed || 0);
 
     // Determine active sub-tab
     const isIngestionActive = pathname.endsWith("/ingestion");
@@ -57,17 +55,6 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
             console.error(err);
         } finally {
             setRetryIngestionLoading(false);
-        }
-    };
-
-    const handleRetryProcessing = async () => {
-        setRetryProcessingLoading(true);
-        try {
-            await reposApi.reprocessFailed(repoId);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setRetryProcessingLoading(false);
         }
     };
 
@@ -148,22 +135,6 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
                     </div>
                 ) : isProcessingActive ? (
                     <div className="flex items-center gap-2">
-                        {failedProcessingCount > 0 && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleRetryProcessing}
-                                disabled={retryProcessingLoading}
-                                className="text-amber-600 border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30"
-                            >
-                                {retryProcessingLoading ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : (
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                )}
-                                Retry Failed ({failedProcessingCount})
-                            </Button>
-                        )}
                         <ExportPanel repoId={repoId} repoName={repo?.full_name} />
                     </div>
                 ) : null}

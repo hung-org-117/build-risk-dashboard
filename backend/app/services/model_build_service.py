@@ -118,6 +118,8 @@ class ModelBuildService:
                         feature_count=training.get("feature_count", 0),
                         extraction_error=training.get("extraction_error"),
                         missing_resources=training.get("missing_resources", []),
+                        prediction_status=training.get("prediction_status", "pending"),
+                        prediction_error=training.get("prediction_error"),
                     )
                 )
 
@@ -176,6 +178,10 @@ class ModelBuildService:
                         prediction_confidence=training.get("prediction_confidence")
                         if training
                         else None,
+                        prediction_status=training.get("prediction_status", "pending")
+                        if training
+                        else None,
+                        prediction_error=training.get("prediction_error") if training else None,
                     )
                 )
 
@@ -256,6 +262,8 @@ class ModelBuildService:
             if training_dict
             else None,
             predicted_at=training_dict.get("predicted_at") if training_dict else None,
+            prediction_status=training_dict.get("prediction_status") if training_dict else None,
+            prediction_error=training_dict.get("prediction_error") if training_dict else None,
         )
 
     def get_recent_builds(self, limit: int = 10, current_user: dict = None) -> List[BuildSummary]:
@@ -342,37 +350,49 @@ class ModelBuildService:
             return ImportBuildListResponse(items=[], total=0, page=1, size=limit)
 
         # Query model_import_builds
-        query: Dict[str, Any] = {"model_repo_config_id": config_oid}
+        match_query: Dict[str, Any] = {"model_repo_config_id": config_oid}
 
         if status:
-            query["status"] = status
+            match_query["status"] = status
 
         if q:
             or_conditions = []
             or_conditions.append({"commit_sha": {"$regex": q, "$options": "i"}})
             or_conditions.append({"ci_run_id": {"$regex": q, "$options": "i"}})
             if or_conditions:
-                query["$or"] = or_conditions
+                match_query["$or"] = or_conditions
 
-        total = self.db.model_import_builds.count_documents(query)
-        cursor = (
-            self.db.model_import_builds.find(query).sort("fetched_at", -1).skip(skip).limit(limit)
-        )
-        import_builds = list(cursor)
+        total = self.db.model_import_builds.count_documents(match_query)
+
+        # Use aggregation to sort by RawBuildRun.created_at
+        pipeline = [
+            {"$match": match_query},
+            # Join with raw_build_runs to get created_at for sorting
+            {
+                "$lookup": {
+                    "from": "raw_build_runs",
+                    "localField": "raw_build_run_id",
+                    "foreignField": "_id",
+                    "as": "raw_build_run",
+                }
+            },
+            {"$unwind": {"path": "$raw_build_run", "preserveNullAndEmptyArrays": True}},
+            # Sort by RawBuildRun.created_at (build creation time on CI)
+            {"$sort": {"raw_build_run.created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+        ]
+
+        import_builds = list(self.db.model_import_builds.aggregate(pipeline))
 
         if not import_builds:
             return ImportBuildListResponse(
                 items=[], total=total, page=skip // limit + 1, size=limit
             )
 
-        # Get RawBuildRun data for enrichment
-        raw_ids = [b["raw_build_run_id"] for b in import_builds]
-        raw_cursor = self.db.raw_build_runs.find({"_id": {"$in": raw_ids}})
-        raw_map = {doc["_id"]: doc for doc in raw_cursor}
-
         items = []
         for imp in import_builds:
-            raw = raw_map.get(imp["raw_build_run_id"], {})
+            raw = imp.get("raw_build_run", {})
 
             # Convert resource_status dict
             resource_status = {}
@@ -499,6 +519,8 @@ class ModelBuildService:
                     prediction_confidence=training.get("prediction_confidence"),
                     prediction_uncertainty=training.get("prediction_uncertainty"),
                     predicted_at=training.get("predicted_at"),
+                    prediction_status=training.get("prediction_status", "pending"),
+                    prediction_error=training.get("prediction_error"),
                 )
             )
 

@@ -34,6 +34,8 @@ def build_ingestion_workflow(
     commit_shas: List[str],
     ci_provider: str,
     correlation_id: Optional[str] = None,
+    pipeline_id: str = "",
+    pipeline_type: str = "",  # "model" or "dataset"
 ) -> Optional[Signature]:
     """
     Build a Celery workflow from task levels.
@@ -82,6 +84,8 @@ def build_ingestion_workflow(
                 commit_shas=commit_shas,
                 ci_provider=ci_provider,
                 correlation_id=correlation_id,
+                pipeline_id=pipeline_id,
+                pipeline_type=pipeline_type,
             )
             if task_sig:
                 level_tasks.append(task_sig)
@@ -113,6 +117,8 @@ def _create_task_signature(
     commit_shas: List[str],
     ci_provider: str,
     correlation_id: Optional[str] = None,
+    pipeline_id: str = "",
+    pipeline_type: str = "",
 ) -> Optional[Signature]:
     """
     Create a Celery task signature for a given task name.
@@ -126,6 +132,8 @@ def _create_task_signature(
             github_repo_id=github_repo_id,
             full_name=full_name,
             correlation_id=correlation_id,
+            pipeline_id=pipeline_id,
+            pipeline_type=pipeline_type,
         )
 
     elif task_name == "create_worktrees":
@@ -134,6 +142,8 @@ def _create_task_signature(
             github_repo_id=github_repo_id,
             commit_shas=commit_shas,
             correlation_id=correlation_id,
+            pipeline_id=pipeline_id,
+            pipeline_type=pipeline_type,
         )
 
     elif task_name == "download_build_logs":
@@ -144,6 +154,8 @@ def _create_task_signature(
             build_ids=build_ids,
             ci_provider=ci_provider,
             correlation_id=correlation_id,
+            pipeline_id=pipeline_id,
+            pipeline_type=pipeline_type,
         )
 
     else:
@@ -156,6 +168,8 @@ def _build_worktree_chain(
     github_repo_id: int,
     commit_shas: List[str],
     correlation_id: Optional[str] = None,
+    pipeline_id: str = "",
+    pipeline_type: str = "",
 ) -> Optional[Signature]:
     """
     Build a chain of worktree chunk tasks for sequential execution.
@@ -188,6 +202,8 @@ def _build_worktree_chain(
             chunk_index=idx,
             total_chunks=total_chunks,
             correlation_id=correlation_id,
+            pipeline_id=pipeline_id,
+            pipeline_type=pipeline_type,
         )
         chunk_signatures.append(sig)
 
@@ -201,6 +217,8 @@ def _build_logs_chord(
     build_ids: List[str],
     ci_provider: str,
     correlation_id: Optional[str] = None,
+    pipeline_id: str = "",
+    pipeline_type: str = "",
 ) -> Optional[Signature]:
     """
     Build a chord of log download chunk tasks for parallel execution.
@@ -244,6 +262,8 @@ def _build_logs_chord(
         github_repo_id=github_repo_id,
         total_chunks=total_chunks,
         correlation_id=correlation_id,
+        pipeline_id=pipeline_id,
+        pipeline_type=pipeline_type,
     )
 
     return chord(group(chunk_tasks), callback).set(chord_unlock_on_error=True)

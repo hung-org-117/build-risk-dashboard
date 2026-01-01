@@ -7,7 +7,7 @@ which are then forwarded to WebSocket clients by the API layer.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import redis
 
@@ -174,6 +174,51 @@ def publish_scan_update(
         payload["metrics"] = metrics
 
     return publish_event("SCAN_UPDATE", payload)
+
+
+def publish_ingestion_build_update(
+    repo_id: str,
+    resource: str,
+    status: str,
+    builds_affected: int = 0,
+    chunk_index: int = 0,
+    total_chunks: int = 1,
+    pipeline_type: str = "",  # "model" or "dataset"
+    commit_shas: Optional[List[str]] = None,  # for git_worktree
+    build_ids: Optional[List[str]] = None,  # for build_logs (ci_run_ids)
+) -> bool:
+    """
+    Publish ingestion build update for real-time per-resource status updates.
+
+    Args:
+        repo_id: Repository ID (ModelRepoConfig._id) or Version ID (DatasetVersion._id)
+        resource: Resource type (git_history, git_worktree, build_logs)
+        status: Resource status (in_progress, completed, failed)
+        builds_affected: Number of builds affected by this update
+        chunk_index: Current chunk index (for chunked operations)
+        total_chunks: Total number of chunks
+        pipeline_type: "model" or "dataset" to identify the pipeline
+        commit_shas: List of commit SHAs affected (for git_worktree)
+        build_ids: List of build IDs affected (for build_logs - ci_run_ids)
+
+    Returns:
+        True if published successfully, False otherwise
+    """
+    payload = {
+        "repo_id": repo_id,
+        "resource": resource,
+        "status": status,
+        "builds_affected": builds_affected,
+        "chunk_index": chunk_index,
+        "total_chunks": total_chunks,
+        "pipeline_type": pipeline_type,
+    }
+    if commit_shas:
+        payload["commit_shas"] = commit_shas
+    if build_ids:
+        payload["build_ids"] = build_ids
+
+    return publish_event("INGESTION_BUILD_UPDATE", payload)
 
 
 def publish_ingestion_error(

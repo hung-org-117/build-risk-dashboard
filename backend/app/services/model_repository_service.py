@@ -464,6 +464,7 @@ class RepositoryService:
         """
         from app.database.mongo import get_transaction
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
+        from app.repositories.feature_vector import FeatureVectorRepository
         from app.repositories.model_import_build import ModelImportBuildRepository
         from app.repositories.model_training_build import ModelTrainingBuildRepository
 
@@ -476,8 +477,20 @@ class RepositoryService:
         audit_log_repo = FeatureAuditLogRepository(self.db)
         import_build_repo = ModelImportBuildRepository(self.db)
         training_build_repo = ModelTrainingBuildRepository(self.db)
+        feature_vector_repo = FeatureVectorRepository(self.db)
         repo_oid = ObjectId(repo_id)
         raw_repo_oid = repo_doc.raw_repo_id
+
+        # Collect feature_vector_ids from training builds BEFORE deleting them
+        training_builds = list(
+            training_build_repo.collection.find(
+                {"model_repo_config_id": repo_oid},
+                {"feature_vector_id": 1},
+            )
+        )
+        feature_vector_ids = [
+            b["feature_vector_id"] for b in training_builds if b.get("feature_vector_id")
+        ]
 
         # Use transaction for atomic cascade deletion
         with get_transaction() as session:
@@ -487,15 +500,20 @@ class RepositoryService:
             )
             logger.info(f"Deleted {audit_deleted} FeatureAuditLog for raw_repo {raw_repo_oid}")
 
-            # 2. Delete ModelImportBuild documents
+            # 2. Delete FeatureVector documents (by feature_vector_ids)
+            if feature_vector_ids:
+                fv_deleted = feature_vector_repo.delete_by_ids(feature_vector_ids, session=session)
+                logger.info(f"Deleted {fv_deleted} FeatureVector for repo config {repo_id}")
+
+            # 3. Delete ModelImportBuild documents
             import_deleted = import_build_repo.delete_by_repo_config(repo_oid, session=session)
             logger.info(f"Deleted {import_deleted} ModelImportBuild for repo config {repo_id}")
 
-            # 3. Delete ModelTrainingBuild documents
+            # 4. Delete ModelTrainingBuild documents
             training_deleted = training_build_repo.delete_by_repo_config(repo_oid, session=session)
             logger.info(f"Deleted {training_deleted} ModelTrainingBuild for repo config {repo_id}")
 
-            # 4. Hard delete the config itself
+            # 5. Hard delete the config itself
             self.repo_config.hard_delete(repo_oid, session=session)
             logger.info(f"Hard deleted repository config {repo_id}")
 

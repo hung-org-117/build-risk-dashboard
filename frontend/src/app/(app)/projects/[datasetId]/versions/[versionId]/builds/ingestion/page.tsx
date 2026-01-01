@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useWebSocket } from "@/contexts/websocket-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -70,6 +71,7 @@ const getImportStatusConfig = (status: string) => {
 export default function IngestionPage() {
     const params = useParams<{ datasetId: string; versionId: string }>();
     const router = useRouter();
+    const { subscribe } = useWebSocket();
     const datasetId = params.datasetId;
     const versionId = params.versionId;
 
@@ -83,6 +85,49 @@ export default function IngestionPage() {
     const [startProcessingLoading, setStartProcessingLoading] = useState(false);
     const [retryIngestionLoading, setRetryIngestionLoading] = useState(false);
     const [failedCount, setFailedCount] = useState(0);
+
+    // Subscribe to WebSocket updates for real-time ingestion status
+    useEffect(() => {
+        const unsubscribe = subscribe("INGESTION_BUILD_UPDATE", (data: any) => {
+            // Check if this update is for our version (dataset pipeline)
+            if (data.repo_id === versionId && data.pipeline_type === "dataset") {
+                const { resource, status, commit_shas, build_ids } = data;
+
+                // Granular update based on resource type
+                setBuilds((prevBuilds) =>
+                    prevBuilds.map((build) => {
+                        let shouldUpdate = false;
+
+                        if (resource === "git_history") {
+                            // git_history: Update ALL builds (clone is repo-level)
+                            shouldUpdate = true;
+                        } else if (resource === "git_worktree" && commit_shas?.length) {
+                            // git_worktree: Update builds with matching commit_sha
+                            shouldUpdate = commit_shas.includes(build.commit_sha);
+                        } else if (resource === "build_logs" && build_ids?.length) {
+                            // build_logs: Update builds with matching build_id
+                            shouldUpdate = build_ids.includes(build.build_id);
+                        }
+
+                        if (shouldUpdate) {
+                            return {
+                                ...build,
+                                resource_status: {
+                                    ...build.resource_status,
+                                    [resource]: {
+                                        ...build.resource_status?.[resource],
+                                        status: status,
+                                    },
+                                },
+                            };
+                        }
+                        return build;
+                    })
+                );
+            }
+        });
+        return () => unsubscribe();
+    }, [subscribe, versionId]);
 
     // Fetch version status
     useEffect(() => {

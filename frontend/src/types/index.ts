@@ -76,6 +76,8 @@ export interface BuildDetail extends Build {
   prediction_confidence?: number;
   prediction_uncertainty?: number;
   predicted_at?: string;
+  prediction_status?: string;
+  prediction_error?: string;
 }
 
 export interface DatasetMapping {
@@ -292,6 +294,8 @@ export interface TrainingBuild {
   prediction_confidence?: number;
   prediction_uncertainty?: number;
   predicted_at?: string;
+  prediction_status?: string;
+  prediction_error?: string;
 }
 
 export interface TrainingBuildListResponse {

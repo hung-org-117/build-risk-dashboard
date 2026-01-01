@@ -13,14 +13,12 @@ Model Architecture:
 import torch
 import torch.nn as nn
 
-
-# Default hyperparameters (should match training - hunglt/training_on_colab.ipynb)
 LSTM_HIDDEN_DIM = 96
 LSTM_LAYERS = 2
 LSTM_DROPOUT = 0.2
 TEMPORAL_DROPOUT = 0.2
 SEQ_LEN = 10
-MIN_SEQ_LEN = 4
+MIN_SEQ_LEN = 1
 
 
 class BayesianLSTM(nn.Module):

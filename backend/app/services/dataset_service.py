@@ -252,6 +252,7 @@ class DatasetService:
         from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
         from app.repositories.dataset_version import DatasetVersionRepository
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
+        from app.repositories.feature_vector import FeatureVectorRepository
 
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
@@ -262,6 +263,18 @@ class DatasetService:
         version_repo = DatasetVersionRepository(self.db)
         audit_log_repo = FeatureAuditLogRepository(self.db)
         quality_repo = DataQualityRepository(self.db)
+        feature_vector_repo = FeatureVectorRepository(self.db)
+
+        # Collect feature_vector_ids from enrichment builds BEFORE deleting them
+        enrichment_builds = list(
+            self.enrichment_build_repo.collection.find(
+                {"dataset_id": dataset_oid},
+                {"feature_vector_id": 1},
+            )
+        )
+        feature_vector_ids = [
+            b["feature_vector_id"] for b in enrichment_builds if b.get("feature_vector_id")
+        ]
 
         # Use transaction to ensure all deletes happen atomically
         with get_transaction() as session:
@@ -269,33 +282,38 @@ class DatasetService:
             audit_deleted = audit_log_repo.delete_by_dataset_id(dataset_id, session=session)
             logger.info(f"Deleted {audit_deleted} audit logs for dataset {dataset_id}")
 
-            # 2. Delete associated enrichment builds (DatasetEnrichmentBuild)
+            # 2. Delete associated FeatureVectors (by feature_vector_ids)
+            if feature_vector_ids:
+                fv_deleted = feature_vector_repo.delete_by_ids(feature_vector_ids, session=session)
+                logger.info(f"Deleted {fv_deleted} FeatureVectors for dataset {dataset_id}")
+
+            # 3. Delete associated enrichment builds (DatasetEnrichmentBuild)
             deleted_enrichment = self.enrichment_build_repo.delete_by_dataset(
                 dataset_oid, session=session
             )
             logger.info(f"Deleted {deleted_enrichment} enrichment builds for dataset {dataset_id}")
 
-            # 3. Delete associated import builds (DatasetImportBuild)
+            # 4. Delete associated import builds (DatasetImportBuild)
             deleted_import = self.import_build_repo.delete_by_dataset(dataset_oid, session=session)
             logger.info(f"Deleted {deleted_import} import builds for dataset {dataset_id}")
 
-            # Delete associated dataset builds (DatasetBuild)
+            # 5. Delete associated dataset builds (DatasetBuild)
             deleted_builds = self.build_repo.delete_by_dataset(dataset_id, session=session)
             logger.info(f"Deleted {deleted_builds} dataset builds for dataset {dataset_id}")
 
-            # Delete repo stats (DatasetRepoStats)
+            # 6. Delete repo stats (DatasetRepoStats)
             deleted_stats = repo_stats_repo.delete_by_dataset(dataset_id, session=session)
             logger.info(f"Deleted {deleted_stats} repo stats for dataset {dataset_id}")
 
-            # Delete versions (DatasetVersion)
+            # 7. Delete versions (DatasetVersion)
             deleted_versions = version_repo.delete_by_dataset(dataset_id, session=session)
             logger.info(f"Deleted {deleted_versions} versions for dataset {dataset_id}")
 
-            # Delete quality reports (DataQualityReport)
+            # 8. Delete quality reports (DataQualityReport)
             deleted_quality = quality_repo.delete_by_dataset(dataset_id, session=session)
             logger.info(f"Deleted {deleted_quality} quality reports for dataset {dataset_id}")
 
-            # Delete the dataset document (DatasetProject)
+            # 9. Delete the dataset document (DatasetProject)
             self.repo.delete_one(dataset_id, session=session)
             logger.info(f"Deleted dataset {dataset_id}")
 

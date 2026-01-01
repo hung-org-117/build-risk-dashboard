@@ -1060,6 +1060,13 @@ def predict_builds_batch(
 
             model_build_repo.update_one(build_info["id"], updates)
 
+            # Publish WebSocket event for real-time UI update
+            publish_build_update(
+                str(build_info["repo_config_id"]),
+                build_info["id"],
+                updates["prediction_status"],
+            )
+
         # Increment builds_completed for each repo config (batch)
         for repo_config_id, count in completed_by_repo.items():
             repo_config_repo.increment_builds_completed(repo_config_id, count)

@@ -60,11 +60,4 @@ export const buildApi = {
         );
         return response.data;
     },
-
-    reprocess: async (repoId: string, buildId: string) => {
-        const response = await api.post<{ status: string; build_id: string; message: string }>(
-            `/repos/${repoId}/builds/${buildId}/reprocess`
-        );
-        return response.data;
-    },
 };

@@ -36,6 +36,7 @@ from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask
+from app.tasks.shared.events import publish_ingestion_build_update
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ def clone_repo(
     github_repo_id: int = 0,
     full_name: str = "",
     correlation_id: str = "",
+    pipeline_id: str = "",
+    pipeline_type: str = "",  # "model" or "dataset"
 ) -> Dict[str, Any]:
     """
     Clone or update git repository.
@@ -182,6 +185,16 @@ def clone_repo(
 
             # No need to chain previous results, we use Redis for aggregation
             save_ingestion_result(self.redis, correlation_id, result)
+
+            # Publish WebSocket update
+            if pipeline_id:
+                publish_ingestion_build_update(
+                    repo_id=pipeline_id,
+                    resource="git_history",
+                    status="completed",
+                    pipeline_type=pipeline_type,
+                )
+
             return result
 
     except SoftTimeLimitExceeded:
@@ -195,6 +208,16 @@ def clone_repo(
         )
         # No need to chain previous results
         save_ingestion_result(self.redis, correlation_id, result)
+
+        # Publish WebSocket update for timeout
+        if pipeline_id:
+            publish_ingestion_build_update(
+                repo_id=pipeline_id,
+                resource="git_history",
+                status="failed",
+                pipeline_type=pipeline_type,
+            )
+
         return result
 
     except (subprocess.CalledProcessError, TimeoutError, Exception) as e:
@@ -223,6 +246,15 @@ def clone_repo(
                 }
             )
 
+            # Publish WebSocket update for failure
+            if pipeline_id:
+                publish_ingestion_build_update(
+                    repo_id=pipeline_id,
+                    resource="git_history",
+                    status="failed",
+                    pipeline_type=pipeline_type,
+                )
+
             return result
 
 
@@ -243,6 +275,8 @@ def create_worktree_chunk(
     chunk_index: int = 0,
     total_chunks: int = 1,
     correlation_id: str = "",
+    pipeline_id: str = "",
+    pipeline_type: str = "",  # "model" or "dataset"
 ) -> Dict[str, Any]:
     """
     Worker: Create worktrees for a chunk of commits.
@@ -442,6 +476,28 @@ def create_worktree_chunk(
             )
 
     save_ingestion_result(self.redis, correlation_id, result)
+
+    # Publish WebSocket update only on final chunk
+    is_final_chunk = chunk_index == total_chunks - 1
+    if pipeline_id and is_final_chunk:
+        ws_status = (
+            "failed"
+            if result.get("worktrees_failed", 0) > 0 and result.get("worktrees_created", 0) == 0
+            else "completed"
+        )
+        # Include all commit SHAs for frontend to update specific builds
+        all_commits = result.get("created_commits", []) + result.get("failed_commits", [])
+        publish_ingestion_build_update(
+            repo_id=pipeline_id,
+            resource="git_worktree",
+            status=ws_status,
+            builds_affected=result.get("worktrees_created", 0) + result.get("worktrees_skipped", 0),
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            pipeline_type=pipeline_type,
+            commit_shas=all_commits if all_commits else None,
+        )
+
     return result
 
 
@@ -552,6 +608,8 @@ def aggregate_logs_results(
     github_repo_id: int = 0,
     total_chunks: int = 0,
     correlation_id: str = "",
+    pipeline_id: str = "",
+    pipeline_type: str = "",  # "model" or "dataset"
 ) -> Dict[str, Any]:
     """
     Chord callback: Aggregate results from parallel log download chunks.
@@ -633,6 +691,25 @@ def aggregate_logs_results(
     }
 
     save_ingestion_result(self.redis, correlation_id, result)
+
+    # Publish WebSocket update
+    if pipeline_id:
+        ws_status = (
+            "failed" if status == "completed_with_errors" and total_downloaded == 0 else "completed"
+        )
+        # Include all build IDs for frontend to update specific builds
+        all_build_ids = (
+            all_downloaded_log_ids + all_skipped_log_ids + all_failed_log_ids + all_expired_log_ids
+        )
+        publish_ingestion_build_update(
+            repo_id=pipeline_id,
+            resource="build_logs",
+            status=ws_status,
+            builds_affected=total_downloaded + total_skipped,
+            pipeline_type=pipeline_type,
+            build_ids=all_build_ids if all_build_ids else None,
+        )
+
     return result
 
 

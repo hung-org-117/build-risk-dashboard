@@ -154,6 +154,22 @@ export function ExtractionStatusBadge({ status, className }: ExtractionStatusBad
     );
 }
 
+// Resource status label mapping
+const RESOURCE_STATUS_LABELS: Record<string, string> = {
+    pending: "Pending",
+    in_progress: "In Progress",
+    completed: "Completed",
+    failed: "Failed",
+    skipped: "Skipped",
+};
+
+// Resource name mapping for friendly display
+const RESOURCE_NAME_LABELS: Record<string, string> = {
+    git_history: "Git History",
+    git_worktree: "Git Worktree",
+    build_logs: "Build Logs",
+};
+
 interface ResourceStatusIndicatorProps {
     status: string;
     resourceName: string;
@@ -165,6 +181,8 @@ interface ResourceStatusIndicatorProps {
  */
 export function ResourceStatusIndicator({ status, resourceName, error }: ResourceStatusIndicatorProps) {
     const s = status?.toLowerCase() || "pending";
+    const statusLabel = RESOURCE_STATUS_LABELS[s] || status;
+    const resourceLabel = RESOURCE_NAME_LABELS[resourceName] || resourceName;
 
     let IconComponent = Clock;
     let colorClass = "text-gray-400";
@@ -190,8 +208,8 @@ export function ResourceStatusIndicator({ status, resourceName, error }: Resourc
                 )}
             />
             <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium font-mono truncate">{resourceName}</p>
-                <p className="text-[10px] text-muted-foreground capitalize">{status}</p>
+                <p className="text-xs font-medium truncate">{resourceLabel}</p>
+                <p className="text-[10px] text-muted-foreground">{statusLabel}</p>
                 {error && (
                     <p className="text-[10px] text-red-500 mt-0.5 break-words leading-tight">
                         {error}

@@ -225,6 +225,8 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
                 build_ids=build_csv_ids,
                 commit_shas=commit_shas,
                 ci_provider=ci_provider,
+                pipeline_id=version_id,
+                pipeline_type="dataset",
             )
 
             if repo_chain:

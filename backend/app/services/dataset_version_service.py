@@ -547,6 +547,7 @@ class DatasetVersionService:
         from app.database.mongo import get_transaction
         from app.repositories.data_quality_repository import DataQualityRepository
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
+        from app.repositories.feature_vector import FeatureVectorRepository
 
         self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
@@ -556,6 +557,18 @@ class DatasetVersionService:
 
         audit_log_repo = FeatureAuditLogRepository(self._db)
         quality_repo = DataQualityRepository(self._db)
+        feature_vector_repo = FeatureVectorRepository(self._db)
+
+        # Collect feature_vector_ids from enrichment builds BEFORE deleting them
+        enrichment_builds = list(
+            self._enrichment_build_repo.collection.find(
+                {"dataset_version_id": ObjectId(version_id)},
+                {"feature_vector_id": 1},
+            )
+        )
+        feature_vector_ids = [
+            b["feature_vector_id"] for b in enrichment_builds if b.get("feature_vector_id")
+        ]
 
         # Use transaction for atomic deletion
         with get_transaction() as session:
@@ -567,17 +580,22 @@ class DatasetVersionService:
             quality_deleted = quality_repo.delete_by_version(version_id, session=session)
             logger.info(f"Deleted {quality_deleted} quality reports for version {version_id}")
 
-            # 3. Delete associated enrichment builds
+            # 3. Delete associated FeatureVectors (by feature_vector_ids)
+            if feature_vector_ids:
+                fv_deleted = feature_vector_repo.delete_by_ids(feature_vector_ids, session=session)
+                logger.info(f"Deleted {fv_deleted} FeatureVectors for version {version_id}")
+
+            # 4. Delete associated enrichment builds
             deleted_enrichment = self._enrichment_build_repo.delete_by_version(
                 version_id, session=session
             )
             logger.info(f"Deleted {deleted_enrichment} enrichment builds for version {version_id}")
 
-            # 4. Delete associated import builds
+            # 5. Delete associated import builds
             deleted_import = self._import_build_repo.delete_by_version(version_id, session=session)
             logger.info(f"Deleted {deleted_import} import builds for version {version_id}")
 
-            # 5. Delete the version
+            # 6. Delete the version
             self._repo.delete(version_id, session=session)
             logger.info(f"Deleted version {version_id} for dataset {dataset_id}")
 

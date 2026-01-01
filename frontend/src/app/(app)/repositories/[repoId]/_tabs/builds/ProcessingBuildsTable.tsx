@@ -41,7 +41,67 @@ import type { TrainingBuild } from "@/types";
 
 const PAGE_SIZE = 20;
 
-// ExtractionStatusBadge moved to @/components/builds
+// Mini status indicator for pipeline steps
+function StatusDot({ status }: { status: string }) {
+    const s = (status || "pending").toLowerCase();
+
+    if (s === "completed") {
+        return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+    }
+    if (s === "partial") {
+        return <AlertCircle className="h-4 w-4 text-amber-500" />;
+    }
+    if (s === "failed") {
+        return <XCircle className="h-4 w-4 text-red-500" />;
+    }
+    if (s === "in_progress") {
+        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+    }
+    // pending or unknown
+    return <Clock className="h-4 w-4 text-slate-400" />;
+}
+
+// Pipeline status showing both extraction and prediction in a mini stepper
+function PipelineStatusBadge({
+    extractionStatus,
+    predictionStatus,
+}: {
+    extractionStatus: string;
+    predictionStatus?: string;
+}) {
+    const extStatus = (extractionStatus || "pending").toLowerCase();
+    const predStatus = (predictionStatus || "pending").toLowerCase();
+
+    // Determine prediction display status
+    const showPrediction = extStatus === "completed" || extStatus === "partial";
+
+    return (
+        <div className="flex items-center gap-1.5">
+            {/* Extraction step */}
+            <div className="flex items-center gap-1" title={`Extraction: ${extractionStatus}`}>
+                <StatusDot status={extractionStatus} />
+                <span className="text-xs text-muted-foreground">Ext</span>
+            </div>
+
+            {/* Arrow connector */}
+            <span className="text-slate-300 dark:text-slate-600">→</span>
+
+            {/* Prediction step */}
+            <div
+                className={cn(
+                    "flex items-center gap-1",
+                    !showPrediction && "opacity-40"
+                )}
+                title={showPrediction ? `Prediction: ${predictionStatus || "pending"}` : "Waiting for extraction"}
+            >
+                <StatusDot status={showPrediction ? (predictionStatus || "pending") : "pending"} />
+                <span className="text-xs text-muted-foreground">Pred</span>
+            </div>
+        </div>
+    );
+}
+
+// Keep LocalExtractionStatusBadge for expanded row details
 function LocalExtractionStatusBadge({ status }: { status: string }) {
     // Use shared badge but with local styling for inline display
     const s = (status || "pending").toLowerCase();
@@ -131,12 +191,14 @@ interface ProcessingBuildsTableProps {
     repoId: string;
     onRetryAllFailed?: () => void;
     retryAllLoading?: boolean;
+    totalFailedCount?: number;
 }
 
 export function ProcessingBuildsTable({
     repoId,
     onRetryAllFailed,
     retryAllLoading,
+    totalFailedCount = 0,
 }: ProcessingBuildsTableProps) {
     const router = useRouter();
     const [builds, setBuilds] = useState<TrainingBuild[]>([]);
@@ -145,7 +207,6 @@ export function ProcessingBuildsTable({
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-    const [reprocessingBuilds, setReprocessingBuilds] = useState<Record<string, boolean>>({});
 
     // Search and filter state
     const [searchQuery, setSearchQuery] = useState("");
@@ -213,7 +274,6 @@ export function ProcessingBuildsTable({
         });
     };
 
-    const failedCount = builds.filter((b) => b.extraction_status === "failed").length;
     const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
 
     const handlePageChange = (direction: "prev" | "next") => {
@@ -248,10 +308,10 @@ export function ProcessingBuildsTable({
                             variant="outline"
                             size="sm"
                             onClick={onRetryAllFailed}
-                            disabled={retryAllLoading || failedCount === 0}
+                            disabled={retryAllLoading || totalFailedCount === 0}
                             className={cn(
                                 "text-amber-600 border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30",
-                                failedCount === 0 && "opacity-50 cursor-not-allowed"
+                                totalFailedCount === 0 && "opacity-50 cursor-not-allowed"
                             )}
                         >
                             {retryAllLoading ? (
@@ -259,7 +319,7 @@ export function ProcessingBuildsTable({
                             ) : (
                                 <RotateCcw className="mr-2 h-4 w-4" />
                             )}
-                            Retry Failed ({failedCount})
+                            Retry Failed ({totalFailedCount})
                         </Button>
                     )}
                 </div>
@@ -285,7 +345,7 @@ export function ProcessingBuildsTable({
                                     Commit
                                 </th>
                                 <th className="px-4 py-3 text-left font-medium text-slate-500">
-                                    Extraction
+                                    Pipeline Status
                                 </th>
                                 <th className="px-4 py-3 text-left font-medium text-slate-500">
                                     Features
@@ -299,14 +359,13 @@ export function ProcessingBuildsTable({
                                 <th className="px-4 py-3 text-left font-medium text-slate-500">
                                     Date
                                 </th>
-                                <th className="px-4 py-3" />
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                             {builds.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={9}
+                                        colSpan={8}
                                         className="px-4 py-8 text-center text-muted-foreground"
                                     >
                                         No processing builds found.
@@ -332,7 +391,7 @@ export function ProcessingBuildsTable({
                                                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/40 transition"
                                                     onClick={() =>
                                                         router.push(
-                                                            `/repositories/${repoId}/builds/${build.id}`
+                                                            `/build/${repoId}/${build.id}`
                                                         )
                                                     }
                                                 >
@@ -366,8 +425,9 @@ export function ProcessingBuildsTable({
                                                         </div>
                                                     </td>
                                                     <td className="px-4 py-3">
-                                                        <LocalExtractionStatusBadge
-                                                            status={build.extraction_status}
+                                                        <PipelineStatusBadge
+                                                            extractionStatus={build.extraction_status}
+                                                            predictionStatus={build.prediction_status}
                                                         />
                                                     </td>
                                                     <td className="px-4 py-3 text-muted-foreground">
@@ -388,46 +448,11 @@ export function ProcessingBuildsTable({
                                                     <td className="px-4 py-3 text-muted-foreground">
                                                         {formatTimestamp(build.created_at)}
                                                     </td>
-                                                    <td
-                                                        className="px-4 py-3"
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                        <Button
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            onClick={async (e) => {
-                                                                e.stopPropagation();
-                                                                if (reprocessingBuilds[build.id]) return;
-                                                                setReprocessingBuilds((prev) => ({
-                                                                    ...prev,
-                                                                    [build.id]: true,
-                                                                }));
-                                                                try {
-                                                                    await buildApi.reprocess(repoId, build.id);
-                                                                } catch (err) {
-                                                                    console.error(err);
-                                                                } finally {
-                                                                    setReprocessingBuilds((prev) => ({
-                                                                        ...prev,
-                                                                        [build.id]: false,
-                                                                    }));
-                                                                }
-                                                            }}
-                                                            disabled={reprocessingBuilds[build.id]}
-                                                            title="Reprocess"
-                                                        >
-                                                            {reprocessingBuilds[build.id] ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                            ) : (
-                                                                <RotateCcw className="h-4 w-4" />
-                                                            )}
-                                                        </Button>
-                                                    </td>
                                                 </tr>
                                                 {hasIssues && (
                                                     <CollapsibleContent asChild>
                                                         <tr className="bg-amber-50 dark:bg-amber-900/10">
-                                                            <td colSpan={9} className="px-4 py-3">
+                                                            <td colSpan={8} className="px-4 py-3">
                                                                 <div className="space-y-2 text-sm">
                                                                     {build.extraction_error && (
                                                                         <div>
