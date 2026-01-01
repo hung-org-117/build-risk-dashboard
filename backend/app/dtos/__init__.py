@@ -44,6 +44,7 @@ from .dataset_template import (
 )
 from .dataset_version import (
     CreateVersionRequest,
+    IngestionProgressResponse,
     VersionListResponse,
     VersionResponse,
 )
@@ -179,6 +180,7 @@ __all__ = [
     "DAGResponse",
     # Dataset Version
     "CreateVersionRequest",
+    "IngestionProgressResponse",
     "VersionResponse",
     "VersionListResponse",
     # Dataset Repo

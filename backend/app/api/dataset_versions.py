@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from app.database.mongo import get_db
 from app.dtos.dataset_version import (
     CreateVersionRequest,
+    IngestionProgressResponse,
     VersionListResponse,
     VersionResponse,
 )
@@ -31,11 +32,11 @@ def _to_response(version: DatasetVersion) -> VersionResponse:
         status=(
             version.status.value if isinstance(version.status, VersionStatus) else version.status
         ),
-        total_rows=version.total_rows,
-        processed_rows=version.processed_rows,
-        enriched_rows=version.enriched_rows,
-        failed_rows=version.failed_rows,
-        skipped_rows=version.skipped_rows,
+        builds_total=version.builds_total,
+        builds_ingested=version.builds_ingested,
+        builds_missing_resource=version.builds_missing_resource,
+        builds_processed=version.builds_processed,
+        builds_processing_failed=version.builds_processing_failed,
         progress_percent=version.progress_percent,
         started_at=version.started_at.isoformat() if version.started_at else None,
         completed_at=version.completed_at.isoformat() if version.completed_at else None,
@@ -95,6 +96,22 @@ async def get_version(
     service = DatasetVersionService(db)
     version = service.get_version(dataset_id, version_id, str(current_user["_id"]))
     return _to_response(version)
+
+
+@router.get("/{version_id}/ingestion-progress", response_model=IngestionProgressResponse)
+async def get_ingestion_progress(
+    dataset_id: str,
+    version_id: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """Get ingestion progress summary for a dataset version."""
+    service = DatasetVersionService(db)
+    return service.get_ingestion_progress(
+        dataset_id=dataset_id,
+        version_id=version_id,
+        user_id=str(current_user["_id"]),
+    )
 
 
 @router.get("/{version_id}/export")

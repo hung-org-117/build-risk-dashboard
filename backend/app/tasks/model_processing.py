@@ -16,7 +16,7 @@ from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
-from app.tasks.base import ModelPipelineTask, PipelineTask
+from app.tasks.base import ModelPipelineTask
 from app.tasks.shared import extract_features_for_build
 from app.tasks.shared.events import publish_build_status as publish_build_update
 from app.tasks.shared.events import publish_repo_status as publish_status
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
     time_limit=120,
 )
 def start_processing_phase(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
 ) -> Dict[str, Any]:
     """
@@ -149,7 +149,7 @@ def start_processing_phase(
     time_limit=360,
 )
 def dispatch_build_processing(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     raw_repo_id: str,
     raw_build_run_ids: List[str],
@@ -334,7 +334,7 @@ def dispatch_build_processing(
     time_limit=120,
 )
 def finalize_model_processing(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     created_count: int,
     correlation_id: str = "",
@@ -445,14 +445,14 @@ def finalize_model_processing(
 # Task 4: Process a single build
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.processing.process_workflow_run",
     queue="processing",
     soft_time_limit=600,
     time_limit=900,
 )
 def process_workflow_run(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     model_build_id: str,
     is_reprocess: bool = False,
@@ -631,13 +631,13 @@ def process_workflow_run(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.processing.retry_failed_builds",
     queue="processing",
     soft_time_limit=300,
     time_limit=360,
 )
-def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, Any]:
+def retry_failed_builds(self: ModelPipelineTask, repo_config_id: str) -> Dict[str, Any]:
     """
     Retry for failed builds - handles both extraction and prediction failures.
 
@@ -794,14 +794,14 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
 # PROCESSING CHAIN ERROR HANDLER
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.processing.handle_processing_chain_error",
     queue="processing",
     soft_time_limit=60,
     time_limit=120,
 )
 def handle_processing_chain_error(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     request,
     exc,
     traceback,
@@ -896,14 +896,14 @@ def handle_processing_chain_error(
 # PREDICTION TASK
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.processing.predict_builds_batch",
     queue="prediction",
     soft_time_limit=300,
     time_limit=360,
 )
 def predict_builds_batch(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     model_build_ids: List[str],
 ) -> Dict[str, Any]:
     """

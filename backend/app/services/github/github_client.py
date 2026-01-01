@@ -254,6 +254,10 @@ class GitHubClient:
                 time.sleep(delay)
                 continue
 
+            except GithubSecondaryRateLimitError:
+                # Secondary rate limit affects ALL tokens (IP-based), don't rotate
+                raise
+
             except GithubRateLimitError as e:
                 # Current token is rate limited, try to rotate to another
                 logger.warning(
@@ -269,10 +273,6 @@ class GitHubClient:
                 # Successfully rotated, retry with new token (don't count as retry)
                 logger.info("Successfully rotated token, retrying request...")
                 continue
-
-            except GithubSecondaryRateLimitError:
-                # Secondary rate limit affects ALL tokens (IP-based), don't rotate
-                raise
 
     def _rest_request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
         # Apply rate limiting to prevent GitHub secondary rate limits

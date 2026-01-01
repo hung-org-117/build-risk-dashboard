@@ -55,17 +55,19 @@ class DatasetVersion(FeatureConfigBase):
 
     status: VersionStatus = VersionStatus.QUEUED
 
-    total_rows: int = Field(default=0, description="Total rows to process")
-    processed_rows: int = Field(default=0, description="Rows processed so far")
-    enriched_rows: int = Field(default=0, description="Rows successfully enriched")
-    failed_rows: int = Field(default=0, description="Rows that failed enrichment")
-    skipped_rows: int = Field(default=0, description="Rows skipped (already processed)")
+    # === BUILD STATS (aligned with ModelRepoConfig) ===
+    builds_total: int = Field(default=0, description="Total validated builds in version")
+    builds_ingested: int = Field(default=0, description="Builds with resources prepared")
+    builds_missing_resource: int = Field(
+        default=0, description="Builds with missing resources during ingestion"
+    )
+    builds_processed: int = Field(default=0, description="Builds with features extracted")
+    builds_processing_failed: int = Field(
+        default=0, description="Builds that failed during processing"
+    )
 
     # Ingestion tracking (progress within INGESTING phase)
     ingestion_progress: int = Field(default=0, description="Ingestion progress percentage (0-100)")
-    repos_total: int = Field(default=0, description="Total repos to ingest")
-    repos_ingested: int = Field(default=0, description="Repos successfully ingested")
-    repos_failed: int = Field(default=0, description="Repos that failed ingestion")
 
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -92,10 +94,10 @@ class DatasetVersion(FeatureConfigBase):
 
     @property
     def progress_percent(self) -> float:
-        """Calculate progress percentage."""
-        if self.total_rows == 0:
+        """Calculate processing progress percentage."""
+        if self.builds_total == 0:
             return 0.0
-        return (self.processed_rows / self.total_rows) * 100
+        return (self.builds_processed / self.builds_total) * 100
 
     @property
     def duration_seconds(self) -> Optional[float]:

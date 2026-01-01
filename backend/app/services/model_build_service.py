@@ -25,8 +25,8 @@ from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 
 
-class BuildService:
-    """Service for querying builds with RawBuildRun as primary source."""
+class ModelBuildService:
+    """Service for querying model builds (ModelTrainingBuild) with RawBuildRun enrichment."""
 
     def __init__(self, db: Database):
         self.db = db
@@ -188,12 +188,12 @@ class BuildService:
 
     def get_build_detail(self, build_id: str) -> Optional[BuildDetail]:
         """
-        Get detailed build info by RawBuildRun._id.
+        Get detailed build info by ModelTrainingBuild._id.
 
         Features are fetched from FeatureVector (single source of truth).
 
         Args:
-            build_id: RawBuildRun._id (MongoDB ObjectId string)
+            build_id: ModelTrainingBuild._id (MongoDB ObjectId string)
         """
         from app.repositories.feature_vector import FeatureVectorRepository
 
@@ -202,13 +202,17 @@ class BuildService:
         except Exception:
             return None
 
-        raw = self.raw_build_run_repo.find_by_id(oid)
+        # Find TrainingBuild by ID
+        training = self.model_training_build_repo.find_by_id(oid)
+        if not training or not training.raw_build_run_id:
+            return None
+
+        # Get RawBuildRun from training build
+        raw = self.raw_build_run_repo.find_by_id(training.raw_build_run_id)
         if not raw:
             return None
 
-        # Get training data if exists
-        training = self.model_training_build_repo.find_by_workflow_run(raw.raw_repo_id, oid)
-        training_dict = training.model_dump() if training else None
+        training_dict = training.model_dump()
 
         # Get features from FeatureVector (single source of truth)
         features = {}

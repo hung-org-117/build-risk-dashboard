@@ -85,12 +85,12 @@ export function QualityReportSection({
     };
 
     useEffect(() => {
-        if (versionStatus === "completed") {
+        if ([\"processed\", \"completed\"].includes(versionStatus)) {
             fetchReport();
         }
     }, [versionStatus, fetchReport]);
 
-    const isVersionReady = versionStatus === "completed";
+    const isVersionReady = [\"processed\", \"completed\"].includes(versionStatus);
 
     // Loading state
     if (isLoading) {

@@ -1,53 +1,49 @@
 "use client";
 
+import { useParams, usePathname } from "next/navigation";
+import Link from "next/link";
 import { Loader2, Play, RefreshCw, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { reposApi } from "@/lib/api";
+import { useRepo } from "../layout";
 
 import { ExportPanel } from "../builds/_components/ExportPanel";
-import { IngestionBuildsTable } from "./builds/IngestionBuildsTable";
-import { ProcessingBuildsTable } from "./builds/ProcessingBuildsTable";
 
 // Statuses that indicate sync/ingestion is in progress
 const SYNCING_STATUSES = ["queued", "fetching", "ingesting"];
 
-interface BuildsTabProps {
-    repoId: string;
-    repoName?: string;
-    repoStatus?: string;
-    // Props for Start Processing button
-    onStartProcessing?: () => void;
-    startProcessingLoading?: boolean;
-    canStartProcessing?: boolean;
-    // Failed counts for showing retry buttons
-    failedIngestionCount?: number;
-    failedProcessingCount?: number;
-}
+export default function BuildsLayout({ children }: { children: React.ReactNode }) {
+    const params = useParams();
+    const pathname = usePathname();
+    const repoId = params.repoId as string;
 
-export function BuildsTab({
-    repoId,
-    repoName,
-    repoStatus = "",
-    onStartProcessing,
-    startProcessingLoading = false,
-    canStartProcessing = false,
-    failedIngestionCount = 0,
-    failedProcessingCount = 0,
-}: BuildsTabProps) {
-    const [activeSubTab, setActiveSubTab] = useState<"ingestion" | "processing">("ingestion");
+    const {
+        repo,
+        progress,
+        handleStartProcessing,
+        startProcessingLoading,
+    } = useRepo();
+
     const [retryIngestionLoading, setRetryIngestionLoading] = useState(false);
     const [retryProcessingLoading, setRetryProcessingLoading] = useState(false);
 
-    // Sync is in progress if status is queued, fetching, or ingesting
+    const repoStatus = repo?.status || "";
     const isSyncing = SYNCING_STATUSES.includes(repoStatus.toLowerCase());
+    const canStartProcessing = ["ingested", "processed"].includes(repoStatus.toLowerCase());
+
+    const failedIngestionCount = progress?.import_builds.missing_resource_retryable || 0;
+    const failedProcessingCount = (progress?.training_builds.failed || 0) + (progress?.training_builds.prediction_failed || 0);
+
+    // Determine active sub-tab
+    const isIngestionActive = pathname.endsWith("/ingestion");
+    const isProcessingActive = pathname.endsWith("/processing");
 
     const handleSync = async () => {
         try {
             await reposApi.triggerLazySync(repoId);
-            // Button will be disabled via repoStatus update from WebSocket
         } catch (err) {
             console.error(err);
         }
@@ -56,7 +52,6 @@ export function BuildsTab({
     const handleRetryIngestion = async () => {
         setRetryIngestionLoading(true);
         try {
-            // Only retries builds after checkpoint
             await reposApi.reingestFailed(repoId);
         } catch (err) {
             console.error(err);
@@ -78,22 +73,37 @@ export function BuildsTab({
 
     return (
         <div className="space-y-4">
-            {/* Header Actions */}
+            {/* Sub-tab Navigation + Actions */}
             <div className="flex items-center justify-between">
-                <Tabs
-                    value={activeSubTab}
-                    onValueChange={(v) => setActiveSubTab(v as "ingestion" | "processing")}
-                >
-                    <TabsList>
-                        <TabsTrigger value="ingestion">Data Collection</TabsTrigger>
-                        <TabsTrigger value="processing">Features & Predictions</TabsTrigger>
-                    </TabsList>
-                </Tabs>
+                {/* Sub-tabs */}
+                <div className="flex gap-1 rounded-lg bg-muted p-1">
+                    <Link
+                        href={`/repositories/${repoId}/builds/ingestion`}
+                        className={cn(
+                            "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                            isIngestionActive
+                                ? "bg-background text-foreground shadow-sm"
+                                : "text-muted-foreground hover:text-foreground"
+                        )}
+                    >
+                        Data Collection
+                    </Link>
+                    <Link
+                        href={`/repositories/${repoId}/builds/processing`}
+                        className={cn(
+                            "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                            isProcessingActive
+                                ? "bg-background text-foreground shadow-sm"
+                                : "text-muted-foreground hover:text-foreground"
+                        )}
+                    >
+                        Features & Predictions
+                    </Link>
+                </div>
 
-                {/* Conditional buttons based on active tab */}
-                {activeSubTab === "ingestion" ? (
+                {/* Actions based on active sub-tab */}
+                {isIngestionActive ? (
                     <div className="flex items-center gap-2">
-                        {/* Retry Ingestion button - only show if there are failed builds */}
                         {failedIngestionCount > 0 && (
                             <Button
                                 variant="outline"
@@ -123,24 +133,21 @@ export function BuildsTab({
                             )}
                             {isSyncing ? "Syncing..." : "Sync Builds"}
                         </Button>
-                        {onStartProcessing && (
-                            <Button
-                                size="sm"
-                                onClick={onStartProcessing}
-                                disabled={startProcessingLoading || !canStartProcessing || isSyncing}
-                            >
-                                {startProcessingLoading ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : (
-                                    <Play className="mr-2 h-4 w-4" />
-                                )}
-                                Start Processing
-                            </Button>
-                        )}
+                        <Button
+                            size="sm"
+                            onClick={handleStartProcessing}
+                            disabled={startProcessingLoading || !canStartProcessing || isSyncing}
+                        >
+                            {startProcessingLoading ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <Play className="mr-2 h-4 w-4" />
+                            )}
+                            Start Processing
+                        </Button>
                     </div>
-                ) : (
+                ) : isProcessingActive ? (
                     <div className="flex items-center gap-2">
-                        {/* Retry Processing button - only show if there are failed builds */}
                         {failedProcessingCount > 0 && (
                             <Button
                                 variant="outline"
@@ -157,25 +164,13 @@ export function BuildsTab({
                                 Retry Failed ({failedProcessingCount})
                             </Button>
                         )}
-                        <ExportPanel repoId={repoId} repoName={repoName} />
+                        <ExportPanel repoId={repoId} repoName={repo?.full_name} />
                     </div>
-                )}
+                ) : null}
             </div>
 
-            {/* Sub-tab Content */}
-            {activeSubTab === "ingestion" ? (
-                <IngestionBuildsTable
-                    repoId={repoId}
-                    onRetryAllFailed={handleRetryIngestion}
-                    retryAllLoading={retryIngestionLoading}
-                />
-            ) : (
-                <ProcessingBuildsTable
-                    repoId={repoId}
-                    onRetryAllFailed={handleRetryProcessing}
-                    retryAllLoading={retryProcessingLoading}
-                />
-            )}
+            {/* Sub-page Content */}
+            {children}
         </div>
     );
 }

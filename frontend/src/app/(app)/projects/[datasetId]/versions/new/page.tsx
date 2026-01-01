@@ -87,7 +87,9 @@ export default function CreateVersionPage({ params }: PageProps) {
             try {
                 const dataset = await datasetsApi.get(datasetId);
                 const response = await datasetsApi.listVersions(datasetId, { limit: 100 });
-                const active = response.versions.some((v: any) => v.status === 'processing' || v.status === 'pending');
+                const active = response.versions.some((v: any) =>
+                    ["queued", "ingesting", "ingested", "processing"].includes(v.status)
+                );
                 setHasActiveVersion(active);
             } catch (err) {
                 console.error("Failed to check active versions:", err);
@@ -173,7 +175,7 @@ export default function CreateVersionPage({ params }: PageProps) {
 
             toast({
                 title: "Version creation started",
-                description: "Your new dataset version is being processed.",
+                description: "Data collection has started for your new dataset version.",
             });
 
             router.push(`/projects/${datasetId}`);
@@ -260,7 +262,7 @@ export default function CreateVersionPage({ params }: PageProps) {
             {hasActiveVersion && (
                 <div className="bg-amber-50 border-b border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-300 py-2 px-6 flex items-center gap-2 text-sm justify-center">
                     <AlertTriangle className="h-4 w-4" />
-                    A version is currently processing. You must wait for it to complete.
+                    A version is currently running. Wait for data collection or feature extraction to finish.
                 </div>
             )}
 

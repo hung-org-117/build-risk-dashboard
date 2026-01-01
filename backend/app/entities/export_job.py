@@ -26,9 +26,16 @@ class ExportJob(BaseEntity):
     Represents an export job for background processing.
 
     Used when the dataset is too large for streaming response.
+    Can be used for:
+    - Model repository exports (uses repo_id)
+    - Dataset version exports (uses dataset_id + version_id)
     """
 
-    repo_id: PyObjectId
+    # Identifiers - either repo_id OR (dataset_id + version_id)
+    repo_id: Optional[PyObjectId] = None  # For model repository exports
+    dataset_id: Optional[PyObjectId] = None  # For dataset version exports
+    version_id: Optional[PyObjectId] = None  # For dataset version exports
+
     user_id: PyObjectId
     format: ExportFormat = ExportFormat.CSV
     status: ExportStatus = ExportStatus.PENDING

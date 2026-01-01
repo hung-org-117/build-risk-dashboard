@@ -717,11 +717,11 @@ export interface EnrichmentJob {
   id: string;
   dataset_id: string;
   status: "queued" | "ingesting" | "processing" | "ingested" | "processed" | "failed";
-  total_rows: number;
-  processed_rows: number;
-  enriched_rows: number;
-  failed_rows: number;
-  skipped_rows: number;
+  builds_total: number;
+  builds_ingested: number;
+  builds_missing_resource: number;
+  builds_processed: number;
+  builds_processing_failed: number;
   progress_percent: number;
   selected_features: string[];
   started_at?: string;
@@ -735,10 +735,10 @@ export interface EnrichmentStatusResponse {
   job_id: string;
   status: string;
   progress_percent: number;
-  processed_rows: number;
-  total_rows: number;
-  enriched_rows: number;
-  failed_rows: number;
+  builds_processed: number;
+  builds_total: number;
+  builds_ingested: number;
+  builds_missing_resource: number;
   error?: string;
   output_file?: string;
   estimated_time_remaining_seconds?: number;
@@ -748,10 +748,10 @@ export interface EnrichmentStatusResponse {
 export interface EnrichmentProgressEvent {
   type: "progress";
   job_id: string;
-  processed_rows: number;
-  total_rows: number;
-  enriched_rows: number;
-  failed_rows: number;
+  builds_processed: number;
+  builds_total: number;
+  builds_ingested: number;
+  builds_missing_resource: number;
   progress_percent: number;
   current_repo?: string;
 }
@@ -760,9 +760,9 @@ export interface EnrichmentCompleteEvent {
   type: "complete";
   job_id: string;
   status: string;
-  total_rows: number;
-  enriched_rows: number;
-  failed_rows: number;
+  builds_total: number;
+  builds_processed: number;
+  builds_processing_failed: number;
   output_file?: string;
   duration_seconds?: number;
 }
@@ -805,10 +805,9 @@ export interface ValidationStats {
 }
 
 export interface IngestionStats {
-  repos_total: number;
-  repos_ingested: number;
-  repos_failed: number;
   builds_total: number;
+  builds_ingested: number;
+  builds_missing_resource: number;
   worktrees_created: number;
   logs_downloaded: number;
 }

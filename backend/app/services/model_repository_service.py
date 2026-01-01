@@ -23,6 +23,7 @@ from app.services.github.github_client import (
     get_user_github_client,
 )
 from app.tasks.model_ingestion import start_model_processing
+from app.tasks.model_processing import start_processing_phase
 
 logger = logging.getLogger(__name__)
 
@@ -568,6 +569,11 @@ class RepositoryService:
         # Checkpoint: use ObjectId for reliable ordering
         last_checkpoint_id = repo_doc.last_processed_import_build_id
 
+        # Count missing resource builds that can be retried (after checkpoint)
+        missing_resource_retryable = import_build_repo.count_missing_resource_after_checkpoint(
+            repo_id, last_checkpoint_id
+        )
+
         return {
             "repo_id": repo_id,
             "status": repo_doc.status.value
@@ -587,6 +593,7 @@ class RepositoryService:
                 "ingesting": import_status_counts.get("ingesting", 0),
                 "ingested": import_status_counts.get("ingested", 0),
                 "missing_resource": import_status_counts.get("missing_resource", 0),
+                "missing_resource_retryable": missing_resource_retryable,
                 "total": sum(import_status_counts.values()),
             },
             # Per-resource status breakdown
@@ -918,7 +925,6 @@ class RepositoryService:
         Raises:
             HTTPException: If repository not found or status is invalid
         """
-        from app.tasks.model_ingestion import start_processing_phase
 
         repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
         if not repo_doc:

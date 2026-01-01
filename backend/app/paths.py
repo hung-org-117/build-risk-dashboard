@@ -30,10 +30,21 @@ HAMILTON_CACHE_DIR = DATA_DIR / "hamilton_cache"
 # Scan configuration files (SonarQube/Trivy per-version per-repo)
 SCAN_CONFIG_DIR = DATA_DIR / "scan-config"
 
+# Export job output files (CSV, JSON exports)
+EXPORTS_DIR = DATA_DIR / "exports"
+
 
 def ensure_data_dirs() -> None:
     """Create all required data directories if they don't exist."""
-    for d in [DATA_DIR, REPOS_DIR, WORKTREES_DIR, LOGS_DIR, HAMILTON_CACHE_DIR, SCAN_CONFIG_DIR]:
+    for d in [
+        DATA_DIR,
+        REPOS_DIR,
+        WORKTREES_DIR,
+        LOGS_DIR,
+        HAMILTON_CACHE_DIR,
+        SCAN_CONFIG_DIR,
+        EXPORTS_DIR,
+    ]:
         d.mkdir(parents=True, exist_ok=True)
 
 

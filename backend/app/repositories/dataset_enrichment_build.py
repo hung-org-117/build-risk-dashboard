@@ -100,8 +100,10 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
     def upsert_for_import_build(
         self,
         dataset_version_id: str,
+        dataset_id: str,
         dataset_build_id: str,
         dataset_import_build_id: str,
+        raw_repo_id: str,
         raw_build_run_id: str,
     ) -> DatasetEnrichmentBuild:
         """
@@ -120,8 +122,10 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         now = datetime.utcnow()
         doc = {
             "dataset_version_id": ObjectId(dataset_version_id),
+            "dataset_id": ObjectId(dataset_id),
             "dataset_build_id": ObjectId(dataset_build_id),
             "dataset_import_build_id": import_oid,
+            "raw_repo_id": ObjectId(raw_repo_id),
             "raw_build_run_id": ObjectId(raw_build_run_id),
             "extraction_status": ExtractionStatus.PENDING.value,
             "created_at": now,
@@ -216,49 +220,104 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         dataset_id: ObjectId,
         version_id: Optional[ObjectId] = None,
         limit: Optional[int] = None,
-    ) -> Iterator[DatasetEnrichmentBuild]:
-        """Get all enriched builds for export, sorted by CSV row index. Yields results."""
-        query: Dict[str, Any] = {
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Get all enriched builds for export with features from FeatureVector.
+
+        Joins with feature_vectors collection to get features and scan_metrics.
+        Yields raw dicts for export_utils.
+        """
+        match_query: Dict[str, Any] = {
             "dataset_id": dataset_id,
             "extraction_status": ExtractionStatus.COMPLETED.value,
         }
         if version_id:
-            query["dataset_version_id"] = version_id
+            match_query["dataset_version_id"] = version_id
 
-        cursor = self.collection.find(query).sort("_id", 1).batch_size(100)
+        pipeline = [
+            {"$match": match_query},
+            {"$sort": {"_id": 1}},
+            # Join with feature_vectors to get features and scan_metrics
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "feature_vector",
+                }
+            },
+            # Unwind the joined array (1:1 relationship)
+            {"$unwind": {"path": "$feature_vector", "preserveNullAndEmptyArrays": True}},
+            # Project only features and scan_metrics for export
+            {
+                "$project": {
+                    "_id": 1,
+                    "dataset_id": 1,
+                    "dataset_version_id": 1,
+                    "raw_repo_id": 1,
+                    "raw_build_run_id": 1,
+                    "dataset_build_id": 1,
+                    # Only features and scan_metrics from FeatureVector
+                    "features": {"$ifNull": ["$feature_vector.features", {}]},
+                    "scan_metrics": {"$ifNull": ["$feature_vector.scan_metrics", {}]},
+                }
+            },
+        ]
+
         if limit:
-            cursor = cursor.limit(limit)
+            pipeline.append({"$limit": limit})
+
+        cursor = self.collection.aggregate(pipeline, batchSize=100)
         for doc in cursor:
-            yield doc  # Return raw dict for export_utils
+            yield doc
 
     def get_all_feature_keys(
         self,
         dataset_id: ObjectId,
         version_id: Optional[ObjectId] = None,
     ) -> set:
-        """Get all unique feature keys for consistent CSV columns.
-
-        Includes keys from both features and scan_metrics fields.
         """
-        query: Dict[str, Any] = {
+        Get all unique feature keys for consistent CSV columns.
+
+        Joins with feature_vectors to get keys from features and scan_metrics fields.
+        """
+        match_query: Dict[str, Any] = {
             "dataset_id": dataset_id,
             "extraction_status": ExtractionStatus.COMPLETED.value,
         }
         if version_id:
-            query["dataset_version_id"] = version_id
+            match_query["dataset_version_id"] = version_id
 
-        # Get keys from features field
+        # Pipeline to get feature keys from joined feature_vectors
         pipeline_features = [
-            {"$match": query},
-            {"$project": {"feature_keys": {"$objectToArray": {"$ifNull": ["$features", {}]}}}},
+            {"$match": match_query},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": False}},
+            {"$project": {"feature_keys": {"$objectToArray": {"$ifNull": ["$fv.features", {}]}}}},
             {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
         ]
 
-        # Get keys from scan_metrics field
+        # Pipeline to get scan_metrics keys from joined feature_vectors
         pipeline_scan = [
-            {"$match": query},
-            {"$project": {"scan_keys": {"$objectToArray": {"$ifNull": ["$scan_metrics", {}]}}}},
+            {"$match": match_query},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": False}},
+            {"$project": {"scan_keys": {"$objectToArray": {"$ifNull": ["$fv.scan_metrics", {}]}}}},
             {"$unwind": {"path": "$scan_keys", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "keys": {"$addToSet": "$scan_keys.k"}}},
         ]
@@ -306,7 +365,9 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         features: List[str],
     ) -> Dict[str, Any]:
         """
-        Calculate statistics for features
+        Calculate statistics for features from FeatureVector.
+
+        Joins with feature_vectors collection to get features.
         """
         if not features:
             return {}
@@ -321,10 +382,10 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         if total_docs == 0:
             return {}
 
-        # 2. Calculate min, max, avg, and count
-        group_fields = {"_id": None}
+        # 2. Calculate min, max, avg, and count using aggregation with $lookup
+        group_fields: Dict[str, Any] = {"_id": None}
         for feature in features:
-            field_path = f"$features.{feature}"
+            field_path = f"$fv.features.{feature}"
 
             # Numeric stat
             group_fields[f"{feature}__min"] = {"$min": field_path}
@@ -332,12 +393,23 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
             group_fields[f"{feature}__avg"] = {"$avg": field_path}
 
             # Count non-null values
-            # $cond with $ne: [val, None] correctly counts 1 for any value (including False/0) except null/missing
             group_fields[f"{feature}__non_null"] = {
                 "$sum": {"$cond": [{"$ne": [field_path, None]}, 1, 0]}
             }
 
-        pipeline = [{"$match": query}, {"$group": group_fields}]
+        pipeline = [
+            {"$match": query},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": True}},
+            {"$group": group_fields},
+        ]
 
         try:
             agg_results = list(self.collection.aggregate(pipeline, allowDiskUse=True))
@@ -346,15 +418,29 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
 
         result_doc = agg_results[0] if agg_results else {}
 
-        # 3. Type Inference (via sampling)
-        sample_docs = list(self.collection.find(query, {"features": 1}).limit(5))
+        # 3. Type Inference (via sampling) - also needs to join with feature_vectors
+        sample_pipeline = [
+            {"$match": query},
+            {"$limit": 5},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": True}},
+            {"$project": {"features": "$fv.features"}},
+        ]
+        sample_docs = list(self.collection.aggregate(sample_pipeline))
 
         stats = {}
         for feature in features:
             # Determine type from samples
             value_type = "unknown"
             for doc in sample_docs:
-                val = doc.get("features", {}).get(feature)
+                val = doc.get("features", {}).get(feature) if doc.get("features") else None
                 if val is not None:
                     if isinstance(val, bool):
                         value_type = "boolean"
@@ -591,7 +677,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
         limit: int = 100,
     ) -> tuple[List[Dict[str, Any]], int]:
         """
-        List builds for a version with repo name and web url.
+        List builds for a version with repo name, web url, and features from FeatureVector.
         """
         pipeline = [
             {"$match": {"dataset_version_id": dataset_version_id}},
@@ -637,14 +723,60 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
                                 "as": "repo_stats",
                             }
                         },
+                        # Join with feature_vectors to get features and scan_metrics
+                        {
+                            "$lookup": {
+                                "from": "feature_vectors",
+                                "localField": "feature_vector_id",
+                                "foreignField": "_id",
+                                "as": "feature_vector",
+                            }
+                        },
                         {
                             "$addFields": {
                                 "repo_full_name": {"$arrayElemAt": ["$repo.full_name", 0]},
                                 "provider": {"$arrayElemAt": ["$repo_stats.ci_provider", 0]},
                                 "web_url": {"$arrayElemAt": ["$run.web_url", 0]},
+                                # Features from FeatureVector
+                                "features": {
+                                    "$ifNull": [
+                                        {"$arrayElemAt": ["$feature_vector.features", 0]},
+                                        {},
+                                    ]
+                                },
+                                "scan_metrics": {
+                                    "$ifNull": [
+                                        {"$arrayElemAt": ["$feature_vector.scan_metrics", 0]},
+                                        {},
+                                    ]
+                                },
+                                "feature_count": {
+                                    "$ifNull": [
+                                        {"$arrayElemAt": ["$feature_vector.feature_count", 0]},
+                                        0,
+                                    ]
+                                },
+                                "is_missing_commit": {
+                                    "$ifNull": [
+                                        {"$arrayElemAt": ["$feature_vector.is_missing_commit", 0]},
+                                        False,
+                                    ]
+                                },
+                                "missing_resources": {
+                                    "$ifNull": [
+                                        {"$arrayElemAt": ["$feature_vector.missing_resources", 0]},
+                                        [],
+                                    ]
+                                },
+                                "skipped_features": {
+                                    "$ifNull": [
+                                        {"$arrayElemAt": ["$feature_vector.skipped_features", 0]},
+                                        [],
+                                    ]
+                                },
                             }
                         },
-                        {"$project": {"repo": 0, "run": 0, "repo_stats": 0}},
+                        {"$project": {"repo": 0, "run": 0, "repo_stats": 0, "feature_vector": 0}},
                     ],
                 }
             },

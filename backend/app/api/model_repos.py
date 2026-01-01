@@ -20,7 +20,7 @@ from app.dtos.build import (
 )
 from app.middleware.auth import get_current_user
 from app.middleware.rbac import Permission, RequirePermission
-from app.services.model_build_service import BuildService
+from app.services.model_build_service import ModelBuildService
 from app.services.model_repository_service import RepositoryService
 
 router = APIRouter(prefix="/repos", tags=["Repositories"])
@@ -257,7 +257,7 @@ def get_repo_builds(
     Returns RawBuildRun data with optional ModelTrainingBuild enrichment.
     Builds appear immediately after ingestion; extraction_status shows processing state.
     """
-    service = BuildService(db)
+    service = ModelBuildService(db)
     return service.get_builds_by_repo(repo_id, skip, limit, q, extraction_status)
 
 
@@ -284,7 +284,7 @@ def get_import_builds(
     Shows ModelImportBuild data with resource status breakdown.
     For the Ingestion phase - shows what resources have been fetched/failed.
     """
-    service = BuildService(db)
+    service = ModelBuildService(db)
     return service.get_import_builds(repo_id, skip, limit, q, status)
 
 
@@ -311,7 +311,7 @@ def get_training_builds(
     Shows ModelTrainingBuild data with extraction and prediction info.
     For the Processing phase - shows feature extraction and prediction results.
     """
-    service = BuildService(db)
+    service = ModelBuildService(db)
     return service.get_training_builds(repo_id, skip, limit, q, extraction_status)
 
 
@@ -327,7 +327,7 @@ def get_build_detail(
     current_user: dict = Depends(get_current_user),
 ):
     """Get build details."""
-    service = BuildService(db)
+    service = ModelBuildService(db)
     build = service.get_build_detail(build_id)
     if not build:
         from fastapi import HTTPException

@@ -425,8 +425,8 @@ def notify_dataset_enrichment_completed(
     user_id: ObjectId,
     dataset_name: str,
     dataset_id: str,
-    enriched_rows: int,
-    total_rows: int,
+    builds_processed: int,
+    builds_total: int,
 ) -> Notification:
     """Dataset enrichment completed - in-app only."""
     return create_notification(
@@ -434,12 +434,12 @@ def notify_dataset_enrichment_completed(
         user_id=user_id,
         type=NotificationType.DATASET_ENRICHMENT_COMPLETED,
         title="Dataset Enrichment Completed",
-        message=f"Enrichment for '{dataset_name}' completed. {enriched_rows}/{total_rows} rows enriched.",
+        message=f"Enrichment for '{dataset_name}' completed. {builds_processed}/{builds_total} builds processed.",
         link=f"/admin/datasets/{dataset_id}",
         metadata={
             "dataset_id": dataset_id,
-            "enriched_rows": enriched_rows,
-            "total_rows": total_rows,
+            "builds_processed": builds_processed,
+            "builds_total": builds_total,
         },
     )
 

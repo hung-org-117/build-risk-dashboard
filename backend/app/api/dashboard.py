@@ -13,7 +13,7 @@ from app.dtos.dashboard import (
 )
 from app.middleware.auth import get_current_user
 from app.services.dashboard_service import DashboardService
-from app.services.model_build_service import BuildService
+from app.services.model_build_service import ModelBuildService
 
 router = APIRouter()
 
@@ -34,7 +34,7 @@ async def get_recent_builds(
     current_user: dict = Depends(get_current_user),
 ):
     """Return recent builds across repositories accessible to the user."""
-    build_service = BuildService(db)
+    build_service = ModelBuildService(db)
     return build_service.get_recent_builds(limit, current_user)
 
 

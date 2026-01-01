@@ -37,17 +37,19 @@ import { datasetVersionApi, type EnrichedBuildData } from "@/lib/api";
 import { ExportVersionModal } from "@/components/datasets/ExportVersionModal";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { VersionScansSection, VersionDashboard, AnalysisSection, PreprocessingSection } from "./_components";
-import { Database, BarChart3, Shield, Settings2 } from "lucide-react";
+import { VersionScansSection, VersionDashboard, AnalysisSection, PreprocessingSection, VersionMiniStepper, VersionIngestionCard, VersionProcessingCard } from "./_components";
+import { Database, BarChart3, Shield, Settings2, Home } from "lucide-react";
 
 interface VersionData {
     id: string;
     name: string;
     version_number: number;
     status: string;
-    total_rows: number;
-    enriched_rows: number;
-    failed_rows: number;
+    builds_total: number;
+    builds_ingested: number;
+    builds_missing_resource: number;
+    builds_processed: number;
+    builds_processing_failed: number;
     selected_features: string[];
     created_at: string | null;
     completed_at: string | null;
@@ -84,13 +86,13 @@ export default function VersionDetailPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
-    // Valid tabs (removed "logs" - now available per-build in Build Detail page)
-    const validTabs = ["builds", "scans", "analysis", "preprocessing"] as const;
+    // Valid tabs
+    const validTabs = ["overview", "builds", "scans", "analysis", "preprocessing"] as const;
     type TabValue = typeof validTabs[number];
 
-    // Get tab from URL or default to "builds"
+    // Get tab from URL or default to "overview"
     const tabFromUrl = searchParams.get("tab") as TabValue | null;
-    const activeTab: TabValue = tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "builds";
+    const activeTab: TabValue = tabFromUrl && validTabs.includes(tabFromUrl) ? tabFromUrl : "overview";
 
     // Handler to update tab in URL
     const handleTabChange = useCallback((value: string) => {
@@ -148,12 +150,17 @@ export default function VersionDetailPage() {
 
     // Status config
     const getVersionStatusConfig = (status: string) => {
+        const key = status.toLowerCase();
         const config: Record<string, { icon: typeof CheckCircle2; color: string; bgColor: string }> = {
-            completed: { icon: CheckCircle2, color: "text-green-600", bgColor: "bg-green-100" },
+            queued: { icon: Loader2, color: "text-slate-600", bgColor: "bg-slate-100" },
+            ingesting: { icon: Loader2, color: "text-blue-600", bgColor: "bg-blue-100" },
+            ingested: { icon: CheckCircle2, color: "text-emerald-600", bgColor: "bg-emerald-100" },
+            processing: { icon: Loader2, color: "text-purple-600", bgColor: "bg-purple-100" },
+            processed: { icon: CheckCircle2, color: "text-green-600", bgColor: "bg-green-100" },
             failed: { icon: XCircle, color: "text-red-600", bgColor: "bg-red-100" },
             cancelled: { icon: AlertCircle, color: "text-slate-600", bgColor: "bg-slate-100" },
         };
-        return config[status] || config.failed;
+        return config[key] || config.failed;
     };
 
     const getBuildStatusConfig = (status: string) => {
@@ -266,10 +273,10 @@ export default function VersionDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     <Badge className={`${statusConfig.bgColor} ${statusConfig.color}`}>
-                        <StatusIcon className="mr-1 h-3 w-3" />
+                        <StatusIcon className={`mr-1 h-3 w-3 ${["queued", "ingesting", "processing"].includes(version.status) ? "animate-spin" : ""}`} />
                         {version.status.charAt(0).toUpperCase() + version.status.slice(1)}
                     </Badge>
-                    {version.status === "completed" && (
+                    {version.status === "processed" && (
                         <Button
                             variant="outline"
                             size="sm"
@@ -282,17 +289,13 @@ export default function VersionDetailPage() {
                 </div>
             </div>
 
-            {/* Dashboard Overview */}
-            <VersionDashboard
-                datasetId={datasetId}
-                versionId={versionId}
-                versionStatus={version.status}
-                onNavigateToAnalysis={() => handleTabChange("analysis")}
-            />
-
             {/* Tabbed Content Area */}
             <Tabs value={activeTab} onValueChange={handleTabChange}>
-                <TabsList className="grid w-full grid-cols-4 mb-4">
+                <TabsList className="grid w-full grid-cols-5 mb-4">
+                    <TabsTrigger value="overview" className="gap-2">
+                        <Home className="h-4 w-4" />
+                        Overview
+                    </TabsTrigger>
                     <TabsTrigger value="builds" className="gap-2">
                         <Database className="h-4 w-4" />
                         Builds
@@ -310,6 +313,43 @@ export default function VersionDetailPage() {
                         Preprocessing
                     </TabsTrigger>
                 </TabsList>
+
+                {/* Overview Tab */}
+                <TabsContent value="overview" className="space-y-6">
+                    <VersionMiniStepper
+                        status={version.status}
+                        progress={{
+                            builds_total: version.builds_total,
+                            builds_ingested: version.builds_ingested,
+                            builds_missing_resource: version.builds_missing_resource,
+                            builds_processed: version.builds_processed,
+                            builds_processing_failed: version.builds_processing_failed,
+                        }}
+                    />
+                    <div className="grid md:grid-cols-2 gap-6">
+                        <VersionIngestionCard
+                            buildsIngested={version.builds_ingested}
+                            buildsTotal={version.builds_total}
+                            buildsMissingResource={version.builds_missing_resource}
+                            status={version.status}
+                        />
+                        <VersionProcessingCard
+                            buildsProcessed={version.builds_processed}
+                            buildsIngested={version.builds_ingested}
+                            buildsProcessingFailed={version.builds_processing_failed}
+                            status={version.status}
+                            canStartProcessing={version.status === "ingested"}
+                        />
+                    </div>
+
+                    {/* Keep VersionDashboard for additional stats */}
+                    <VersionDashboard
+                        datasetId={datasetId}
+                        versionId={versionId}
+                        versionStatus={version.status}
+                        onNavigateToAnalysis={() => handleTabChange("analysis")}
+                    />
+                </TabsContent>
 
                 {/* Builds Tab */}
                 <TabsContent value="builds">
@@ -423,7 +463,7 @@ export default function VersionDetailPage() {
                 datasetId={datasetId}
                 versionId={versionId}
                 versionName={version.name}
-                totalRows={version.total_rows}
+                totalRows={version.builds_total}
             />
 
 

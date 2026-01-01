@@ -44,7 +44,7 @@ from app.repositories.model_import_build import ModelImportBuildRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
-from app.tasks.base import ModelPipelineTask, PipelineTask
+from app.tasks.base import ModelPipelineTask
 from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.pipeline.shared.resources import FeatureResource
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
     time_limit=180,
 )
 def start_model_processing(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
@@ -140,14 +140,14 @@ def start_model_processing(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.ingest_model_builds",
     queue="ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
 def ingest_model_builds(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
@@ -273,14 +273,14 @@ def ingest_model_builds(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.fetch_builds_until_existing",
     queue="ingestion",
     soft_time_limit=600,
     time_limit=900,
 )
 def fetch_builds_until_existing(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     ci_provider: str,
     batch_size: int,
@@ -290,8 +290,8 @@ def fetch_builds_until_existing(
     """
     Sequential fetch that stops when hitting existing builds.
 
-    Fetches pages one by one from newest to oldest. Stops when
-    all builds on a page already exist in the database (COMPLETED or PARTIAL).
+    Uses 'since' parameter to only fetch builds NEWER than the newest existing build.
+    This prevents fetching old builds that were not included in the initial sync.
 
     After fetching, dispatches ingestion for new builds.
     """
@@ -320,6 +320,16 @@ def fetch_builds_until_existing(
     if not raw_repo:
         return {"status": "error", "error": "RawRepository not found"}
 
+    # Get newest existing build's created_at for "since" filter
+    # This ensures we only fetch builds NEWER than what we already have
+    newest_build = build_run_repo.get_latest_run(ObjectId(raw_repo_id))
+    since_dt = newest_build.created_at if newest_build else None
+
+    if since_dt:
+        logger.info(f"{log_ctx} Fetching builds newer than {since_dt.isoformat()}")
+    else:
+        logger.info(f"{log_ctx} No existing builds, fetching all")
+
     page = 1
     total_new_builds = 0
     all_commit_shas = []
@@ -329,6 +339,7 @@ def fetch_builds_until_existing(
         logger.info(f"{log_ctx} Fetching page {page}")
 
         fetch_kwargs = {
+            "since": since_dt,  # Only fetch builds newer than existing
             "limit": batch_size,
             "page": page,
             "exclude_bots": True,
@@ -504,14 +515,14 @@ def fetch_builds_until_existing(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.fetch_builds_batch",
     queue="ingestion",
     soft_time_limit=300,
     time_limit=360,
 )
 def fetch_builds_batch(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     ci_provider: str,
     page: int,
@@ -661,14 +672,14 @@ def fetch_builds_batch(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.aggregate_fetch_results",
     queue="ingestion",
     soft_time_limit=60,
     time_limit=120,
 )
 def aggregate_fetch_results(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     results: List[Dict[str, Any]],
     repo_config_id: str,
     correlation_id: str = "",
@@ -759,14 +770,14 @@ def aggregate_fetch_results(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.dispatch_ingestion",
     queue="ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
 def dispatch_ingestion(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
     raw_repo_id: str,
     github_repo_id: int,
@@ -846,14 +857,14 @@ def dispatch_ingestion(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.aggregate_model_ingestion_results",
     queue="ingestion",
     soft_time_limit=30,
     time_limit=60,
 )
 def aggregate_model_ingestion_results(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     results: Any,
     repo_config_id: str,
     correlation_id: str = "",
@@ -1069,14 +1080,14 @@ def aggregate_model_ingestion_results(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.model_ingestion.handle_ingestion_chord_error",
     queue="ingestion",
     soft_time_limit=60,
     time_limit=120,
 )
 def handle_ingestion_chord_error(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     request,
     exc,
     traceback,
@@ -1173,14 +1184,14 @@ def handle_ingestion_chord_error(
 # REINGEST FAILED BUILDS
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelPipelineTask,
     name="app.tasks.ingestion.reingest_failed_builds",
     queue="ingestion",
     soft_time_limit=600,
     time_limit=900,
 )
 def reingest_failed_builds(
-    self: PipelineTask,
+    self: ModelPipelineTask,
     repo_config_id: str,
 ) -> Dict[str, Any]:
     """

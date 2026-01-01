@@ -49,9 +49,11 @@ export interface VersionDataResponse {
         name: string;
         version_number: number;
         status: string;
-        total_rows: number;
-        enriched_rows: number;
-        failed_rows: number;
+        builds_total: number;
+        builds_ingested: number;
+        builds_missing_resource: number;
+        builds_processed: number;
+        builds_processing_failed: number;
         selected_features: string[];
         created_at: string | null;
         completed_at: string | null;
@@ -62,6 +64,12 @@ export interface VersionDataResponse {
     page_size: number;
     total_pages: number;
     column_stats?: Record<string, unknown>;
+}
+
+export interface VersionIngestionProgress {
+    total: number;
+    status_counts: Record<string, number>;
+    resource_status?: Record<string, Record<string, number>>;
 }
 
 export const datasetScanApi = {
@@ -238,6 +246,16 @@ export const datasetVersionApi = {
     ): Promise<EnrichmentBuildDetailResponse> => {
         const response = await api.get<EnrichmentBuildDetailResponse>(
             `/datasets/${datasetId}/versions/${versionId}/builds/${buildId}`
+        );
+        return response.data;
+    },
+
+    getIngestionProgress: async (
+        datasetId: string,
+        versionId: string
+    ): Promise<VersionIngestionProgress> => {
+        const response = await api.get<VersionIngestionProgress>(
+            `/datasets/${datasetId}/versions/${versionId}/ingestion-progress`
         );
         return response.data;
     },

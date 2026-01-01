@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from bson import ObjectId
@@ -102,18 +102,16 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         )
         return result.modified_count > 0
 
-    def update_progress(
+    def update_build_progress(
         self,
         version_id: Union[str, ObjectId],
-        processed_rows: int,
-        enriched_rows: int,
-        failed_rows: int,
+        builds_processed: int,
+        builds_processing_failed: int,
     ) -> bool:
-        """Update version progress atomically."""
+        """Update version build progress atomically."""
         updates: Dict[str, Any] = {
-            "processed_rows": processed_rows,
-            "enriched_rows": enriched_rows,
-            "failed_rows": failed_rows,
+            "builds_processed": builds_processed,
+            "builds_processing_failed": builds_processing_failed,
             "updated_at": datetime.now(timezone.utc),
         }
 
@@ -122,24 +120,21 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         result = self.collection.update_one({"_id": self.ensure_object_id(version_id)}, update_ops)
         return result.modified_count > 0
 
-    def increment_progress(
+    def increment_builds(
         self,
         version_id: Union[str, ObjectId],
-        processed_rows: int = 0,
-        enriched_rows: int = 0,
-        failed_rows: int = 0,
+        builds_processed: int = 0,
+        builds_processing_failed: int = 0,
     ) -> bool:
-        """Increment version progress atomically using $inc.
+        """Increment version build counters atomically using $inc.
 
-        Used for batch processing where each task adds to the total.
+        Used for sequential processing where each task adds to the total.
         """
         inc_ops: Dict[str, int] = {}
-        if processed_rows:
-            inc_ops["processed_rows"] = processed_rows
-        if enriched_rows:
-            inc_ops["enriched_rows"] = enriched_rows
-        if failed_rows:
-            inc_ops["failed_rows"] = failed_rows
+        if builds_processed:
+            inc_ops["builds_processed"] = builds_processed
+        if builds_processing_failed:
+            inc_ops["builds_processing_failed"] = builds_processing_failed
 
         if not inc_ops:
             return False
@@ -153,9 +148,9 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         )
         return result.modified_count > 0
 
-    def increment_processed_rows(self, version_id: Union[str, ObjectId], count: int = 1) -> bool:
-        """Increment processed_rows counter by 1 (or specified count)."""
-        return self.increment_progress(version_id, processed_rows=count)
+    def increment_builds_processed(self, version_id: Union[str, ObjectId], count: int = 1) -> bool:
+        """Increment builds_processed counter by 1 (or specified count)."""
+        return self.increment_builds(version_id, builds_processed=count)
 
     def mark_started(self, version_id: Union[str, ObjectId], task_id: Optional[str] = None) -> bool:
         """Mark version as started processing."""
@@ -247,22 +242,6 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         """
         oid = self.ensure_object_id(dataset_id)
         result = self.collection.delete_many({"dataset_id": oid}, session=session)
-        return result.deleted_count
-
-    def cleanup_old_versions(self, days: int = 30) -> int:
-        """Delete completed versions older than N days."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        result = self.collection.delete_many(
-            {
-                "status": {
-                    "$in": [
-                        VersionStatus.PROCESSED,
-                        VersionStatus.FAILED,
-                    ]
-                },
-                "completed_at": {"$lt": cutoff},
-            }
-        )
         return result.deleted_count
 
     def count_by_dataset(self, dataset_id: Union[str, ObjectId]) -> int:

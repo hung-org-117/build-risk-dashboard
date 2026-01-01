@@ -82,7 +82,7 @@ export function PreprocessingSection({
     const [previewData, setPreviewData] = useState<NormalizationPreviewResponse | null>(null);
     const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
-    const isVersionCompleted = versionStatus === "completed";
+    const isVersionCompleted = ["processed", "completed"].includes(versionStatus);
 
     const fetchNormalizationPreview = useCallback(async (method: NormalizationMethod) => {
         if (!isVersionCompleted || method === "none") {

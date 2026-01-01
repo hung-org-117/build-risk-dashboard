@@ -17,6 +17,7 @@ from app.dtos import (
 from app.entities.dataset import DatasetMapping, DatasetProject, DatasetStats
 from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+from app.repositories.dataset_import_build import DatasetImportBuildRepository
 from app.repositories.dataset_repository import DatasetRepository
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class DatasetService:
         self.repo = DatasetRepository(db)
         self.build_repo = DatasetBuildRepository(db)
         self.enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
+        self.import_build_repo = DatasetImportBuildRepository(db)
 
     def _serialize(self, dataset) -> DatasetResponse:
         payload = dataset.model_dump(by_alias=True) if hasattr(dataset, "model_dump") else dataset
@@ -270,6 +272,10 @@ class DatasetService:
                 dataset_oid, session=session
             )
             logger.info(f"Deleted {deleted_enrichment} enrichment builds for dataset {dataset_id}")
+
+            # 3. Delete associated import builds (DatasetImportBuild)
+            deleted_import = self.import_build_repo.delete_by_dataset(dataset_oid, session=session)
+            logger.info(f"Deleted {deleted_import} import builds for dataset {dataset_id}")
 
             # Delete associated dataset builds (DatasetBuild)
             deleted_builds = self.build_repo.delete_by_dataset(dataset_id, session=session)

@@ -174,14 +174,14 @@ function ActiveVersionCard({ version }: ActiveVersionCardProps) {
                 <Progress value={version.progress_percent} className="h-2" />
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                     <span>
-                        {version.processed_rows.toLocaleString()} /{" "}
-                        {version.total_rows.toLocaleString()} rows
+                        {version.builds_processed.toLocaleString()} /{" "}
+                        {version.builds_total.toLocaleString()} builds
                     </span>
                     <span>{version.progress_percent.toFixed(1)}%</span>
                 </div>
-                {version.failed_rows > 0 && (
+                {version.builds_processing_failed > 0 && (
                     <p className="text-sm text-amber-600">
-                        ⚠️ {version.failed_rows} rows failed
+                        ⚠️ {version.builds_processing_failed} builds failed
                     </p>
                 )}
             </CardContent>
@@ -197,21 +197,21 @@ interface WaitingVersionCardProps {
 }
 
 function WaitingVersionCard({ version, onStartProcessing, onRetryIngestion }: WaitingVersionCardProps) {
-    const hasFailedRows = version.failed_rows > 0;
+    const hasMissingResource = version.builds_missing_resource > 0;
 
     return (
-        <Card className={hasFailedRows
+        <Card className={hasMissingResource
             ? "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
             : "border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20"
         }>
             <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2 text-base">
-                        <CheckCircle2 className={`h-4 w-4 ${hasFailedRows ? "text-amber-500" : "text-green-500"}`} />
+                        <CheckCircle2 className={`h-4 w-4 ${hasMissingResource ? "text-amber-500" : "text-green-500"}`} />
                         Ingestion Complete: {version.name}
                     </CardTitle>
                     <div className="flex items-center gap-2">
-                        {hasFailedRows && (
+                        {hasMissingResource && (
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -234,8 +234,8 @@ function WaitingVersionCard({ version, onStartProcessing, onRetryIngestion }: Wa
             </CardHeader>
             <CardContent>
                 <p className="text-sm text-muted-foreground">
-                    {version.enriched_rows} / {version.total_rows} builds ingested.
-                    {hasFailedRows && ` ${version.failed_rows} failed.`}
+                    {version.builds_ingested} / {version.builds_total} builds ingested.
+                    {hasMissingResource && ` ${version.builds_missing_resource} missing resources.`}
                     {" "}Click &quot;Start Processing&quot; to begin feature extraction.
                 </p>
             </CardContent>
@@ -317,8 +317,8 @@ function VersionCard({ version, onView, onDownload, onDelete, onRetryProcessing 
                     </div>
                     <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
                         <span>
-                            {version.enriched_rows.toLocaleString()} /{" "}
-                            {version.total_rows.toLocaleString()} rows
+                            {version.builds_processed.toLocaleString()} /{" "}
+                            {version.builds_total.toLocaleString()} builds
                         </span>
                         <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
@@ -334,7 +334,7 @@ function VersionCard({ version, onView, onDownload, onDelete, onRetryProcessing 
             </div>
 
             <div className="flex items-center gap-2">
-                {version.status === "completed" && (
+                {version.status === "processed" && (
                     <>
                         <Button
                             variant="ghost"

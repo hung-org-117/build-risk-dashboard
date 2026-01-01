@@ -101,8 +101,8 @@ export function AnalysisSection({ datasetId, versionId, versionStatus }: Analysi
             const statsData = await statisticsApi.getVersionStatistics(datasetId, versionId);
             setStatistics(statsData);
 
-            // Fetch quality report if version completed
-            if (versionStatus === "completed") {
+            // Fetch quality report if version processed
+            if (["processed", "completed"].includes(versionStatus)) {
                 try {
                     const qualityData = await qualityApi.getReport(datasetId, versionId);
                     if (!("available" in qualityData) || qualityData.available !== false) {
@@ -203,7 +203,7 @@ export function AnalysisSection({ datasetId, versionId, versionStatus }: Analysi
                                 <ScoreItem label="Consistency" score={qualityReport.consistency_score} weight={20} />
                                 <ScoreItem label="Coverage" score={qualityReport.coverage_score} weight={10} />
                             </div>
-                        ) : versionStatus === "completed" ? (
+                        ) : ["processed", "completed"].includes(versionStatus) ? (
                             <div className="text-center py-4">
                                 <p className="text-sm text-muted-foreground mb-3">No quality report available</p>
                                 <Button size="sm" onClick={handleEvaluate} disabled={isEvaluating}>

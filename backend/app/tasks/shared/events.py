@@ -97,10 +97,10 @@ def publish_build_status(repo_id: str, build_id: str, status: str) -> bool:
 def publish_enrichment_update(
     version_id: str,
     status: str,
-    processed_rows: int = 0,
-    total_rows: int = 0,
-    enriched_rows: int = 0,
-    failed_rows: int = 0,
+    builds_processed: int = 0,
+    builds_total: int = 0,
+    builds_ingested: int = 0,
+    builds_missing_resource: int = 0,
     error: Optional[str] = None,
 ) -> bool:
     """
@@ -109,23 +109,23 @@ def publish_enrichment_update(
     Args:
         version_id: DatasetVersion ID
         status: Status value (ingesting, processing, completed, failed)
-        processed_rows: Number of rows processed so far
-        total_rows: Total number of rows to process
-        enriched_rows: Number of rows successfully enriched
-        failed_rows: Number of rows that failed enrichment
+        builds_processed: Number of builds processed so far
+        builds_total: Total number of builds in version
+        builds_ingested: Number of builds ingested
+        builds_missing_resource: Number of builds with missing resources
         error: Optional error message
 
     Returns:
         True if published successfully, False otherwise
     """
-    progress = round((processed_rows / total_rows) * 100, 1) if total_rows > 0 else 0
+    progress = round((builds_processed / builds_total) * 100, 1) if builds_total > 0 else 0
     payload = {
         "version_id": version_id,
         "status": status,
-        "processed_rows": processed_rows,
-        "total_rows": total_rows,
-        "enriched_rows": enriched_rows,
-        "failed_rows": failed_rows,
+        "builds_processed": builds_processed,
+        "builds_total": builds_total,
+        "builds_ingested": builds_ingested,
+        "builds_missing_resource": builds_missing_resource,
         "progress": progress,
     }
     if error:

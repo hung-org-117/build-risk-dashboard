@@ -35,11 +35,11 @@ class VersionResponse(BaseModel):
     description: Optional[str]
     selected_features: List[str]
     status: str
-    total_rows: int
-    processed_rows: int
-    enriched_rows: int
-    failed_rows: int
-    skipped_rows: int
+    builds_total: int
+    builds_ingested: int
+    builds_missing_resource: int
+    builds_processed: int
+    builds_processing_failed: int
     progress_percent: float
     started_at: Optional[str]
     completed_at: Optional[str]
@@ -57,3 +57,11 @@ class VersionListResponse(BaseModel):
     total: int
     skip: int = 0
     limit: int = 10
+
+
+class IngestionProgressResponse(BaseModel):
+    """Response for dataset version ingestion progress."""
+
+    total: int
+    status_counts: Dict[str, int]
+    resource_status: Dict[str, Dict[str, int]] = Field(default_factory=dict)

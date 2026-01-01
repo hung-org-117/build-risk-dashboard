@@ -1,46 +1,38 @@
 """
-Version Enrichment Tasks - Chord pattern for parallel ingestion and feature extraction.
+Version Enrichment Processing Tasks - Phase 2: Feature Extraction.
 
-Flow (NEW - chord pattern):
-1. start_enrichment - Orchestrator: Build parallel ingestion tasks
-2. aggregate_ingestion_results - Chord callback: aggregate ingestion results
-3. dispatch_scans_and_processing - Dispatch scans (async) + processing
-4. dispatch_enrichment_batches - Dispatch batch processing
-5. process_enrichment_batch - Extract features for a batch of builds
-6. finalize_enrichment - Mark version as completed
-7. dispatch_version_scans - Dispatch scans per unique commit (async)
+This module handles the processing phase of dataset version enrichment:
+1. start_enrichment_processing - Trigger processing after ingestion
+2. dispatch_scans_and_processing - Dispatch scans + batches
+3. dispatch_enrichment_batches - Dispatch batch processing
+4. process_single_enrichment - Extract features for a batch of builds
+5. finalize_enrichment - Mark version as completed
+6. reprocess_failed_enrichment_builds - Retry failed builds
+7. process_version_export_job - Export version data
+
+Phase 1 (ingestion) is in enrichment_ingestion.py.
 """
 
 import logging
 import uuid
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from bson import ObjectId
-from celery import chord, group
+from celery import chain
 
 from app.celery_app import celery_app
-from app.config import settings
 from app.core.tracing import TracingContext
-from app.database.mongo import get_database
-from app.entities.dataset_build import DatasetBuild
-from app.entities.dataset_import_build import (
-    DatasetImportBuild,
-    DatasetImportBuildStatus,
-)
-from app.entities.dataset_version import DatasetVersion, VersionStatus
+from app.entities.dataset_version import VersionStatus
 from app.entities.enums import ExtractionStatus
 from app.entities.feature_audit_log import AuditLogCategory
-from app.entities.raw_repository import RawRepository
-from app.repositories.dataset_build_repository import DatasetBuildRepository
+from app.paths import EXPORTS_DIR
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_import_build import DatasetImportBuildRepository
-from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
-from app.repositories.dataset_repository import DatasetRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
-from app.tasks.base import PipelineTask
+from app.tasks.base import EnrichmentTask, PipelineTask
 from app.tasks.shared import extract_features_for_build
 from app.tasks.shared.events import publish_enrichment_update
 from app.tasks.shared.processing_tracker import ProcessingTracker
@@ -48,562 +40,6 @@ from app.tasks.shared.processing_tracker import ProcessingTracker
 logger = logging.getLogger(__name__)
 
 
-class EnrichmentTask(PipelineTask):
-    """
-    Custom task class for enrichment with entity failure handling.
-
-    When a task fails (timeout, error), automatically updates
-    DatasetVersion status to FAILED and publishes WebSocket event.
-    """
-
-    def get_entity_failure_handler(self, kwargs: dict) -> Optional[Callable[[str, str], None]]:
-        """Update DatasetVersion status to FAILED when task fails."""
-        version_id = kwargs.get("version_id")
-        if not version_id:
-            return None
-
-        def update_version_failed(status: str, error_message: str) -> None:
-            try:
-                db = get_database()
-                version_repo = DatasetVersionRepository(db)
-                version_repo.mark_failed(version_id, error_message)
-                # Publish WebSocket event for frontend
-                publish_enrichment_update(
-                    version_id=version_id,
-                    status="failed",
-                    error=error_message,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to update version {version_id} status: {e}")
-
-        return update_version_failed
-
-
-@celery_app.task(
-    bind=True,
-    base=EnrichmentTask,
-    name="app.tasks.version_enrichment.start_enrichment",
-    queue="processing",
-    soft_time_limit=120,
-    time_limit=180,
-)
-def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
-    """
-    Orchestrator: Build ingestion chains and dispatch as chord.
-
-    Flow (pure Celery chord pattern):
-        start_enrichment
-            └── chord(
-                    group(
-                        chain(clone_1 → worktrees_1 → logs_1),
-                        chain(clone_2 → worktrees_2 → logs_2),
-                        ...
-                    ),
-                    chain(aggregate_ingestion_results, dispatch_scans_and_processing)
-                )
-
-    Chains are built directly here (not wrapped in tasks) so chord properly
-    waits for ALL chain tasks to complete before calling the callback.
-    """
-    from app.tasks.pipeline.feature_dag._metadata import get_required_resources_for_features
-    from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
-    from app.tasks.shared import build_ingestion_workflow
-
-    # Generate correlation_id for entire enrichment run
-    correlation_id = str(uuid.uuid4())
-
-    # Set tracing context for structured logging
-    TracingContext.set(
-        correlation_id=correlation_id,
-        version_id=version_id,
-        pipeline_type="dataset_enrichment",
-    )
-
-    version_repo = DatasetVersionRepository(self.db)
-    dataset_build_repo = DatasetBuildRepository(self.db)
-    dataset_repo = DatasetRepository(self.db)
-    dataset_repo_stats_repo = DatasetRepoStatsRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
-    raw_build_run_repo = RawBuildRunRepository(self.db)
-
-    # Load version
-    dataset_version = version_repo.find_by_id(version_id)
-    if not dataset_version:
-        logger.error(f"Version {version_id} not found")
-        return {"status": "error", "error": "Version not found"}
-
-    # Mark as started
-    version_repo.mark_started(version_id, task_id=self.request.id)
-
-    try:
-        # Load dataset
-        dataset = dataset_repo.find_by_id(dataset_version.dataset_id)
-        if not dataset:
-            raise ValueError(f"Dataset {dataset_version.dataset_id} not found")
-
-        # Get validated builds
-        validated_builds = dataset_build_repo.find_validated_builds(dataset_version.dataset_id)
-
-        total_rows = len(validated_builds)
-        if total_rows == 0:
-            raise ValueError("No validated builds found. Please run validation first.")
-
-        # Get validated repos from dataset stats
-        repo_stats_list = dataset_repo_stats_repo.find_by_dataset(dataset_version.dataset_id)
-        validated_raw_repo_ids = [str(stat.raw_repo_id) for stat in repo_stats_list]
-
-        version_repo.update_one(
-            version_id,
-            {
-                "total_rows": total_rows,
-                "repos_total": len(validated_raw_repo_ids),
-                "status": VersionStatus.INGESTING.value,
-            },
-        )
-        # Publish initial progress via WebSocket
-        publish_enrichment_update(
-            version_id=version_id,
-            status="ingesting",
-            processed_rows=0,
-            total_rows=total_rows,
-        )
-        logger.info(
-            f"[start_enrichment] {total_rows} builds, "
-            f"{len(validated_raw_repo_ids)} repos to ingest"
-        )
-
-        if not validated_raw_repo_ids:
-            # No repos to process
-            version_repo.mark_completed(version_id)
-            return {"status": "completed", "message": "No repos to ingest"}
-
-        # Calculate required resources from features
-        feature_set = (
-            set(dataset_version.selected_features) if dataset_version.selected_features else set()
-        )
-        required_resources = get_required_resources_for_features(feature_set)
-
-        # FORCE worktree if scans are enabled
-        has_scans = bool(dataset_version.scan_metrics.get("sonarqube")) or bool(
-            dataset_version.scan_metrics.get("trivy")
-        )
-        if has_scans and "git_worktree" not in required_resources:
-            required_resources.add("git_worktree")
-
-        # Get tasks grouped by level from resource_dag
-        tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
-
-        logger.info(
-            f"[start_enrichment] Resources={required_resources}, "
-            f"tasks_by_level={tasks_by_level}, scans={has_scans}"
-        )
-
-        # Create DatasetImportBuild records for tracking ingestion per-build
-        import_builds_created = _create_import_builds_for_version(
-            db=self.db,
-            version_id=version_id,
-            validated_builds=validated_builds,
-            required_resources=list(required_resources),
-        )
-        logger.info(f"[start_enrichment] Created {import_builds_created} import build records")
-
-        # Build INGESTION CHAINS directly (not wrapped in tasks)
-        # This ensures chord properly waits for all chain tasks
-        ingestion_chains = []
-        repo_metadata = []  # Track metadata for aggregation
-
-        for raw_repo_id in validated_raw_repo_ids:
-            # Get repo info
-            raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
-            if not raw_repo:
-                logger.warning(f"RawRepository {raw_repo_id} not found, skipping")
-                continue
-
-            # Get CI provider from repo stats
-            repo_stats = dataset_repo_stats_repo.find_by_dataset_and_repo(
-                str(dataset.id), raw_repo_id
-            )
-            ci_provider = "github_actions"
-            if repo_stats and repo_stats.ci_provider:
-                ci_provider = (
-                    repo_stats.ci_provider.value
-                    if hasattr(repo_stats.ci_provider, "value")
-                    else repo_stats.ci_provider
-                )
-
-            # Get build IDs and commit SHAs for this repo
-            repo_builds = dataset_build_repo.find_found_builds_by_repo(
-                dataset_version.dataset_id, raw_repo_id
-            )
-            build_csv_ids = list({str(build.build_id_from_csv) for build in repo_builds})
-
-            if not build_csv_ids:
-                continue
-
-            # Get commit SHAs
-            commit_shas = []
-            for build_csv_id in build_csv_ids:
-                raw_build_run = raw_build_run_repo.find_by_business_key(
-                    raw_repo_id, build_csv_id, ci_provider
-                )
-                if raw_build_run and raw_build_run.commit_sha:
-                    commit_shas.append(raw_build_run.effective_sha or raw_build_run.commit_sha)
-            commit_shas = list(set(commit_shas))
-
-            # Build ingestion chain for this repo
-            repo_chain = build_ingestion_workflow(
-                tasks_by_level=tasks_by_level,
-                raw_repo_id=raw_repo_id,
-                github_repo_id=raw_repo.github_repo_id,
-                full_name=raw_repo.full_name,
-                build_ids=build_csv_ids,
-                commit_shas=commit_shas,
-                ci_provider=ci_provider,
-            )
-
-            if repo_chain:
-                ingestion_chains.append(repo_chain)
-                repo_metadata.append(
-                    {
-                        "raw_repo_id": raw_repo_id,
-                        "full_name": raw_repo.full_name,
-                        "builds": len(build_csv_ids),
-                        "commits": len(commit_shas),
-                    }
-                )
-                logger.info(
-                    f"[start_enrichment] Built chain for {raw_repo.full_name}: "
-                    f"{len(build_csv_ids)} builds, {len(commit_shas)} commits"
-                )
-
-        if not ingestion_chains:
-            # No ingestion needed (no tasks required for features)
-            logger.info("[start_enrichment] No ingestion chains needed, proceeding to processing")
-            # Mark import builds as INGESTED since no ingestion is needed
-            import_build_repo = DatasetImportBuildRepository(self.db)
-            import_build_repo.mark_ingested_batch(version_id)
-            dispatch_scans_and_processing.delay(version_id, correlation_id=correlation_id)
-            return {"status": "dispatched", "message": "No ingestion needed, dispatched processing"}
-
-        # Initialize resource status for all import builds before ingestion
-        import_build_repo = DatasetImportBuildRepository(self.db)
-        init_count = import_build_repo.init_resource_status(version_id, list(required_resources))
-        logger.info(f"[start_enrichment] Initialized resource status for {init_count} builds")
-
-        # Use chord: run all repo ingestion chains in parallel → aggregate results
-        # Note: chord waits for ALL chains to complete (including retries/failures)
-        # Processing is NOT auto-dispatched - user triggers Phase 2 manually
-        callback = aggregate_ingestion_results.s(
-            version_id=version_id,
-            correlation_id=correlation_id,
-        )
-
-        # Error callback for chord failures
-        error_callback = handle_enrichment_chord_error.s(
-            version_id=version_id,
-            correlation_id=correlation_id,
-        )
-
-        chord(group(ingestion_chains), callback).apply_async(link_error=error_callback)
-
-        logger.info(
-            f"[start_enrichment] Dispatched {len(ingestion_chains)} ingestion chains "
-            f"for version {version_id}"
-        )
-
-        return {
-            "status": "dispatched",
-            "total_builds": total_rows,
-            "repos": len(validated_raw_repo_ids),
-            "ingestion_chains": len(ingestion_chains),
-            "repo_metadata": repo_metadata,
-        }
-
-    except Exception as exc:
-        error_msg = str(exc)
-        logger.error(f"Version enrichment start failed: {error_msg}")
-        version_repo.mark_failed(version_id, error_msg)
-        raise
-
-
-# Task 1b: Aggregate ingestion results (chord callback)
-@celery_app.task(
-    bind=True,
-    base=EnrichmentTask,
-    name="app.tasks.version_enrichment.aggregate_ingestion_results",
-    queue="processing",
-    soft_time_limit=30,
-    time_limit=60,
-)
-def aggregate_ingestion_results(
-    self: PipelineTask,
-    results: List[Dict[str, Any]],
-    version_id: str,
-    correlation_id: str = "",
-) -> Dict[str, Any]:
-    """
-    Aggregate results from parallel repo ingestion chains.
-
-    This is the chord callback that runs after ALL ingestion chains complete.
-    Parses results to update per-resource status, then marks builds as INGESTED/FAILED.
-    Does NOT auto-dispatch processing - user triggers Phase 2 manually.
-    """
-    from bson import ObjectId
-
-    from app.entities.dataset_import_build import ResourceStatus
-    from app.tasks.pipeline.shared.resources import FeatureResource
-
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-
-    version_repo = DatasetVersionRepository(self.db)
-    import_build_repo = DatasetImportBuildRepository(self.db)
-
-    # Collect failed items from task results (same as model pipeline)
-    clone_failed = False
-    clone_error = None
-    failed_commits: list[str] = []
-    failed_log_ids: list[str] = []
-    expired_log_ids: list[str] = []
-
-    if isinstance(results, list):
-        for r in results:
-            if not isinstance(r, dict):
-                continue
-            # Check clone result (git_history) - affects ALL builds
-            if r.get("status") == "failed" and "Clone" in r.get("error", ""):
-                clone_failed = True
-                clone_error = r.get("error")
-            if r.get("status") in ("timeout", "failed") and r.get("path") is None:
-                clone_failed = True
-                clone_error = r.get("error")
-
-            # Collect failed commits from worktree chunks
-            if "failed_commits" in r:
-                failed_commits.extend(r["failed_commits"])
-
-            # Collect failed log IDs from log chunks
-            if "failed_log_ids" in r:
-                failed_log_ids.extend(r["failed_log_ids"])
-            if "expired_log_ids" in r:
-                expired_log_ids.extend(r["expired_log_ids"])
-
-    elif isinstance(results, dict):
-        if results.get("status") == "failed":
-            clone_failed = True
-            clone_error = results.get("error")
-
-    # === Update resource status per-build ===
-
-    # 1. git_history: ALL builds get same status (clone is repo-level)
-    if clone_failed:
-        import_build_repo.update_resource_status_batch(
-            version_id,
-            FeatureResource.GIT_HISTORY.value,
-            ResourceStatus.FAILED,
-            clone_error,
-        )
-    else:
-        import_build_repo.update_resource_status_batch(
-            version_id, FeatureResource.GIT_HISTORY.value, ResourceStatus.COMPLETED
-        )
-
-    # 2. git_worktree: Mark failed commits, then mark rest as completed
-    if failed_commits:
-        # Note: update_resource_by_commits needs raw_repo_id; for dataset we update all
-        # builds with matching commit_sha
-        import_build_repo.collection.update_many(
-            {
-                "dataset_version_id": ObjectId(version_id),
-                "status": DatasetImportBuildStatus.INGESTING.value,
-                "commit_sha": {"$in": failed_commits},
-            },
-            {
-                "$set": {
-                    f"resource_status.{FeatureResource.GIT_WORKTREE.value}.status": ResourceStatus.FAILED.value,
-                    f"resource_status.{FeatureResource.GIT_WORKTREE.value}.error": "Worktree creation failed",
-                }
-            },
-        )
-    # Mark remaining as completed
-    import_build_repo.update_resource_status_batch(
-        version_id, FeatureResource.GIT_WORKTREE.value, ResourceStatus.COMPLETED
-    )
-
-    # 3. build_logs: Mark failed/expired logs, then mark rest as completed
-    all_failed_logs = failed_log_ids + expired_log_ids
-    if all_failed_logs:
-        import_build_repo.collection.update_many(
-            {
-                "dataset_version_id": ObjectId(version_id),
-                "status": DatasetImportBuildStatus.INGESTING.value,
-                "ci_run_id": {"$in": all_failed_logs},
-            },
-            {
-                "$set": {
-                    f"resource_status.{FeatureResource.BUILD_LOGS.value}.status": ResourceStatus.FAILED.value,
-                    f"resource_status.{FeatureResource.BUILD_LOGS.value}.error": "Log download failed or expired",
-                }
-            },
-        )
-    # Mark remaining as completed
-    import_build_repo.update_resource_status_batch(
-        version_id, FeatureResource.BUILD_LOGS.value, ResourceStatus.COMPLETED
-    )
-
-    # === Determine per-build final status ===
-    # A build is INGESTED if all required resources are COMPLETED
-    # A build is FAILED if any required resource is FAILED
-
-    # Mark builds as MISSING_RESOURCE if clone failed (all builds)
-    if clone_failed:
-        import_build_repo.update_many_by_status(
-            version_id,
-            from_status=DatasetImportBuildStatus.INGESTING.value,
-            updates={"status": DatasetImportBuildStatus.MISSING_RESOURCE.value},
-        )
-    else:
-        # Mark builds with failed worktrees as MISSING_RESOURCE
-        if failed_commits:
-            import_build_repo.collection.update_many(
-                {
-                    "dataset_version_id": ObjectId(version_id),
-                    "status": DatasetImportBuildStatus.INGESTING.value,
-                    "commit_sha": {"$in": failed_commits},
-                },
-                {"$set": {"status": DatasetImportBuildStatus.MISSING_RESOURCE.value}},
-            )
-        # Mark remaining INGESTING builds as INGESTED
-        import_build_repo.mark_ingested_batch(version_id)
-
-    # Count by status to determine final state
-    status_counts = import_build_repo.count_by_status(version_id)
-    ingested = status_counts.get(DatasetImportBuildStatus.INGESTED.value, 0)
-    missing_resource = status_counts.get(DatasetImportBuildStatus.MISSING_RESOURCE.value, 0)
-
-    # Determine final ingestion status
-    # Note: MISSING_RESOURCE builds can still be processed (graceful degradation)
-    # Always set to INGESTED - missing_resource count is tracked in repos_failed
-    final_status = VersionStatus.INGESTED
-    if missing_resource > 0:
-        msg = f"Ingestion complete with warnings: {ingested} ok, {missing_resource} missing resources. Start processing when ready."
-    else:
-        msg = f"Ingestion complete: {ingested} builds ready. Start processing when ready."
-
-    version_repo.update_one(
-        version_id,
-        {
-            "status": final_status.value,
-            "ingestion_progress": 100,
-            "repos_ingested": ingested,
-            "repos_failed": missing_resource,
-        },
-    )
-
-    logger.info(f"{corr_prefix}[aggregate_ingestion_results] {msg}")
-
-    # Get resource status summary for stats
-    resource_summary = import_build_repo.get_resource_status_summary(version_id)
-
-    # Publish event for frontend
-    publish_enrichment_update(
-        version_id=version_id,
-        status=final_status.value,
-        processed_rows=0,
-        total_rows=ingested + missing_resource,
-    )
-
-    return {
-        "status": "completed",
-        "final_status": final_status.value,
-        "builds_ingested": ingested,
-        "builds_missing_resource": missing_resource,
-        "resource_status": resource_summary,
-    }
-
-
-# Task 1c: Error callback for ingestion chord failure
-@celery_app.task(
-    bind=True,
-    base=EnrichmentTask,
-    name="app.tasks.version_enrichment.handle_enrichment_chord_error",
-    queue="processing",
-    soft_time_limit=60,
-    time_limit=120,
-)
-def handle_enrichment_chord_error(
-    self: PipelineTask,
-    request,
-    exc,
-    traceback,
-    version_id: str,
-    correlation_id: str = "",
-) -> Dict[str, Any]:
-    """
-    Error callback for ingestion chord failure.
-
-    When ingestion chord fails (clone_repo, create_worktrees, etc.):
-    1. Mark all INGESTING builds as MISSING_RESOURCE with error
-    2. Update version status to INGESTED or FAILED
-    3. User can review and retry
-    """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    error_msg = str(exc) if exc else "Unknown ingestion error"
-
-    logger.error(f"{corr_prefix} Ingestion chord failed for version {version_id}: {error_msg}")
-
-    import_build_repo = DatasetImportBuildRepository(self.db)
-    version_repo = DatasetVersionRepository(self.db)
-
-    # Mark all INGESTING builds as MISSING_RESOURCE
-    missing_resource_count = import_build_repo.update_many_by_status(
-        version_id,
-        from_status=DatasetImportBuildStatus.INGESTING.value,
-        updates={
-            "status": DatasetImportBuildStatus.MISSING_RESOURCE.value,
-        },
-    )
-
-    logger.warning(f"{corr_prefix} Marked {missing_resource_count} builds as MISSING_RESOURCE")
-
-    # Check if any builds made it to INGESTED before failure
-    ingested_builds = import_build_repo.find_ingested_builds(version_id)
-
-    if ingested_builds:
-        # Some builds made it through - still mark as INGESTED
-        logger.info(
-            f"{corr_prefix} {len(ingested_builds)} builds were INGESTED before failure. "
-            f"Processing can still proceed."
-        )
-        version_repo.update_one(
-            version_id,
-            {
-                "status": VersionStatus.INGESTED.value,
-                "repos_ingested": len(ingested_builds),
-                "repos_failed": missing_resource_count,
-            },
-        )
-        publish_enrichment_update(
-            version_id=version_id,
-            status=VersionStatus.INGESTED.value,
-        )
-    else:
-        # No builds made it - mark as failed
-        version_repo.mark_failed(version_id, error_msg)
-        publish_enrichment_update(
-            version_id=version_id,
-            status="failed",
-            error=error_msg,
-        )
-
-    return {
-        "status": "handled",
-        "missing_resource_builds": missing_resource_count,
-        "ingested_builds": len(ingested_builds) if ingested_builds else 0,
-        "error": error_msg,
-    }
-
-
-# Task 1d: Start processing phase (manually triggered by user)
 @celery_app.task(
     bind=True,
     base=EnrichmentTask,
@@ -622,8 +58,6 @@ def start_enrichment_processing(
     Validates that ingestion is complete before starting feature extraction.
     Only proceeds if status is INGESTED.
     """
-    import uuid
-
     correlation_id = TracingContext.get_correlation_id() or str(uuid.uuid4())
     corr_prefix = f"[corr={correlation_id[:8]}]"
 
@@ -675,7 +109,11 @@ def start_enrichment_processing(
     soft_time_limit=30,
     time_limit=60,
 )
-def dispatch_scans_and_processing(self: PipelineTask, version_id: str) -> Dict[str, Any]:
+def dispatch_scans_and_processing(
+    self: PipelineTask,
+    version_id: str,
+    correlation_id: str = "",
+) -> Dict[str, Any]:
     """
     Dispatch scans (async, fire & forget) and processing after ingestion completes.
 
@@ -683,7 +121,7 @@ def dispatch_scans_and_processing(self: PipelineTask, version_id: str) -> Dict[s
     Scan results are backfilled to DatasetEnrichmentBuild.features later.
     """
     # Get correlation_id for propagation to child tasks
-    correlation_id = TracingContext.get_correlation_id()
+    correlation_id = correlation_id or TracingContext.get_correlation_id() or ""
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
     version_repo = DatasetVersionRepository(self.db)
@@ -701,6 +139,9 @@ def dispatch_scans_and_processing(self: PipelineTask, version_id: str) -> Dict[s
             f"{corr_prefix}[dispatch_scans_and_processing] Dispatching scans: "
             f"sonar={has_sonar}, trivy={has_trivy}"
         )
+        # Import here to avoid circular import
+        from app.tasks.enrichment_ingestion import dispatch_version_scans
+
         dispatch_version_scans.delay(version_id, correlation_id=correlation_id)
 
     # Dispatch processing immediately (doesn't wait for scans)
@@ -717,7 +158,6 @@ def dispatch_scans_and_processing(self: PipelineTask, version_id: str) -> Dict[s
     }
 
 
-# Task 1e: Error callback for processing chain failure
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -763,8 +203,6 @@ def handle_enrichment_processing_chain_error(
     )
 
     # Count completed vs failed for status determination
-    from bson import ObjectId
-
     completed_count = enrichment_build_repo.count_by_status(
         ObjectId(version_id), ExtractionStatus.COMPLETED.value
     )
@@ -801,7 +239,6 @@ def handle_enrichment_processing_chain_error(
     }
 
 
-# Task 2: Dispatch enrichment batches after ingestion
 @celery_app.task(
     bind=True,
     base=EnrichmentTask,
@@ -823,8 +260,6 @@ def dispatch_enrichment_batches(
     2. Create DatasetEnrichmentBuild for each (if not exists)
     3. Dispatch sequential chain for temporal feature support
     """
-    from celery import chain
-
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
     version_repo = DatasetVersionRepository(self.db)
@@ -845,8 +280,14 @@ def dispatch_enrichment_batches(
         return {"status": "completed", "message": "No ingested builds to process"}
 
     # Build lookup map for raw_build_run data
-    raw_build_run_ids = [str(ib.raw_build_run_id) for ib in ingested_imports]
-    raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
+    raw_build_run_ids = [
+        ObjectId(ib.raw_build_run_id)
+        if isinstance(ib.raw_build_run_id, str)
+        else ib.raw_build_run_id
+        for ib in ingested_imports
+    ]
+    # Type ignore: method accepts List[str | ObjectId]
+    raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)  # type: ignore
     build_run_map = {str(r.id): r for r in raw_build_runs}
 
     # Sort by build creation time (oldest first) for temporal features
@@ -869,8 +310,10 @@ def dispatch_enrichment_batches(
         # Create or get DatasetEnrichmentBuild
         enrichment_build = enrichment_build_repo.upsert_for_import_build(
             dataset_version_id=version_id,
+            dataset_id=str(dataset_version.dataset_id),
             dataset_build_id=str(import_build.dataset_build_id),
             dataset_import_build_id=str(import_build.id),
+            raw_repo_id=str(import_build.raw_repo_id),
             raw_build_run_id=str(import_build.raw_build_run_id),
         )
         enrichment_build_ids.append(str(enrichment_build.id))
@@ -925,7 +368,7 @@ def dispatch_enrichment_batches(
     publish_enrichment_update(
         version_id=version_id,
         status="processing",
-        total_rows=total_builds,
+        builds_total=total_builds,
     )
 
     return {
@@ -936,7 +379,6 @@ def dispatch_enrichment_batches(
     }
 
 
-# Task 2a: Process single enrichment build (for sequential chain)
 @celery_app.task(
     bind=True,
     base=EnrichmentTask,
@@ -957,8 +399,6 @@ def process_single_enrichment(
 
     This is the sequential version matching model pipeline's process_workflow_run.
     """
-    from app.entities.feature_audit_log import AuditLogCategory
-
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
     version_repo = DatasetVersionRepository(self.db)
@@ -1034,7 +474,7 @@ def process_single_enrichment(
     enrichment_build_repo.update_one(enrichment_build_id, updates)
 
     # Update version progress
-    version_repo.increment_processed_rows(version_id)
+    version_repo.increment_builds_processed(version_id)
 
     # Track result in Redis for finalize aggregation (matching model pipeline)
     if correlation_id:
@@ -1054,11 +494,6 @@ def process_single_enrichment(
         "build_id": enrichment_build_id,
         "feature_count": result.get("feature_count", 0),
     }
-
-
-# =============================================================================
-# FAILED BUILD HANDLING (matching model pipeline)
-# =============================================================================
 
 
 @celery_app.task(
@@ -1083,10 +518,6 @@ def reprocess_failed_enrichment_builds(
     - Feature extractors have been fixed
     - You want to retry only the failed builds, not all builds
     """
-    import uuid
-
-    from celery import chain
-
     correlation_id = str(uuid.uuid4())
     TracingContext.set(
         correlation_id=correlation_id,
@@ -1180,86 +611,6 @@ def reprocess_failed_enrichment_builds(
 @celery_app.task(
     bind=True,
     base=EnrichmentTask,
-    name="app.tasks.version_enrichment.reingest_missing_resource_builds",
-    queue="processing",
-    soft_time_limit=300,
-    time_limit=360,
-)
-def reingest_missing_resource_builds(
-    self: PipelineTask,
-    version_id: str,
-) -> Dict[str, Any]:
-    """
-    Re-ingest only MISSING_RESOURCE import builds for a version.
-
-    This is useful when:
-    - Some builds have missing resources due to transient errors
-    - Clone/worktree/log download failures that may be recoverable
-    """
-    import uuid
-
-    from app.entities.dataset_import_build import DatasetImportBuildStatus
-
-    correlation_id = str(uuid.uuid4())
-
-    version_repo = DatasetVersionRepository(self.db)
-    import_build_repo = DatasetImportBuildRepository(self.db)
-
-    # Validate version exists
-    version = version_repo.find_by_id(version_id)
-    if not version:
-        return {"status": "error", "message": "Version not found"}
-
-    # Find MISSING_RESOURCE import builds
-    missing_resource_imports = import_build_repo.find_many(
-        {
-            "dataset_version_id": ObjectId(version_id),
-            "status": DatasetImportBuildStatus.MISSING_RESOURCE.value,
-        }
-    )
-
-    if not missing_resource_imports:
-        return {
-            "status": "completed",
-            "builds_queued": 0,
-            "message": "No missing resource builds to retry",
-        }
-
-    # Reset to PENDING
-    reset_count = 0
-    for build in missing_resource_imports:
-        try:
-            import_build_repo.update_one(
-                str(build.id),
-                {"status": DatasetImportBuildStatus.PENDING.value},
-            )
-            reset_count += 1
-        except Exception as e:
-            logger.warning(f"Failed to reset import build {build.id}: {e}")
-
-    if reset_count == 0:
-        return {"status": "error", "message": "Failed to reset any builds"}
-
-    # Update version status
-    version_repo.update_one(version_id, {"status": VersionStatus.INGESTING.value})
-
-    # Re-trigger ingestion for this version
-    start_enrichment.delay(version_id)
-
-    logger.info(f"Re-triggered ingestion for {reset_count} missing resource imports")
-
-    return {
-        "status": "queued",
-        "builds_reset": reset_count,
-        "total_missing_resource": len(missing_resource_imports),
-        "correlation_id": correlation_id,
-    }
-
-
-# Task 3: Finalize
-@celery_app.task(
-    bind=True,
-    base=EnrichmentTask,
     name="app.tasks.version_enrichment.finalize_enrichment",
     queue="processing",
     soft_time_limit=30,
@@ -1277,7 +628,6 @@ def finalize_enrichment(
     Called at end of chain: B1 → B2 → ... → finalize_enrichment
     Uses ProcessingTracker for real-time results (matching model pipeline).
     """
-
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     logger.info(f"{corr_prefix} Finalizing enrichment for version {version_id}")
 
@@ -1316,9 +666,8 @@ def finalize_enrichment(
         version_id,
         {
             "status": final_status.value,
-            "processed_rows": total,
-            "enriched_rows": completed + partial,
-            "failed_rows": failed,
+            "builds_processed": completed + partial,
+            "builds_processing_failed": failed,
         },
     )
 
@@ -1326,9 +675,8 @@ def finalize_enrichment(
     publish_enrichment_update(
         version_id=version_id,
         status=final_status.value,
-        processed_rows=total,
-        enriched_rows=completed + partial,
-        failed_rows=failed,
+        builds_processed=completed + partial,
+        builds_total=total,
     )
 
     # Auto-trigger quality evaluation after successful enrichment
@@ -1360,9 +708,9 @@ def finalize_enrichment(
     return {
         "status": final_status.value,
         "version_id": version_id,
-        "enriched_rows": completed + partial,
-        "failed_rows": failed,
-        "total_rows": total,
+        "builds_processed": completed + partial,
+        "builds_processing_failed": failed,
+        "builds_total": total,
         "tracker_stats": {
             "success": tracker_success,
             "failed": tracker_failed,
@@ -1371,332 +719,6 @@ def finalize_enrichment(
     }
 
 
-def _extract_features_for_enrichment(
-    db,
-    dataset_build: DatasetBuild,
-    selected_features: List[str],
-    raw_build_run_repo: RawBuildRunRepository,
-    dataset_version: DatasetVersion,
-    raw_repo: RawRepository,
-    enrichment_build_id: str = None,
-) -> Dict[str, Any]:
-    """
-    Extract features for a single build using shared helper.
-
-    Args:
-        db: Database connection
-        dataset_build: DatasetBuild entity
-        selected_features: Features to extract
-        raw_build_run_repo: Repository for RawBuildRun lookup
-        dataset_version: DatasetVersion entity (used for config via feature_configs)
-        raw_repo: RawRepository (passed from caller, no lookup needed)
-        enrichment_build_id: ID of the enrichment build for audit log linking
-
-    Returns result dict with status, features, errors, warnings.
-    """
-    if not dataset_build.raw_run_id:
-        logger.warning(f"Build {dataset_build.build_id_from_csv} has no raw_run_id")
-        return {
-            "status": "failed",
-            "features": {},
-            "errors": ["No raw_run_id"],
-            "warnings": [],
-        }
-
-    raw_build_run = raw_build_run_repo.find_by_id(dataset_build.raw_run_id)
-    if not raw_build_run:
-        logger.warning(f"RawBuildRun with id={dataset_build.raw_run_id} not found")
-        return {
-            "status": "failed",
-            "features": {},
-            "errors": ["RawBuildRun not found"],
-            "warnings": [],
-        }
-
-    # Create GitHub client for GITHUB_API features (required)
-    from app.services.github.github_client import get_public_github_client
-    from app.tasks.pipeline.feature_dag._inputs import GitHubClientInput
-
-    github_client = get_public_github_client()
-    github_client_input = GitHubClientInput(client=github_client, full_name=raw_repo.full_name)
-
-    return extract_features_for_build(
-        db=db,
-        raw_repo=raw_repo,
-        feature_config=dataset_version.feature_configs,
-        raw_build_run=raw_build_run,
-        selected_features=selected_features,
-        github_client=github_client_input,
-        category=AuditLogCategory.DATASET_ENRICHMENT,
-        version_id=str(dataset_version.id),
-        dataset_id=str(dataset_version.dataset_id),
-        output_build_id=enrichment_build_id,
-    )
-
-
-def _create_import_builds_for_version(
-    db,
-    version_id: str,
-    validated_builds: List[DatasetBuild],
-    required_resources: List[str],
-) -> int:
-    """
-    Create DatasetImportBuild records for all validated builds in a version.
-
-    Args:
-        db: Database connection
-        version_id: DatasetVersion ID
-        validated_builds: List of validated DatasetBuild entities
-        required_resources: List of required resource names for ingestion
-
-    Returns:
-        Number of import build records created
-    """
-    import_build_repo = DatasetImportBuildRepository(db)
-    raw_build_run_repo = RawBuildRunRepository(db)
-    raw_repo_repo = RawRepositoryRepository(db)
-
-    import_builds = []
-
-    for dataset_build in validated_builds:
-        # Skip builds without raw references
-        if not dataset_build.raw_run_id or not dataset_build.raw_repo_id:
-            continue
-
-        # Get raw build run for denormalized fields
-        raw_build_run = raw_build_run_repo.find_by_id(dataset_build.raw_run_id)
-        if not raw_build_run:
-            continue
-
-        # Get raw repo for full_name
-        raw_repo = raw_repo_repo.find_by_id(dataset_build.raw_repo_id)
-        repo_full_name = raw_repo.full_name if raw_repo else ""
-
-        import_build = DatasetImportBuild(
-            _id=None,
-            dataset_version_id=ObjectId(version_id),
-            dataset_build_id=dataset_build.id,
-            raw_repo_id=dataset_build.raw_repo_id,
-            raw_build_run_id=dataset_build.raw_run_id,
-            status=DatasetImportBuildStatus.PENDING,
-            resource_status={},
-            required_resources=required_resources,
-            ci_run_id=raw_build_run.ci_run_id or "",
-            commit_sha=raw_build_run.effective_sha or raw_build_run.commit_sha or "",
-            repo_full_name=repo_full_name,
-        )
-        import_builds.append(import_build)
-
-    if import_builds:
-        import_build_repo.bulk_insert(import_builds)
-        logger.info(
-            f"[_create_import_builds] Created {len(import_builds)} import builds "
-            f"for version {version_id}"
-        )
-
-    return len(import_builds)
-
-
-# Task 4: Dispatch version scans (runs in parallel with ingestion)
-@celery_app.task(
-    bind=True,
-    base=EnrichmentTask,
-    name="app.tasks.version_enrichment.dispatch_version_scans",
-    queue="processing",
-    soft_time_limit=300,
-    time_limit=600,
-)
-def dispatch_version_scans(
-    self: PipelineTask,
-    version_id: str,
-    correlation_id: str = "",
-) -> Dict[str, Any]:
-    """
-    Dispatch scans for all unique commits in version's validated builds.
-
-    Uses chunked processing to handle:
-    1. Paginate through builds using cursor pagination
-    2. Batch query RawBuildRuns and RawRepositories
-    3. Dispatch scan tasks in configurable batches
-
-    Config settings:
-        SCAN_BUILDS_PER_QUERY: Builds fetched per paginated query (default: 1000)
-        SCAN_COMMITS_PER_BATCH: Commits dispatched per batch (default: 100)
-        SCAN_BATCH_DELAY_SECONDS: Delay between batch dispatches (default: 0.5)
-    """
-    import time
-
-    from app.repositories.dataset_build_repository import DatasetBuildRepository
-
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-
-    version_repo = DatasetVersionRepository(self.db)
-    dataset_build_repo = DatasetBuildRepository(self.db)
-    raw_build_run_repo = RawBuildRunRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
-
-    version = version_repo.find_by_id(version_id)
-    if not version:
-        return {"status": "error", "error": "Version not found"}
-
-    has_sonar = bool(version.scan_metrics.get("sonarqube"))
-    has_trivy = bool(version.scan_metrics.get("trivy"))
-
-    if not has_sonar and not has_trivy:
-        return {"status": "skipped", "reason": "No scan metrics selected"}
-
-    # Track unique commits to scan (avoid duplicates across pages)
-    commits_to_scan = {}  # {(repo_id, commit_sha): commit_info}
-    repo_cache = {}  # Cache RawRepository lookups
-
-    # Config
-    builds_per_query = settings.SCAN_BUILDS_PER_QUERY
-    commits_per_batch = settings.SCAN_COMMITS_PER_BATCH
-    batch_delay = settings.SCAN_BATCH_DELAY_SECONDS
-
-    total_builds_processed = 0
-    total_batches_dispatched = 0
-
-    logger.info(
-        f"{corr_prefix} Starting chunked scan dispatch for version {version_id[:8]} "
-        f"(builds_per_query={builds_per_query}, commits_per_batch={commits_per_batch})"
-    )
-
-    # Import scan helper here
-    from app.tasks.enrichment_scan_helpers import dispatch_scan_for_commit
-
-    # Iterate through builds using cursor pagination
-    for build_batch in dataset_build_repo.iterate_builds_with_run_ids_paginated(
-        dataset_id=str(version.dataset_id),
-        batch_size=builds_per_query,
-    ):
-        total_builds_processed += len(build_batch)
-
-        # Collect workflow_run_ids from this batch (these are RawBuildRun ObjectIds)
-        workflow_run_ids = [b.raw_run_id for b in build_batch if b.raw_run_id]
-        if not workflow_run_ids:
-            continue
-
-        # Batch query RawBuildRuns for this page
-        raw_build_runs = raw_build_run_repo.find_by_ids(workflow_run_ids)
-        build_run_map = {str(r.id): r for r in raw_build_runs}
-
-        # Collect unique repo IDs needed for this batch
-        repo_ids_needed = set()
-        for build in build_batch:
-            if not build.raw_run_id:
-                continue
-            raw_build_run = build_run_map.get(str(build.raw_run_id))
-            if raw_build_run:
-                repo_id = str(raw_build_run.raw_repo_id)
-                if repo_id not in repo_cache:
-                    repo_ids_needed.add(repo_id)
-
-        # Batch query RawRepositories (only ones not in cache)
-        if repo_ids_needed:
-            raw_repos = raw_repo_repo.find_by_ids(list(repo_ids_needed))
-            for repo in raw_repos:
-                repo_cache[str(repo.id)] = repo
-
-        # Process builds and collect unique commits
-        for build in build_batch:
-            if not build.raw_run_id:
-                continue
-            raw_build_run = build_run_map.get(str(build.raw_run_id))
-            if not raw_build_run:
-                continue
-
-            repo_id = str(raw_build_run.raw_repo_id)
-            raw_repo = repo_cache.get(repo_id)
-            if not raw_repo:
-                continue
-
-            key = (repo_id, raw_build_run.commit_sha)
-            if key not in commits_to_scan:
-                commits_to_scan[key] = {
-                    "raw_repo_id": repo_id,
-                    "commit_sha": raw_build_run.commit_sha,
-                    "github_repo_id": raw_repo.github_repo_id,
-                    "repo_full_name": raw_repo.full_name,
-                }
-
-        # Check if we should dispatch a batch
-        if len(commits_to_scan) >= commits_per_batch:
-            batch_count = _dispatch_scan_batch(
-                version_id=version_id,
-                commits=list(commits_to_scan.values())[:commits_per_batch],
-                dispatch_scan_for_commit=dispatch_scan_for_commit,
-                corr_prefix=corr_prefix,
-            )
-            total_batches_dispatched += 1
-
-            # Remove dispatched commits
-            dispatched_keys = list(commits_to_scan.keys())[:commits_per_batch]
-            for k in dispatched_keys:
-                del commits_to_scan[k]
-
-            # Rate limiting between batches
-            if batch_delay > 0:
-                time.sleep(batch_delay)
-
-            logger.info(
-                f"{corr_prefix} Dispatched batch {total_batches_dispatched}: "
-                f"{batch_count} scan tasks "
-                f"(processed {total_builds_processed} builds so far)"
-            )
-
-    # Dispatch remaining commits
-    if commits_to_scan:
-        batch_count = _dispatch_scan_batch(
-            version_id=version_id,
-            commits=list(commits_to_scan.values()),
-            dispatch_scan_for_commit=dispatch_scan_for_commit,
-            corr_prefix=corr_prefix,
-        )
-        total_batches_dispatched += 1
-        logger.info(f"{corr_prefix} Dispatched final batch: {batch_count} scan tasks")
-
-    logger.info(
-        f"{corr_prefix} Scan dispatch complete: "
-        f"{total_builds_processed} builds processed, "
-        f"{total_batches_dispatched} batches dispatched"
-    )
-
-    return {
-        "status": "dispatched",
-        "builds_processed": total_builds_processed,
-        "batches_dispatched": total_batches_dispatched,
-        "has_sonar": has_sonar,
-        "has_trivy": has_trivy,
-    }
-
-
-def _dispatch_scan_batch(
-    version_id: str,
-    commits: List[Dict[str, Any]],
-    dispatch_scan_for_commit,
-    corr_prefix: str,
-) -> int:
-    """Helper to dispatch a batch of scan tasks."""
-    scan_tasks = []
-    for commit_info in commits:
-        scan_tasks.append(
-            dispatch_scan_for_commit.si(
-                version_id=version_id,
-                raw_repo_id=commit_info["raw_repo_id"],
-                github_repo_id=commit_info["github_repo_id"],
-                commit_sha=commit_info["commit_sha"],
-                repo_full_name=commit_info["repo_full_name"],
-            )
-        )
-
-    if scan_tasks:
-        group(scan_tasks).apply_async()
-
-    return len(scan_tasks)
-
-
-# Task 5: Process version export job (for large dataset version exports)
 @celery_app.task(
     bind=True,
     base=PipelineTask,
@@ -1711,11 +733,8 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
 
     Writes CSV/JSON file to disk with progress updates.
     """
-    import os
-    from datetime import timezone
-
     from app.repositories.export_job import ExportJobRepository
-    from app.utils.export_utils import write_csv_file, write_json_file
+    from app.utils.export_utils import format_feature_row, write_csv_file, write_json_file
 
     job_repo = ExportJobRepository(self.db)
     enrichment_repo = DatasetEnrichmentBuildRepository(self.db)
@@ -1725,31 +744,43 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
         logger.error(f"Export job {job_id} not found")
         return {"status": "error", "message": "Job not found"}
 
+    # Validate job has required fields for version export
+    if not job.dataset_id or not job.version_id:
+        logger.error(f"Export job {job_id} missing dataset_id or version_id")
+        job_repo.update_status(job_id, "failed", error_message="Missing dataset_id or version_id")
+        return {"status": "error", "message": "Missing dataset_id or version_id"}
+
     # Mark as processing
     job_repo.update_status(job_id, "processing")
 
     try:
-        # Get data cursor
+        # Get data cursor - convert ObjectId to ObjectId (they're already ObjectId in entity)
+        dataset_oid = (
+            ObjectId(job.dataset_id) if isinstance(job.dataset_id, str) else job.dataset_id
+        )
+        version_oid = (
+            ObjectId(job.version_id) if isinstance(job.version_id, str) else job.version_id
+        )
+
         cursor = enrichment_repo.get_enriched_for_export(
-            dataset_id=job.dataset_id,
-            version_id=job.version_id,
+            dataset_id=dataset_oid,
+            version_id=version_oid,
         )
 
         # Get all feature keys for CSV headers
         all_feature_keys = enrichment_repo.get_all_feature_keys(
-            dataset_id=job.dataset_id,
-            version_id=job.version_id,
+            dataset_id=dataset_oid,
+            version_id=version_oid,
         )
 
-        # Prepare output path
-        from app.utils.export_utils import format_feature_row
-
-        export_dir = os.path.join(settings.REPO_DATA_DIR, "exports")
-        os.makedirs(export_dir, exist_ok=True)
+        # Prepare output path - use centralized EXPORTS_DIR
+        EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         filename = f"version_{job.version_id}_{timestamp}.{job.format}"
-        file_path = os.path.join(export_dir, filename)
+        from pathlib import Path
+
+        file_path = Path(EXPORTS_DIR / filename)
 
         # Progress callback
         def update_progress(processed: int) -> None:
@@ -1759,24 +790,24 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
         # Write file
         if job.format == "csv":
             write_csv_file(
+                file_path=file_path,
                 cursor=cursor,
-                format_row=format_feature_row,
-                output_path=file_path,
-                selected_features=job.features,
+                format_row_fn=format_feature_row,
+                features=list(job.features) if job.features else None,
                 all_feature_keys=all_feature_keys,
                 progress_callback=update_progress,
             )
         else:
             write_json_file(
+                file_path=file_path,
                 cursor=cursor,
-                format_row=format_feature_row,
-                output_path=file_path,
-                selected_features=job.features,
+                format_row_fn=format_feature_row,
+                features=list(job.features) if job.features else None,
                 progress_callback=update_progress,
             )
 
         # Get file size
-        file_size = os.path.getsize(file_path)
+        file_size = file_path.stat().st_size
 
         # Mark completed
         job_repo.update_status(

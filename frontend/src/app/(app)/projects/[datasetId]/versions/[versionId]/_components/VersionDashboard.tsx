@@ -51,8 +51,8 @@ export function VersionDashboard({
             let qualityScore: number | null = null;
             let topIssues: { message: string; severity: string }[] = [];
 
-            // Fetch quality report if version is completed
-            if (versionStatus === "completed") {
+            // Fetch quality report if version is processed
+            if (["processed", "completed"].includes(versionStatus)) {
                 try {
                     const qualityResponse = await qualityApi.getReport(datasetId, versionId);
                     if (!("available" in qualityResponse) || qualityResponse.available !== false) {

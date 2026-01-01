@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_ready
+from celery.signals import worker_process_init, worker_ready
 from kombu import Exchange, Queue
 
 from app.config import settings
@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.tasks.model_ingestion",
         "app.tasks.model_processing",
         "app.tasks.dataset_validation",
+        "app.tasks.enrichment_ingestion",
         "app.tasks.enrichment_processing",
         "app.tasks.export",
         "app.tasks.sonar",
@@ -91,6 +92,16 @@ celery_app.conf.update(
     },
     timezone="UTC",
 )
+
+
+# Reset MongoDB client after fork to ensure fork-safety
+@worker_process_init.connect
+def on_worker_process_init(**kwargs):
+    """Reset MongoDB client after fork to avoid fork-safety warnings."""
+    from app.database import mongo
+
+    # Reset the global client so each forked worker creates its own connection
+    mongo._client = None
 
 
 # Setup structured logging when worker starts

@@ -9,6 +9,7 @@ from pymongo.database import Database
 from app.entities.dataset import DatasetProject
 from app.entities.dataset_version import DatasetVersion, VersionStatus
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
+from app.repositories.dataset_import_build import DatasetImportBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.services.dataset_service import DatasetService
 
@@ -32,6 +33,7 @@ class DatasetVersionService:
         self._repo = DatasetVersionRepository(db)
         self._dataset_service = DatasetService(db)
         self._enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
+        self._import_build_repo = DatasetImportBuildRepository(db)
 
     def _verify_dataset_access(self, dataset_id: str, user_id: str) -> DatasetProject:
         """
@@ -119,7 +121,7 @@ class DatasetVersionService:
                 feature_configs=feature_configs or {},
                 scan_metrics=normalized_scan_metrics,
                 scan_config=normalized_scan_config,
-                total_rows=dataset.rows or 0,
+                builds_total=dataset.rows or 0,
                 status=VersionStatus.QUEUED,
             )
 
@@ -128,7 +130,7 @@ class DatasetVersionService:
 
             version = self._repo.create(version)
 
-            from app.tasks.enrichment_processing import start_enrichment
+            from app.tasks.enrichment_ingestion import start_enrichment
 
             task = start_enrichment.delay(str(version.id))
             self._repo.update_one(str(version.id), {"task_id": task.id})
@@ -198,6 +200,22 @@ class DatasetVersionService:
             media_type=media_type,
         )
 
+    def get_ingestion_progress(self, dataset_id: str, version_id: str, user_id: str) -> dict:
+        """Get ingestion progress summary for a dataset version."""
+        self._verify_dataset_access(dataset_id, user_id)
+        self._get_version(dataset_id, version_id)
+
+        import_repo = DatasetImportBuildRepository(self._db)
+        status_counts = import_repo.count_by_status(version_id)
+        total = sum(status_counts.values())
+        resource_status = import_repo.get_resource_status_summary(version_id)
+
+        return {
+            "total": total,
+            "status_counts": status_counts,
+            "resource_status": resource_status,
+        }
+
     def _stream_enrichment_export(
         self,
         dataset_id: str,
@@ -255,7 +273,7 @@ class DatasetVersionService:
             )
 
         # Get row count
-        total = self._enrichment_build_repo.count_by_query(
+        total = self._enrichment_build_repo.count(
             {
                 "dataset_id": ObjectId(dataset_id),
                 "dataset_version_id": ObjectId(version_id),
@@ -370,6 +388,8 @@ class DatasetVersionService:
 
     def get_export_preview(self, dataset_id: str, version_id: str, user_id: str) -> dict:
         """Get preview of exportable data."""
+        from app.utils.export_utils import format_feature_row
+
         self._verify_dataset_access(dataset_id, user_id)
 
         builds = self._enrichment_build_repo.get_enriched_for_export(
@@ -378,14 +398,22 @@ class DatasetVersionService:
             limit=10,
         )
 
-        total_rows = 0
         sample_rows = []
         all_features = set()
 
         for doc in builds:
-            row = self._format_row(doc)
+            row = format_feature_row(doc)
             sample_rows.append(row)
             all_features.update(row.keys())
+
+        # Get total count
+        total_rows = self._enrichment_build_repo.count(
+            {
+                "dataset_id": ObjectId(dataset_id),
+                "dataset_version_id": ObjectId(version_id),
+                "extraction_status": "completed",
+            }
+        )
 
         return {
             "total_rows": total_rows,
@@ -414,10 +442,16 @@ class DatasetVersionService:
             logger.info(f"Deleted {audit_deleted} audit logs for version {version_id}")
 
             # 2. Delete associated enrichment builds
-            deleted = self._enrichment_build_repo.delete_by_version(version_id, session=session)
-            logger.info(f"Deleted {deleted} enrichment builds for version {version_id}")
+            deleted_enrichment = self._enrichment_build_repo.delete_by_version(
+                version_id, session=session
+            )
+            logger.info(f"Deleted {deleted_enrichment} enrichment builds for version {version_id}")
 
-            # 3. Delete the version
+            # 3. Delete associated import builds
+            deleted_import = self._import_build_repo.delete_by_version(version_id, session=session)
+            logger.info(f"Deleted {deleted_import} import builds for version {version_id}")
+
+            # 4. Delete the version
             self._repo.delete(version_id, session=session)
             logger.info(f"Deleted version {version_id} for dataset {dataset_id}")
 
@@ -487,9 +521,11 @@ class DatasetVersionService:
                 "status": (
                     version.status.value if hasattr(version.status, "value") else version.status
                 ),
-                "total_rows": version.total_rows,
-                "enriched_rows": version.enriched_rows,
-                "failed_rows": version.failed_rows,
+                "builds_total": version.builds_total,
+                "builds_ingested": version.builds_ingested,
+                "builds_missing_resource": version.builds_missing_resource,
+                "builds_processed": version.builds_processed,
+                "builds_processing_failed": version.builds_processing_failed,
                 "selected_features": version.selected_features,
                 "created_at": (version.created_at.isoformat() if version.created_at else None),
                 "completed_at": (
@@ -537,7 +573,8 @@ class DatasetVersionService:
         Get complete details for a single enriched build.
 
         Aggregates data from:
-        - DatasetEnrichmentBuild: Extracted features and status
+        - DatasetEnrichmentBuild: Build tracking and status
+        - FeatureVector: Extracted features and scan metrics
         - RawBuildRun: CI build metadata
         - FeatureAuditLog: Extraction logs (optional)
 
@@ -552,6 +589,7 @@ class DatasetVersionService:
             RawBuildRunDetail,
         )
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
+        from app.repositories.feature_vector import FeatureVectorRepository
         from app.repositories.raw_build_run import RawBuildRunRepository
 
         self._verify_dataset_access(dataset_id, user_id)
@@ -568,13 +606,19 @@ class DatasetVersionService:
                 detail="Build does not belong to this version",
             )
 
-        # 2. Get raw build run
+        # 2. Get feature vector (contains features and scan_metrics)
+        feature_vector = None
+        if enrichment_build.feature_vector_id:
+            fv_repo = FeatureVectorRepository(self._db)
+            feature_vector = fv_repo.find_by_id(str(enrichment_build.feature_vector_id))
+
+        # 3. Get raw build run
         raw_run_repo = RawBuildRunRepository(self._db)
         raw_build_run = raw_run_repo.find_by_id(str(enrichment_build.raw_build_run_id))
         if not raw_build_run:
             raise HTTPException(status_code=404, detail="Raw build run not found")
 
-        # 3. Get audit log (optional - may not exist)
+        # 4. Get audit log (optional - may not exist)
         audit_log_repo = FeatureAuditLogRepository(self._db)
         audit_log = audit_log_repo.find_by_enrichment_build(build_id)
 
@@ -607,19 +651,27 @@ class DatasetVersionService:
             is_bot_commit=raw_build_run.is_bot_commit,
         )
 
+        # Get feature data from FeatureVector
+        features = feature_vector.features if feature_vector else {}
+        scan_metrics = feature_vector.scan_metrics if feature_vector else {}
+        feature_count = feature_vector.feature_count if feature_vector else 0
+        is_missing_commit = feature_vector.is_missing_commit if feature_vector else False
+        missing_resources = feature_vector.missing_resources if feature_vector else []
+        skipped_features = feature_vector.skipped_features if feature_vector else []
+
         enrichment_detail = EnrichmentBuildDetail(
             id=str(enrichment_build.id),
             extraction_status=enrichment_build.extraction_status.value
             if hasattr(enrichment_build.extraction_status, "value")
             else str(enrichment_build.extraction_status),
             extraction_error=enrichment_build.extraction_error,
-            is_missing_commit=enrichment_build.is_missing_commit,
-            missing_resources=enrichment_build.missing_resources,
-            skipped_features=enrichment_build.skipped_features,
-            feature_count=enrichment_build.feature_count,
+            is_missing_commit=is_missing_commit,
+            missing_resources=missing_resources,
+            skipped_features=skipped_features,
+            feature_count=feature_count,
             expected_feature_count=len(version.selected_features),
-            features=enrichment_build.features,
-            scan_metrics=enrichment_build.scan_metrics,
+            features=features,
+            scan_metrics=scan_metrics,
             enriched_at=enrichment_build.enriched_at,
         )
 
@@ -705,7 +757,7 @@ class DatasetVersionService:
                 detail="Can only retry scans for completed or failed versions",
             )
 
-        from app.tasks.enrichment_processing import dispatch_version_scans
+        from app.tasks.enrichment_ingestion import dispatch_version_scans
 
         task = dispatch_version_scans.delay(version_id)
 
@@ -914,7 +966,6 @@ class DatasetVersionService:
         self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
 
-        # Only allow retry if ingested (with missing resources) or failed
         valid_statuses = [
             VersionStatus.INGESTED,
             VersionStatus.FAILED,
@@ -925,7 +976,7 @@ class DatasetVersionService:
                 detail=f"Cannot retry ingestion: status is {version.status}",
             )
 
-        from app.tasks.enrichment_processing import reingest_missing_resource_builds
+        from app.tasks.enrichment_ingestion import reingest_missing_resource_builds
 
         task = reingest_missing_resource_builds.delay(version_id)
 

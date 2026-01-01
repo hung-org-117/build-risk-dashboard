@@ -111,6 +111,26 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
             query["_id"] = {"$gt": after_id}
         return self.find_many(query)
 
+    def count_missing_resource_after_checkpoint(
+        self, config_id: str, checkpoint_id: Optional[ObjectId] = None
+    ) -> int:
+        """Count missing resource builds after checkpoint.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            checkpoint_id: Only count builds with _id > checkpoint_id
+
+        Returns:
+            Count of missing resource builds that can be retried
+        """
+        query = {
+            "model_repo_config_id": ObjectId(config_id),
+            "status": ModelImportBuildStatus.MISSING_RESOURCE.value,
+        }
+        if checkpoint_id:
+            query["_id"] = {"$gt": checkpoint_id}
+        return self.collection.count_documents(query)
+
     def get_missing_resource_builds_with_errors(
         self, config_id: str, limit: int = 50
     ) -> List[dict]:

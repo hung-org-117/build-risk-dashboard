@@ -67,15 +67,13 @@ export function VersionHistoryTable({
     const [currentPage, setCurrentPage] = useState(1);
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-    // Filter completed versions (not queued/ingesting/processing/ingested)
-    const completedVersions = versions.filter(
-        (version) => version.status !== "queued" && version.status !== "ingesting" && version.status !== "processing" && version.status !== "ingested"
-    );
+    // Show all versions
+    const displayVersions = versions;
 
     // Pagination
-    const totalPages = Math.ceil(completedVersions.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(displayVersions.length / ITEMS_PER_PAGE);
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const paginatedVersions = completedVersions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    const paginatedVersions = displayVersions.slice(startIndex, startIndex + ITEMS_PER_PAGE);
 
     // Navigate to version detail
     const handleViewVersion = (versionId: string) => {
@@ -132,7 +130,7 @@ export function VersionHistoryTable({
                             Version History
                         </CardTitle>
                         <CardDescription>
-                            {completedVersions.length} version(s) created
+                            {displayVersions.length} version(s) created
                         </CardDescription>
                     </div>
                     <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading}>
@@ -147,7 +145,7 @@ export function VersionHistoryTable({
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Loading versions...
                     </div>
-                ) : completedVersions.length === 0 ? (
+                ) : displayVersions.length === 0 ? (
                     <div className="py-8 text-center text-muted-foreground">
                         No versions created yet. Click &quot;Create New Version&quot; to get started.
                     </div>
@@ -192,8 +190,8 @@ export function VersionHistoryTable({
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <span className="text-muted-foreground">
-                                                    {version.enriched_rows.toLocaleString()} /{" "}
-                                                    {version.total_rows.toLocaleString()}
+                                                    {version.builds_processed.toLocaleString()} /{" "}
+                                                    {version.builds_total.toLocaleString()}
                                                 </span>
                                             </TableCell>
                                             <TableCell>
@@ -258,8 +256,8 @@ export function VersionHistoryTable({
                         {totalPages > 1 && (
                             <div className="mt-4 flex items-center justify-between">
                                 <p className="text-sm text-muted-foreground">
-                                    Showing {startIndex + 1}-{Math.min(startIndex + ITEMS_PER_PAGE, completedVersions.length)} of{" "}
-                                    {completedVersions.length}
+                                    Showing {startIndex + 1}-{Math.min(startIndex + ITEMS_PER_PAGE, displayVersions.length)} of{" "}
+                                    {displayVersions.length}
                                 </p>
                                 <div className="flex items-center gap-2">
                                     <Button
@@ -285,8 +283,9 @@ export function VersionHistoryTable({
                             </div>
                         )}
                     </>
-                )}
-            </CardContent>
-        </Card>
+                )
+                }
+            </CardContent >
+        </Card >
     );
 }

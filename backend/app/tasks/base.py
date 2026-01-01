@@ -250,13 +250,19 @@ class PipelineTask(Task):
             from app.services.notification_service import NotificationService
 
             notification_service = NotificationService(self.db)
+
+            # Convert retry_after to datetime if it's int/float (seconds)
+            retry_after = exc.retry_after
+            if isinstance(retry_after, (int, float)):
+                retry_after = datetime.fromtimestamp(retry_after, tz=timezone.utc)
+
             notification_service.notify_rate_limit_exhausted(
-                retry_after=exc.retry_after,
+                retry_after=retry_after,
                 task_name=self.name,
             )
             logger.warning(
                 f"All GitHub tokens exhausted. Task {self.name} failed after max retries. "
-                f"Tokens will reset at: {exc.retry_after}"
+                f"Tokens will reset at: {retry_after}"
             )
         except Exception as notify_exc:
             # Don't fail the task if notification fails
@@ -302,7 +308,7 @@ class ModelPipelineTask(PipelineTask):
             """Update ModelRepoConfig to FAILED status with error details."""
             from app.entities.model_repo_config import ModelImportStatus
             from app.repositories.model_repo_config import ModelRepoConfigRepository
-            from app.tasks.shared.status_publisher import publish_status
+            from app.tasks.shared.events import publish_repo_status
 
             log_prefix = f"[corr={correlation_id[:8] if correlation_id != 'unknown' else 'N/A'}]"
 
@@ -327,7 +333,7 @@ class ModelPipelineTask(PipelineTask):
                 )
 
                 # Notify frontend via WebSocket
-                publish_status(
+                publish_repo_status(
                     repo_config_id,
                     "failed",
                     f"Pipeline failed: {truncated_error[:200]}",
@@ -337,6 +343,79 @@ class ModelPipelineTask(PipelineTask):
                 # Log but don't raise - we don't want to mask the original error
                 logger.warning(
                     f"{log_prefix} Failed to update ModelRepoConfig {repo_config_id} "
+                    f"to FAILED status: {update_exc}"
+                )
+
+        return updater
+
+
+class EnrichmentTask(PipelineTask):
+    """
+    Pipeline task for DatasetVersion enrichment with automatic failure handling.
+
+    When any unhandled exception occurs (including SoftTimeLimitExceeded),
+    this task will automatically:
+    1. Update DatasetVersion status to FAILED
+    2. Log the error with correlation_id for traceability
+    3. Send WebSocket notification to frontend
+    4. Store error_message for user visibility
+
+    Usage:
+        @celery_app.task(bind=True, base=EnrichmentTask, ...)
+        def my_task(self, version_id: str, ...):
+            ...
+
+    Note: Only critical/unrecoverable exceptions will set FAILED status.
+    Individual build failures are tracked at DatasetEnrichmentBuild level.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(self, kwargs: dict):
+        """
+        Override to auto-update DatasetVersion status to FAILED on task failure.
+
+        Extracts version_id from kwargs and returns an updater function.
+        """
+        version_id = kwargs.get("version_id")
+        if not version_id:
+            return None
+
+        # Capture correlation_id for logging
+        correlation_id = kwargs.get("correlation_id", "unknown")
+
+        def updater(status: str, error_msg: str) -> None:
+            """Update DatasetVersion to FAILED status with error details."""
+            from app.repositories.dataset_version import DatasetVersionRepository
+            from app.tasks.shared.events import publish_enrichment_update
+
+            log_prefix = f"[corr={correlation_id[:8] if correlation_id != 'unknown' else 'N/A'}]"
+
+            try:
+                # Truncate error message for storage
+                truncated_error = error_msg[:500] if error_msg else "Unknown error"
+
+                # Update version status
+                version_repo = DatasetVersionRepository(self.db)
+                version_repo.mark_failed(version_id, truncated_error)
+
+                # Log with correlation_id for traceability
+                logger.error(
+                    f"{log_prefix} DatasetVersion {version_id} marked as FAILED. "
+                    f"Task: {self.name}. Error: {truncated_error[:200]}"
+                )
+
+                # Notify frontend via WebSocket
+                publish_enrichment_update(
+                    version_id=version_id,
+                    status="failed",
+                    error=f"Pipeline failed: {truncated_error[:200]}",
+                )
+
+            except Exception as update_exc:
+                # Log but don't raise - we don't want to mask the original error
+                logger.warning(
+                    f"{log_prefix} Failed to update DatasetVersion {version_id} "
                     f"to FAILED status: {update_exc}"
                 )
 

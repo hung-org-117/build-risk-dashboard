@@ -11,11 +11,11 @@ export interface DatasetVersion {
     description: string | null;
     selected_features: string[];
     status: "queued" | "ingesting" | "ingested" | "processing" | "processed" | "failed";
-    total_rows: number;
-    processed_rows: number;
-    enriched_rows: number;
-    failed_rows: number;
-    skipped_rows: number;
+    builds_total: number;
+    builds_ingested: number;
+    builds_missing_resource: number;
+    builds_processed: number;
+    builds_processing_failed: number;
     progress_percent: number;
     file_name: string | null;
     file_size_bytes: number | null;

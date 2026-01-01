@@ -246,6 +246,34 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
         )
         return result.deleted_count
 
+    def delete_by_dataset(
+        self,
+        dataset_id: ObjectId,
+        session: ClientSession | None = None,
+    ) -> int:
+        """
+        Delete all import builds for a dataset (across all versions).
+
+        Performs a lookup via dataset_versions to find all version IDs,
+        then deletes import builds for those versions.
+        """
+        # Find all version IDs for this dataset
+        version_ids = list(
+            self.db.dataset_versions.distinct(
+                "_id",
+                {"dataset_id": dataset_id},
+            )
+        )
+
+        if not version_ids:
+            return 0
+
+        result = self.collection.delete_many(
+            {"dataset_version_id": {"$in": version_ids}},
+            session=session,
+        )
+        return result.deleted_count
+
     # ========== Resource Status Tracking Methods ==========
 
     def update_resource_status(
@@ -654,7 +682,9 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
                     "pending": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
                     "ingesting": {"$sum": {"$cond": [{"$eq": ["$status", "ingesting"]}, 1, 0]}},
                     "ingested": {"$sum": {"$cond": [{"$eq": ["$status", "ingested"]}, 1, 0]}},
-                    "missing_resource": {"$sum": {"$cond": [{"$eq": ["$status", "missing_resource"]}, 1, 0]}},
+                    "missing_resource": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "missing_resource"]}, 1, 0]}
+                    },
                     "total": {"$sum": 1},
                 }
             },
