@@ -274,6 +274,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         build_status: Optional[str] = None,
+        limit: Optional[int] = None,
     ):
         """
         Get cursor for streaming export of builds with features from FeatureVector.
@@ -286,6 +287,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             start_date: Optional filter by build_created_at >= start_date
             end_date: Optional filter by build_created_at <= end_date
             build_status: Optional filter by build status
+            limit: Optional limit for preview
 
         Returns:
             MongoDB aggregation cursor for iteration
@@ -329,6 +331,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             # Remove the temporary feature_vector field
             {"$project": {"feature_vector": 0}},
         ]
+
+        if limit:
+            pipeline.append({"$limit": limit})
 
         return self.collection.aggregate(pipeline, batchSize=100)
 

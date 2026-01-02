@@ -816,12 +816,21 @@ def dispatch_ingestion(
 
     import_build_repo.init_resource_status(repo_config_id, list(required_resources))
 
-    # Publish IN_PROGRESS status for all resources
+    # Update DB and publish WebSocket for IN_PROGRESS status
+    from app.entities.model_import_build import ResourceStatus
+
     total_builds = len(commit_shas)
     for resource in required_resources:
+        # Persist IN_PROGRESS status to DB
+        import_build_repo.update_resource_status_batch(
+            repo_config_id,
+            resource,
+            ResourceStatus.IN_PROGRESS,
+        )
+        # Publish WebSocket event for real-time UI update
         publish_ingestion_build_update(
             repo_id=repo_config_id,
-            resource=resource.value,
+            resource=resource,
             status="in_progress",
             builds_affected=total_builds,
             pipeline_type="model",

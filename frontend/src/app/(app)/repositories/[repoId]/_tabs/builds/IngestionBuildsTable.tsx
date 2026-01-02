@@ -112,6 +112,15 @@ export function IngestionBuildsTable({
             }
         });
 
+        // Subscribe to REPO_UPDATE to reload when ingestion status changes
+        const unsubscribeRepo = subscribe("REPO_UPDATE", (data: any) => {
+            if (data.repo_id === repoId) {
+                // Reload builds when status changes (especially to ingested/processed/failed)
+                // This ensures resource_status is refreshed from DB
+                loadBuilds(page);
+            }
+        });
+
         const unsubscribeIngestion = subscribe("INGESTION_BUILD_UPDATE", (data: any) => {
             // Check if this update is for our repo (model pipeline)
             if (data.repo_id === repoId && data.pipeline_type === "model") {
@@ -153,6 +162,7 @@ export function IngestionBuildsTable({
 
         return () => {
             unsubscribeBuild();
+            unsubscribeRepo();
             unsubscribeIngestion();
         };
     }, [subscribe, loadBuilds, page, repoId]);

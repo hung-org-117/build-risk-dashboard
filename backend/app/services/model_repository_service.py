@@ -770,7 +770,7 @@ class RepositoryService:
         build_repo = ModelTrainingBuildRepository(self.db)
 
         # Get sample builds
-        cursor = build_repo.get_for_export(ObjectId(repo_id)).limit(10)
+        cursor = build_repo.get_for_export(ObjectId(repo_id), limit=10)
 
         sample_rows = []
         all_features = set()

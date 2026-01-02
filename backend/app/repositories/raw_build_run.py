@@ -127,7 +127,15 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         Uses atomic find_one_and_update for thread safety.
         This method ensures deduplication when the same build is
         fetched from both model flow and dataset flow.
+
+        Auto-populates effective_sha from commit_sha if not explicitly provided,
+        ensuring effective_sha is always set for downstream processing.
         """
+        # Auto-populate effective_sha from commit_sha if not provided
+        # This ensures effective_sha is always set for all builds
+        if "effective_sha" not in kwargs and "commit_sha" in kwargs:
+            kwargs["effective_sha"] = kwargs["commit_sha"]
+
         update_data = {
             "raw_repo_id": raw_repo_id,
             "ci_run_id": build_id,

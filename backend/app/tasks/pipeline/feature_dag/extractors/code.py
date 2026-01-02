@@ -60,6 +60,7 @@ def git_commit_info(
     git_history: GitHistoryInput,
     repo: RepoInput,
     raw_build_runs: RawBuildRunsCollection,
+    build_run: BuildRunInput,
 ) -> Dict[str, Any]:
     """
     Determine commits included in this build and find previous build.
@@ -94,6 +95,9 @@ def git_commit_info(
     last_commit_sha: Optional[str] = None
     prev_build_id = None
 
+    # Ensure strict temporal ordering (must be older than current build)
+    current_created_at = build_run.created_at
+
     first = True
     for commit_info in iter_commit_history(repo_path, effective_sha, max_count=1000):
         hexsha = commit_info["hexsha"]
@@ -109,9 +113,17 @@ def git_commit_info(
         last_commit_sha = hexsha
 
         # Check if this commit has a build in DB
-        # Sort by created_at DESC to get the most recent build (in case of multiple builds per commit)
+        # Use effective_sha since it's always populated (equals commit_sha for non-fork, synthetic_sha for fork)
+        # Must be strictly older than current build to avoid future leaks or self-reference
+        query = {"effective_sha": hexsha, "raw_repo_id": ObjectId(repo.id)}
+
+        # Add temporal filter if we have a valid timestamp
+        if current_created_at:
+            query["created_at"] = {"$lt": current_created_at}
+
+        # Sort by created_at DESC to get the most recent valid build
         existing_build = raw_build_runs.find_one(
-            {"commit_sha": hexsha, "raw_repo_id": ObjectId(repo.id)},
+            query,
             sort=[("created_at", -1)],
         )
 
