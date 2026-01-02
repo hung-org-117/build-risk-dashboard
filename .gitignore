@@ -72,3 +72,5 @@ repo-data/*
 # Gmail Secrets
 backend/gmail_credentials.json
 backend/gmail_token.json
+builddefection.2025-11-17.private-key.pem
+docker-compose.server.yml
