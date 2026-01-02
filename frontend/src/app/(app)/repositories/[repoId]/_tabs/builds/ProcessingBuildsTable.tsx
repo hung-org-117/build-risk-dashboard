@@ -391,7 +391,7 @@ export function ProcessingBuildsTable({
                                                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/40 transition"
                                                     onClick={() =>
                                                         router.push(
-                                                            `/build/${repoId}/${build.id}`
+                                                            `/repositories/${repoId}/builds/processing/${build.id}`
                                                         )
                                                     }
                                                 >
