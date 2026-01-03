@@ -219,21 +219,6 @@ def start_processing(
     return service.start_processing(repo_id)
 
 
-@router.post("/{repo_id}/retry-predictions")
-def retry_predictions(
-    repo_id: str,
-    db: Database = Depends(get_db),
-    _admin: dict = Depends(RequirePermission(Permission.MANAGE_REPOS)),
-):
-    """
-    Retry prediction for builds with failed predictions (Admin only).
-
-    Retries builds that have features extracted but prediction failed.
-    """
-    service = RepositoryService(db)
-    return service.trigger_retry_predictions(repo_id)
-
-
 @router.get(
     "/{repo_id}/builds",
     response_model=BuildListResponse,

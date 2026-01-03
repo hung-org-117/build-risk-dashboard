@@ -64,6 +64,7 @@ class DatasetResponse(BaseModel):
     rows: int
     size_bytes: int
     columns: List[str]
+    versions_count: int = 0
     mapped_fields: DatasetMappingDto = Field(default_factory=DatasetMappingDto)
     stats: DatasetStatsDto = Field(default_factory=DatasetStatsDto)
     preview: List[Dict[str, Any]] = Field(default_factory=list)

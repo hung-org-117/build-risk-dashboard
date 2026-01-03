@@ -19,6 +19,7 @@ from app.repositories.dataset_build_repository import DatasetBuildRepository
 from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_import_build import DatasetImportBuildRepository
 from app.repositories.dataset_repository import DatasetRepository
+from app.repositories.dataset_version import DatasetVersionRepository
 
 logger = logging.getLogger(__name__)
 DATASET_DIR = Path("../repo-data/datasets")
@@ -31,11 +32,15 @@ class DatasetService:
         self.db = db
         self.repo = DatasetRepository(db)
         self.build_repo = DatasetBuildRepository(db)
+
         self.enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
+        self.version_repo = DatasetVersionRepository(db)
         self.import_build_repo = DatasetImportBuildRepository(db)
 
-    def _serialize(self, dataset) -> DatasetResponse:
+    def _serialize(self, dataset, versions_count: int = 0) -> DatasetResponse:
         payload = dataset.model_dump(by_alias=True) if hasattr(dataset, "model_dump") else dataset
+        if isinstance(payload, dict):
+            payload["versions_count"] = versions_count
         return DatasetResponse.model_validate(payload)
 
     def _validate_required_mapping(
@@ -69,11 +74,18 @@ class DatasetService:
         Permission is validated at API layer via RequirePermission middleware.
         """
         datasets, total = self.repo.list_by_user(None, skip=skip, limit=limit, q=q)
+        # Fetch counts for each dataset
+        # Note: Ideally this should be a single aggregation query for performance
+        items = []
+        for ds in datasets:
+            count = self.version_repo.count_by_dataset(ds.id)
+            items.append(self._serialize(ds, versions_count=count))
+
         return DatasetListResponse(
             total=total,
             skip=skip,
             limit=limit,
-            items=[self._serialize(ds) for ds in datasets],
+            items=items,
         )
 
     def get_dataset(self, dataset_id: str, user_id: str) -> DatasetResponse:
@@ -81,7 +93,9 @@ class DatasetService:
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
-        return self._serialize(dataset)
+
+        count = self.version_repo.count_by_dataset(dataset.id)
+        return self._serialize(dataset, versions_count=count)
 
     def create_dataset(self, user_id: str, payload: DatasetCreateRequest) -> DatasetResponse:
         now = datetime.now(timezone.utc)
@@ -253,6 +267,8 @@ class DatasetService:
         from app.repositories.dataset_version import DatasetVersionRepository
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
         from app.repositories.feature_vector import FeatureVectorRepository
+        from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset or (dataset.user_id and str(dataset.user_id) != user_id):
@@ -264,6 +280,8 @@ class DatasetService:
         audit_log_repo = FeatureAuditLogRepository(self.db)
         quality_repo = DataQualityRepository(self.db)
         feature_vector_repo = FeatureVectorRepository(self.db)
+        sonar_scan_repo = SonarCommitScanRepository(self.db)
+        trivy_scan_repo = TrivyCommitScanRepository(self.db)
 
         # Collect feature_vector_ids from enrichment builds BEFORE deleting them
         enrichment_builds = list(
@@ -306,6 +324,26 @@ class DatasetService:
             logger.info(f"Deleted {deleted_stats} repo stats for dataset {dataset_id}")
 
             # 7. Delete versions (DatasetVersion)
+            # First delete associated scans for these versions
+            # We need version IDs for this
+            versions = list(version_repo.collection.find({"dataset_id": dataset_oid}, {"_id": 1}))
+            version_ids = [v["_id"] for v in versions]
+
+            if version_ids:
+                s_deleted = sonar_scan_repo.collection.delete_many(
+                    {"dataset_version_id": {"$in": version_ids}}, session=session
+                )
+                logger.info(
+                    f"Deleted {s_deleted.deleted_count} Sonar scans for dataset {dataset_id}"
+                )
+
+                t_deleted = trivy_scan_repo.collection.delete_many(
+                    {"dataset_version_id": {"$in": version_ids}}, session=session
+                )
+                logger.info(
+                    f"Deleted {t_deleted.deleted_count} Trivy scans for dataset {dataset_id}"
+                )
+
             deleted_versions = version_repo.delete_by_dataset(dataset_id, session=session)
             logger.info(f"Deleted {deleted_versions} versions for dataset {dataset_id}")
 

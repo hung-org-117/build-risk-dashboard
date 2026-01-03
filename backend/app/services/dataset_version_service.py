@@ -571,6 +571,8 @@ class DatasetVersionService:
         from app.repositories.data_quality_repository import DataQualityRepository
         from app.repositories.feature_audit_log import FeatureAuditLogRepository
         from app.repositories.feature_vector import FeatureVectorRepository
+        from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
         self._verify_dataset_access(dataset_id, user_id)
         version = self._get_version(dataset_id, version_id)
@@ -581,6 +583,8 @@ class DatasetVersionService:
         audit_log_repo = FeatureAuditLogRepository(self._db)
         quality_repo = DataQualityRepository(self._db)
         feature_vector_repo = FeatureVectorRepository(self._db)
+        sonar_scan_repo = SonarCommitScanRepository(self._db)
+        trivy_scan_repo = TrivyCommitScanRepository(self._db)
 
         # Collect feature_vector_ids from enrichment builds BEFORE deleting them
         enrichment_builds = list(
@@ -602,6 +606,13 @@ class DatasetVersionService:
             # 2. Delete associated quality reports
             quality_deleted = quality_repo.delete_by_version(version_id, session=session)
             logger.info(f"Deleted {quality_deleted} quality reports for version {version_id}")
+
+            # 3. Delete associated scans
+            sonar_deleted = sonar_scan_repo.delete_by_version(version_id, session=session)
+            logger.info(f"Deleted {sonar_deleted} Sonar scans for version {version_id}")
+
+            trivy_deleted = trivy_scan_repo.delete_by_version(version_id, session=session)
+            logger.info(f"Deleted {trivy_deleted} Trivy scans for version {version_id}")
 
             # 3. Delete associated FeatureVectors (by feature_vector_ids)
             if feature_vector_ids:

@@ -791,9 +791,14 @@ def dispatch_ingestion(
 
     # Update DB and publish WebSocket for IN_PROGRESS status
     from app.entities.model_import_build import ResourceStatus
+    from app.tasks.pipeline.shared.resources import (
+        get_ingestion_only_resources,
+    )
+
+    ingestion_resources = get_ingestion_only_resources(set(required_resources))
 
     total_builds = len(commit_shas)
-    for resource in required_resources:
+    for resource in ingestion_resources:
         # Persist IN_PROGRESS status to DB
         import_build_repo.update_resource_status_batch(
             repo_config_id,

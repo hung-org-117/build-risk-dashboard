@@ -163,3 +163,9 @@ class TrivyCommitScanRepository(BaseRepository[TrivyCommitScan]):
                 "status": TrivyScanStatus.FAILED.value,
             }
         )
+
+    def delete_by_version(self, version_id: ObjectId | str, session=None) -> int:
+        """Delete all scans for a version."""
+        if isinstance(version_id, str):
+            version_id = ObjectId(version_id)
+        return self.delete_many({"dataset_version_id": version_id}, session=session)

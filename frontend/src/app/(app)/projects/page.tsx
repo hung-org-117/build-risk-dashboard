@@ -262,7 +262,7 @@ export default function DatasetsPage() {
                     Rows
                   </th>
                   <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                    Enrichments
+                    Versions
                   </th>
                   <th className="px-6 py-3 text-left font-semibold text-slate-500">
                     Created
@@ -319,7 +319,7 @@ export default function DatasetsPage() {
                         {formatNumber(dataset.rows)}
                       </td>
                       <td className="px-6 py-4 text-muted-foreground">
-                        {dataset.enrichment_jobs_count || 0}
+                        {dataset.versions_count || 0}
                       </td>
                       <td className="px-6 py-4 text-muted-foreground">
                         {formatDate(dataset.created_at)}

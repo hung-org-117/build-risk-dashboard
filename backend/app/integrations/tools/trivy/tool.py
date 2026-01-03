@@ -50,7 +50,9 @@ class TrivyTool(IntegrationTool):
         trivy_settings = self._get_db_settings()
         self._server_url = trivy_settings.get("server_url")
         if not self._server_url:
-            raise ValueError("Trivy server URL is required. Configure in settings.")
+            logger.warning(
+                "Trivy server URL is not configured. Trivy scanning will be unavailable."
+            )
         self._default_config = trivy_settings.get("default_config", "")
         self._timeout = 600  # Default timeout 10 minutes
 
@@ -96,6 +98,9 @@ class TrivyTool(IntegrationTool):
 
     def _check_server_health(self) -> bool:
         """Check if Trivy server is healthy."""
+        if not self._server_url:
+            return False
+
         import requests
 
         try:
@@ -195,8 +200,7 @@ class TrivyTool(IntegrationTool):
 
         try:
             logger.info(
-                f"Running Trivy scan (server mode) on {target_path} "
-                f"with scanners: {scan_types}"
+                f"Running Trivy scan (server mode) on {target_path} " f"with scanners: {scan_types}"
             )
             logger.debug(f"Command: {' '.join(cmd)}")
 
@@ -328,10 +332,14 @@ class TrivyTool(IntegrationTool):
         # Build trivy args - use server mode with specified scan types
         trivy_args = [
             "fs",
-            "--format", "json",
-            "--timeout", f"{self._timeout}s",
-            "--server", self._server_url,
-            "--scanners", ",".join(scan_types),  # Use passed scan types
+            "--format",
+            "json",
+            "--timeout",
+            f"{self._timeout}s",
+            "--server",
+            self._server_url,
+            "--scanners",
+            ",".join(scan_types),  # Use passed scan types
         ]
 
         # Target path inside container
@@ -339,9 +347,13 @@ class TrivyTool(IntegrationTool):
 
         # Build docker command
         docker_cmd = [
-            "docker", "run", "--rm",
-            "-v", f"{target_path_abs}:/work:ro",  # Mount source as read-only
-            "--network", "host",  # Access Trivy server
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{target_path_abs}:/work:ro",  # Mount source as read-only
+            "--network",
+            "host",  # Access Trivy server
         ]
 
         # Mount config file if provided

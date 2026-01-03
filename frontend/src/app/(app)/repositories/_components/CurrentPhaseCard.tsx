@@ -22,6 +22,7 @@ interface ImportProgress {
         last_checkpoint_at: string | null;
         accepted_failed: number;
         stats: Record<string, number>;
+        current_processing_ci_run_id?: string | null;
     };
     import_builds: {
         pending: number;
@@ -189,9 +190,10 @@ function getPhaseInfo(status: string, progress: ImportProgress | null): PhaseInf
     // Processing phase
     if (statusLower === "processing") {
         const { completed, partial, pending, total, failed } = progress.training_builds;
+        const currentBuildId = progress.checkpoint?.current_processing_ci_run_id;
         return {
             title: "Feature Extraction",
-            description: "Extracting features from builds using Hamilton DAG",
+            description: currentBuildId ? `Processing build #${currentBuildId}` : "",
             current: completed + partial,
             total: total || progress.import_builds.ingested,
             failed,
