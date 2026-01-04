@@ -997,6 +997,7 @@ def aggregate_model_ingestion_results(
         # 3. Mark builds with failed build_logs as FAILED (retryable)
         # Note: We differentiate between actual failures and expired logs
         # For now, treat all log failures as MISSING_RESOURCE (not retryable)
+        # Set ingested_at (not failed_at) because ingestion is complete, just partial
         import_build_repo.collection.update_many(
             {
                 "model_repo_config_id": ObjectId(repo_config_id),
@@ -1007,7 +1008,7 @@ def aggregate_model_ingestion_results(
                 "$set": {
                     "status": ModelImportBuildStatus.MISSING_RESOURCE.value,
                     "ingestion_error": "Log download failed or expired",
-                    "failed_at": now,
+                    "ingested_at": now,  # Ingestion completed (with partial resources)
                 }
             },
         )

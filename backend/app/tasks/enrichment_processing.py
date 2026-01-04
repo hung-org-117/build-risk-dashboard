@@ -82,11 +82,11 @@ def start_enrichment_processing(
         logger.warning(f"{corr_prefix} {msg}")
         return {"status": "error", "message": msg}
 
-    # Query INGESTED builds
-    ingested_builds = import_build_repo.find_ingested_builds(version_id)
+    # Query INGESTED and MISSING_RESOURCE builds (graceful degradation)
+    processable_builds = import_build_repo.find_processable_builds(version_id)
 
-    if not ingested_builds:
-        logger.info(f"{corr_prefix} No ingested builds for {version_id}")
+    if not processable_builds:
+        logger.info(f"{corr_prefix} No processable builds for {version_id}")
         return {"status": "completed", "builds": 0, "message": "No builds to process"}
 
     # Update status to PROCESSING
@@ -95,14 +95,14 @@ def start_enrichment_processing(
     # Dispatch scans (if configured) and processing batches
     dispatch_scans_and_processing.delay(version_id, correlation_id=correlation_id)
 
-    logger.info(f"{corr_prefix} Dispatched processing for {len(ingested_builds)} builds")
+    logger.info(f"{corr_prefix} Dispatched processing for {len(processable_builds)} builds")
 
     publish_enrichment_update(
         version_id=version_id,
         status=VersionStatus.PROCESSING.value,
     )
 
-    return {"status": "dispatched", "builds": len(ingested_builds)}
+    return {"status": "dispatched", "builds": len(processable_builds)}
 
 
 @celery_app.task(
@@ -273,27 +273,27 @@ def dispatch_enrichment_batches(
     if not dataset_version:
         raise ValueError(f"Version {version_id} not found")
 
-    # Step 1: Get INGESTED import builds (sorted by build creation time)
-    ingested_imports = import_build_repo.find_ingested_builds(version_id)
+    # Step 1: Get INGESTED + MISSING_RESOURCE import builds (graceful degradation)
+    processable_imports = import_build_repo.find_processable_builds(version_id)
 
-    if not ingested_imports:
-        logger.info(f"{corr_prefix} No ingested builds for {version_id}")
+    if not processable_imports:
+        logger.info(f"{corr_prefix} No processable builds for {version_id}")
         version_repo.mark_completed(version_id)
-        return {"status": "completed", "message": "No ingested builds to process"}
+        return {"status": "completed", "message": "No builds to process"}
 
     # Build lookup map for raw_build_run data
     raw_build_run_ids = [
         ObjectId(ib.raw_build_run_id)
         if isinstance(ib.raw_build_run_id, str)
         else ib.raw_build_run_id
-        for ib in ingested_imports
+        for ib in processable_imports
     ]
     # Type ignore: method accepts List[str | ObjectId]
     raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)  # type: ignore
     build_run_map = {str(r.id): r for r in raw_build_runs}
 
     # Sort by build creation time (oldest first) for temporal features
-    ingested_imports.sort(
+    processable_imports.sort(
         key=lambda ib: (build_run_map.get(str(ib.raw_build_run_id), ib).created_at or ib.created_at)
     )
 
@@ -302,7 +302,7 @@ def dispatch_enrichment_batches(
     skipped_existing = 0
     enrichment_build_ids = []
 
-    for import_build in ingested_imports:
+    for import_build in processable_imports:
         # Check if already exists
         existing = enrichment_build_repo.find_by_import_build(str(import_build.id))
         if existing and existing.extraction_status != ExtractionStatus.PENDING.value:

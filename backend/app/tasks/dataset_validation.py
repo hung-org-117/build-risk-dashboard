@@ -27,6 +27,7 @@ from bson import ObjectId
 from celery import chain, group
 
 from app.celery_app import celery_app
+from app.ci_providers.config import get_provider_config
 from app.ci_providers.factory import get_ci_provider
 from app.ci_providers.models import BuildData, CIProvider
 from app.config import settings
@@ -515,8 +516,9 @@ def validate_builds_chunk(
     ci_provider_str = builds[0].get("ci_provider", "github_actions") if builds else "github_actions"
     ci_provider = CIProvider(ci_provider_str)
 
-    # Get CI provider client
-    ci_client = get_ci_provider(ci_provider, db=db)
+    # Get CI provider client with config from settings (includes token)
+    ci_config = get_provider_config(ci_provider)
+    ci_client = get_ci_provider(ci_provider, config=ci_config, db=db)
 
     # Load build filters from dataset
     dataset_repo = DatasetRepository(db)

@@ -1,4 +1,4 @@
-import { BuildValidationFilters, CIProvider, DatasetRecord, ValidationStats } from "@/types";
+import { BuildValidationFilters, CIProviderOption, DatasetRecord, ValidationStats } from "@/types";
 
 export type MappingKey = "build_id" | "repo_name";
 export type Step = 1 | 2;
@@ -18,11 +18,6 @@ export interface CSVPreview {
     totalRows: number;
     fileName: string;
     fileSize: number;
-}
-
-export interface CIProviderOption {
-    value: string;
-    label: string;
 }
 
 export interface StepUploadProps {

@@ -45,8 +45,10 @@ export default function BuildsPage() {
         : 0;
 
     // Failed processing count: all failed extraction + prediction
-    const failedProcessingCount = (progress?.training_builds.failed || 0) +
-        (progress?.training_builds.prediction_failed || 0);
+    // Hide failed count while processing is in progress (confusing UX)
+    const isProcessing = repo?.status?.toLowerCase() === "processing";
+    const failedProcessingCount = isProcessing ? 0 :
+        (progress?.training_builds.failed || 0) + (progress?.training_builds.prediction_failed || 0);
 
     return (
         <div className="space-y-0">

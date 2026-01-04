@@ -47,16 +47,10 @@ import {
     type EnrichmentBuildDetailResponse,
     type NodeExecutionDetail,
 } from "@/lib/api";
-
-/** CI Provider labels mapping */
-const CI_PROVIDER_LABELS: Record<string, string> = {
-    github_actions: "GitHub Actions",
-    circleci: "CircleCI",
-    travis_ci: "Travis CI",
-};
+import { CIProviderLabels } from "@/types";
 
 const getCIProviderLabel = (provider: string): string => {
-    return CI_PROVIDER_LABELS[provider] || provider;
+    return CIProviderLabels[provider as keyof typeof CIProviderLabels] || provider;
 };
 
 /** Format duration */

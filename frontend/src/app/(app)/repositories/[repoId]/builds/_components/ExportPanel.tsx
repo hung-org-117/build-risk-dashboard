@@ -123,7 +123,7 @@ export function ExportPanel({ repoId, repoName }: ExportPanelProps) {
             } else {
                 // Small dataset - stream download
                 const blob = await exportApi.downloadStream(repoId, format);
-                downloadBlob(blob, `${repoName || repoId}_builds.${format}`);
+                downloadBlob(blob, generateFilename(format));
             }
         } catch (err: any) {
             // Check if it's a 413 error (too large)
@@ -149,7 +149,7 @@ export function ExportPanel({ repoId, repoName }: ExportPanelProps) {
             const blob = await exportApi.downloadJob(jobId);
             const job = recentJobs.find((j) => j.job_id === jobId);
             const ext = job?.format || "csv";
-            downloadBlob(blob, `${repoName || repoId}_builds.${ext}`);
+            downloadBlob(blob, generateFilename(ext));
         } catch (err: any) {
             setError(err.message || "Failed to download");
         }
@@ -164,6 +164,17 @@ export function ExportPanel({ repoId, repoName }: ExportPanelProps) {
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
+    };
+
+    // Generate filename with timestamp (YYYYMMDD_HHMMSS format)
+    const generateFilename = (ext: string) => {
+        const now = new Date();
+        const timestamp = now.toISOString()
+            .replace(/[-:]/g, "")
+            .replace("T", "_")
+            .slice(0, 15); // YYYYMMDD_HHMMSS
+        const baseName = (repoName || repoId).replace(/\//g, "_");
+        return `${baseName}_builds_${timestamp}.${ext}`;
     };
 
     const formatBytes = (bytes: number) => {

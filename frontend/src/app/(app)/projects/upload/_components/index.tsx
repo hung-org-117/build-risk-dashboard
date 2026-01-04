@@ -16,7 +16,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { datasetsApi } from "@/lib/api";
-import type { UploadDatasetModalProps, Step, CIProviderOption } from "./types";
+import { CI_PROVIDER_OPTIONS, CIProviderOption } from "@/types";
+import type { UploadDatasetModalProps, Step } from "./types";
 import { StepIndicator } from "./StepIndicator";
 import { StepUpload } from "./StepUpload";
 import { useUploadDatasetWizard } from "./hooks/useUploadDatasetWizard";
@@ -71,12 +72,8 @@ export function UploadDatasetModal({
     const [repoStatsPage, setRepoStatsPage] = useState(0);
     const [repoStatsLoading, setRepoStatsLoading] = useState(false);
 
-    // Default CI providers fallback
-    const ciProviders: CIProviderOption[] = featuresConfig?.ciProviders ?? [
-        { value: "github_actions", label: "GitHub Actions" },
-        { value: "travis", label: "Travis CI" },
-        { value: "circleci", label: "CircleCI" },
-    ];
+    // Default CI providers fallback - use shared constant
+    const ciProviders: CIProviderOption[] = featuresConfig?.ciProviders ?? CI_PROVIDER_OPTIONS;
 
     // Fetch repo stats when validation completes
     const fetchRepoStats = useCallback(async (datasetId: string, page: number = 0) => {

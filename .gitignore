@@ -47,7 +47,7 @@ out/
 postgresql-data/
 mongo-data/
 
-# ML Models
+# ML Models (generic - ignored by default)
 *.h5
 *.pkl
 *.pth
@@ -55,6 +55,10 @@ mongo-data/
 models/saved/
 data/raw/
 data/processed/
+
+# Exception: Allow risk_model artifacts to be tracked
+!backend/app/services/risk_model/artifacts/
+!backend/app/services/risk_model/artifacts/*.pkl
 
 # Logs
 logs/

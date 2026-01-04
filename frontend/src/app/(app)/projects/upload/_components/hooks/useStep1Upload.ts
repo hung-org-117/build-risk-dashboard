@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import Papa from "papaparse";
-import type { BuildValidationFilters } from "@/types";
+import { BuildValidationFilters, CI_PROVIDER_OPTIONS, CIProvider } from "@/types";
 import type { CSVPreview, MappingKey, CIProviderMode } from "../types";
 
 const DEFAULT_BUILD_FILTERS: BuildValidationFilters = {
@@ -63,16 +63,13 @@ export function useStep1Upload(): UseStep1UploadReturn {
         build_id: "",
         repo_name: "",
     });
-    const [ciProvider, setCiProvider] = useState("github_actions");
+    const [ciProvider, setCiProvider] = useState<string>(CIProvider.GITHUB_ACTIONS);
     const [ciProviderMode, setCiProviderMode] = useState<CIProviderMode>("single");
     const [ciProviderColumn, setCiProviderColumn] = useState("");
     const [buildFilters, setBuildFilters] = useState<BuildValidationFilters>(DEFAULT_BUILD_FILTERS);
 
-    const ciProviders = [
-        { value: "github_actions", label: "GitHub Actions" },
-        { value: "travis", label: "Travis CI" },
-        { value: "circleci", label: "CircleCI" },
-    ];
+    // Use shared constant for CI providers
+    const ciProviders = CI_PROVIDER_OPTIONS;
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,7 +83,7 @@ export function useStep1Upload(): UseStep1UploadReturn {
         setName("");
         setDescription("");
         setMappings({ build_id: "", repo_name: "" });
-        setCiProvider("github_actions");
+        setCiProvider(CIProvider.GITHUB_ACTIONS as string);
         setCiProviderMode("single");
         setCiProviderColumn("");
         setBuildFilters(DEFAULT_BUILD_FILTERS);

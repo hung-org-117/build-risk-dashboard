@@ -404,6 +404,7 @@ def aggregate_ingestion_results(
         )
 
         # 3. Mark builds with failed build_logs as MISSING_RESOURCE (not retryable)
+        # Note: Set ingested_at (not failed_at) because ingestion is complete, just partial
         import_build_repo.collection.update_many(
             {
                 "dataset_version_id": ObjectId(version_id),
@@ -414,7 +415,7 @@ def aggregate_ingestion_results(
                 "$set": {
                     "status": DatasetImportBuildStatus.MISSING_RESOURCE.value,
                     "ingestion_error": "Log download failed or expired",
-                    "failed_at": now,
+                    "ingested_at": now,  # Ingestion completed (with partial resources)
                 }
             },
         )

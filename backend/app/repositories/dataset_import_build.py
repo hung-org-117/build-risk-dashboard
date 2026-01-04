@@ -64,6 +64,26 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
         """Find builds with missing resources (not retryable - logs expired, etc)."""
         return self.find_by_version(version_id, status=DatasetImportBuildStatus.MISSING_RESOURCE)
 
+    def find_processable_builds(self, version_id: str) -> List[DatasetImportBuild]:
+        """
+        Find all builds that should go to processing phase.
+
+        Includes both INGESTED and MISSING_RESOURCE builds for graceful degradation.
+        Builds with missing resources can still have partial features extracted.
+
+        Returns:
+            List of DatasetImportBuild with status INGESTED or MISSING_RESOURCE
+        """
+        return self.find_many({
+            "dataset_version_id": ObjectId(version_id),
+            "status": {
+                "$in": [
+                    DatasetImportBuildStatus.INGESTED.value,
+                    DatasetImportBuildStatus.MISSING_RESOURCE.value,
+                ]
+            },
+        })
+
     def find_failed_builds(self, version_id: str) -> List[DatasetImportBuild]:
         """Find builds with FAILED status (retryable - actual errors like timeout, network)."""
         return self.find_by_version(version_id, status=DatasetImportBuildStatus.FAILED)

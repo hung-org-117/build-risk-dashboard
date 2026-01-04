@@ -457,6 +457,19 @@ export const CIProviderLabels: Record<CIProvider, string> = {
   [CIProvider.TRAVIS_CI]: "Travis CI",
 };
 
+// Interface for CI provider dropdown options
+export interface CIProviderOption {
+  value: string;
+  label: string;
+}
+
+// Dropdown options for CI provider selection (single source of truth)
+export const CI_PROVIDER_OPTIONS: CIProviderOption[] = [
+  { value: CIProvider.GITHUB_ACTIONS, label: CIProviderLabels[CIProvider.GITHUB_ACTIONS] },
+  { value: CIProvider.CIRCLECI, label: CIProviderLabels[CIProvider.CIRCLECI] },
+  { value: CIProvider.TRAVIS_CI, label: CIProviderLabels[CIProvider.TRAVIS_CI] },
+];
+
 export interface ScanJob {
   id: string;
   repo_id: string;

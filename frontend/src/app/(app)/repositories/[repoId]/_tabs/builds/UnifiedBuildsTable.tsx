@@ -274,7 +274,7 @@ export function UnifiedBuildsTable({
                                 ) : (
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                 )}
-                                Retry Ingestion {failedIngestionCount > 0 && `(${failedIngestionCount})`}
+                                Retry Failed Ingestion {failedIngestionCount > 0 && `(${failedIngestionCount})`}
                             </Button>
                         )}
                         {onRetryProcessing && (
@@ -293,7 +293,7 @@ export function UnifiedBuildsTable({
                                 ) : (
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                 )}
-                                Retry Processing {failedProcessingCount > 0 && `(${failedProcessingCount})`}
+                                Retry Failed Processing {failedProcessingCount > 0 && `(${failedProcessingCount})`}
                             </Button>
                         )}
                     </div>
