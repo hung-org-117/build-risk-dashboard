@@ -64,12 +64,13 @@ def list_repositories(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     q: str | None = Query(default=None, description="Search query"),
+    status: str | None = Query(default=None, description="Filter by status"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """List tracked repositories with RBAC access control."""
     service = RepositoryService(db)
-    return service.list_repositories(current_user, skip, limit, q)
+    return service.list_repositories(current_user, skip, limit, q, status)
 
 
 @router.get("/search", response_model=RepoSearchResponse)

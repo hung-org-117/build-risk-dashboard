@@ -9,7 +9,7 @@ import type {
 import { api } from "./client";
 
 export const reposApi = {
-    list: async (params?: { skip?: number; limit?: number; q?: string }) => {
+    list: async (params?: { skip?: number; limit?: number; q?: string; status?: string }) => {
         const response = await api.get<RepoListResponse>("/repos/", { params });
         return response.data;
     },

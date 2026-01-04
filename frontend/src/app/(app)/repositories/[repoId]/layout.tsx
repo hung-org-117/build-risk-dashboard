@@ -287,12 +287,12 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
 
                 {/* Tab Navigation - hide on build detail page */}
                 {!isBuildDetailPage && (
-                    <div className="border-b">
-                        <nav className="flex gap-4">
+                    <div className="border-b w-full">
+                        <nav className="flex w-full">
                             <Link
                                 href={`/repositories/${repoId}/overview`}
                                 className={cn(
-                                    "pb-3 text-sm font-medium transition-colors border-b-2",
+                                    "flex-1 text-center pb-3 text-sm font-medium transition-colors border-b-2",
                                     isOverviewActive
                                         ? "border-primary text-primary"
                                         : "border-transparent text-muted-foreground hover:text-foreground"
@@ -303,7 +303,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                             <Link
                                 href={`/repositories/${repoId}/builds`}
                                 className={cn(
-                                    "pb-3 text-sm font-medium transition-colors border-b-2",
+                                    "flex-1 text-center pb-3 text-sm font-medium transition-colors border-b-2",
                                     isBuildsActive
                                         ? "border-primary text-primary"
                                         : "border-transparent text-muted-foreground hover:text-foreground"

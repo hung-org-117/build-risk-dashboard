@@ -730,6 +730,16 @@ def aggregate_logs_results(
         "skipped_log_ids": all_skipped_log_ids,
     }
 
+    # Cleanup Redis session keys to prevent stale stop flags blocking future syncs
+    try:
+        session_key = f"logs_session:{raw_repo_id}"
+        self.redis.delete(f"{session_key}:stop")
+        self.redis.delete(f"{session_key}:consecutive")
+        self.redis.delete(f"{session_key}:max_expired")
+        logger.debug(f"{log_ctx} Cleaned up Redis session keys")
+    except Exception as e:
+        logger.warning(f"{log_ctx} Failed to cleanup Redis session keys: {e}")
+
     return result
 
 

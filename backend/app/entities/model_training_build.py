@@ -29,6 +29,7 @@ class ModelTrainingBuild(BaseEntity):
     class Config:
         collection = "model_training_builds"
         use_enum_values = True
+        protected_namespaces = ()  # Disable warning for model_ prefix fields
 
     # References to raw data
     raw_repo_id: PyObjectId = Field(

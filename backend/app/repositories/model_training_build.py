@@ -329,7 +329,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """
         match_query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
-            "extraction_status": ExtractionStatus.COMPLETED.value,
+            "extraction_status": {
+                "$in": [ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value]
+            },
         }
 
         if start_date or end_date:
@@ -395,7 +397,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """
         match_query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
-            "extraction_status": ExtractionStatus.COMPLETED.value,
+            "extraction_status": {
+                "$in": [ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value]
+            },
         }
 
         if start_date or end_date:
@@ -441,7 +445,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """Count builds available for export."""
         query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
-            "extraction_status": ExtractionStatus.COMPLETED.value,
+            "extraction_status": {
+                "$in": [ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value]
+            },
         }
 
         if start_date or end_date:

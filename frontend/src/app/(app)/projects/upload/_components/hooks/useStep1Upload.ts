@@ -72,11 +72,6 @@ export function useStep1Upload(): UseStep1UploadReturn {
         { value: "github_actions", label: "GitHub Actions" },
         { value: "travis", label: "Travis CI" },
         { value: "circleci", label: "CircleCI" },
-        { value: "gitlab", label: "GitLab CI" },
-        { value: "jenkins", label: "Jenkins" },
-        { value: "azure_pipelines", label: "Azure Pipelines" },
-        { value: "bitbucket_pipelines", label: "Bitbucket Pipelines" },
-        { value: "other", label: "Other / Generic" },
     ];
 
     const fileInputRef = useRef<HTMLInputElement>(null);

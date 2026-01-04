@@ -9,7 +9,6 @@ import {
     X,
     AlertTriangle,
     AlertCircle,
-    ArrowLeft,
     ChevronLeft,
     ChevronRight,
 } from "lucide-react";
@@ -75,7 +74,7 @@ export function UploadDatasetModal({
     // Default CI providers fallback
     const ciProviders: CIProviderOption[] = featuresConfig?.ciProviders ?? [
         { value: "github_actions", label: "GitHub Actions" },
-        { value: "travis_ci", label: "Travis CI" },
+        { value: "travis", label: "Travis CI" },
         { value: "circleci", label: "CircleCI" },
     ];
 
@@ -396,7 +395,7 @@ export function UploadDatasetModal({
                     {/* Footer */}
                     <div className="mt-6 flex items-center justify-between border-t pt-4">
                         <div className="flex items-center gap-2">
-                            {step === 1 ? (
+                            {step === 1 && (
                                 <Button
                                     variant="outline"
                                     onClick={() => {
@@ -407,26 +406,6 @@ export function UploadDatasetModal({
                                 >
                                     Cancel
                                 </Button>
-                            ) : validationStatus === "completed" ? (
-                                // Hide back button when validation is completed
-                                null
-                            ) : (
-                                <div className="flex items-center gap-3">
-                                    {validationStatus === "validating" && (
-                                        <span className="text-xs text-muted-foreground hidden sm:inline-block">
-                                            Pause validation to go back
-                                        </span>
-                                    )}
-                                    <Button
-                                        variant="outline"
-                                        onClick={wizard.goBackToStep1}
-                                        disabled={validationStatus === "validating" || uploading}
-                                        className="gap-2"
-                                    >
-                                        <ArrowLeft className="h-4 w-4" />
-                                        Back
-                                    </Button>
-                                </div>
                             )}
                         </div>
 

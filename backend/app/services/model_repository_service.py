@@ -224,7 +224,12 @@ class RepositoryService:
         return RepoSuggestionListResponse(items=items[:limit])
 
     def list_repositories(
-        self, current_user: dict, skip: int, limit: int, q: Optional[str] = None
+        self,
+        current_user: dict,
+        skip: int,
+        limit: int,
+        q: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> RepoListResponse:
         """List tracked repositories with RBAC access control."""
         user_id = ObjectId(current_user["_id"])
@@ -237,6 +242,7 @@ class RepositoryService:
             skip=skip,
             limit=limit,
             search_query=q,
+            status_filter=status,
             github_accessible_repos=github_accessible_repos,
         )
         return RepoListResponse(
@@ -587,17 +593,28 @@ class RepositoryService:
         # Checkpoint: use ObjectId for reliable ordering
         last_checkpoint_id = repo_doc.last_processed_import_build_id
 
-        # Look up the build_number of the last processed build
-        current_processing_build_number = None
-        if last_checkpoint_id:
-            last_import_build = import_build_repo.find_by_id(last_checkpoint_id)
-            if last_import_build and last_import_build.raw_build_run_id:
-                from app.repositories.raw_build_run import RawBuildRunRepository
+        # Find the NEWEST processed build (highest build_number with completed prediction)
+        # This is different from checkpoint which is the oldest in the batch
+        last_processed_build_number = None
+        newest_processed_pipeline = [
+            {
+                "$match": {
+                    "model_repo_config_id": ObjectId(repo_id),
+                    "predicted_label": {"$ne": None},  # Has prediction result
+                }
+            },
+            {"$sort": {"build_number": -1}},  # Newest first (highest build_number)
+            {"$limit": 1},
+            {"$project": {"build_number": 1}},
+        ]
+        newest_processed = list(training_build_repo.collection.aggregate(newest_processed_pipeline))
+        if newest_processed:
+            last_processed_build_number = newest_processed[0].get("build_number")
 
-                raw_build_repo = RawBuildRunRepository(self.db)
-                raw_build = raw_build_repo.find_by_id(last_import_build.raw_build_run_id)
-                if raw_build:
-                    current_processing_build_number = raw_build.build_number
+        # Count builds that can be processed (ingested after checkpoint, not yet processed)
+        pending_processing_count = import_build_repo.count_unprocessed_after_checkpoint(
+            repo_id, last_checkpoint_id
+        )
 
         # Count missing resource builds that can be retried (after checkpoint)
         missing_resource_retryable = import_build_repo.count_missing_resource_after_checkpoint(
@@ -615,7 +632,8 @@ class RepositoryService:
                 "last_processed_import_build_id": (
                     str(last_checkpoint_id) if last_checkpoint_id else None
                 ),
-                "current_processing_build_number": current_processing_build_number,
+                "last_processed_build_number": last_processed_build_number,
+                "pending_processing_count": pending_processing_count,
             },
             # Import phase (ModelImportBuild) - TOTAL
             "import_builds": {

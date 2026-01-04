@@ -9,7 +9,8 @@ export interface ImportProgress {
         last_checkpoint_at: string | null;
         accepted_failed: number;
         stats: Record<string, number>;
-        current_processing_build_number?: number | null;
+        last_processed_build_number?: number | null;
+        pending_processing_count?: number;
     };
     import_builds: {
         pending: number;

@@ -88,8 +88,9 @@ def process_export_job(self, job_id: str):
                 job.build_status,
             )
 
-        # Write export file
-        file_path = EXPORT_DIR / f"{job_id}.{job.format}"
+        # Write export file - include timestamp in filename
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        file_path = EXPORT_DIR / f"{job_id}_{timestamp}.{job.format}"
 
         if job.format == "csv":
             write_csv_file(

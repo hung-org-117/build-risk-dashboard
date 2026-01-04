@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,19 @@ import {
     Trash2,
     XCircle,
 } from "lucide-react";
+import { SearchFilterBar } from "@/components/builds";
 import type { DatasetVersion } from "../_hooks/useDatasetVersions";
+
+// Version status options for filter dropdown
+const VERSION_STATUS_OPTIONS = [
+    { value: "all", label: "All Statuses" },
+    { value: "queued", label: "Queued" },
+    { value: "ingesting", label: "Ingesting" },
+    { value: "ingested", label: "Ingested" },
+    { value: "processing", label: "Processing" },
+    { value: "processed", label: "Processed" },
+    { value: "failed", label: "Failed" },
+];
 
 type ExportFormat = "csv" | "json";
 
@@ -63,9 +75,39 @@ export function VersionHistoryTable({
 }: VersionHistoryTableProps) {
     const router = useRouter();
     const [currentPage, setCurrentPage] = useState(1);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [statusFilter, setStatusFilter] = useState("all");
 
-    // Show all versions
-    const displayVersions = versions;
+    // Search and filter handlers
+    const handleSearch = useCallback((query: string) => {
+        setSearchQuery(query);
+        setCurrentPage(1);
+    }, []);
+
+    const handleStatusFilter = useCallback((status: string) => {
+        setStatusFilter(status);
+        setCurrentPage(1);
+    }, []);
+
+    // Filter versions based on search and status
+    const displayVersions = useMemo(() => {
+        let filtered = versions;
+
+        // Filter by status
+        if (statusFilter !== "all") {
+            filtered = filtered.filter(v => v.status === statusFilter);
+        }
+
+        // Filter by search query (name)
+        if (searchQuery) {
+            const query = searchQuery.toLowerCase();
+            filtered = filtered.filter(v =>
+                v.name.toLowerCase().includes(query)
+            );
+        }
+
+        return filtered;
+    }, [versions, searchQuery, statusFilter]);
 
     // Pagination
     const totalPages = Math.ceil(displayVersions.length / ITEMS_PER_PAGE);
@@ -123,6 +165,17 @@ export function VersionHistoryTable({
                     </Button>
                 </div>
             </CardHeader>
+
+            {/* Search and Filter */}
+            <div className="px-6 pb-4">
+                <SearchFilterBar
+                    placeholder="Search by version name..."
+                    statusOptions={VERSION_STATUS_OPTIONS}
+                    onSearch={handleSearch}
+                    onStatusFilter={handleStatusFilter}
+                    isLoading={loading}
+                />
+            </div>
 
             <CardContent>
                 {loading && versions.length === 0 ? (

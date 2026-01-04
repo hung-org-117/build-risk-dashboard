@@ -131,6 +131,10 @@ class CircleCIProvider(CIProviderInterface):
                     for pipeline in items:
                         build_data = await self._parse_pipeline(client, pipeline, repo_name)
 
+                        # Skip pipelines without commit info (scheduled, API-triggered, etc.)
+                        if build_data is None:
+                            continue
+
                         if only_completed and build_data.status in [
                             BuildStatus.PENDING.value,
                             BuildStatus.RUNNING.value,
@@ -145,8 +149,14 @@ class CircleCIProvider(CIProviderInterface):
                         if exclude_bots and is_bot:
                             continue
 
-                        if since and build_data.created_at and build_data.created_at < since:
-                            continue
+                        if since and build_data.created_at:
+                            # Normalize both datetimes to naive UTC for comparison
+                            from app.utils.datetime import ensure_naive_utc
+
+                            since_normalized = ensure_naive_utc(since) or since
+                            created_normalized = ensure_naive_utc(build_data.created_at)
+                            if created_normalized and created_normalized < since_normalized:
+                                continue
 
                         if only_with_logs:
                             logs_available = await self._check_logs_available(
@@ -379,8 +389,21 @@ class CircleCIProvider(CIProviderInterface):
 
     async def _parse_pipeline(
         self, client: httpx.AsyncClient, pipeline: dict, repo_name: str
-    ) -> BuildData:
-        """Parse CircleCI pipeline to BuildData."""
+    ) -> Optional[BuildData]:
+        """Parse CircleCI pipeline to BuildData.
+
+        Returns None if the pipeline lacks required commit info (e.g., scheduled pipelines).
+        """
+        # Get commit info early to check if we should skip
+        vcs = pipeline.get("vcs", {})
+        branch = vcs.get("branch")
+        commit_sha = vcs.get("revision")
+
+        # Skip pipelines without commit info (scheduled, API-triggered, etc.)
+        if not branch or not commit_sha:
+            logger.debug(f"Skipping pipeline {pipeline.get('id')} - missing branch or commit_sha")
+            return None
+
         # Parse timestamps
         created_at = None
         started_at = None
@@ -419,9 +442,6 @@ class CircleCIProvider(CIProviderInterface):
         if started_at and stopped_at:
             duration_seconds = (stopped_at - started_at).total_seconds()
 
-        # Get commit info
-        vcs = pipeline.get("vcs", {})
-
         # Build web URL
         project_slug = pipeline.get("project_slug", "")
         pipeline_number = pipeline.get("number", "")
@@ -435,8 +455,8 @@ class CircleCIProvider(CIProviderInterface):
             build_id=pipeline.get("id"),
             build_number=pipeline.get("number"),
             repo_name=repo_name,
-            branch=vcs.get("branch"),
-            commit_sha=vcs.get("revision"),
+            branch=branch,
+            commit_sha=commit_sha,
             commit_message=(vcs.get("commit", {}).get("subject") if vcs.get("commit") else None),
             commit_author=(
                 vcs.get("commit", {}).get("author", {}).get("name") if vcs.get("commit") else None

@@ -193,6 +193,19 @@ def extract_features_for_build(
     pipeline = None
     feature_vector_repo = FeatureVectorRepository(db)
 
+    # Determine scope and config_id based on category (defined before try for exception handler)
+    scope = FeatureVectorScope.MODEL.value
+    config_id = None
+
+    if category == AuditLogCategory.DATASET_ENRICHMENT:
+        scope = FeatureVectorScope.DATASET.value
+        if version_id:
+            config_id = ObjectId(version_id)
+    elif category == AuditLogCategory.MODEL_TRAINING:
+        scope = FeatureVectorScope.MODEL.value
+        if model_repo_config_id:
+            config_id = ObjectId(model_repo_config_id)
+
     try:
         from app.services.github.github_client import get_public_github_client
         from app.tasks.pipeline.feature_dag._inputs import GitHubClientInput
@@ -246,19 +259,6 @@ def extract_features_for_build(
         # Ensure it's a string (MongoDB may return Int64 for numeric-looking values)
         tr_prev_build_raw = formatted_features.get("tr_prev_build")
         tr_prev_build = str(tr_prev_build_raw) if tr_prev_build_raw is not None else None
-
-        # Determine scope and config_id based on category
-        scope = FeatureVectorScope.MODEL.value
-        config_id = None
-
-        if category == AuditLogCategory.DATASET_ENRICHMENT:
-            scope = FeatureVectorScope.DATASET.value
-            if version_id:
-                config_id = ObjectId(version_id)
-        elif category == AuditLogCategory.MODEL_TRAINING:
-            scope = FeatureVectorScope.MODEL.value
-            if model_repo_config_id:
-                config_id = ObjectId(model_repo_config_id)
 
         # Save to FeatureVector (single source of truth)
         feature_vector = feature_vector_repo.upsert_features(

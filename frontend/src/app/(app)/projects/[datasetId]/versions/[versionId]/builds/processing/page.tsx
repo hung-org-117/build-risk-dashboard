@@ -28,6 +28,7 @@ import {
     AlertTriangle,
     Clock,
     RotateCcw,
+    RefreshCw,
 } from "lucide-react";
 import { datasetVersionApi, type EnrichedBuildData } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -156,6 +157,26 @@ export default function ProcessingPage() {
     const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
     const canRetryProcessing = failedCount > 0;
 
+    const handleRefresh = useCallback(async () => {
+        setLoading(true);
+        try {
+            const skip = (currentPage - 1) * ITEMS_PER_PAGE;
+            const response = await datasetVersionApi.getEnrichmentBuilds(
+                datasetId,
+                versionId,
+                skip,
+                ITEMS_PER_PAGE,
+                statusFilter !== "all" ? statusFilter : undefined
+            );
+            setBuilds(response.items);
+            setTotal(response.total);
+        } catch (err) {
+            console.error("Failed to refresh builds:", err);
+        } finally {
+            setLoading(false);
+        }
+    }, [datasetId, versionId, currentPage, statusFilter]);
+
     return (
         <div className="space-y-4">
             {/* Search and Filter */}
@@ -188,19 +209,29 @@ export default function ProcessingPage() {
                                     {total} builds with feature extraction
                                 </CardDescription>
                             </div>
-                            <Button
-                                variant="outline"
-                                onClick={handleRetryProcessing}
-                                disabled={retryLoading || failedCount === 0}
-                                className={cn("gap-2", failedCount === 0 && "opacity-50")}
-                            >
-                                {retryLoading ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                    <RotateCcw className="h-4 w-4" />
-                                )}
-                                Retry Failed ({failedCount})
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleRefresh}
+                                >
+                                    <RefreshCw className="h-4 w-4 mr-1" />
+                                    Refresh
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={handleRetryProcessing}
+                                    disabled={retryLoading || failedCount === 0}
+                                    className={cn("gap-2", failedCount === 0 && "opacity-50")}
+                                >
+                                    {retryLoading ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <RotateCcw className="h-4 w-4" />
+                                    )}
+                                    Retry Failed ({failedCount})
+                                </Button>
+                            </div>
                         </div>
                     </CardHeader>
                     <CardContent>

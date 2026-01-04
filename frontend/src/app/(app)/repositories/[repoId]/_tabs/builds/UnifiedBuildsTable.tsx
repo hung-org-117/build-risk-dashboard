@@ -8,6 +8,7 @@ import {
     Clock,
     GitCommit,
     Loader2,
+    RefreshCw,
     RotateCcw,
     XCircle,
 } from "lucide-react";
@@ -126,6 +127,9 @@ interface UnifiedBuildsTableProps {
     onRetryProcessing?: () => void;
     retryIngestionLoading?: boolean;
     retryProcessingLoading?: boolean;
+    // Failed counts from progress API
+    failedIngestionCount?: number;
+    failedProcessingCount?: number;
 }
 
 export function UnifiedBuildsTable({
@@ -134,6 +138,8 @@ export function UnifiedBuildsTable({
     onRetryProcessing,
     retryIngestionLoading,
     retryProcessingLoading,
+    failedIngestionCount = 0,
+    failedProcessingCount = 0,
 }: UnifiedBuildsTableProps) {
     const router = useRouter();
     const [builds, setBuilds] = useState<UnifiedBuild[]>([]);
@@ -222,13 +228,7 @@ export function UnifiedBuildsTable({
 
     const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
 
-    // Count failed builds for retry buttons
-    const ingestionFailedCount = builds.filter(
-        (b) => b.ingestion_status === "failed" || b.ingestion_status === "missing_resource"
-    ).length;
-    const processingFailedCount = builds.filter(
-        (b) => b.extraction_status === "failed" || b.prediction_status === "failed"
-    ).length;
+
 
     if (loading) {
         return (
@@ -249,15 +249,24 @@ export function UnifiedBuildsTable({
                         </CardDescription>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => loadBuilds(page, true)}
+                            disabled={tableLoading}
+                        >
+                            <RefreshCw className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`} />
+                            Refresh
+                        </Button>
                         {onRetryIngestion && (
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={onRetryIngestion}
-                                disabled={retryIngestionLoading || ingestionFailedCount === 0}
+                                disabled={retryIngestionLoading || failedIngestionCount === 0}
                                 className={cn(
                                     "text-amber-600 border-amber-300 hover:bg-amber-50",
-                                    ingestionFailedCount === 0 && "opacity-50"
+                                    failedIngestionCount === 0 && "opacity-50"
                                 )}
                             >
                                 {retryIngestionLoading ? (
@@ -265,7 +274,7 @@ export function UnifiedBuildsTable({
                                 ) : (
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                 )}
-                                Retry Ingestion
+                                Retry Ingestion {failedIngestionCount > 0 && `(${failedIngestionCount})`}
                             </Button>
                         )}
                         {onRetryProcessing && (
@@ -273,10 +282,10 @@ export function UnifiedBuildsTable({
                                 variant="outline"
                                 size="sm"
                                 onClick={onRetryProcessing}
-                                disabled={retryProcessingLoading || processingFailedCount === 0}
+                                disabled={retryProcessingLoading || failedProcessingCount === 0}
                                 className={cn(
                                     "text-amber-600 border-amber-300 hover:bg-amber-50",
-                                    processingFailedCount === 0 && "opacity-50"
+                                    failedProcessingCount === 0 && "opacity-50"
                                 )}
                             >
                                 {retryProcessingLoading ? (
@@ -284,7 +293,7 @@ export function UnifiedBuildsTable({
                                 ) : (
                                     <RotateCcw className="mr-2 h-4 w-4" />
                                 )}
-                                Retry Processing
+                                Retry Processing {failedProcessingCount > 0 && `(${failedProcessingCount})`}
                             </Button>
                         )}
                     </div>

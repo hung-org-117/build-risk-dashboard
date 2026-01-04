@@ -354,6 +354,7 @@ class EnrichmentBuildDetail(BaseModel):
     expected_feature_count: int = 0
     features: Dict[str, Any] = {}
     scan_metrics: Dict[str, Any] = {}
+    created_at: Optional[datetime] = None
     enriched_at: Optional[datetime] = None
 
 

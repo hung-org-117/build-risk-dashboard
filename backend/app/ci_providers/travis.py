@@ -5,6 +5,7 @@ from typing import List, Optional
 import httpx
 
 from app.config import settings
+from app.utils.datetime import ensure_naive_utc
 
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
@@ -109,7 +110,9 @@ class TravisCIProvider(CIProviderInterface):
         if branch:
             params["branch.name"] = branch
         if only_completed:
-            params["state"] = "passed,failed,errored,canceled"
+            # Only fetch passed/failed - exclude errored/canceled as they
+            # typically never started and have no logs
+            params["state"] = "passed,failed"
 
         builds = []
         consecutive_unavailable = 0
@@ -126,6 +129,11 @@ class TravisCIProvider(CIProviderInterface):
             build_list = data.get("builds", [])
 
             for build in build_list:
+                # Skip builds without started_at - these are errored/canceled builds
+                # that never actually ran and typically have no logs
+                if not build.get("started_at"):
+                    continue
+
                 build_data = self._parse_build(build, repo_name)
 
                 is_bot = _is_bot_author(build_data.commit_author)
@@ -134,8 +142,16 @@ class TravisCIProvider(CIProviderInterface):
                 if exclude_bots and is_bot:
                     continue
 
-                if since and build_data.created_at and build_data.created_at < since:
-                    continue
+                if since and build_data.created_at:
+                    # Normalize both to naive UTC for comparison
+                    since_normalized = ensure_naive_utc(since)
+                    created_normalized = ensure_naive_utc(build_data.created_at)
+                    if (
+                        created_normalized
+                        and since_normalized
+                        and created_normalized < since_normalized
+                    ):
+                        continue
 
                 if only_with_logs:
                     logs_available = await self._check_logs_available(client, build["id"])
@@ -216,6 +232,10 @@ class TravisCIProvider(CIProviderInterface):
 
     async def fetch_build_jobs(self, build_id: str) -> List[JobData]:
         """Fetch jobs for a build."""
+        # Handle repo_name:build_id format (extract just the build_id)
+        if ":" in build_id:
+            _, build_id = build_id.rsplit(":", 1)
+
         base_url = self._get_base_url()
         url = f"{base_url}/build/{build_id}/jobs"
 
@@ -240,6 +260,10 @@ class TravisCIProvider(CIProviderInterface):
         job_id: Optional[str] = None,
     ) -> List[LogFile]:
         """Fetch logs for a build's jobs."""
+        # Handle repo_name:build_id format (extract just the build_id)
+        if ":" in build_id:
+            _, build_id = build_id.rsplit(":", 1)
+
         base_url = self._get_base_url()
         logs = []
 

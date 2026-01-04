@@ -142,35 +142,22 @@ export function OverviewTab({
             {/* Mini Stepper */}
             <MiniStepper status={status} progress={progress} />
 
-            {/* Current Phase Details - shown during active phases */}
-            {["queued", "ingesting", "processing"].includes(status.toLowerCase()) && (
-                <CurrentPhaseCard
-                    status={status}
-                    progress={progress}
-                    isLoading={false}
-                    onRetryFailed={onRetryIngestion}
-                />
-            )}
-
-            {/* Collection Card - shows current batch (after checkpoint) */}
+            {/* Collection Card - read-only view */}
             <CollectionCard
                 fetchedCount={progress?.import_builds.total || 0}
                 ingestedCount={progress?.import_builds.ingested || 0}
                 totalCount={progress?.import_builds.total || 0}
-                failedCount={progress?.import_builds.missing_resource || 0}
+                missingResourceCount={progress?.import_builds.missing_resource || 0}
+                failedCount={0}
                 lastSyncedAt={repo.last_synced_at}
                 status={status}
-                onSync={onSync}
-                onRetryFailed={onRetryIngestion}
-                syncLoading={syncLoading}
-                retryLoading={retryIngestionLoading}
                 // Checkpoint props
                 hasCheckpoint={progress?.checkpoint?.has_checkpoint || false}
                 checkpointAt={progress?.checkpoint?.last_checkpoint_at}
                 acceptedFailedCount={progress?.checkpoint?.accepted_failed || 0}
             />
 
-            {/* Processing Card */}
+            {/* Processing Card - read-only view */}
             <ProcessingCard
                 extractedCount={(progress?.training_builds.completed || 0) + (progress?.training_builds.partial || 0)}
                 extractedTotal={progress?.training_builds.total || progress?.import_builds.ingested || 0}
@@ -179,11 +166,6 @@ export function OverviewTab({
                 failedExtractionCount={progress?.training_builds.failed || 0}
                 failedPredictionCount={progress?.training_builds.prediction_failed || 0}
                 status={status}
-                canStartProcessing={canStartProcessing}
-                onStartProcessing={onStartProcessing}
-                onRetryFailed={onRetryFailed}
-                startLoading={startProcessingLoading}
-                retryFailedLoading={retryFailedLoading}
                 lastProcessedBuildId={progress?.checkpoint?.current_processing_build_number}
             />
 

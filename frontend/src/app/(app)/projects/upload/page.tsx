@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Play, RotateCcw, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Loader2, RotateCcw, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useUploadDatasetWizard } from "./_components/hooks/useUploadDatasetWizard";
@@ -35,17 +35,7 @@ export default function UploadDatasetPage() {
     } = wizard;
 
     const handleBack = () => {
-        if (step === 2) {
-            if (validationStatus === "completed") {
-                // Already done, stick here or redirect?
-                return;
-            }
-            // Go back to config
-            wizard.goBackToStep1();
-        } else {
-            // Back to projects list
-            router.push("/projects");
-        }
+        router.push("/projects");
     };
 
     return (
@@ -54,9 +44,11 @@ export default function UploadDatasetPage() {
             <div className="w-[500px] flex-shrink-0 border-r bg-background flex flex-col z-10 shadow-xl shadow-slate-200/50 dark:shadow-none">
                 {/* Header */}
                 <div className="flex items-center gap-3 px-6 py-4 border-b">
-                    <Button variant="ghost" size="icon" className="-ml-2" onClick={handleBack}>
-                        <ArrowLeft className="h-5 w-5" />
-                    </Button>
+                    {step === 1 && (
+                        <Button variant="ghost" size="icon" className="-ml-2" onClick={handleBack}>
+                            <ArrowLeft className="h-5 w-5" />
+                        </Button>
+                    )}
                     <div>
                         <h1 className="text-lg font-semibold leading-none">Upload Dataset</h1>
                         <p className="text-xs text-muted-foreground mt-1">Add new data for risk analysis</p>
@@ -130,13 +122,15 @@ export default function UploadDatasetPage() {
                 {/* Footer Controls */}
                 <div className="px-6 py-4 border-t bg-background mt-auto">
                     <div className="flex justify-between items-center">
-                        <Button
-                            variant="ghost"
-                            onClick={handleBack}
-                            disabled={uploading || (step === 2 && validationStatus === 'completed')}
-                        >
-                            {step === 1 ? 'Cancel' : 'Back'}
-                        </Button>
+                        {step === 1 && (
+                            <Button
+                                variant="ghost"
+                                onClick={() => router.push("/projects")}
+                                disabled={uploading}
+                            >
+                                Cancel
+                            </Button>
+                        )}
 
                         <div className="flex gap-2">
                             {step === 1 && (

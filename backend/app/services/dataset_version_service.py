@@ -848,6 +848,7 @@ class DatasetVersionService:
             expected_feature_count=expected_feature_count,
             features=features,
             scan_metrics=scan_metrics,
+            created_at=enrichment_build.created_at,
             enriched_at=enrichment_build.enriched_at,
         )
 

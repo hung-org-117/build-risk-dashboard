@@ -249,13 +249,18 @@ def ingest_model_builds(
                 break
 
     # Dispatch chord: fetch all pages → aggregate results
-    workflow = chord(
-        group(fetch_tasks),
-        aggregate_fetch_results.s(
+    # Use on_error on callback to handle chord failures
+    callback = aggregate_fetch_results.s(
+        repo_config_id=repo_config_id,
+        correlation_id=correlation_id,
+    ).on_error(
+        handle_fetch_chord_error.s(
             repo_config_id=repo_config_id,
             correlation_id=correlation_id,
-        ),
+        )
     )
+
+    workflow = chord(group(fetch_tasks), callback)
     workflow.apply_async()
 
     logger.info(f"{corr_prefix} Dispatched {len(fetch_tasks)} fetch tasks")
@@ -376,6 +381,7 @@ def fetch_builds_until_existing(
                 BuildConclusion.SKIPPED,
                 BuildConclusion.ACTION_REQUIRED,
                 BuildConclusion.STALE,
+                BuildConclusion.CANCELLED,
             ):
                 continue
 
@@ -576,6 +582,7 @@ def fetch_builds_batch(
             BuildConclusion.SKIPPED,
             BuildConclusion.ACTION_REQUIRED,
             BuildConclusion.STALE,
+            BuildConclusion.CANCELLED,
         ):
             continue
 
@@ -739,6 +746,66 @@ def aggregate_fetch_results(
         "status": "dispatched",
         "builds": total_fetched,
         "commits": len(commit_shas),
+    }
+
+
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.model_ingestion.handle_fetch_chord_error",
+    queue="ingestion",
+    soft_time_limit=30,
+    time_limit=60,
+)
+def handle_fetch_chord_error(
+    self: PipelineTask,
+    request,
+    exc,
+    traceback,
+    repo_config_id: str,
+    correlation_id: str = "",
+) -> Dict[str, Any]:
+    """
+    Error callback for fetch chord failure.
+
+    When fetch chord fails (API timeout, rate limit exhausted, validation error):
+    1. Mark repo config as FAILED with error message
+    2. Publish status update to WebSocket
+
+    Args:
+        request: Celery request object
+        exc: Exception that caused the failure
+        traceback: Traceback string
+        repo_config_id: The model repo config ID
+        correlation_id: Correlation ID for tracing
+    """
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    error_msg = str(exc) if exc else "Unknown fetch error"
+
+    logger.error(f"{corr_prefix} Fetch chord failed for {repo_config_id}: {error_msg}")
+
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+
+    # Mark repo config as FAILED
+    repo_config_repo.update_repository(
+        repo_config_id,
+        {
+            "status": ModelImportStatus.FAILED.value,
+            "error_message": f"Fetch failed: {error_msg}",
+            "failed_at": datetime.utcnow(),
+        },
+    )
+
+    publish_status(
+        repo_config_id,
+        "failed",
+        f"Failed to fetch builds: {error_msg}",
+    )
+
+    return {
+        "status": "handled",
+        "error": error_msg,
+        "repo_config_id": repo_config_id,
     }
 
 

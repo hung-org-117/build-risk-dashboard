@@ -60,6 +60,7 @@ export type {
     ScanSummaryResponse,
     EnrichedBuildData,
     ImportBuildItem,
+    UnifiedPipelineBuild,
     VersionDataResponse,
     NodeExecutionDetail,
     AuditLogDetail,

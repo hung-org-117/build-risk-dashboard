@@ -20,7 +20,6 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
     const {
         repo,
         progress,
-        builds,
         handleStartProcessing,
         startProcessingLoading,
     } = useRepo();
@@ -29,14 +28,12 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
     const isSyncing = SYNCING_STATUSES.includes(repoStatus.toLowerCase());
     const canStartProcessing = ["ingested", "processed"].includes(repoStatus.toLowerCase());
 
-    // Check if checkpoint matches the last ingested build (nothing new to process)
-    const lastIngestedBuildNumber = builds?.[0]?.build_number;
-    const checkpointBuildNumber = progress?.checkpoint?.current_processing_build_number;
-    const isFullyProcessed = Boolean(
-        lastIngestedBuildNumber &&
-        checkpointBuildNumber &&
-        lastIngestedBuildNumber === checkpointBuildNumber
-    );
+    // Get counts from progress API
+    const lastProcessedBuildNumber = progress?.checkpoint?.last_processed_build_number;
+    const pendingProcessingCount = progress?.checkpoint?.pending_processing_count ?? 0;
+
+    // Disable Start Processing if no pending builds
+    const hasNothingToProcess = pendingProcessingCount === 0;
 
     // Check if we're on sub-pages (processing/[buildId] detail pages)
     const isDetailPage = pathname.includes("/processing/") && pathname.split("/").length > 5;
@@ -55,14 +52,14 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
             {!isDetailPage && (
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        {/* Checkpoint indicator */}
-                        {progress?.checkpoint?.current_processing_build_number && !isSyncing && (
+                        {/* Last Processed indicator */}
+                        {lastProcessedBuildNumber && !isSyncing && (
                             <div className="flex items-center gap-2 text-sm">
-                                <span className="text-muted-foreground">Checkpoint:</span>
+                                <span className="text-muted-foreground">Last Processed:</span>
                                 <span className="font-mono text-xs bg-muted px-2 py-1 rounded">
-                                    #{progress.checkpoint.current_processing_build_number}
+                                    #{lastProcessedBuildNumber}
                                 </span>
-                                {isFullyProcessed && (
+                                {hasNothingToProcess && (
                                     <span className="text-xs text-green-600">(Up to date)</span>
                                 )}
                             </div>
@@ -85,15 +82,15 @@ export default function BuildsLayout({ children }: { children: React.ReactNode }
                         <Button
                             size="sm"
                             onClick={handleStartProcessing}
-                            disabled={startProcessingLoading || !canStartProcessing || isSyncing || isFullyProcessed}
-                            title={isFullyProcessed ? "All builds are already processed" : undefined}
+                            disabled={startProcessingLoading || !canStartProcessing || isSyncing || hasNothingToProcess}
+                            title={hasNothingToProcess ? "All builds are already processed" : undefined}
                         >
                             {startProcessingLoading ? (
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : (
                                 <Play className="mr-2 h-4 w-4" />
                             )}
-                            Start Processing
+                            Start Processing{pendingProcessingCount > 0 && ` (${pendingProcessingCount})`}
                         </Button>
                         <ExportPanel repoId={repoId} repoName={repo?.full_name} />
                     </div>

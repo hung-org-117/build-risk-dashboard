@@ -70,6 +70,7 @@ class ModelImportBuild(BaseEntity):
     class Config:
         collection = "model_import_builds"
         use_enum_values = True
+        protected_namespaces = ()  # Disable warning for model_ prefix fields
 
     model_repo_config_id: PyObjectId = Field(
         ...,

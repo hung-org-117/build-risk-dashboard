@@ -5,6 +5,7 @@ import {
   Loader2,
   Trash2,
   Upload,
+  RefreshCw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -216,19 +217,9 @@ export default function DatasetsPage() {
               Upload CSV datasets and configure feature extraction.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Input
-                placeholder="Search datasets..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9"
-              />
-            </div>
-            <Button onClick={() => router.push("/projects/upload")} className="gap-2">
-              <Upload className="h-4 w-4" /> Upload CSV
-            </Button>
-          </div>
+          <Button onClick={() => router.push("/projects/upload")} className="gap-2">
+            <Upload className="h-4 w-4" /> Upload CSV
+          </Button>
         </CardHeader>
       </Card>
 
@@ -242,10 +233,33 @@ export default function DatasetsPage() {
       {/* Datasets Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Uploaded Datasets</CardTitle>
-          <CardDescription>
-            Overview of all datasets available for enrichment
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Uploaded Datasets</CardTitle>
+              <CardDescription>
+                Overview of all datasets available for enrichment
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative w-64">
+                <Input
+                  placeholder="Search datasets..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-9"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => loadDatasets(page, true)}
+                disabled={tableLoading}
+              >
+                <RefreshCw className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">

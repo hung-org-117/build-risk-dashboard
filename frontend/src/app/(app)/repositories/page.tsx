@@ -58,6 +58,9 @@ export default function AdminReposPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearchQuery = useDebounce(searchQuery, 500);
 
+  // Status filter state
+  const [statusFilter, setStatusFilter] = useState<string>("");
+
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -74,6 +77,7 @@ export default function AdminReposPage() {
           skip: (pageNumber - 1) * PAGE_SIZE,
           limit: PAGE_SIZE,
           q: debouncedSearchQuery || undefined,
+          status: statusFilter || undefined,
         });
         setRepositories(data.items);
         setTotal(data.total);
@@ -85,7 +89,7 @@ export default function AdminReposPage() {
         setTableLoading(false);
       }
     },
-    [debouncedSearchQuery]
+    [debouncedSearchQuery, statusFilter]
   );
 
   // WebSocket connection
@@ -186,19 +190,9 @@ export default function AdminReposPage() {
               Connect GitHub repositories and ingest builds.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Input
-                placeholder="Search repositories..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-9"
-              />
-            </div>
-            <Button onClick={() => router.push("/repositories/import")} className="gap-2">
-              <Plus className="h-4 w-4" /> Add GitHub Repository
-            </Button>
-          </div>
+          <Button onClick={() => router.push("/repositories/import")} className="gap-2">
+            <Plus className="h-4 w-4" /> Add GitHub Repository
+          </Button>
         </CardHeader>
       </Card>
 
@@ -209,11 +203,37 @@ export default function AdminReposPage() {
       ) : null}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Connected repositories</CardTitle>
-          <CardDescription>
-            Overview of every repository currently tracked by BuildGuard
-          </CardDescription>
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle>Connected repositories</CardTitle>
+            <CardDescription>
+              Overview of every repository currently tracked by BuildGuard
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative w-64">
+              <Input
+                placeholder="Search repositories..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            >
+              <option value="">All Status</option>
+              <option value="queued">Queued</option>
+              <option value="fetching">Fetching</option>
+              <option value="ingesting">Ingesting</option>
+              <option value="ingested">Ingested</option>
+              <option value="processing">Processing</option>
+              <option value="processed">Processed</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">

@@ -28,6 +28,7 @@ import {
     Timer,
     FileText,
     RotateCcw,
+    RefreshCw,
 } from "lucide-react";
 import { datasetVersionApi, type ImportBuildItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -272,6 +273,26 @@ export default function IngestionPage() {
     const canStartProcessing = versionStatus.toLowerCase() === "ingested";
     const canRetryIngestion = failedCount > 0;
 
+    const handleRefresh = useCallback(async () => {
+        setLoading(true);
+        try {
+            const skip = (currentPage - 1) * ITEMS_PER_PAGE;
+            const response = await datasetVersionApi.getImportBuilds(
+                datasetId,
+                versionId,
+                skip,
+                ITEMS_PER_PAGE,
+                statusFilter !== "all" ? statusFilter : undefined
+            );
+            setBuilds(response.items);
+            setTotal(response.total);
+        } catch (err) {
+            console.error("Failed to refresh builds:", err);
+        } finally {
+            setLoading(false);
+        }
+    }, [datasetId, versionId, currentPage, statusFilter]);
+
     return (
         <div className="space-y-4">
             {/* Search and Filter */}
@@ -326,6 +347,7 @@ export default function IngestionPage() {
                     onRetryIngestion={handleRetryIngestion}
                     retryIngestionLoading={retryIngestionLoading}
                     failedCount={failedCount}
+                    onRefresh={handleRefresh}
                 />
             )}
 
@@ -373,6 +395,7 @@ function ImportBuildsTable({
     onRetryIngestion,
     retryIngestionLoading = false,
     failedCount = 0,
+    onRefresh,
 }: {
     builds: ImportBuildItem[];
     total: number;
@@ -383,6 +406,7 @@ function ImportBuildsTable({
     onRetryIngestion?: () => void;
     retryIngestionLoading?: boolean;
     failedCount?: number;
+    onRefresh?: () => void;
 }) {
     const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -418,6 +442,12 @@ function ImportBuildsTable({
                         </CardDescription>
                     </div>
                     <div className="flex items-center gap-2">
+                        {onRefresh && (
+                            <Button variant="outline" size="sm" onClick={onRefresh}>
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                                Refresh
+                            </Button>
+                        )}
                         {onRetryIngestion && (
                             <Button
                                 variant="outline"

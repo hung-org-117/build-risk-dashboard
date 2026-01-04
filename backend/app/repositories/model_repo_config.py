@@ -60,6 +60,7 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         skip: int = 0,
         limit: int = 100,
         search_query: Optional[str] = None,
+        status_filter: Optional[str] = None,
         github_accessible_repos: Optional[List[str]] = None,
     ) -> tuple[List[ModelRepoConfig], int]:
         """List repos with RBAC access control based on GitHub membership."""
@@ -67,6 +68,9 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
 
         if search_query:
             base_query["full_name"] = {"$regex": search_query, "$options": "i"}
+
+        if status_filter:
+            base_query["status"] = status_filter
 
         if user_role == "admin":
             pass

@@ -171,6 +171,33 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
             query["_id"] = {"$gt": checkpoint_id}
         return self.collection.count_documents(query)
 
+    def count_unprocessed_after_checkpoint(
+        self, config_id: str, checkpoint_id: Optional[ObjectId] = None
+    ) -> int:
+        """Count ingested builds that haven't been processed yet.
+
+        These are builds available for processing (Start Processing button).
+
+        Args:
+            config_id: ModelRepoConfig ID
+            checkpoint_id: Only count builds with _id > checkpoint_id
+
+        Returns:
+            Count of ingested builds ready for processing
+        """
+        query = {
+            "model_repo_config_id": ObjectId(config_id),
+            "status": {
+                "$in": [
+                    ModelImportBuildStatus.INGESTED.value,
+                    ModelImportBuildStatus.MISSING_RESOURCE.value,
+                ]
+            },
+        }
+        if checkpoint_id:
+            query["_id"] = {"$gt": checkpoint_id}
+        return self.collection.count_documents(query)
+
     def get_missing_resource_builds_with_errors(
         self, config_id: str, limit: int = 50
     ) -> List[dict]:

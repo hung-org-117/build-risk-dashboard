@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 @tag(group="build_log")
-def tr_build_id(build_run: BuildRunInput) -> int:
-    """Workflow run ID."""
-    return int(build_run.ci_run_id)
+def tr_build_id(build_run: BuildRunInput) -> str:
+    """Workflow run ID.
+
+    Returns the original CI run ID as a string to preserve
+    the exact ID for API lookups during dataset validation.
+    """
+    return build_run.ci_run_id
 
 
 @tag(group="build_log")

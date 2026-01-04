@@ -783,7 +783,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
 
         pipeline = [
             {"$match": match_query},
-            {"$sort": {"_id": 1}},
+            {"$sort": {"enriched_at": -1}},
             {
                 "$facet": {
                     "metadata": [{"$count": "total"}],
