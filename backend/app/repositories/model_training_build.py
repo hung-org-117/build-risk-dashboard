@@ -114,9 +114,11 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                     "build_number": build_number,
                     "build_created_at": build_created_at,
                     "feature_vector_id": fv_id,  # Link to FeatureVector
-                    "extraction_status": extraction_status.value
-                    if hasattr(extraction_status, "value")
-                    else extraction_status,
+                    "extraction_status": (
+                        extraction_status.value
+                        if hasattr(extraction_status, "value")
+                        else extraction_status
+                    ),
                     "created_at": now,
                 },
             },
@@ -127,7 +129,10 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         # Check if it was newly created by comparing created_at
         was_created = (
             doc.get("created_at") is not None
-            and (datetime.utcnow() - doc.get("created_at", datetime.utcnow())).total_seconds() < 2
+            and (
+                datetime.utcnow() - doc.get("created_at", datetime.utcnow())
+            ).total_seconds()
+            < 2
         )
         return build, was_created
 
@@ -172,6 +177,30 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             }
         )
 
+    def find_builds_for_prediction(
+        self,
+        model_repo_config_id: ObjectId,
+    ) -> List[ModelTrainingBuild]:
+        """
+        Find builds ready for prediction (extracted but not predicted).
+
+        Returns builds where:
+        - extraction_status is 'completed' or 'partial'
+        - prediction_status is 'pending'
+        """
+        return self.find_many(
+            {
+                "model_repo_config_id": model_repo_config_id,
+                "extraction_status": {
+                    "$in": [
+                        ExtractionStatus.COMPLETED.value,
+                        ExtractionStatus.PARTIAL.value,
+                    ]
+                },
+                "prediction_status": ExtractionStatus.PENDING.value,
+            }
+        )
+
     def find_by_config(
         self,
         model_repo_config_id: ObjectId,
@@ -180,7 +209,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
     ) -> tuple[List[ModelTrainingBuild], int]:
         """List builds for a model repo config with pagination."""
         query = {"model_repo_config_id": model_repo_config_id}
-        return self.paginate(query, sort=[("build_created_at", -1)], skip=skip, limit=limit)
+        return self.paginate(
+            query, sort=[("build_created_at", -1)], skip=skip, limit=limit
+        )
 
     def find_by_repo(
         self,
@@ -190,7 +221,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
     ) -> tuple[List[ModelTrainingBuild], int]:
         """List builds for a raw repository with pagination."""
         query = {"raw_repo_id": raw_repo_id}
-        return self.paginate(query, sort=[("build_created_at", -1)], skip=skip, limit=limit)
+        return self.paginate(
+            query, sort=[("build_created_at", -1)], skip=skip, limit=limit
+        )
 
     def find_existing_by_raw_build_run_ids(
         self,
@@ -266,7 +299,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """Count builds for a config, optionally filtered by status."""
         query: Dict[str, Any] = {"model_repo_config_id": model_repo_config_id}
         if status:
-            query["extraction_status"] = status.value if hasattr(status, "value") else status
+            query["extraction_status"] = (
+                status.value if hasattr(status, "value") else status
+            )
         return self.collection.count_documents(query)
 
     def get_for_training(
@@ -330,7 +365,10 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         match_query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
             "extraction_status": {
-                "$in": [ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value]
+                "$in": [
+                    ExtractionStatus.COMPLETED.value,
+                    ExtractionStatus.PARTIAL.value,
+                ]
             },
         }
 
@@ -357,7 +395,12 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                 }
             },
             # Unwind to get single feature_vector document
-            {"$unwind": {"path": "$feature_vector", "preserveNullAndEmptyArrays": True}},
+            {
+                "$unwind": {
+                    "path": "$feature_vector",
+                    "preserveNullAndEmptyArrays": True,
+                }
+            },
             # Add features field from feature_vector
             {
                 "$addFields": {
@@ -398,7 +441,10 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         match_query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
             "extraction_status": {
-                "$in": [ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value]
+                "$in": [
+                    ExtractionStatus.COMPLETED.value,
+                    ExtractionStatus.PARTIAL.value,
+                ]
             },
         }
 
@@ -423,9 +469,18 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                     "as": "feature_vector",
                 }
             },
-            {"$unwind": {"path": "$feature_vector", "preserveNullAndEmptyArrays": False}},
+            {
+                "$unwind": {
+                    "path": "$feature_vector",
+                    "preserveNullAndEmptyArrays": False,
+                }
+            },
             # Extract feature keys from feature_vector.features
-            {"$project": {"feature_keys": {"$objectToArray": "$feature_vector.features"}}},
+            {
+                "$project": {
+                    "feature_keys": {"$objectToArray": "$feature_vector.features"}
+                }
+            },
             {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
         ]
@@ -446,7 +501,10 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         query: Dict[str, Any] = {
             "model_repo_config_id": model_repo_config_id,
             "extraction_status": {
-                "$in": [ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value]
+                "$in": [
+                    ExtractionStatus.COMPLETED.value,
+                    ExtractionStatus.PARTIAL.value,
+                ]
             },
         }
 
@@ -486,7 +544,10 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             status = r["_id"]
             count = r["count"]
 
-            if status in (ExtractionStatus.COMPLETED.value, ExtractionStatus.PARTIAL.value):
+            if status in (
+                ExtractionStatus.COMPLETED.value,
+                ExtractionStatus.PARTIAL.value,
+            ):
                 stats["builds_processed"] += count
             elif status == ExtractionStatus.FAILED.value:
                 stats["builds_processing_failed"] += count
@@ -494,6 +555,72 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                 stats["total_pending"] += count
 
         return stats
+
+    def aggregate_prediction_stats(
+        self,
+        model_repo_config_id: ObjectId,
+    ) -> Dict[str, int]:
+        """
+        Aggregate prediction stats for a repo config.
+
+        Returns a dictionary with:
+        - 'predicted': count of builds with predicted_label (successful predictions)
+        - 'failed': count of builds with prediction_error (failed predictions)
+        - 'pending': count of builds with completed extraction but no prediction yet
+
+        Args:
+            model_repo_config_id: The ModelRepoConfig ID
+
+        Returns:
+            Dict with prediction stats
+        """
+        pipeline = [
+            {
+                "$match": {
+                    "model_repo_config_id": model_repo_config_id,
+                    "extraction_status": {
+                        "$in": [
+                            ExtractionStatus.COMPLETED.value,
+                            ExtractionStatus.PARTIAL.value,
+                        ]
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "predicted": {
+                        "$sum": {"$cond": [{"$ne": ["$predicted_label", None]}, 1, 0]}
+                    },
+                    "failed": {
+                        "$sum": {"$cond": [{"$ne": ["$prediction_error", None]}, 1, 0]}
+                    },
+                    "pending": {
+                        "$sum": {
+                            "$cond": [
+                                {
+                                    "$and": [
+                                        {"$eq": ["$predicted_label", None]},
+                                        {"$eq": ["$prediction_error", None]},
+                                    ]
+                                },
+                                1,
+                                0,
+                            ]
+                        }
+                    },
+                }
+            },
+        ]
+        results = list(self.collection.aggregate(pipeline))
+
+        if results:
+            return {
+                "predicted": results[0].get("predicted", 0),
+                "failed": results[0].get("failed", 0),
+                "pending": results[0].get("pending", 0),
+            }
+        return {"predicted": 0, "failed": 0, "pending": 0}
 
     def find_builds_needing_prediction(
         self,
@@ -559,4 +686,56 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             "prediction_error": {"$ne": None},
         }
         cursor = self.collection.find(query).limit(limit)
+        return [ModelTrainingBuild(**doc) for doc in cursor]
+
+    def aggregate_risk_counts(
+        self,
+        model_repo_config_id: ObjectId,
+    ) -> Dict[str, int]:
+        """
+        Aggregate builds by predicted risk label.
+
+        Returns a dictionary with counts for each risk level: HIGH, MEDIUM, LOW.
+        Only includes builds with successful predictions.
+
+        Args:
+            model_repo_config_id: The ModelRepoConfig ID
+
+        Returns:
+            Dict with counts per risk level, e.g. {"HIGH": 5, "MEDIUM": 10, "LOW": 20}
+        """
+        pipeline = [
+            {
+                "$match": {
+                    "model_repo_config_id": model_repo_config_id,
+                    "predicted_label": {"$ne": None},
+                }
+            },
+            {"$group": {"_id": "$predicted_label", "count": {"$sum": 1}}},
+        ]
+        results = list(self.collection.aggregate(pipeline))
+
+        # Convert to dict
+        return {r["_id"]: r["count"] for r in results if r["_id"]}
+
+    def find_high_risk_builds(
+        self,
+        model_repo_config_id: ObjectId,
+        limit: int = 10,
+    ) -> List[ModelTrainingBuild]:
+        """
+        Find builds predicted as HIGH risk.
+
+        Args:
+            model_repo_config_id: The ModelRepoConfig ID
+            limit: Maximum number of builds to return
+
+        Returns:
+            List of HIGH risk builds, sorted by build_created_at desc
+        """
+        query = {
+            "model_repo_config_id": model_repo_config_id,
+            "predicted_label": "HIGH",
+        }
+        cursor = self.collection.find(query).sort("build_created_at", -1).limit(limit)
         return [ModelTrainingBuild(**doc) for doc in cursor]

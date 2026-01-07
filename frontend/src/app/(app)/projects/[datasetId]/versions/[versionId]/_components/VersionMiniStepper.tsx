@@ -9,8 +9,8 @@ interface VersionProgress {
     builds_total: number;
     builds_ingested: number;
     builds_missing_resource: number;
-    builds_processed: number;
-    builds_processing_failed: number;
+    builds_features_extracted: number;
+    builds_extraction_failed: number;
 }
 
 interface Step {
@@ -37,7 +37,7 @@ const STEPS: Step[] = [
     {
         id: "processing",
         label: "Processing",
-        getCurrent: (p) => (p?.builds_processed || 0) + (p?.builds_processing_failed || 0),
+        getCurrent: (p) => (p?.builds_features_extracted || 0) + (p?.builds_extraction_failed || 0),
         getTotal: (p) => p?.builds_ingested || 0,
         getState: (status, p) => {
             const s = status.toLowerCase();

@@ -38,11 +38,18 @@ export default function BuildsPage() {
         }
     };
 
-    // Failed ingestion count: only count failed AFTER checkpoint (not missing_resource)
-    // Progress API counts builds after checkpoint already
-    const failedIngestionCount = progress?.import_builds.total
-        ? progress.import_builds.total - progress.import_builds.ingested - (progress.import_builds.missing_resource || 0)
-        : 0;
+    // Syncing status check - hide retry buttons during ingestion
+    const isSyncing = ["queued", "fetching", "ingesting"].includes(repo?.status?.toLowerCase() || "");
+
+    // Failed ingestion count: use the failed count from progress API
+    // Hide during syncing for cleaner UX
+    const failedIngestionCount = isSyncing ? 0 :
+        (progress?.import_builds.total || 0) -
+        (progress?.import_builds.ingested || 0) -
+        (progress?.import_builds.missing_resource || 0) -
+        (progress?.import_builds.pending || 0) -
+        (progress?.import_builds.fetched || 0) -
+        (progress?.import_builds.ingesting || 0);
 
     // Failed processing count: all failed extraction + prediction
     // Hide failed count while processing is in progress (confusing UX)

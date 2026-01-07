@@ -1,5 +1,3 @@
-"""DatasetVersion Repository - CRUD operations for dataset versions."""
-
 from __future__ import annotations
 
 import logging
@@ -48,23 +46,32 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         oid = self.ensure_object_id(dataset_id)
         query = {"dataset_id": oid}
         total = self.collection.count_documents(query)
-        docs = self.collection.find(query).sort("version_number", -1).skip(skip).limit(limit)
+        docs = (
+            self.collection.find(query)
+            .sort("version_number", -1)
+            .skip(skip)
+            .limit(limit)
+        )
         return [DatasetVersion(**doc) for doc in docs], total
 
-    def find_active_by_dataset(self, dataset_id: Union[str, ObjectId]) -> Optional[DatasetVersion]:
+    def find_active_by_dataset(
+        self, dataset_id: Union[str, ObjectId]
+    ) -> Optional[DatasetVersion]:
         """Find running or pending version for a dataset."""
         oid = self.ensure_object_id(dataset_id)
         doc = self.collection.find_one(
             {
                 "dataset_id": oid,
-                "status": {"$in": [VersionStatus.QUEUED, VersionStatus.PROCESSING]},
+                "status": {"$in": [VersionStatus.QUEUED, VersionStatus.INGESTING]},
             }
         )
         if doc:
             return DatasetVersion(**doc)
         return None
 
-    def find_latest_by_dataset(self, dataset_id: Union[str, ObjectId]) -> Optional[DatasetVersion]:
+    def find_latest_by_dataset(
+        self, dataset_id: Union[str, ObjectId]
+    ) -> Optional[DatasetVersion]:
         """Find the latest completed version for a dataset."""
         oid = self.ensure_object_id(dataset_id)
         doc = self.collection.find_one(
@@ -78,7 +85,9 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
     def get_next_version_number(self, dataset_id: Union[str, ObjectId]) -> int:
         """Get the next version number for a dataset."""
         oid = self.ensure_object_id(dataset_id)
-        latest = self.collection.find_one({"dataset_id": oid}, sort=[("version_number", -1)])
+        latest = self.collection.find_one(
+            {"dataset_id": oid}, sort=[("version_number", -1)]
+        )
         if latest:
             return latest.get("version_number", 0) + 1
         return 1
@@ -91,10 +100,17 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
     ) -> List[DatasetVersion]:
         """Find versions for a user."""
         oid = self.ensure_object_id(user_id)
-        docs = self.collection.find({"user_id": oid}).sort("created_at", -1).skip(skip).limit(limit)
+        docs = (
+            self.collection.find({"user_id": oid})
+            .sort("created_at", -1)
+            .skip(skip)
+            .limit(limit)
+        )
         return [DatasetVersion(**doc) for doc in docs]
 
-    def update_one(self, version_id: Union[str, ObjectId], updates: Dict[str, Any]) -> bool:
+    def update_one(
+        self, version_id: Union[str, ObjectId], updates: Dict[str, Any]
+    ) -> bool:
         """Update a version by ID."""
         updates["updated_at"] = datetime.now(timezone.utc)
         result = self.collection.update_one(
@@ -105,36 +121,38 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
     def update_build_progress(
         self,
         version_id: Union[str, ObjectId],
-        builds_processed: int,
-        builds_processing_failed: int,
+        builds_features_extracted: int,
+        builds_extraction_failed: int,
     ) -> bool:
         """Update version build progress atomically."""
         updates: Dict[str, Any] = {
-            "builds_processed": builds_processed,
-            "builds_processing_failed": builds_processing_failed,
+            "builds_features_extracted": builds_features_extracted,
+            "builds_extraction_failed": builds_extraction_failed,
             "updated_at": datetime.now(timezone.utc),
         }
 
         update_ops: Dict[str, Any] = {"$set": updates}
 
-        result = self.collection.update_one({"_id": self.ensure_object_id(version_id)}, update_ops)
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)}, update_ops
+        )
         return result.modified_count > 0
 
     def increment_builds(
         self,
         version_id: Union[str, ObjectId],
-        builds_processed: int = 0,
-        builds_processing_failed: int = 0,
+        builds_features_extracted: int = 0,
+        builds_extraction_failed: int = 0,
     ) -> bool:
         """Increment version build counters atomically using $inc.
 
         Used for sequential processing where each task adds to the total.
         """
         inc_ops: Dict[str, int] = {}
-        if builds_processed:
-            inc_ops["builds_processed"] = builds_processed
-        if builds_processing_failed:
-            inc_ops["builds_processing_failed"] = builds_processing_failed
+        if builds_features_extracted:
+            inc_ops["builds_features_extracted"] = builds_features_extracted
+        if builds_extraction_failed:
+            inc_ops["builds_extraction_failed"] = builds_extraction_failed
 
         if not inc_ops:
             return False
@@ -148,11 +166,82 @@ class DatasetVersionRepository(BaseRepository[DatasetVersion]):
         )
         return result.modified_count > 0
 
-    def increment_builds_processed(self, version_id: Union[str, ObjectId], count: int = 1) -> bool:
-        """Increment builds_processed counter by 1 (or specified count)."""
-        return self.increment_builds(version_id, builds_processed=count)
+    def increment_builds_features_extracted(
+        self, version_id: Union[str, ObjectId], count: int = 1
+    ) -> bool:
+        """Increment builds_features_extracted counter by 1 (or specified count)."""
+        return self.increment_builds(version_id, builds_features_extracted=count)
 
-    def mark_started(self, version_id: Union[str, ObjectId], task_id: Optional[str] = None) -> bool:
+    def increment_scans_completed(
+        self, version_id: Union[str, ObjectId], count: int = 1
+    ) -> bool:
+        """Increment scans_completed counter atomically."""
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)},
+            {
+                "$inc": {"scans_completed": count},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
+        )
+        return result.modified_count > 0
+
+    def increment_scans_failed(
+        self, version_id: Union[str, ObjectId], count: int = 1
+    ) -> bool:
+        """Increment scans_failed counter atomically."""
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)},
+            {
+                "$inc": {"scans_failed": count},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
+        )
+        return result.modified_count > 0
+
+    def mark_feature_extraction_completed(
+        self, version_id: Union[str, ObjectId]
+    ) -> bool:
+        """Mark feature extraction as completed."""
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)},
+            {
+                "$set": {
+                    "feature_extraction_completed": True,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        return result.modified_count > 0
+
+    def mark_scan_extraction_completed(self, version_id: Union[str, ObjectId]) -> bool:
+        """Mark scan extraction as completed."""
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)},
+            {
+                "$set": {
+                    "scan_extraction_completed": True,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        return result.modified_count > 0
+
+    def mark_enrichment_notified(self, version_id: Union[str, ObjectId]) -> bool:
+        """Mark that enrichment notification has been sent."""
+        result = self.collection.update_one(
+            {"_id": self.ensure_object_id(version_id)},
+            {
+                "$set": {
+                    "enrichment_notified": True,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        return result.modified_count > 0
+
+    def mark_started(
+        self, version_id: Union[str, ObjectId], task_id: Optional[str] = None
+    ) -> bool:
         """Mark version as started processing."""
         updates: Dict[str, Any] = {
             "status": VersionStatus.PROCESSING,

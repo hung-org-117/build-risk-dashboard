@@ -227,7 +227,7 @@ export function VersionHistoryTable({
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <span className="text-muted-foreground">
-                                                    {version.builds_processed.toLocaleString()} /{" "}
+                                                    {version.builds_features_extracted.toLocaleString()} /{" "}
                                                     {version.builds_total.toLocaleString()}
                                                 </span>
                                             </TableCell>

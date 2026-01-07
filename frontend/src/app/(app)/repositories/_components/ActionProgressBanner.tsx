@@ -15,8 +15,10 @@ interface ActionProgressBannerProps {
         training_builds: {
             completed: number;
             partial: number;
+            pending: number;
             total: number;
             with_prediction?: number;
+            pending_prediction?: number;
         };
     } | null;
     syncLoading?: boolean;
@@ -77,8 +79,24 @@ export function ActionProgressBanner({
     } else if (isProcessing) {
         icon = <Play className="h-4 w-4 text-green-500" />;
         title = "Processing Builds";
-        description = `Extracting features: ${extractionDone}/${extractionTotal}`;
-        progressValue = extractionPercent;
+
+        // Check if extraction is done but prediction is in progress
+        const extractionPending = progress?.training_builds.pending || 0;
+        const extractionDone = (progress?.training_builds.completed || 0) + (progress?.training_builds.partial || 0);
+        const predictionDone = progress?.training_builds.with_prediction || 0;
+        const pendingPrediction = progress?.training_builds.pending_prediction || 0;
+
+        const isExtractionDone = extractionPending === 0 && extractionDone > 0;
+        const isPredictionPhase = isExtractionDone && pendingPrediction > 0;
+
+        if (isPredictionPhase) {
+            description = `Predicting risk: ${predictionDone}/${extractionDone}`;
+            const predictionPercent = extractionDone > 0 ? Math.round((predictionDone / extractionDone) * 100) : 0;
+            progressValue = predictionPercent;
+        } else {
+            description = `Extracting features: ${extractionDone}/${extractionTotal}`;
+            progressValue = extractionPercent;
+        }
         bgColor = "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800";
     } else if (isRetryingIngestion) {
         icon = <RotateCcw className="h-4 w-4 animate-spin text-amber-500" />;

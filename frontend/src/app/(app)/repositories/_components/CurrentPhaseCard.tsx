@@ -187,9 +187,29 @@ function getPhaseInfo(status: string, progress: ImportProgress | null): PhaseInf
         };
     }
 
-    // Processing phase
+    // Processing phase - can be extraction or prediction
     if (statusLower === "processing") {
-        const { completed, partial, pending, total, failed } = progress.training_builds;
+        const { completed, partial, pending, total, failed, with_prediction, pending_prediction, prediction_failed } = progress.training_builds;
+
+        // Check if extraction is done but prediction is in progress
+        const extractionDone = pending === 0 && (completed + partial) > 0;
+        const predictionInProgress = extractionDone && with_prediction !== undefined &&
+            (pending_prediction !== undefined && pending_prediction > 0);
+
+        if (predictionInProgress) {
+            // Prediction phase
+            return {
+                title: "Risk Prediction",
+                description: "Running Bayesian LSTM model for risk prediction",
+                current: with_prediction || 0,
+                total: completed + partial,
+                failed: prediction_failed || 0,
+                isActive: true,
+                canRetry: false,
+            };
+        }
+
+        // Extraction phase
         return {
             title: "Feature Extraction",
             description: "Extracting features from ingested builds",

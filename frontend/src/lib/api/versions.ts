@@ -86,8 +86,8 @@ export interface VersionDataResponse {
         builds_ingested: number;
         builds_missing_resource: number;
         builds_ingestion_failed: number;
-        builds_processed: number;
-        builds_processing_failed: number;
+        builds_features_extracted: number;
+        builds_extraction_failed: number;
         selected_features: string[];
         scan_metrics?: {
             trivy?: string[];
@@ -328,16 +328,6 @@ export const datasetVersionApi = {
     ): Promise<EnrichmentBuildDetailResponse> => {
         const response = await api.get<EnrichmentBuildDetailResponse>(
             `/datasets/${datasetId}/versions/${versionId}/builds/${buildId}`
-        );
-        return response.data;
-    },
-
-    getIngestionProgress: async (
-        datasetId: string,
-        versionId: string
-    ): Promise<VersionIngestionProgress> => {
-        const response = await api.get<VersionIngestionProgress>(
-            `/datasets/${datasetId}/versions/${versionId}/ingestion-progress`
         );
         return response.data;
     },

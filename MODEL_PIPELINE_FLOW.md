@@ -161,6 +161,54 @@ ingest_model_builds
        └─ Dispatch dispatch_ingestion
 ```
 
+### 1.2.1 Webhook Auto-Sync Flow
+
+**Files**: 
+- [backend/app/api/webhook.py](backend/app/api/webhook.py) - API endpoint `/webhook/github`
+- [backend/app/services/github/github_webhook.py](backend/app/services/github/github_webhook.py) - Event handler
+- [backend/app/tasks/model_ingestion.py](backend/app/tasks/model_ingestion.py) - `ingest_webhook_build` task
+
+**Mục đích**: Tự động nhận builds mới từ GitHub webhook khi workflow hoàn thành
+
+| Task | Queue | Timeout | Mô Tả |
+|------|-------|---------|-------|
+| `ingest_webhook_build` | ingestion | 300s | Ingest single build từ webhook event |
+
+```
+GitHub sends webhook (workflow_run.completed)
+       │
+       ▼
+/webhook/github (FastAPI)
+│
+├─ Verify signature (GITHUB_WEBHOOK_SECRET)
+├─ Filter: only action=completed, conclusion=completed
+├─ Find RawRepository by full_name
+│
+└─ IF repo tracked in ModelRepoConfig:
+       │
+       ├─ Create/Update RawBuildRun
+       ├─ Increment builds_fetched counter
+       └─ Dispatch ingest_webhook_build
+              │
+              ▼
+    ingest_webhook_build (Celery)
+    │
+    ├─ Create ModelImportBuild (status=FETCHED)
+    ├─ Mark INGESTING
+    └─ Dispatch dispatch_ingestion (single build)
+           │
+           ▼
+    Build ingested (clone/worktree/logs)
+           │
+           ▼
+    Status: INGESTED
+    (User starts processing manually via UI)
+```
+
+> [!NOTE]
+> Webhook chỉ thực hiện **ingestion** (clone, worktree, logs), không tự động processing.
+> User phải bấm "Start Processing" trên UI để chạy feature extraction.
+
 ### 1.3 Fetch Builds Logic
 
 ```python
@@ -399,13 +447,13 @@ process_workflow_run (sequential for each build)
 │   ├─ extraction_status: COMPLETED/PARTIAL/FAILED
 │   └─ extraction_error (if any)
 │
-├─ Track result in Redis (ProcessingTracker)
 └─ Publish WebSocket update
        │
        ▼
 finalize_model_processing
 │
-├─ Get results from Redis tracker
+├─ Query DB for builds with extraction_status IN (completed, partial)
+│   AND prediction_status = pending (find_builds_for_prediction)
 ├─ Update repo_config:
 │   ├─ status → PROCESSED
 │   ├─ last_processed_import_build_id (checkpoint)
@@ -515,11 +563,12 @@ update_data["last_processed_import_build_id"] = ObjectId(last_build_id)
 
 **Mục đích**: Dự đoán risk level cho mỗi build
 
-### 4.1 Prediction Task
+### 4.1 Prediction Tasks
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
 | `predict_builds_batch` | prediction | 360s | Batch prediction cho nhiều builds |
+| `finalize_prediction` | processing | 120s | Finalize: set status PROCESSED after all predictions |
 
 ### 4.2 Prediction Flow
 
@@ -663,7 +712,9 @@ class ExtractionStatus(str, Enum):
 |--------|----------|-------|
 | `POST` | `/repos/import/bulk` | Import multiple repositories |
 | `GET` | `/repos/` | List repositories |
-| `GET` | `/repos/search` | Search repositories |
+| `GET` | `/repos/search` | Search repositories (private installed + public) |
+| `GET` | `/repos/available` | Discover available repositories |
+| `GET` | `/repos/languages?full_name={owner/repo}` | Detect repository languages |
 | `GET` | `/repos/{repo_id}` | Get repository detail |
 | `DELETE` | `/repos/{repo_id}` | Delete repository (cascade) |
 
@@ -673,18 +724,19 @@ class ExtractionStatus(str, Enum):
 |--------|----------|-------|
 | `POST` | `/repos/{repo_id}/sync-run` | Trigger manual sync (fetch new builds) |
 | `POST` | `/repos/{repo_id}/start-processing` | Start Phase 2 (processing) |
-| `POST` | `/repos/{repo_id}/reingest-failed` | Retry failed ingestion |
-| `POST` | `/repos/{repo_id}/reprocess-failed` | Retry failed processing |
-| `POST` | `/repos/{repo_id}/retry-predictions` | Retry failed predictions |
+| `POST` | `/repos/{repo_id}/reingest-failed` | Retry FAILED ingestion builds (not MISSING_RESOURCE) |
+| `POST` | `/repos/{repo_id}/reprocess-failed` | Retry failed processing/prediction |
 
 ### Progress & Builds
 
 | Method | Endpoint | Mô Tả |
 |--------|----------|-------|
-| `GET` | `/repos/{repo_id}/import-progress` | Get detailed import progress |
-| `GET` | `/repos/{repo_id}/import-builds` | List ModelImportBuild records |
-| `GET` | `/repos/{repo_id}/training-builds` | List ModelTrainingBuild records |
+| `GET` | `/repos/{repo_id}/import-progress` | Get detailed import progress by status |
+| `GET` | `/repos/{repo_id}/import-progress/failed` | Get failed import builds with error details |
+| `GET` | `/repos/{repo_id}/import-builds` | List ModelImportBuild records (ingestion phase) |
+| `GET` | `/repos/{repo_id}/training-builds` | List ModelTrainingBuild records (processing phase) |
 | `GET` | `/repos/{repo_id}/builds` | List builds (RawBuildRun enriched) |
+| `GET` | `/repos/{repo_id}/builds/unified` | Unified builds (ingestion + processing + prediction) |
 | `GET` | `/repos/{repo_id}/builds/{build_id}` | Get build detail |
 
 ### Export
@@ -692,8 +744,11 @@ class ExtractionStatus(str, Enum):
 | Method | Endpoint | Mô Tả |
 |--------|----------|-------|
 | `GET` | `/repos/{repo_id}/export/preview` | Preview exportable data |
-| `GET` | `/repos/{repo_id}/export` | Stream export (CSV/JSON) |
-| `POST` | `/repos/{repo_id}/export/async` | Create async export job |
+| `GET` | `/repos/{repo_id}/export` | Stream export (CSV/JSON) - for small datasets |
+| `POST` | `/repos/{repo_id}/export/async` | Create async export job - for large datasets |
+| `GET` | `/repos/{repo_id}/export/jobs` | List export jobs for repository |
+| `GET` | `/repos/export/jobs/{job_id}` | Get export job status |
+| `GET` | `/repos/export/jobs/{job_id}/download` | Download completed export file |
 
 ---
 
@@ -705,26 +760,39 @@ class ExtractionStatus(str, Enum):
 
 ```
 /repositories
-├── page.tsx              # Repository list
+├── page.tsx                   # Repository list with import progress display
+├── layout.tsx                 # Main layout
+├── _components/
+│   ├── ActionProgressBanner.tsx    # Progress banner with retry buttons
+│   ├── CollectionCard.tsx          # Ingestion stats display
+│   ├── CurrentPhaseCard.tsx        # Active phase details card
+│   ├── ImportProgressDisplay.tsx   # Import progress in list view
+│   ├── MiniStepper.tsx             # 4-phase indicator component
+│   ├── ProcessingCard.tsx          # Processing stats display
+│   └── StatBox.tsx                 # Stat box component
 ├── import/
-│   └── page.tsx          # Import wizard (2 steps)
+│   └── page.tsx               # Import wizard (2 steps)
 └── [repoId]/
-    ├── layout.tsx        # Repo context & tabs
-    ├── page.tsx          # Redirect to overview
+    ├── layout.tsx             # Repo context & tabs navigation
+    ├── page.tsx               # Redirect to overview
+    ├── repo-context.tsx       # React context for repo state
     ├── overview/
-    │   └── page.tsx      # Pipeline overview
+    │   └── page.tsx           # Pipeline overview (uses OverviewTab)
+    ├── analytics/
+    │   └── page.tsx           # Analytics dashboard (uses AnalyticsTab)
     ├── builds/
-    │   ├── page.tsx      # Builds list
-    │   ├── ingestion/
-    │   │   └── page.tsx  # Ingestion builds table
-    │   ├── processing/
-    │   │   └── page.tsx  # Processing builds table
+    │   ├── page.tsx           # Unified builds list with UnifiedBuildsTable
+    │   ├── layout.tsx         # Builds layout
+    │   └── _components/
+    │       └── ...            # Build-related components
+    ├── build/
     │   └── [buildId]/
-    │       └── page.tsx  # Build detail
+    │       └── page.tsx       # Single build detail page
     └── _tabs/
-        ├── OverviewTab.tsx
-        ├── BuildsTab.tsx
-        └── IssuesTab.tsx
+        ├── OverviewTab.tsx    # Overview tab component
+        ├── AnalyticsTab.tsx   # Analytics/charts tab component
+        └── builds/
+            └── UnifiedBuildsTable.tsx  # Unified builds table (ingestion + processing)
 ```
 
 ### Import Flow UI
@@ -768,25 +836,62 @@ Step 2: Configure & Import
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### Tabs & Navigation
+
+Repository detail page (`/repositories/[repoId]`) có các tabs:
+- **Overview**: Pipeline overview với MiniStepper, CollectionCard, ProcessingCard
+- **Builds**: Unified builds table hiển thị tất cả builds với ingestion & processing status
+- **Analytics**: Time-series charts showing builds by risk level over time
+
 ### Overview Tab Components
 
 ```
-OverviewTab
-├── MiniStepper          # Phase indicator (Fetch → Ingest → Process)
-├── CurrentPhaseCard     # Active phase details (shown during progress)
-├── CollectionCard       # Ingestion stats & controls
+OverviewTab (in _tabs/OverviewTab.tsx)
+├── MiniStepper          # 4-phase indicator (Fetch → Ingest → Extract → Predict)
+├── CollectionCard       # Ingestion stats (fetched, ingested, missing_resource counts)
 │   ├── Fetched count
 │   ├── Ingested count
-│   ├── Failed count
-│   ├── [Sync] button
-│   └── [Retry Failed] button
-├── ProcessingCard       # Processing stats & controls
-│   ├── Extracted count
-│   ├── Predicted count
-│   ├── Failed count
-│   ├── [Start Processing] button
-│   └── [Retry Failed] button
-└── Repository Info      # Branch, language, CI provider
+│   ├── Missing Resource count
+│   └── Checkpoint info (last processed, accepted failed)
+├── ProcessingCard       # Processing stats
+│   ├── Extracted count / total
+│   ├── Predicted count / total
+│   ├── Failed extraction count
+│   ├── Failed prediction count
+│   └── Last processed build ID
+└── Repository Info      # Branch, language, CI provider, visibility
+```
+
+### Builds Page Components
+
+```
+BuildsPage (in builds/page.tsx)
+├── ActionProgressBanner   # Progress banner shown during active phases
+│   ├── Phase indicator (Ingesting/Processing/Predicting)
+│   ├── Progress bar
+│   ├── [Retry Failed Ingestion] button (when applicable)
+│   └── [Retry Failed Processing] button (when applicable)
+└── UnifiedBuildsTable     # Combined builds table
+    ├── Build info (ID, branch, commit)
+    ├── CI status (success/failure)
+    ├── Ingestion status (ingested, missing_resource, failed)
+    ├── Extraction status (completed, partial, failed)
+    ├── Prediction result (LOW, MEDIUM, HIGH risk)
+    └── Expandable row with details
+```
+
+### Analytics Tab Components
+
+```
+AnalyticsTab (in _tabs/AnalyticsTab.tsx)
+├── Summary Stats Cards
+│   ├── Total Builds with Predictions
+│   ├── Risk Distribution (LOW/MEDIUM/HIGH counts)
+│   └── Trend indicators
+└── Time Series Chart
+    ├── Stacked area chart by risk level
+    ├── Time range filter
+    └── Interactive tooltips
 ```
 
 ---
@@ -809,8 +914,8 @@ OverviewTab
 |------------|--------|-----------|--------|
 | Feature extraction failed | FAILED | Yes | `retry_failed_builds` |
 | Hamilton DAG error | FAILED | Yes | `retry_failed_builds` |
-| Prediction timeout | FAILED | Yes | `retry_predictions` |
-| Prediction model error | FAILED | Yes | `retry_predictions` |
+| Prediction timeout | FAILED | Yes | `retry_failed_builds` (handles both extraction + prediction) |
+| Prediction model error | FAILED | Yes | `retry_failed_builds` (skips extraction if already COMPLETED) |
 
 ### Error Callbacks
 

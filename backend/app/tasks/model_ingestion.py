@@ -890,7 +890,7 @@ def dispatch_ingestion(
             resource,
             ResourceStatus.IN_PROGRESS,
         )
-        # Publish WebSocket event for real-time UI update
+
         publish_ingestion_build_update(
             repo_id=repo_config_id,
             resource=resource,
@@ -1339,5 +1339,120 @@ def reingest_failed_builds(
         "status": "queued",
         "imports_reset": reset_count,
         "total_failed": len(failed_builds),
+        "correlation_id": correlation_id,
+    }
+
+
+# WEBHOOK INGESTION TASK
+@celery_app.task(
+    bind=True,
+    base=SafeTask,
+    name="app.tasks.model_ingestion.ingest_webhook_build",
+    queue="ingestion",
+    soft_time_limit=300,
+    time_limit=360,
+    max_retries=3,
+)
+def x(
+    self: SafeTask,
+    repo_config_id: str,
+    raw_repo_id: str,
+    raw_build_run_id: str,
+    full_name: str,
+    ci_provider: str,
+    commit_sha: str,
+    ci_run_id: str,
+    github_repo_id: int,
+) -> Dict[str, Any]:
+    """
+    Ingest a single build from webhook event.
+
+    This task is triggered by GitHub webhook when a workflow_run completes.
+    It only runs ingestion (clone, worktree, logs) - does NOT auto-process.
+    User must manually start processing phase via UI.
+
+    Flow:
+    1. Create ModelImportBuild if not exists (status=FETCHED)
+    2. Run ingestion workflow for this single build
+    3. Mark as INGESTED when done
+    4. STOP - no auto-processing (aligns with 2-phase approach)
+    """
+    correlation_id = str(uuid.uuid4())[:8]
+    corr_prefix = f"[corr={correlation_id}][webhook]"
+
+    logger.info(
+        f"{corr_prefix} Starting webhook ingestion for build {ci_run_id} "
+        f"in repo {full_name}"
+    )
+
+    import_build_repo = ModelImportBuildRepository(self.db)
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+    raw_repo_repo = RawRepositoryRepository(self.db)
+
+    # Verify repo config exists
+    repo_config = repo_config_repo.find_by_id(repo_config_id)
+    if not repo_config:
+        logger.error(f"{corr_prefix} ModelRepoConfig not found: {repo_config_id}")
+        return {"status": "error", "error": "ModelRepoConfig not found"}
+
+    # Get raw repo for github_repo_id if not provided
+    raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+    if not raw_repo:
+        logger.error(f"{corr_prefix} RawRepository not found: {raw_repo_id}")
+        return {"status": "error", "error": "RawRepository not found"}
+
+    github_repo_id = github_repo_id or raw_repo.github_repo_id
+
+    # Create or get ModelImportBuild
+    existing_import = import_build_repo.find_by_business_key(
+        repo_config_id, raw_build_run_id
+    )
+
+    if existing_import:
+        logger.info(f"{corr_prefix} Build {ci_run_id} already ingested, skipping")
+        return {"status": "already_ingested", "build_id": ci_run_id}
+
+    # Create new ModelImportBuild with FETCHED status
+    import_build = ModelImportBuild(
+        model_repo_config_id=ObjectId(repo_config_id),
+        raw_build_run_id=ObjectId(raw_build_run_id),
+        status=ModelImportBuildStatus.FETCHED,
+        ci_run_id=ci_run_id,
+        commit_sha=commit_sha,
+    )
+    result = import_build_repo.insert_one(import_build)
+    import_build_id = str(result.id)
+    logger.info(f"{corr_prefix} Created ModelImportBuild {import_build_id}")
+
+    # Dispatch ingestion for this single build
+    dispatch_ingestion.delay(
+        repo_config_id=repo_config_id,
+        raw_repo_id=raw_repo_id,
+        github_repo_id=github_repo_id,
+        full_name=full_name,
+        ci_provider=ci_provider,
+        commit_shas=[commit_sha],
+        ci_run_ids=[ci_run_id],
+        correlation_id=correlation_id,
+    )
+
+    # Publish status update with stats (same as sync flow)
+    publish_status(
+        repo_config_id,
+        "ingesting",
+        f"Ingesting new build from webhook: {ci_run_id[:8]}...",
+        stats={
+            "builds_fetched": 1,  # Single build from webhook
+            "builds_processed": 0,
+            "builds_missing_resource": 0,
+        },
+    )
+
+    logger.info(f"{corr_prefix} Dispatched ingestion for webhook build {ci_run_id}")
+
+    return {
+        "status": "dispatched",
+        "build_id": ci_run_id,
+        "import_build_id": import_build_id,
         "correlation_id": correlation_id,
     }

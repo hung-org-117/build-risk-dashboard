@@ -165,7 +165,7 @@ export default function UserBuildsPage() {
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => router.push("/repos")}
+                        onClick={() => router.push("/my-repos")}
                         className="gap-2"
                     >
                         <ArrowLeft className="h-4 w-4" />
@@ -262,7 +262,7 @@ export default function UserBuildsPage() {
                                         <tr
                                             key={build.id}
                                             className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                                            onClick={() => router.push(`/repos/${repoId}/builds/${build.id}`)}
+                                            onClick={() => router.push(`/my-repos/${repoId}/builds/${build.id}`)}
                                         >
                                             <td className="px-6 py-4 font-medium">#{build.build_number || "—"}</td>
                                             <td className="px-6 py-4">

@@ -68,7 +68,9 @@ class DatasetValidationTask(SafeTask):
     Dataset.validation_status to FAILED and publishes WebSocket event.
     """
 
-    def get_entity_failure_handler(self, kwargs: dict) -> Optional[Callable[[str, str], None]]:
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
         """Update Dataset status to FAILED when task fails."""
         dataset_id = kwargs.get("dataset_id")
         if not dataset_id:
@@ -89,7 +91,9 @@ class DatasetValidationTask(SafeTask):
                     },
                 )
                 # Publish WebSocket event for frontend
-                publish_dataset_update(redis_client, dataset_id, "failed", error=error_message)
+                publish_dataset_update(
+                    redis_client, dataset_id, "failed", error=error_message
+                )
                 cleanup_validation_stats(redis_client, dataset_id)
             except Exception as e:
                 logger.warning(f"Failed to update dataset {dataset_id} status: {e}")
@@ -168,7 +172,9 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
     dataset_repo = DatasetRepository(db)
 
     try:
-        logger.info(f"{corr_prefix}[dataset_validation] Starting for dataset {dataset_id}")
+        logger.info(
+            f"{corr_prefix}[dataset_validation] Starting for dataset {dataset_id}"
+        )
 
         # Load dataset
         dataset = dataset_repo.find_by_id(dataset_id)
@@ -232,10 +238,14 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
         }
 
         if validated_builds:
-            logger.info(f"Resuming: skipping {len(validated_builds)} already validated builds")
+            logger.info(
+                f"Resuming: skipping {len(validated_builds)} already validated builds"
+            )
             for repo_name in list(all_repo_builds.keys()):
                 remaining = [
-                    b for b in all_repo_builds[repo_name] if b["build_id"] not in validated_builds
+                    b
+                    for b in all_repo_builds[repo_name]
+                    if b["build_id"] not in validated_builds
                 ]
                 if remaining:
                     all_repo_builds[repo_name] = remaining
@@ -264,10 +274,14 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
         init_validation_stats(self.redis, dataset_id, total_repos, total_builds)
 
         # Chunk repos for parallel processing
-        repo_chunks = list(chunk_dict(all_repo_builds, settings.VALIDATION_REPOS_PER_TASK))
+        repo_chunks = list(
+            chunk_dict(all_repo_builds, settings.VALIDATION_REPOS_PER_TASK)
+        )
 
         # Update total chunks in Redis
-        increment_validation_stat(self.redis, dataset_id, "total_chunks", len(repo_chunks))
+        increment_validation_stat(
+            self.redis, dataset_id, "total_chunks", len(repo_chunks)
+        )
 
         repo_tasks = [
             validate_repo_chunk.si(
@@ -432,7 +446,9 @@ def validate_repo_chunk(
 
                 repos_not_found += 1
                 increment_validation_stat(self.redis, dataset_id, "repos_not_found")
-                increment_validation_stat(self.redis, dataset_id, "builds_not_found", len(builds))
+                increment_validation_stat(
+                    self.redis, dataset_id, "builds_not_found", len(builds)
+                )
 
     # Update chunk completion
     increment_validation_stat(self.redis, dataset_id, "chunks_completed")
@@ -440,7 +456,9 @@ def validate_repo_chunk(
     # Publish progress update
     stats = get_validation_stats(self.redis, dataset_id)
     progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
-    publish_dataset_update(self.redis, dataset_id, "validating", progress=progress, stats=stats)
+    publish_dataset_update(
+        self.redis, dataset_id, "validating", progress=progress, stats=stats
+    )
 
     return {
         "chunk_index": chunk_index,
@@ -498,7 +516,9 @@ def validate_builds_chunk(
             raw_repo_id = str(raw_repo.id)
         else:
             # Repo not validated yet or not found - skip builds
-            logger.warning(f"RawRepository not found for {repo_name}, skipping build validation")
+            logger.warning(
+                f"RawRepository not found for {repo_name}, skipping build validation"
+            )
             return {
                 "repo_name": repo_name,
                 "builds_found": 0,
@@ -513,7 +533,9 @@ def validate_builds_chunk(
     builds_to_insert: List[DatasetBuild] = []
 
     # Determine CI provider from first build
-    ci_provider_str = builds[0].get("ci_provider", "github_actions") if builds else "github_actions"
+    ci_provider_str = (
+        builds[0].get("ci_provider", "github_actions") if builds else "github_actions"
+    )
     ci_provider = CIProvider(ci_provider_str)
 
     # Get CI provider client with config from settings (includes token)
@@ -532,7 +554,9 @@ def validate_builds_chunk(
     else:
         exclude_bots = getattr(build_filters, "exclude_bots", False)
         only_completed = getattr(build_filters, "only_completed", True)
-        allowed_conclusions = getattr(build_filters, "allowed_conclusions", ["success", "failure"])
+        allowed_conclusions = getattr(
+            build_filters, "allowed_conclusions", ["success", "failure"]
+        )
 
     build_ids = [b["build_id"] for b in builds]
     existing_builds = dataset_build_repo.find_many(
@@ -613,12 +637,16 @@ def validate_builds_chunk(
                     provider=ci_provider,
                     repo_name=build_data.repo_name or repo_name,
                     build_number=build_data.build_number,
-                    status=build_data.status.value
-                    if hasattr(build_data.status, "value")
-                    else build_data.status,
-                    conclusion=build_data.conclusion.value
-                    if hasattr(build_data.conclusion, "value")
-                    else build_data.conclusion,
+                    status=(
+                        build_data.status.value
+                        if hasattr(build_data.status, "value")
+                        else build_data.status
+                    ),
+                    conclusion=(
+                        build_data.conclusion.value
+                        if hasattr(build_data.conclusion, "value")
+                        else build_data.conclusion
+                    ),
                     commit_sha=build_data.commit_sha,
                     commit_message=build_data.commit_message,
                     commit_author=build_data.commit_author,
@@ -703,8 +731,12 @@ def validate_builds_chunk(
 
     # Update Redis counters
     increment_validation_stat(self.redis, dataset_id, "builds_found", builds_found)
-    increment_validation_stat(self.redis, dataset_id, "builds_not_found", builds_not_found)
-    increment_validation_stat(self.redis, dataset_id, "builds_filtered", builds_filtered)
+    increment_validation_stat(
+        self.redis, dataset_id, "builds_not_found", builds_not_found
+    )
+    increment_validation_stat(
+        self.redis, dataset_id, "builds_filtered", builds_filtered
+    )
 
     return {
         "repo_name": repo_name,
@@ -771,7 +803,9 @@ def aggregate_validation_results(
     builds_filtered = stats["builds_filtered"]
 
     # Calculate coverage
-    build_coverage = round((builds_found / total_builds) * 100, 2) if total_builds > 0 else 0.0
+    build_coverage = (
+        round((builds_found / total_builds) * 100, 2) if total_builds > 0 else 0.0
+    )
 
     try:
         # Aggregate builds by repo_name_from_csv
@@ -782,7 +816,9 @@ def aggregate_validation_results(
                     "_id": "$repo_name_from_csv",
                     "raw_repo_id": {"$first": "$raw_repo_id"},
                     "builds_total": {"$sum": 1},
-                    "builds_found": {"$sum": {"$cond": [{"$eq": ["$status", "found"]}, 1, 0]}},
+                    "builds_found": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "found"]}, 1, 0]}
+                    },
                     "builds_not_found": {
                         "$sum": {"$cond": [{"$eq": ["$status", "not_found"]}, 1, 0]}
                     },
@@ -856,6 +892,26 @@ def aggregate_validation_results(
         f"Dataset validation completed: {dataset_id}, "
         f"{repos_valid}/{total_repos} repos, {builds_found}/{total_builds} builds"
     )
+
+    # =========================================================================
+    # NOTIFY ADMIN ABOUT VALIDATION COMPLETION
+    # =========================================================================
+    try:
+        from app.services.notification_service import notify_dataset_validation_to_admin
+
+        dataset = dataset_repo.find_by_id(dataset_id)
+        if dataset:
+            notify_dataset_validation_to_admin(
+                db=db,
+                user_id=dataset.user_id,
+                dataset_name=dataset.name,
+                dataset_id=dataset_id,
+                repos_valid=repos_valid,
+                builds_valid=builds_found,
+                builds_total=total_builds,
+            )
+    except Exception as e:
+        logger.warning(f"{log_ctx} Failed to send validation notification: {e}")
 
     return {
         "status": "completed",

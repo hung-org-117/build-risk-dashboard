@@ -6,7 +6,7 @@ through ingestion stages (clone → worktree → logs).
 
 Key design principles:
 - Version tracking: Links build to DatasetVersion
-- Status tracking: Tracks build through PENDING → INGESTING → INGESTED
+- Status tracking: Tracks build through CREATED → INGESTING → INGESTED
 - Per-resource tracking: Extensible resource_status dict for granular error tracking
 - Query-based flow: Enables DB queries instead of state passing
 """
@@ -24,7 +24,7 @@ class DatasetImportBuildStatus(str, Enum):
     """Status of a build in the dataset ingestion pipeline."""
 
     # Initial state
-    PENDING = "pending"  # Queued for ingestion
+    CREATED = "created"  # Build created from CSV, waiting for ingestion
 
     # Ingestion stage (clone, worktree, logs)
     INGESTING = "ingesting"  # Ingestion in progress
@@ -90,8 +90,8 @@ class DatasetImportBuild(BaseEntity):
 
     # Pipeline status
     status: DatasetImportBuildStatus = Field(
-        default=DatasetImportBuildStatus.PENDING,
-        description="Pipeline status: PENDING → INGESTING → INGESTED or MISSING_RESOURCE",
+        default=DatasetImportBuildStatus.CREATED,
+        description="Pipeline status: CREATED → INGESTING → INGESTED or MISSING_RESOURCE",
     )
 
     # Per-resource status tracking (extensible)

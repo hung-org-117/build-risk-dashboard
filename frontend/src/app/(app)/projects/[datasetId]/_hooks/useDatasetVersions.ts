@@ -14,8 +14,8 @@ export interface DatasetVersion {
     builds_total: number;
     builds_ingested: number;
     builds_missing_resource: number;
-    builds_processed: number;
-    builds_processing_failed: number;
+    builds_features_extracted: number;
+    builds_extraction_failed: number;
     progress_percent: number;
     file_name: string | null;
     file_size_bytes: number | null;

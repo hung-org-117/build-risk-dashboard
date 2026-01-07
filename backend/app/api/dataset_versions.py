@@ -38,8 +38,8 @@ def _to_response(version: DatasetVersion) -> VersionResponse:
         builds_ingested=version.builds_ingested,
         builds_missing_resource=version.builds_missing_resource,
         builds_ingestion_failed=version.builds_ingestion_failed,
-        builds_processed=version.builds_processed,
-        builds_processing_failed=version.builds_processing_failed,
+        builds_features_extracted=version.builds_features_extracted,
+        builds_extraction_failed=version.builds_extraction_failed,
         progress_percent=version.progress_percent,
         started_at=version.started_at.isoformat() if version.started_at else None,
         completed_at=version.completed_at.isoformat() if version.completed_at else None,
@@ -99,24 +99,6 @@ async def get_version(
     service = DatasetVersionService(db)
     version = service.get_version(dataset_id, version_id, str(current_user["_id"]))
     return _to_response(version)
-
-
-@router.get(
-    "/{version_id}/ingestion-progress", response_model=IngestionProgressResponse
-)
-async def get_ingestion_progress(
-    dataset_id: str,
-    version_id: str,
-    db=Depends(get_db),
-    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
-):
-    """Get ingestion progress summary for a dataset version."""
-    service = DatasetVersionService(db)
-    return service.get_ingestion_progress(
-        dataset_id=dataset_id,
-        version_id=version_id,
-        user_id=str(current_user["_id"]),
-    )
 
 
 @router.get("/{version_id}/import-builds")

@@ -56,21 +56,42 @@ class DatasetVersion(FeatureConfigBase):
     status: VersionStatus = VersionStatus.QUEUED
 
     # === BUILD STATS (aligned with ModelRepoConfig) ===
-    builds_total: int = Field(default=0, description="Total validated builds in version")
-    builds_ingested: int = Field(default=0, description="Builds with resources prepared")
+    builds_total: int = Field(
+        default=0, description="Total validated builds in version"
+    )
+    builds_ingested: int = Field(
+        default=0, description="Builds with resources prepared"
+    )
     builds_missing_resource: int = Field(
         default=0, description="Builds with missing resources (not retryable)"
     )
     builds_ingestion_failed: int = Field(
         default=0, description="Builds that failed with actual errors (retryable)"
     )
-    builds_processed: int = Field(default=0, description="Builds with features extracted")
-    builds_processing_failed: int = Field(
-        default=0, description="Builds that failed during processing"
+    builds_features_extracted: int = Field(
+        default=0, description="Builds with features extracted"
+    )
+    builds_extraction_failed: int = Field(
+        default=0, description="Builds that failed during feature extraction"
     )
 
-    # Ingestion tracking (progress within INGESTING phase)
-    ingestion_progress: int = Field(default=0, description="Ingestion progress percentage (0-100)")
+    # === SCAN TRACKING (separate from feature extraction) ===
+    scans_total: int = Field(
+        default=0, description="Total scans to run (unique commits × enabled tools)"
+    )
+    scans_completed: int = Field(default=0, description="Completed scans")
+    scans_failed: int = Field(default=0, description="Failed scans")
+
+    # === COMPLETION FLAGS ===
+    feature_extraction_completed: bool = Field(
+        default=False, description="All features extracted"
+    )
+    scan_extraction_completed: bool = Field(
+        default=False, description="All scans done (completed + failed = total)"
+    )
+    enrichment_notified: bool = Field(
+        default=False, description="Enrichment complete notification sent"
+    )
 
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -100,7 +121,7 @@ class DatasetVersion(FeatureConfigBase):
         """Calculate processing progress percentage."""
         if self.builds_total == 0:
             return 0.0
-        return (self.builds_processed / self.builds_total) * 100
+        return (self.builds_features_extracted / self.builds_total) * 100
 
     @property
     def duration_seconds(self) -> Optional[float]:

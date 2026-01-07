@@ -122,7 +122,7 @@ export const INGESTION_STATUS_OPTIONS: StatusOption[] = [
 // Predefined status options for dataset import (no fetched state)
 export const DATASET_INGESTION_STATUS_OPTIONS: StatusOption[] = [
     { value: "all", label: "All Statuses" },
-    { value: "pending", label: "Pending" },
+    { value: "created", label: "Created" },
     { value: "ingesting", label: "Ingesting" },
     { value: "ingested", label: "Ingested" },
     { value: "failed", label: "Failed" },

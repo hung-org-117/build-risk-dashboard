@@ -650,7 +650,7 @@ class RepositoryService:
                 }
             },
             {"$unwind": {"path": "$raw_build", "preserveNullAndEmptyArrays": True}},
-            {"$sort": {"build_number": -1}},  # Newest first (highest build_number)
+            {"$sort": {"raw_build.created_at": -1}},
             {"$limit": 1},
             {"$project": {"build_number": 1, "ci_run_id": "$raw_build.ci_run_id"}},
         ]

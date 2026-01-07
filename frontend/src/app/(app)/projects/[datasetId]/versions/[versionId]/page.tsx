@@ -16,11 +16,15 @@ interface VersionData {
     builds_ingested: number;
     builds_missing_resource: number;
     builds_ingestion_failed: number;
-    builds_processed: number;
-    builds_processing_failed: number;
+    builds_features_extracted: number;
+    builds_extraction_failed: number;
     selected_features: string[];
     created_at: string | null;
     completed_at: string | null;
+    // Scan tracking
+    scans_total?: number;
+    scans_completed?: number;
+    scans_failed?: number;
 }
 
 export default function VersionOverviewPage() {
@@ -69,8 +73,8 @@ export default function VersionOverviewPage() {
                         builds_total: version.builds_total,
                         builds_ingested: version.builds_ingested,
                         builds_missing_resource: version.builds_missing_resource,
-                        builds_processed: version.builds_processed,
-                        builds_processing_failed: version.builds_processing_failed,
+                        builds_features_extracted: version.builds_features_extracted,
+                        builds_extraction_failed: version.builds_extraction_failed,
                     }}
                 />
             </div>
@@ -83,11 +87,14 @@ export default function VersionOverviewPage() {
                     status={version.status}
                 />
                 <VersionProcessingCard
-                    buildsProcessed={version.builds_processed}
+                    buildsExtracted={version.builds_features_extracted}
                     buildsIngested={version.builds_ingested}
-                    buildsProcessingFailed={version.builds_processing_failed}
+                    buildsExtractionFailed={version.builds_extraction_failed}
                     status={version.status}
                     canStartProcessing={version.status === "ingested"}
+                    scansCompleted={version.scans_completed}
+                    scansTotal={version.scans_total}
+                    scansFailed={version.scans_failed}
                 />
             </div>
 

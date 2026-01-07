@@ -54,7 +54,7 @@ const ITEMS_PER_PAGE = 20;
 /** Status config for import builds */
 const getImportStatusConfig = (status: string) => {
     const config: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
-        pending: { icon: Clock, color: "text-gray-500", label: "Pending" },
+        created: { icon: Clock, color: "text-gray-500", label: "Created" },
         fetched: { icon: CheckCircle2, color: "text-blue-500", label: "Fetched" },
         ingesting: { icon: Loader2, color: "text-blue-500", label: "Ingesting" },
         ingested: { icon: CheckCircle2, color: "text-green-500", label: "Ingested" },
@@ -84,7 +84,7 @@ export default function IngestionPage() {
 
     // Processing progress state
     const [processingProgress, setProcessingProgress] = useState<{
-        builds_processed: number;
+        builds_features_extracted: number;
         builds_total: number;
         progress: number;
     } | null>(null);
@@ -143,7 +143,7 @@ export default function IngestionPage() {
                 // Update processing progress
                 if (data.status === "processing" || data.status === "processed") {
                     setProcessingProgress({
-                        builds_processed: data.builds_processed || 0,
+                        builds_features_extracted: data.builds_features_extracted || 0,
                         builds_total: data.builds_total || 0,
                         progress: data.progress || 0,
                     });
@@ -311,7 +311,7 @@ export default function IngestionPage() {
                                         Feature Extraction in Progress
                                     </span>
                                     <span className="text-sm text-purple-600 dark:text-purple-400">
-                                        {processingProgress?.builds_processed || 0} / {processingProgress?.builds_total || total} builds
+                                        {processingProgress?.builds_features_extracted || 0} / {processingProgress?.builds_total || total} builds
                                     </span>
                                 </div>
                                 <div className="h-2 w-full rounded-full bg-purple-200 dark:bg-purple-900 overflow-hidden">

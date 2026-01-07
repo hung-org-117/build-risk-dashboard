@@ -49,7 +49,7 @@ const STEPS: Step[] = [
     {
         id: "ingest",
         label: "Ingest",
-        getCurrent: (p) => p?.import_builds.ingested || 0,
+        getCurrent: (p) => (p?.import_builds.ingested || 0) + (p?.import_builds.missing_resource || 0),
         getTotal: (p) => p?.import_builds.total || 0,
         getState: (status, p) => {
             const s = status.toLowerCase();

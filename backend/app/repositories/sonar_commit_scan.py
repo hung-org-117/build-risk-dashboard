@@ -41,19 +41,37 @@ class SonarCommitScanRepository(BaseRepository[SonarCommitScan]):
         if status:
             query["status"] = status.value
         total = self.collection.count_documents(query)
-        items = list(self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit))
+        items = list(
+            self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
+        )
         return [SonarCommitScan(**doc) for doc in items], total
 
     def count_by_version(self, version_id: ObjectId) -> int:
         """Count all scans for a version."""
         return self.collection.count_documents({"dataset_version_id": version_id})
 
-    def count_by_version_and_status(self, version_id: ObjectId, status: SonarScanStatus) -> int:
+    def count_by_version_and_status(
+        self, version_id: ObjectId, status: SonarScanStatus
+    ) -> int:
         """Count scans for a version filtered by status."""
         return self.collection.count_documents(
             {
                 "dataset_version_id": version_id,
                 "status": status.value,
+            }
+        )
+
+    def count_pending_or_scanning(self, version_id: ObjectId) -> int:
+        """Count scans that are still pending or in progress."""
+        return self.collection.count_documents(
+            {
+                "dataset_version_id": version_id,
+                "status": {
+                    "$in": [
+                        SonarScanStatus.PENDING.value,
+                        SonarScanStatus.SCANNING.value,
+                    ]
+                },
             }
         )
 

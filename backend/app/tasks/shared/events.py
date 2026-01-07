@@ -98,11 +98,16 @@ def publish_build_status(repo_id: str, build_id: str, status: str) -> bool:
 def publish_enrichment_update(
     version_id: str,
     status: str,
-    builds_processed: int = 0,
+    builds_features_extracted: int = 0,
     builds_total: int = 0,
     builds_ingested: int = 0,
     builds_missing_resource: int = 0,
     builds_ingestion_failed: int = 0,
+    scans_completed: int = 0,
+    scans_total: int = 0,
+    scans_failed: int = 0,
+    feature_extraction_completed: bool = False,
+    scan_extraction_completed: bool = False,
     error: Optional[str] = None,
 ) -> bool:
     """
@@ -111,26 +116,48 @@ def publish_enrichment_update(
     Args:
         version_id: DatasetVersion ID
         status: Status value (ingesting, processing, completed, failed)
-        builds_processed: Number of builds processed so far
+        builds_features_extracted: Number of builds with features extracted
         builds_total: Total number of builds in version
         builds_ingested: Number of builds ingested
         builds_missing_resource: Number of builds with missing resources
         builds_ingestion_failed: Number of builds that failed ingestion (retryable)
+        scans_completed: Number of scans completed
+        scans_total: Total number of scans to run
+        scans_failed: Number of scans failed
+        feature_extraction_completed: Whether feature extraction is done
+        scan_extraction_completed: Whether all scans are done
         error: Optional error message
 
     Returns:
         True if published successfully, False otherwise
     """
-    progress = round((builds_processed / builds_total) * 100, 1) if builds_total > 0 else 0
+    feature_extraction_progress = (
+        round((builds_features_extracted / builds_total) * 100, 1)
+        if builds_total > 0
+        else 0
+    )
+    scan_progress = (
+        round(((scans_completed + scans_failed) / scans_total) * 100, 1)
+        if scans_total > 0
+        else 0
+    )
     payload = {
         "version_id": version_id,
         "status": status,
-        "builds_processed": builds_processed,
+        # Feature extraction tracking
+        "builds_features_extracted": builds_features_extracted,
         "builds_total": builds_total,
         "builds_ingested": builds_ingested,
         "builds_missing_resource": builds_missing_resource,
         "builds_ingestion_failed": builds_ingestion_failed,
-        "progress": progress,
+        "feature_extraction_progress": feature_extraction_progress,
+        "feature_extraction_completed": feature_extraction_completed,
+        # Scan tracking (parallel with feature extraction)
+        "scans_completed": scans_completed,
+        "scans_total": scans_total,
+        "scans_failed": scans_failed,
+        "scan_progress": scan_progress,
+        "scan_extraction_completed": scan_extraction_completed,
     }
     if error:
         payload["error"] = error

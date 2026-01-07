@@ -23,9 +23,6 @@ from app.entities.base import BaseEntity, PyObjectId
 class ModelImportBuildStatus(str, Enum):
     """Status of a build in the import pipeline."""
 
-    # Initial state
-    PENDING = "pending"  # Queued for fetch
-
     # Fetch stage
     FETCHED = "fetched"  # Build info fetched from CI API
 

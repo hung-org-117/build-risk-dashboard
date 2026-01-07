@@ -381,7 +381,7 @@ export interface RepositoryRecord {
   builds_ingested: number;
   builds_completed: number;
   builds_missing_resource: number;  // Ingestion phase failures
-  builds_processing_failed: number; // Processing phase failures
+  builds_extraction_failed: number; // Feature extraction phase failures
   // Status
   status: "queued" | "fetching" | "ingesting" | "ingestion_complete" | "ingestion_partial" | "processing" | "imported" | "partial" | "failed";
   error_message?: string;
@@ -770,8 +770,8 @@ export interface EnrichmentJob {
   builds_total: number;
   builds_ingested: number;
   builds_missing_resource: number;
-  builds_processed: number;
-  builds_processing_failed: number;
+  builds_features_extracted: number;
+  builds_extraction_failed: number;
   progress_percent: number;
   selected_features: string[];
   started_at?: string;
@@ -779,13 +779,19 @@ export interface EnrichmentJob {
   error?: string;
   output_file?: string;
   created_at?: string;
+  // Scan tracking (parallel with feature extraction)
+  scans_total?: number;
+  scans_completed?: number;
+  scans_failed?: number;
+  feature_extraction_completed?: boolean;
+  scan_extraction_completed?: boolean;
 }
 
 export interface EnrichmentStatusResponse {
   job_id: string;
   status: string;
   progress_percent: number;
-  builds_processed: number;
+  builds_features_extracted: number;
   builds_total: number;
   builds_ingested: number;
   builds_missing_resource: number;
@@ -798,7 +804,7 @@ export interface EnrichmentStatusResponse {
 export interface EnrichmentProgressEvent {
   type: "progress";
   job_id: string;
-  builds_processed: number;
+  builds_features_extracted: number;
   builds_total: number;
   builds_ingested: number;
   builds_missing_resource: number;
@@ -811,8 +817,8 @@ export interface EnrichmentCompleteEvent {
   job_id: string;
   status: string;
   builds_total: number;
-  builds_processed: number;
-  builds_processing_failed: number;
+  builds_features_extracted: number;
+  builds_extraction_failed: number;
   output_file?: string;
   duration_seconds?: number;
 }

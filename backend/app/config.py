@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     INGESTION_BUILDS_PER_PAGE: int = 40  # Builds fetched per API page
     INGESTION_WORKTREES_PER_CHUNK: int = 20  # Worktrees created per task
     INGESTION_LOGS_PER_CHUNK: int = 20  # Logs downloaded per task
+    INGESTION_IMPORT_BUILDS_PER_CHUNK: int = (
+        1000  # Import builds created per bulk insert
+    )
+    INGESTION_BUILDS_QUERY_LIMIT: int = (
+        5000  # Max builds loaded per DB query (pagination)
+    )
+    INGESTION_REPOS_PER_BATCH: int = (
+        10  # Repos dispatched per batch (for large datasets)
+    )
 
     # --- Processing Phase (feature extraction) ---
     PROCESSING_BUILDS_PER_BATCH: int = 50  # Builds processed per enrichment batch

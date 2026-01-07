@@ -65,8 +65,11 @@ function PhaseStatusIcon({ status }: { status: string | undefined }) {
     if (statusLower === "partial") {
         return <AlertCircle className="h-4 w-4 text-amber-500" />;
     }
-    if (statusLower === "failed" || statusLower === "missing_resource") {
+    if (statusLower === "failed") {
         return <XCircle className="h-4 w-4 text-red-500" />;
+    }
+    if (statusLower === "missing_resource") {
+        return <AlertCircle className="h-4 w-4 text-amber-500" />;
     }
     if (statusLower === "in_progress" || statusLower === "ingesting" || statusLower === "processing") {
         return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;

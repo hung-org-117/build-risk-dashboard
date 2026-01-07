@@ -39,7 +39,6 @@ from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask, SafeTask, TaskState
 from app.tasks.shared import extract_features_for_build
 from app.tasks.shared.events import publish_enrichment_update
-from app.tasks.shared.processing_tracker import ProcessingTracker
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +73,11 @@ def start_enrichment_processing(
         logger.error(f"{corr_prefix} Version {version_id} not found")
         return {"status": "error", "message": "Version not found"}
 
-    valid_statuses = [
-        VersionStatus.INGESTED.value,
-    ]
-    if version.status not in valid_statuses:
-        msg = f"Cannot start processing: status is {version.status}. " f"Expected: {valid_statuses}"
+    if version.status != VersionStatus.INGESTED.value:
+        msg = (
+            f"Cannot start processing: status is {version.status}. "
+            f"Expected: {VersionStatus.INGESTED.value}"
+        )
         logger.warning(f"{corr_prefix} {msg}")
         return {"status": "error", "message": msg}
 
@@ -95,7 +94,9 @@ def start_enrichment_processing(
     # Dispatch scans (if configured) and processing batches
     dispatch_scans_and_processing.delay(version_id, correlation_id=correlation_id)
 
-    logger.info(f"{corr_prefix} Dispatched processing for {len(processable_builds)} builds")
+    logger.info(
+        f"{corr_prefix} Dispatched processing for {len(processable_builds)} builds"
+    )
 
     publish_enrichment_update(
         version_id=version_id,
@@ -122,7 +123,7 @@ def dispatch_scans_and_processing(
     Dispatch scans (async, fire & forget) and processing after ingestion completes.
 
     Scans run independently without blocking feature extraction.
-    Scan results are backfilled to DatasetEnrichmentBuild.features later.
+    Scan results are backfilled to FeatureVector.scan_metrics later.
     """
     # Get correlation_id for propagation to child tasks
     correlation_id = correlation_id or TracingContext.get_correlation_id() or ""
@@ -232,6 +233,20 @@ def handle_enrichment_processing_chain_error(
         f"Marked {in_progress_count} builds as FAILED, status={final_status}"
     )
 
+    # Notify admin about enrichment failure
+    try:
+        from app.services.notification_service import notify_enrichment_failed_to_admin
+
+        notify_enrichment_failed_to_admin(
+            db=self.db,
+            version_id=version_id,
+            error_message=error_msg,
+            completed_count=completed_count,
+            failed_count=failed_count,
+        )
+    except Exception as e:
+        logger.warning(f"{corr_prefix} Failed to send failure notification: {e}")
+
     return {
         "status": final_status,
         "in_progress_marked_failed": in_progress_count,
@@ -283,9 +298,11 @@ def dispatch_enrichment_batches(
 
     # Build lookup map for raw_build_run data
     raw_build_run_ids = [
-        ObjectId(ib.raw_build_run_id)
-        if isinstance(ib.raw_build_run_id, str)
-        else ib.raw_build_run_id
+        (
+            ObjectId(ib.raw_build_run_id)
+            if isinstance(ib.raw_build_run_id, str)
+            else ib.raw_build_run_id
+        )
         for ib in processable_imports
     ]
     # Type ignore: method accepts List[str | ObjectId]
@@ -294,7 +311,9 @@ def dispatch_enrichment_batches(
 
     # Sort by build creation time (oldest first) for temporal features
     processable_imports.sort(
-        key=lambda ib: (build_run_map.get(str(ib.raw_build_run_id), ib).created_at or ib.created_at)
+        key=lambda ib: (
+            build_run_map.get(str(ib.raw_build_run_id), ib).created_at or ib.created_at
+        )
     )
 
     # Step 2: Create DatasetEnrichmentBuild for each (if not exists)
@@ -333,10 +352,6 @@ def dispatch_enrichment_batches(
     # Step 3: Dispatch sequential processing (oldest → newest for temporal features)
     total_builds = len(enrichment_build_ids)
 
-    # Initialize ProcessingTracker for this enrichment batch
-    tracker = ProcessingTracker(self.redis, version_id, correlation_id)
-    tracker.initialize(total_builds)
-
     sequential_tasks = [
         process_single_enrichment.si(
             version_id=version_id,
@@ -347,7 +362,9 @@ def dispatch_enrichment_batches(
         for build_id in enrichment_build_ids
     ]
 
-    logger.info(f"{corr_prefix} Dispatching {total_builds} builds for sequential processing")
+    logger.info(
+        f"{corr_prefix} Dispatching {total_builds} builds for sequential processing"
+    )
 
     # Chain: B1 → B2 → B3 → ... → finalize
     # Each build processes after the previous one completes
@@ -450,14 +467,18 @@ def process_single_enrichment(
         """Mark build as FAILED."""
         enrichment_build_repo.update_one(
             enrichment_build_id,
-            {"extraction_status": ExtractionStatus.FAILED.value, "extraction_error": str(exc)},
+            {
+                "extraction_status": ExtractionStatus.FAILED.value,
+                "extraction_error": str(exc),
+            },
         )
 
     def _work(state: TaskState) -> Dict[str, Any]:
         """Feature extraction work function."""
         if state.phase == "START":
             enrichment_build_repo.update_one(
-                enrichment_build_id, {"extraction_status": ExtractionStatus.IN_PROGRESS.value}
+                enrichment_build_id,
+                {"extraction_status": ExtractionStatus.IN_PROGRESS.value},
             )
             state.phase = "EXTRACTING"
 
@@ -489,15 +510,7 @@ def process_single_enrichment(
             updates["extraction_error"] = "; ".join(result["errors"])
 
         enrichment_build_repo.update_one(enrichment_build_id, updates)
-        version_repo.increment_builds_processed(version_id)
-
-        # Track in Redis
-        if correlation_id:
-            tracker = ProcessingTracker(self.redis, version_id, correlation_id)
-            if result["status"] in ("completed", "partial"):
-                tracker.record_success(enrichment_build_id)
-            else:
-                tracker.record_failure(enrichment_build_id)
+        version_repo.increment_builds_features_extracted(version_id)
 
         return {
             "status": result["status"],
@@ -552,12 +565,26 @@ def reprocess_failed_enrichment_builds(
         logger.error(f"Version {version_id} not found")
         return {"status": "error", "message": "Version not found"}
 
-    # Find only FAILED enrichment builds
+    # Validate status - only allow retry when PROCESSED or FAILED
+    allowed_statuses = [
+        VersionStatus.PROCESSED.value,
+        VersionStatus.FAILED.value,
+    ]
+    if version.status not in allowed_statuses:
+        msg = (
+            f"Cannot reprocess: status is {version.status}. "
+            f"Expected: {allowed_statuses}"
+        )
+        logger.warning(msg)
+        return {"status": "error", "message": msg}
+
+    # Find only FAILED enrichment builds (sorted oldest → newest for temporal features)
     failed_builds = enrichment_build_repo.find_many(
         {
             "dataset_version_id": ObjectId(version_id),
             "extraction_status": ExtractionStatus.FAILED.value,
-        }
+        },
+        sort=[("_id", 1)],
     )
 
     if not failed_builds:
@@ -644,7 +671,7 @@ def finalize_enrichment(
     Finalize enrichment after all sequential builds processed.
 
     Called at end of chain: B1 → B2 → ... → finalize_enrichment
-    Uses ProcessingTracker for real-time results (matching model pipeline).
+    Uses database stats to determine final status.
     """
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     logger.info(f"{corr_prefix} Finalizing enrichment for version {version_id}")
@@ -652,20 +679,7 @@ def finalize_enrichment(
     version_repo = DatasetVersionRepository(self.db)
     enrichment_build_repo = DatasetEnrichmentBuildRepository(self.db)
 
-    # Get results from Redis tracker (matching model pipeline pattern)
-    tracker = ProcessingTracker(self.redis, version_id, correlation_id)
-    tracker_results = tracker.get_results()
-
-    tracker_success = tracker_results["success_count"]
-    tracker_failed = tracker_results["failed_count"]
-    tracker_skipped = tracker_results["skipped_count"]
-
-    logger.info(
-        f"{corr_prefix} Processing results from tracker: "
-        f"success={tracker_success}, failed={tracker_failed}, skipped={tracker_skipped}"
-    )
-
-    # Also get aggregated stats from DB for verification
+    # Get aggregated stats from DB
     stats = enrichment_build_repo.aggregate_stats_by_version(version_id)
     completed = stats.get("completed", 0)
     partial = stats.get("partial", 0)
@@ -684,17 +698,19 @@ def finalize_enrichment(
         version_id,
         {
             "status": final_status.value,
-            "builds_processed": completed + partial,
-            "builds_processing_failed": failed,
+            "builds_features_extracted": completed + partial,
+            "builds_extraction_failed": failed,
+            "feature_extraction_completed": True,  # Mark features as done
         },
     )
 
-    # Publish completion via WebSocket
+    # Publish completion via WebSocket with full status
     publish_enrichment_update(
         version_id=version_id,
         status=final_status.value,
-        builds_processed=completed + partial,
+        builds_features_extracted=completed + partial,
         builds_total=total,
+        feature_extraction_completed=True,
     )
 
     # Auto-trigger quality evaluation after successful enrichment
@@ -720,20 +736,24 @@ def finalize_enrichment(
         f"{completed + partial}/{total} rows enriched, {failed} failed"
     )
 
-    # Cleanup tracker after finalization (matching model pipeline)
-    tracker.cleanup()
+    # =========================================================================
+    # CHECK IF READY TO SEND ENRICHMENT COMPLETE NOTIFICATION
+    # =========================================================================
+    try:
+        from app.services.notification_service import (
+            check_and_notify_enrichment_completed,
+        )
+
+        check_and_notify_enrichment_completed(db=self.db, version_id=version_id)
+    except Exception as e:
+        logger.warning(f"{corr_prefix} Failed to check enrichment notification: {e}")
 
     return {
         "status": final_status.value,
         "version_id": version_id,
-        "builds_processed": completed + partial,
-        "builds_processing_failed": failed,
+        "builds_features_extracted": completed + partial,
+        "builds_extraction_failed": failed,
         "builds_total": total,
-        "tracker_stats": {
-            "success": tracker_success,
-            "failed": tracker_failed,
-            "skipped": tracker_skipped,
-        },
     }
 
 
@@ -752,7 +772,11 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
     Writes CSV/JSON file to disk with progress updates.
     """
     from app.repositories.export_job import ExportJobRepository
-    from app.utils.export_utils import format_feature_row, write_csv_file, write_json_file
+    from app.utils.export_utils import (
+        format_feature_row,
+        write_csv_file,
+        write_json_file,
+    )
 
     job_repo = ExportJobRepository(self.db)
     enrichment_repo = DatasetEnrichmentBuildRepository(self.db)
@@ -765,7 +789,9 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
     # Validate job has required fields for version export
     if not job.dataset_id or not job.version_id:
         logger.error(f"Export job {job_id} missing dataset_id or version_id")
-        job_repo.update_status(job_id, "failed", error_message="Missing dataset_id or version_id")
+        job_repo.update_status(
+            job_id, "failed", error_message="Missing dataset_id or version_id"
+        )
         return {"status": "error", "message": "Missing dataset_id or version_id"}
 
     # Mark as processing
@@ -774,10 +800,14 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
     try:
         # Get data cursor - convert ObjectId to ObjectId (they're already ObjectId in entity)
         dataset_oid = (
-            ObjectId(job.dataset_id) if isinstance(job.dataset_id, str) else job.dataset_id
+            ObjectId(job.dataset_id)
+            if isinstance(job.dataset_id, str)
+            else job.dataset_id
         )
         version_oid = (
-            ObjectId(job.version_id) if isinstance(job.version_id, str) else job.version_id
+            ObjectId(job.version_id)
+            if isinstance(job.version_id, str)
+            else job.version_id
         )
 
         cursor = enrichment_repo.get_enriched_for_export(
@@ -890,7 +920,9 @@ def dispatch_version_scans(
         return {"status": "skipped", "reason": "No scan metrics selected"}
 
     # Track unique commits to scan (avoid duplicates across pages)
-    commits_to_scan: Dict[tuple, Dict[str, Any]] = {}  # {(repo_id, commit_sha): commit_info}
+    commits_to_scan: Dict[tuple, Dict[str, Any]] = (
+        {}
+    )  # {(repo_id, commit_sha): commit_info}
     repo_cache: Dict[str, Any] = {}  # Cache RawRepository lookups
 
     # Config
@@ -898,7 +930,7 @@ def dispatch_version_scans(
     commits_per_batch = settings.SCAN_COMMITS_PER_BATCH
     batch_delay = settings.SCAN_BATCH_DELAY_SECONDS
 
-    total_builds_processed = 0
+    builds_scanned = 0
     total_batches_dispatched = 0
 
     logger.info(
@@ -914,7 +946,7 @@ def dispatch_version_scans(
         dataset_id=str(version.dataset_id),
         batch_size=builds_per_query,
     ):
-        total_builds_processed += len(build_batch)
+        builds_scanned += len(build_batch)
 
         # Collect workflow_run_ids from this batch (these are RawBuildRun ObjectIds)
         workflow_run_ids = [b.raw_run_id for b in build_batch if b.raw_run_id]
@@ -986,7 +1018,7 @@ def dispatch_version_scans(
             logger.info(
                 f"{corr_prefix} Dispatched batch {total_batches_dispatched}: "
                 f"{batch_count} scan tasks "
-                f"(processed {total_builds_processed} builds so far)"
+                f"(scanned {builds_scanned} builds so far)"
             )
 
     # Dispatch remaining commits
@@ -1000,16 +1032,36 @@ def dispatch_version_scans(
         total_batches_dispatched += 1
         logger.info(f"{corr_prefix} Dispatched final batch: {batch_count} scan tasks")
 
+    # Count actual scans from CommitScan collections
+    from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+    from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
+    trivy_repo_scan = TrivyCommitScanRepository(self.db)
+    sonar_repo_scan = SonarCommitScanRepository(self.db)
+
+    trivy_count = (
+        trivy_repo_scan.count_by_version(ObjectId(version_id)) if has_trivy else 0
+    )
+    sonar_count = (
+        sonar_repo_scan.count_by_version(ObjectId(version_id)) if has_sonar else 0
+    )
+    scans_total = trivy_count + sonar_count
+
+    # Update version with scans_total
+    version_repo.update_one(version_id, {"scans_total": scans_total})
+
     logger.info(
         f"{corr_prefix} Scan dispatch complete: "
-        f"{total_builds_processed} builds processed, "
-        f"{total_batches_dispatched} batches dispatched"
+        f"{builds_scanned} builds scanned, "
+        f"{total_batches_dispatched} batches dispatched, "
+        f"{scans_total} total scans ({trivy_count} trivy, {sonar_count} sonar)"
     )
 
     return {
         "status": "dispatched",
-        "builds_processed": total_builds_processed,
+        "builds_scanned": builds_scanned,
         "batches_dispatched": total_batches_dispatched,
+        "scans_total": scans_total,
         "has_sonar": has_sonar,
         "has_trivy": has_trivy,
     }

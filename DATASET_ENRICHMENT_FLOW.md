@@ -6,9 +6,11 @@
 3. [Phase 2: Ingestion](#phase-2-ingestion)
 4. [Phase 3: Processing](#phase-3-processing)
 5. [Scan Metrics Integration](#scan-metrics-integration)
-6. [Entities & Data Model](#entities--data-model)
-7. [Error Handling & Recovery](#error-handling--recovery)
-8. [Performance Optimization](#performance-optimization)
+6. [API Endpoints](#api-endpoints)
+7. [Frontend UI Flow](#frontend-ui-flow)
+8. [Entities & Data Model](#entities--data-model)
+9. [Error Handling & Recovery](#error-handling--recovery)
+10. [Performance Optimization](#performance-optimization)
 
 ---
 
@@ -595,12 +597,12 @@ Nếu build N fail → tất cả builds sau đó sẽ có temporal features kh�
 
 **Solution**: Process tuần tự từ cũ → mới:
 ```
-1. B1 (oldest) → complete → track in Redis
-2. B2 → use B1's results → complete → track
+1. B1 (oldest) → complete → update DB
+2. B2 → use B1's results → complete → update DB
 3. B3 → use B1, B2's results → complete
 ...
 n. Bn (newest) → use all previous → complete
-n+1. finalize_enrichment → aggregate results
+n+1. finalize_enrichment → aggregate from DB
 ```
 
 ### 3.3 Tasks Overview
@@ -888,11 +890,8 @@ def process_single_enrichment(
         "enriched_at": datetime.now(),
     })
     
-    # Track in ProcessingTracker (for finalize aggregation)
-    tracker.record_success(enrichment_build_id) if success else tracker.record_failure(...)
-    
     # Update version progress
-    version_repo.increment_builds_processed(version_id)
+    version_repo.increment_builds_features_extracted(version_id)
     
     return {"status": result["status"], "feature_count": result.get("feature_count")}
 ```
@@ -907,12 +906,7 @@ def finalize_enrichment(
     created_count: int,
     correlation_id: str,
 ):
-    # Get results from ProcessingTracker (Redis)
-    tracker = ProcessingTracker(redis, version_id, correlation_id)
-    tracker_results = tracker.get_results()
-    # {success_count, failed_count, skipped_count}
-    
-    # Get aggregated stats from DB
+    # Get aggregated stats from DB (no Redis tracker)
     stats = enrichment_build_repo.aggregate_stats_by_version(version_id)
     # {completed: X, partial: Y, failed: Z}
     
@@ -922,22 +916,23 @@ def finalize_enrichment(
     else:
         final_status = PROCESSED
     
-    # Update version
+    # Update version with feature_extraction_completed flag
     version_repo.update_one(version_id, {
         "status": final_status,
-        "builds_processed": completed + partial,
-        "builds_processing_failed": failed,
+        "builds_features_extracted": completed + partial,
+        "builds_extraction_failed": failed,
+        "feature_extraction_completed": True,  # Mark features done
     })
     
     # Auto quality evaluation
     if final_status == PROCESSED:
         quality_service.evaluate_version(version_id)
     
-    # Cleanup tracker
-    tracker.cleanup()
+    # Check if enrichment fully complete (features + scans)
+    check_and_notify_enrichment_completed(version_id)
     
     # Publish event
-    publish_enrichment_update(version_id, final_status)
+    publish_enrichment_update(version_id, final_status, feature_extraction_completed=True)
 ```
 
 ### 3.8 Error Handling
@@ -1144,6 +1139,224 @@ filtered_metrics = _filter_trivy_metrics(
 
 ---
 
+## API Endpoints
+
+**File**: [backend/app/api/dataset_versions.py](backend/app/api/dataset_versions.py)
+
+> [!NOTE]
+> Prefix: `/datasets/{dataset_id}/versions`
+
+### Version Management
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/` | List versions for a dataset |
+| `POST` | `/` | Create new version (triggers validation & ingestion) |
+| `GET` | `/{version_id}` | Get version details |
+| `DELETE` | `/{version_id}` | Delete version (cascade deletes builds) |
+
+### Ingestion & Processing
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/{version_id}/import-builds` | List DatasetImportBuild records |
+| `GET` | `/{version_id}/enrichment-builds` | List DatasetEnrichmentBuild records |
+| `GET` | `/{version_id}/builds/{build_id}` | Get build detail with features |
+| `POST` | `/{version_id}/start-processing` | Start processing phase (requires INGESTED status) |
+| `POST` | `/{version_id}/retry-ingestion` | Retry FAILED ingestion builds |
+| `POST` | `/{version_id}/retry-processing` | Retry FAILED processing builds |
+
+### Scan Metrics
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/{version_id}/scan-status` | Get scan status summary (Trivy/SonarQube) |
+| `GET` | `/{version_id}/commit-scans` | List commit scans with pagination |
+| `GET` | `/{version_id}/commit-scans/{commit_sha}` | Get scan detail for specific commit |
+| `POST` | `/{version_id}/commit-scans/{commit_sha}/retry` | Retry scan for commit (tool_type param) |
+
+### Data & Export
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/{version_id}/data` | Get paginated data with column stats |
+| `GET` | `/{version_id}/preview` | Preview exportable data |
+| `GET` | `/{version_id}/export` | Stream export (CSV/JSON) - small datasets |
+| `POST` | `/{version_id}/export/async` | Create async export job - large datasets |
+| `GET` | `/{version_id}/export/jobs` | List export jobs |
+| `GET` | `/export/jobs/{job_id}` | Get export job status |
+| `GET` | `/export/jobs/{job_id}/download` | Download completed export file |
+
+### Quality Evaluation
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `POST` | `/{version_id}/evaluate` | Start quality evaluation |
+| `GET` | `/{version_id}/quality-report` | Get latest quality report |
+
+---
+
+## Frontend UI Flow
+
+**Files**: [frontend/src/app/(app)/projects/](frontend/src/app/(app)/projects/)
+
+### Page Structure
+
+```
+/projects
+├── page.tsx                    # Dataset list page
+├── layout.tsx                  # Main layout
+├── _components/
+│   └── StatusBadge.tsx         # Dataset status badge component
+├── upload/
+│   ├── page.tsx                # CSV upload wizard
+│   └── _components/
+│       └── ...                 # Upload-related components
+└── [datasetId]/
+    ├── page.tsx                # Dataset detail (version history)
+    ├── layout.tsx              # Dataset layout with tabs
+    ├── _components/
+    │   ├── CorrelationMatrixModal.tsx
+    │   ├── DatasetHeader.tsx
+    │   ├── FeatureDistributionModal.tsx
+    │   ├── VersionHistory.tsx
+    │   ├── VersionHistoryTable.tsx
+    │   ├── FeatureSelection/
+    │   │   └── ...             # Feature selection components
+    │   └── tabs/
+    │       └── ...             # Tab components
+    ├── builds/
+    │   └── page.tsx            # Builds by dataset
+    └── versions/
+        ├── new/
+        │   └── page.tsx        # Create new version wizard
+        └── [versionId]/
+            ├── layout.tsx      # Version layout with tabs
+            ├── page.tsx        # Version dashboard
+            ├── _components/
+            │   ├── VersionDashboard.tsx
+            │   ├── VersionMiniStepper.tsx    # 2-phase stepper (Ingestion → Processing)
+            │   ├── VersionIngestionCard.tsx
+            │   ├── VersionProcessingCard.tsx
+            │   ├── AnalysisSection.tsx
+            │   ├── ExportSection.tsx
+            │   ├── PreprocessingSection.tsx
+            │   ├── ScanMetricsSection.tsx
+            │   ├── FeatureDistributionChart.tsx
+            │   ├── FeatureDistributionCarousel.tsx
+            │   └── CorrelationMatrixChart.tsx
+            ├── _hooks/
+            │   └── ...                       # Version-related hooks
+            ├── builds/
+            │   ├── layout.tsx
+            │   ├── page.tsx
+            │   ├── ingestion/
+            │   │   └── page.tsx              # Ingestion builds table
+            │   ├── processing/
+            │   │   └── page.tsx              # Processing builds table
+            │   └── scans/
+            │       └── ...                   # Scan results pages
+            ├── analysis/
+            │   └── page.tsx                  # Feature analysis page
+            └── export/
+                └── page.tsx                  # Export configuration page
+```
+
+### Upload Flow UI
+
+```
+Step 1: Upload CSV
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│           ┌───────────────────────────────────┐             │
+│           │    📄 Drag & Drop CSV file        │             │
+│           │    or click to browse             │             │
+│           └───────────────────────────────────┘             │
+│                                                              │
+│    CSV Format: repo_name, build_id, ...                     │
+│                                                              │
+│                                               [Next →]       │
+└──────────────────────────────────────────────────────────────┘
+
+Step 2: Configure Dataset
+┌──────────────────────────────────────────────────────────────┐
+│    Dataset Name: [___________________]                       │
+│                                                              │
+│    Description: [___________________]                        │
+│                                                              │
+│    Template: [Risk Prediction ▼]                            │
+│                                                              │
+│                                       [← Back] [Create]      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Version Dashboard Components
+
+```
+VersionDashboard (in _components/VersionDashboard.tsx)
+├── VersionMiniStepper     # 2-phase indicator (Ingestion → Processing)
+├── VersionIngestionCard   # Ingestion stats & controls
+│   ├── Ingested count / total
+│   ├── Missing resource count
+│   ├── Failed count
+│   ├── Progress bar
+│   └── [Retry Failed] button
+├── VersionProcessingCard  # Processing stats & controls
+│   ├── Processed count / total
+│   ├── Failed count
+│   ├── Progress bar
+│   └── [Retry Failed] button
+├── ScanMetricsSection     # Trivy/SonarQube scan results
+│   ├── Scan coverage (commits scanned)
+│   ├── Trivy vulnerability summary
+│   └── SonarQube quality metrics
+├── AnalysisSection        # Feature analysis
+│   ├── Feature distribution charts
+│   ├── Correlation matrix
+│   └── Statistics overview
+├── PreprocessingSection   # Data preprocessing options
+│   ├── Missing value handling
+│   ├── Feature normalization
+│   └── Preview transformations
+└── ExportSection          # Export configuration
+    ├── Format selection (CSV/JSON)
+    ├── Feature selection
+    └── [Export] button
+```
+
+### Version Builds Page
+
+```
+VersionBuildsPage (in builds/page.tsx)
+├── Tab Navigation
+│   ├── Ingestion tab → /builds/ingestion
+│   ├── Processing tab → /builds/processing
+│   └── Scans tab → /builds/scans
+└── Content Area
+    ├── IngestionBuildsTable (per-build ingestion status)
+    │   ├── Build info (ID, repo, commit)
+    │   ├── Resource status (git_history, git_worktree, build_logs)
+    │   └── Final status (ingested, missing_resource, failed)
+    └── ProcessingBuildsTable (per-build extraction status)
+        ├── Build info
+        ├── Extraction status
+        ├── Feature count
+        └── Scan metrics status
+```
+
+### Key Differences from Model Pipeline UI
+
+| Aspect | Model Pipeline (repositories) | Dataset Enrichment (projects) |
+|--------|------------------------------|-------------------------------|
+| Entry Point | Import GitHub repos | Upload CSV file |
+| Stepper Phases | 4 phases (Fetch, Ingest, Extract, Predict) | 2 phases (Ingestion, Processing) |
+| Prediction | Yes (ML model) | No (feature extraction only) |
+| Scan Metrics | No | Yes (Trivy, SonarQube) |
+| Feature Analysis | No | Yes (distribution, correlation) |
+| Export | Basic | Advanced (preprocessing, format options) |
+
+---
+
 ## Entities & Data Model
 
 ### Core Entities
@@ -1175,10 +1388,8 @@ filtered_metrics = _filter_trivy_metrics(
     builds_ingested: int,           # Successfully ingested builds
     builds_missing_resource: int,   # Builds with missing resources (not retryable)
     builds_ingestion_failed: int,   # Builds that failed ingestion (retryable)
-    builds_processed: int,          # Successfully processed builds
-    builds_processing_failed: int,  # Failed during feature extraction
-    ingestion_progress: int,        # 0-100 percentage
-    
+    builds_features_extracted: int,   # Successfully extracted builds
+    builds_extraction_failed: int,    # Failed during feature extraction
     # Timestamps
     started_at: datetime,
     completed_at: datetime,
@@ -1502,9 +1713,9 @@ SCAN_BATCH_DELAY_SECONDS = 0.5
 
 ### 4. Redis Optimization
 
-- **ProcessingTracker**: Real-time result tracking (avoids DB queries)
 - **RedisLock**: Prevent concurrent operations (clone, worktree)
-- **Ingestion Results**: Save to Redis (prevents data loss in chains)
+
+> **Note**: ProcessingTracker và ingestion results tracking đã được thay thế bằng database queries để đảm bảo data durability.
 
 ### 5. Parallelization
 

@@ -17,7 +17,7 @@ class DatasetRepoSummary(BaseModel):
     validation_error: Optional[str] = None
     builds_in_csv: int = 0
     builds_found: int = 0
-    builds_processed: int = 0
+    builds_features_extracted: int = 0
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 

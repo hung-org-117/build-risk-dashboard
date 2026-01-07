@@ -114,8 +114,8 @@ export function EnrichmentPanel({
                 builds_total: validation.total_rows,
                 builds_ingested: 0,
                 builds_missing_resource: 0,
-                builds_processed: 0,
-                builds_processing_failed: 0,
+                builds_features_extracted: 0,
+                builds_extraction_failed: 0,
                 progress_percent: 0,
                 selected_features: selectedFeatures,
             });
@@ -145,7 +145,7 @@ export function EnrichmentPanel({
 
                     if (data.type === "progress") {
                         setProgress(data.progress_percent);
-                        setProcessedRows(data.builds_processed);
+                        setProcessedRows(data.builds_features_extracted);
                         setTotalRows(data.builds_total);
                         if ("current_repo" in data && data.current_repo) {
                             setCurrentRepo(data.current_repo);
@@ -188,7 +188,7 @@ export function EnrichmentPanel({
             try {
                 const status = await enrichmentApi.getStatus(datasetId);
                 setProgress(status.progress_percent);
-                setProcessedRows(status.builds_processed);
+                setProcessedRows(status.builds_features_extracted);
                 setTotalRows(status.builds_total);
 
                 if (["completed", "failed"].includes(status.status)) {

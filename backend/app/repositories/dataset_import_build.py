@@ -1,7 +1,3 @@
-"""
-DatasetImportBuild Repository - Database operations for dataset import builds.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -47,16 +43,6 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
         if status:
             query["status"] = status.value if hasattr(status, "value") else status
         return self.find_many(query)
-
-    def find_pending_builds(self, version_id: str) -> List[DatasetImportBuild]:
-        """Find pending builds for ingestion."""
-        return self.find_by_version(version_id, status=DatasetImportBuildStatus.PENDING)
-
-    def find_ingesting_builds(self, version_id: str) -> List[DatasetImportBuild]:
-        """Find builds currently ingesting."""
-        return self.find_by_version(
-            version_id, status=DatasetImportBuildStatus.INGESTING
-        )
 
     def find_ingested_builds(self, version_id: str) -> List[DatasetImportBuild]:
         """Find successfully ingested builds."""
@@ -242,36 +228,6 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
             }
         )
 
-    def get_commit_shas_by_repo(self, version_id: str, raw_repo_id: str) -> List[str]:
-        """Get unique commit SHAs for a specific repo in version."""
-        query = {
-            "dataset_version_id": ObjectId(version_id),
-            "raw_repo_id": ObjectId(raw_repo_id),
-            "status": {
-                "$in": [
-                    DatasetImportBuildStatus.PENDING.value,
-                    DatasetImportBuildStatus.INGESTING.value,
-                ]
-            },
-        }
-        result = self.collection.distinct("commit_sha", query)
-        return [sha for sha in result if sha]
-
-    def get_ci_run_ids_by_repo(self, version_id: str, raw_repo_id: str) -> List[str]:
-        """Get CI run IDs for a specific repo in version."""
-        query = {
-            "dataset_version_id": ObjectId(version_id),
-            "raw_repo_id": ObjectId(raw_repo_id),
-            "status": {
-                "$in": [
-                    DatasetImportBuildStatus.PENDING.value,
-                    DatasetImportBuildStatus.INGESTING.value,
-                ]
-            },
-        }
-        result = self.collection.distinct("ci_run_id", query)
-        return list(result)
-
     def delete_by_version(
         self, version_id: str, session: ClientSession | None = None
     ) -> int:
@@ -441,7 +397,7 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
         required_resources: List[str],
     ) -> int:
         """
-        Initialize resource_status for all PENDING builds.
+        Initialize resource_status for all CREATED builds.
 
         Sets required resources to PENDING and others to SKIPPED.
 
@@ -488,7 +444,7 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
         result = self.collection.update_many(
             {
                 "dataset_version_id": ObjectId(version_id),
-                "status": DatasetImportBuildStatus.PENDING.value,
+                "status": DatasetImportBuildStatus.CREATED.value,
             },
             {
                 "$set": {
@@ -721,8 +677,8 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
                 "$group": {
                     "_id": "$raw_repo_id",
                     "repo_full_name": {"$first": "$repo_full_name"},
-                    "pending": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}
+                    "created": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "created"]}, 1, 0]}
                     },
                     "ingesting": {
                         "$sum": {"$cond": [{"$eq": ["$status", "ingesting"]}, 1, 0]}

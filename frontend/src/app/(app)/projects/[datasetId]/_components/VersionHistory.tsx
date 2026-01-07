@@ -183,14 +183,14 @@ function ActiveVersionCard({ version, datasetId }: ActiveVersionCardProps) {
                 <Progress value={version.progress_percent} className="h-2" />
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                     <span>
-                        {version.builds_processed.toLocaleString()} /{" "}
+                        {version.builds_features_extracted.toLocaleString()} /{" "}
                         {version.builds_total.toLocaleString()} builds
                     </span>
                     <span>{version.progress_percent.toFixed(1)}%</span>
                 </div>
-                {version.builds_processing_failed > 0 && (
+                {version.builds_extraction_failed > 0 && (
                     <p className="text-sm text-amber-600">
-                        ⚠️ {version.builds_processing_failed} builds failed
+                        ⚠️ {version.builds_extraction_failed} builds failed
                     </p>
                 )}
             </CardContent>
@@ -346,7 +346,7 @@ function VersionCard({ version, onView, onDownload, onDelete, onRetryProcessing 
                     </div>
                     <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
                         <span>
-                            {version.builds_processed.toLocaleString()} /{" "}
+                            {version.builds_features_extracted.toLocaleString()} /{" "}
                             {version.builds_total.toLocaleString()} builds
                         </span>
                         <span className="flex items-center gap-1">

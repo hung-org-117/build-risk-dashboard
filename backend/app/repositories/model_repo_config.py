@@ -80,7 +80,9 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
             else:
                 base_query["full_name"] = {"$in": []}
 
-        return self.paginate(base_query, sort=[("created_at", -1)], skip=skip, limit=limit)
+        return self.paginate(
+            base_query, sort=[("created_at", -1)], skip=skip, limit=limit
+        )
 
     def can_user_access(
         self,
@@ -145,7 +147,9 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         if error:
             update["error_message"] = error
 
-        self.collection.update_one({"_id": self.ensure_object_id(config_id)}, {"$set": update})
+        self.collection.update_one(
+            {"_id": self.ensure_object_id(config_id)}, {"$set": update}
+        )
 
     def increment_builds_fetched(
         self,
@@ -184,7 +188,7 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         config_id: ObjectId,
         count: int = 1,
     ) -> Optional[ModelRepoConfig]:
-        """Increment the builds extraction failed count (processing phase)."""
+        """Increment the builds processing failed count."""
         doc = self.collection.find_one_and_update(
             {"_id": config_id},
             {
@@ -211,7 +215,9 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
         )
         return ModelRepoConfig(**doc) if doc else None
 
-    def hard_delete(self, config_id: ObjectId, session: "ClientSession | None" = None) -> int:
+    def hard_delete(
+        self, config_id: ObjectId, session: "ClientSession | None" = None
+    ) -> int:
         """Hard delete a config (permanently removes from DB)."""
         result = self.collection.delete_one({"_id": config_id}, session=session)
         return result.deleted_count

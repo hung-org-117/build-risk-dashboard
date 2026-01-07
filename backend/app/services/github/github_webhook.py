@@ -43,7 +43,9 @@ def verify_signature(signature: str | None, body: bytes) -> None:
         )
 
 
-def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict[str, object]:
+def _handle_workflow_run_event(
+    db: Database, payload: Dict[str, object]
+) -> Dict[str, object]:
     """Handle workflow_run events."""
     action = payload.get("action")
     # Only process completed runs; we additionally filter by conclusion below.
@@ -56,10 +58,15 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
 
     if not full_name or not workflow_run:
         return {"status": "ignored", "reason": "missing_data"}
-    # Accept only runs whose conclusion is completed; status can vary.
+
+    # Filter by conclusion - only accept conclusions that have logs
     conclusion_val = (workflow_run.get("conclusion") or "").lower()
-    if conclusion_val != "completed":
-        return {"status": "ignored", "reason": f"conclusion_{conclusion_val}_ignored"}
+
+    # Conclusions with logs: success, failure, timed_out, neutral
+    # Rejected (no/partial logs): skipped, cancelled, action_required, stale
+    accepted_conclusions = {"success", "failure", "timed_out", "neutral"}
+    if conclusion_val not in accepted_conclusions:
+        return {"status": "ignored", "reason": f"conclusion_{conclusion_val}_rejected"}
 
     # Filter out bot-triggered workflow runs (e.g., Dependabot, github-actions[bot])
     triggering_actor = workflow_run.get("triggering_actor", {})
@@ -78,7 +85,9 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
     # Save/Update RawBuildRun
     build_run_repo = RawBuildRunRepository(db)
 
-    existing_run = build_run_repo.find_by_business_key(repo_id, build_id, CIProvider.GITHUB)
+    existing_run = build_run_repo.find_by_business_key(
+        repo_id, build_id, CIProvider.GITHUB
+    )
 
     if existing_run:
         # Update existing run but don't reprocess (avoid duplicate processing)
@@ -113,7 +122,11 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
         # Map GitHub conclusion to normalized conclusion
         gh_conclusion = workflow_run.get("conclusion", "").lower()
         try:
-            conclusion = BuildConclusion(gh_conclusion) if gh_conclusion else BuildConclusion.NONE
+            conclusion = (
+                BuildConclusion(gh_conclusion)
+                if gh_conclusion
+                else BuildConclusion.NONE
+            )
         except (ValueError, KeyError):
             conclusion = BuildConclusion.UNKNOWN
 
@@ -154,7 +167,9 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
         from app.repositories.model_repo_config import ModelRepoConfigRepository
 
         model_repo_config_repo = ModelRepoConfigRepository(db)
-        repo_config = model_repo_config_repo.find_one({"raw_repo_id": ObjectId(repo_id)})
+        repo_config = model_repo_config_repo.find_one(
+            {"raw_repo_id": ObjectId(repo_id)}
+        )
 
         if not repo_config:
             return {
@@ -170,21 +185,24 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
             {"_id": ObjectId(repo_config_id)}, {"$inc": {"builds_fetched": 1}}
         )
 
-        # Dispatch prepare_and_dispatch_processing to run ingestion workflow (clone, logs, worktrees)
-        # then dispatch_build_processing for feature extraction
-        # This aligns webhook flow with import flow
+        # Dispatch ingestion task for this single build (webhook flow)
+        # This only does ingestion (clone, worktree, logs) - no auto-processing
+        # User must manually start processing via UI
         celery_app.send_task(
-            "app.tasks.model_ingestion.prepare_and_dispatch_processing",
+            "app.tasks.model_ingestion.ingest_webhook_build",
             kwargs={
                 "repo_config_id": repo_config_id,
                 "raw_repo_id": repo_id,
+                "raw_build_run_id": str(new_run.id),
                 "full_name": full_name,
                 "ci_provider": (
                     repo_config.ci_provider.value
                     if hasattr(repo_config.ci_provider, "value")
                     else repo_config.ci_provider
                 ),
-                "ci_build_ids": [build_id],  # Single build from webhook
+                "commit_sha": workflow_run.get("head_sha", ""),
+                "ci_run_id": build_id,
+                "github_repo_id": repo.github_repo_id,
             },
         )
 
@@ -196,7 +214,9 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
     }
 
 
-def handle_github_event(db: Database, event: str, payload: Dict[str, object]) -> Dict[str, object]:
+def handle_github_event(
+    db: Database, event: str, payload: Dict[str, object]
+) -> Dict[str, object]:
     if event in {"installation", "installation_repositories"}:
         # return _handle_installation_event(db, event, payload)
         return {"status": "ignored", "reason": "installation_management_removed"}

@@ -185,7 +185,9 @@ class NotificationService:
                     },
                 )
             except Exception as e:
-                logger.warning(f"Failed to create notification for admin {admin.id}: {e}")
+                logger.warning(
+                    f"Failed to create notification for admin {admin.id}: {e}"
+                )
 
         # Send Gmail alert to admins
         try:
@@ -322,11 +324,6 @@ def get_notification_manager(db: Optional[Database] = None) -> NotificationManag
     return _manager
 
 
-# =============================================================================
-# In-App Only Helpers (Backward Compatible)
-# =============================================================================
-
-
 def create_notification(
     db: Database,
     user_id: ObjectId,
@@ -425,7 +422,7 @@ def notify_dataset_enrichment_completed(
     user_id: ObjectId,
     dataset_name: str,
     dataset_id: str,
-    builds_processed: int,
+    builds_features_extracted: int,
     builds_total: int,
 ) -> Notification:
     """Dataset enrichment completed - in-app only."""
@@ -434,11 +431,11 @@ def notify_dataset_enrichment_completed(
         user_id=user_id,
         type=NotificationType.DATASET_ENRICHMENT_COMPLETED,
         title="Dataset Enrichment Completed",
-        message=f"Enrichment for '{dataset_name}' completed. {builds_processed}/{builds_total} builds processed.",
+        message=f"Enrichment for '{dataset_name}' completed. {builds_features_extracted}/{builds_total} builds processed.",
         link=f"/admin/datasets/{dataset_id}",
         metadata={
             "dataset_id": dataset_id,
-            "builds_processed": builds_processed,
+            "builds_features_extracted": builds_features_extracted,
             "builds_total": builds_total,
         },
     )
@@ -470,35 +467,6 @@ def notify_scan_vulnerabilities_found(
 # =============================================================================
 # GitHub Token Rate Limit Notifications
 # =============================================================================
-
-
-def notify_rate_limit_warning(
-    db: Database,
-    user_id: ObjectId,
-    token_label: str,
-    remaining: int,
-    reset_at: datetime,
-) -> Notification:
-    """
-    Single token rate limit warning - in-app only.
-
-    Use when a token is running low but not exhausted.
-    """
-    reset_str = reset_at.strftime("%H:%M UTC") if reset_at else "soon"
-
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.RATE_LIMIT_WARNING,
-        title="GitHub Rate Limit Warning",
-        message=f"Token '{token_label}' has only {remaining} requests remaining. Resets at {reset_str}.",
-        link="/admin/settings",
-        metadata={
-            "token_label": token_label,
-            "remaining": remaining,
-            "reset_at": reset_str,
-        },
-    )
 
 
 def notify_rate_limit_exhausted(
@@ -613,4 +581,433 @@ def notify_system_error_to_admins(
                 },
             )
         except Exception as e:
-            logger.warning(f"Failed to create error notification for admin {admin.id}: {e}")
+            logger.warning(
+                f"Failed to create error notification for admin {admin.id}: {e}"
+            )
+
+
+# =============================================================================
+# User-Facing Notifications
+# =============================================================================
+
+
+def notify_high_risk_detected(
+    db: Database,
+    user_id: ObjectId,
+    repo_name: str,
+    build_number: int,
+    repo_id: str,
+) -> Notification:
+    """
+    Alert user when HIGH risk build detected in their repo.
+
+    Use when prediction phase finds a HIGH risk build for a repo
+    that the user has access to via GitHub.
+    """
+    return create_notification(
+        db=db,
+        user_id=user_id,
+        type=NotificationType.HIGH_RISK_DETECTED,
+        title="⚠️ High Risk Build Detected",
+        message=f"Build #{build_number} in {repo_name} predicted as HIGH risk.",
+        link=f"/my-repos/{repo_id}/builds",
+        metadata={
+            "repo_name": repo_name,
+            "build_number": build_number,
+            "repo_id": repo_id,
+            "risk_level": "HIGH",
+        },
+    )
+
+
+def notify_prediction_ready(
+    db: Database,
+    user_id: ObjectId,
+    repo_name: str,
+    repo_id: str,
+    high_count: int = 0,
+    medium_count: int = 0,
+    low_count: int = 0,
+) -> Notification:
+    """
+    Notify user when predictions complete for their repo.
+
+    Summary notification sent after prediction phase finishes.
+    """
+    total = high_count + medium_count + low_count
+    message = f"{repo_name}: {total} builds analyzed."
+    if high_count > 0:
+        message += f" {high_count} HIGH risk."
+    if medium_count > 0:
+        message += f" {medium_count} MEDIUM risk."
+
+    return create_notification(
+        db=db,
+        user_id=user_id,
+        type=NotificationType.BUILD_PREDICTION_READY,
+        title="🎯 Predictions Ready",
+        message=message,
+        link=f"/my-repos/{repo_id}/builds",
+        metadata={
+            "repo_name": repo_name,
+            "repo_id": repo_id,
+            "high_count": high_count,
+            "medium_count": medium_count,
+            "low_count": low_count,
+            "total": total,
+        },
+    )
+
+
+def notify_users_for_repo(
+    db: Database,
+    raw_repo_id: ObjectId,
+    repo_name: str,
+    repo_id: str,
+    high_risk_builds: Optional[List[dict]] = None,
+    prediction_summary: Optional[dict] = None,
+) -> None:
+    """
+    Notify all users with access to a repository about predictions.
+
+    Args:
+        db: Database connection
+        raw_repo_id: RawRepository ObjectId (for user access lookup)
+        repo_name: Repository full name for display
+        repo_id: ModelRepoConfig ID for links
+        high_risk_builds: List of HIGH risk build dicts (max 3 alerts sent)
+        prediction_summary: Dict with high/medium/low counts
+    """
+    from app.repositories.user import UserRepository
+
+    user_repo = UserRepository(db)
+    users = user_repo.find_users_with_repo_access(raw_repo_id)
+
+    for user in users:
+        try:
+            # Summary notification
+            if prediction_summary:
+                notify_prediction_ready(
+                    db=db,
+                    user_id=user.id,
+                    repo_name=repo_name,
+                    repo_id=repo_id,
+                    high_count=prediction_summary.get("high", 0),
+                    medium_count=prediction_summary.get("medium", 0),
+                    low_count=prediction_summary.get("low", 0),
+                )
+
+            # Alert for HIGH risk builds (limit to 3)
+            if high_risk_builds:
+                for build in high_risk_builds[:3]:
+                    notify_high_risk_detected(
+                        db=db,
+                        user_id=user.id,
+                        repo_name=repo_name,
+                        build_number=build.get("build_number", 0),
+                        repo_id=repo_id,
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to notify user {user.id} for repo {repo_name}: {e}")
+
+
+# =============================================================================
+# Admin Notifications - Model Pipeline
+# =============================================================================
+
+
+def notify_pipeline_completed_to_admins(
+    db: Database,
+    repo_name: str,
+    predicted_count: int,
+    failed_count: int,
+    high_count: int = 0,
+    medium_count: int = 0,
+    low_count: int = 0,
+) -> None:
+    """
+    Notify all admins when Model Pipeline prediction phase completes.
+
+    Called from finalize_prediction task.
+    """
+    from app.repositories.user import UserRepository
+
+    user_repo = UserRepository(db)
+    admin_users = user_repo.find_by_role("admin")
+
+    total = high_count + medium_count + low_count
+    message = f"{repo_name}: {predicted_count}/{total} predicted."
+    if failed_count > 0:
+        message += f" {failed_count} failed."
+    if high_count > 0:
+        message += f" {high_count} HIGH risk."
+
+    for admin in admin_users:
+        try:
+            create_notification(
+                db=db,
+                user_id=admin.id,
+                type=NotificationType.PIPELINE_COMPLETED,
+                title="✅ Pipeline Complete",
+                message=message,
+                link=f"/repositories",
+                metadata={
+                    "repo_name": repo_name,
+                    "predicted": predicted_count,
+                    "failed": failed_count,
+                    "high": high_count,
+                    "medium": medium_count,
+                    "low": low_count,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify admin {admin.id}: {e}")
+
+
+def notify_pipeline_failed_to_admins(
+    db: Database,
+    repo_name: str,
+    error_message: str,
+) -> None:
+    """
+    Notify all admins when Model Pipeline fails completely.
+    """
+    from app.repositories.user import UserRepository
+
+    user_repo = UserRepository(db)
+    admin_users = user_repo.find_by_role("admin")
+
+    for admin in admin_users:
+        try:
+            create_notification(
+                db=db,
+                user_id=admin.id,
+                type=NotificationType.PIPELINE_FAILED,
+                title="❌ Pipeline Failed",
+                message=f"{repo_name}: {error_message[:200]}",
+                link=f"/repositories",
+                metadata={
+                    "repo_name": repo_name,
+                    "error": error_message,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify admin {admin.id}: {e}")
+
+
+# =============================================================================
+# Admin Notifications - Dataset Enrichment
+# =============================================================================
+
+
+def notify_dataset_validation_to_admin(
+    db: Database,
+    user_id: ObjectId,
+    dataset_name: str,
+    dataset_id: str,
+    repos_valid: int,
+    builds_valid: int,
+    builds_total: int,
+) -> Notification:
+    """
+    Notify admin when dataset validation phase completes.
+
+    Called from aggregate_validation_results task.
+    """
+    return create_notification(
+        db=db,
+        user_id=user_id,
+        type=NotificationType.DATASET_VALIDATION_COMPLETED,
+        title="✔️ Dataset Validation Complete",
+        message=f"{dataset_name}: {repos_valid} repos, {builds_valid}/{builds_total} builds validated.",
+        link=f"/projects/{dataset_id}",
+        metadata={
+            "dataset_name": dataset_name,
+            "dataset_id": dataset_id,
+            "repos_valid": repos_valid,
+            "builds_valid": builds_valid,
+            "builds_total": builds_total,
+        },
+    )
+
+
+def notify_enrichment_completed_to_admin(
+    db: Database,
+    user_id: ObjectId,
+    dataset_name: str,
+    version_id: str,
+    builds_features_extracted: int,
+    builds_total: int,
+    features_count: int = 0,
+    scan_metrics_count: int = 0,
+) -> Notification:
+    """
+    Notify admin when dataset enrichment fully completes (features + scans).
+
+    Called from check_and_notify_enrichment_completed when all data is ready.
+    """
+    message = f"{dataset_name}: {builds_features_extracted}/{builds_total} builds."
+    if features_count > 0:
+        message += f" {features_count} features."
+    if scan_metrics_count > 0:
+        message += f" {scan_metrics_count} scan metrics."
+
+    return create_notification(
+        db=db,
+        user_id=user_id,
+        type=NotificationType.DATASET_ENRICHMENT_COMPLETED,
+        title="🔧 Enrichment Complete",
+        message=message,
+        link=f"/projects/{version_id.split('/')[0] if '/' in version_id else version_id}",
+        metadata={
+            "dataset_name": dataset_name,
+            "version_id": version_id,
+            "builds_features_extracted": builds_features_extracted,
+            "builds_total": builds_total,
+            "features_count": features_count,
+            "scan_metrics_count": scan_metrics_count,
+        },
+    )
+
+
+def notify_enrichment_failed_to_admin(
+    db: Database,
+    version_id: str,
+    error_message: str,
+    completed_count: int = 0,
+    failed_count: int = 0,
+) -> None:
+    """
+    Notify dataset creator when enrichment processing chain fails.
+
+    Called from handle_enrichment_processing_chain_error.
+    """
+    from app.repositories.dataset import DatasetRepository
+    from app.repositories.dataset_version import DatasetVersionRepository
+
+    version_repo = DatasetVersionRepository(db)
+    version = version_repo.find_by_id(version_id)
+    if not version:
+        logger.warning(f"Version {version_id} not found for failure notification")
+        return
+
+    dataset_repo = DatasetRepository(db)
+    dataset = dataset_repo.find_by_id(version.dataset_id)
+    if not dataset:
+        logger.warning(f"Dataset not found for version {version_id}")
+        return
+
+    message = f"{dataset.name}: {completed_count} completed, {failed_count} failed."
+    if error_message:
+        # Truncate long error messages
+        short_error = (
+            error_message[:100] + "..." if len(error_message) > 100 else error_message
+        )
+        message += f" Error: {short_error}"
+
+    create_notification(
+        db=db,
+        user_id=dataset.user_id,
+        type=NotificationType.DATASET_ENRICHMENT_COMPLETED,
+        title="⚠️ Enrichment Failed",
+        message=message,
+        link=f"/projects/{str(dataset.id)}",
+        metadata={
+            "dataset_name": dataset.name,
+            "version_id": version_id,
+            "completed_count": completed_count,
+            "failed_count": failed_count,
+            "error": error_message,
+            "status": "failed",
+        },
+    )
+
+
+def check_and_notify_enrichment_completed(
+    db: Database,
+    version_id: str,
+) -> bool:
+    """
+    Check if enrichment is fully complete (features + scan metrics) and send notification.
+
+    Called from:
+    1. finalize_enrichment - after features complete
+    2. start_trivy_scan_for_version_commit - after each Trivy scan
+    3. export_metrics_from_webhook - after each SonarQube webhook
+
+    Returns True if notification was sent, False if still pending.
+    """
+    from app.repositories.dataset_version import DatasetVersionRepository
+
+    version_repo = DatasetVersionRepository(db)
+    version = version_repo.find_by_id(version_id)
+
+    if not version:
+        logger.warning(
+            f"Version {version_id} not found for enrichment notification check"
+        )
+        return False
+
+    # Check 1: Already notified? (avoid duplicates)
+    if getattr(version, "enrichment_notified", False):
+        logger.debug(f"Version {version_id} already notified")
+        return False
+
+    # Check 2: Features extraction complete?
+    if not getattr(version, "feature_extraction_completed", False):
+        logger.debug(f"Version {version_id} features not complete yet")
+        return False
+
+    # Check 3: All builds processed?
+    builds_features_extracted = version.builds_features_extracted or 0
+    builds_total = version.builds_total or 0
+    if builds_total > 0 and builds_features_extracted < builds_total:
+        logger.debug(
+            f"Version {version_id} not all builds processed: "
+            f"{builds_features_extracted}/{builds_total}"
+        )
+        return False
+
+    # Check 4: Do we have any scans configured?
+    scans_total = getattr(version, "scans_total", 0) or 0
+    scans_completed = getattr(version, "scans_completed", 0) or 0
+    scans_failed = getattr(version, "scans_failed", 0) or 0
+
+    # If scans are configured, check if all done
+    if scans_total > 0:
+        scans_done = scans_completed + scans_failed
+        if scans_done < scans_total:
+            logger.debug(
+                f"Version {version_id} scans not complete: "
+                f"{scans_done}/{scans_total}"
+            )
+            return False
+
+        # Mark scan extraction as complete
+        if not getattr(version, "scan_extraction_completed", False):
+            version_repo.mark_scan_extraction_completed(str(version_id))
+
+    # All done! Send notification
+    logger.info(f"Version {version_id} enrichment complete - sending notification")
+
+    # Get dataset info for notification
+    from app.repositories.dataset import DatasetRepository
+
+    dataset_repo = DatasetRepository(db)
+    dataset = dataset_repo.find_by_id(version.dataset_id)
+
+    if dataset:
+        notify_enrichment_completed_to_admin(
+            db=db,
+            user_id=dataset.user_id,
+            dataset_name=dataset.name,
+            version_id=str(version_id),
+            builds_features_extracted=version.builds_features_extracted or 0,
+            builds_total=version.builds_total or 0,
+            scan_metrics_count=scans_completed,
+        )
+
+        # Mark as notified using repository method
+        version_repo.mark_enrichment_notified(str(version_id))
+
+    return True

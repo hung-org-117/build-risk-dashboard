@@ -22,11 +22,15 @@ interface VersionData {
     builds_ingested: number;
     builds_missing_resource: number;
     builds_ingestion_failed: number;
-    builds_processed: number;
-    builds_processing_failed: number;
+    builds_features_extracted: number;
+    builds_extraction_failed: number;
     selected_features: string[];
     created_at: string | null;
     completed_at: string | null;
+    // Scan tracking
+    scans_total?: number;
+    scans_completed?: number;
+    scans_failed?: number;
 }
 
 // Status config
@@ -134,11 +138,14 @@ export default function VersionLayout({ children }: { children: ReactNode }) {
     useEffect(() => {
         const unsubscribe = subscribe("ENRICHMENT_UPDATE", (data: any) => {
             if (data.version_id === versionId && data.status) {
-                // Update version status and progress
+                // Update version status and progress including scan tracking
                 setVersion(prev => prev ? {
                     ...prev,
                     status: data.status,
-                    builds_processed: data.builds_processed ?? prev.builds_processed,
+                    builds_features_extracted: data.builds_features_extracted ?? prev.builds_features_extracted,
+                    scans_completed: data.scans_completed ?? prev.scans_completed,
+                    scans_total: data.scans_total ?? prev.scans_total,
+                    scans_failed: data.scans_failed ?? prev.scans_failed,
                 } : prev);
             }
         });

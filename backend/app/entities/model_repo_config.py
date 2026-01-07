@@ -21,9 +21,11 @@ class ModelImportStatus(str, Enum):
     QUEUED = "queued"
     FETCHING = "fetching"  # Fetching builds from CI API
     INGESTING = "ingesting"  # Clone/worktree/download logs phase
-    INGESTED = "ingested"  # Ingestion done (user accepts current state to start processing)
+    INGESTED = (
+        "ingested"  # Ingestion done (user accepts current state to start processing)
+    )
     PROCESSING = "processing"  # Feature extraction phase
-    PROCESSED = "processed"  # Processing complete (features extracted)
+    PROCESSED = "processed"  # Processing complete (features extracted + prediction)
     FAILED = "failed"  # Critical error, pipeline failed
 
 

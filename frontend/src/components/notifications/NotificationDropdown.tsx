@@ -15,14 +15,18 @@ interface NotificationDropdownProps {
 }
 
 const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
+    // Model Pipeline (Admin)
     pipeline_completed: '✅',
     pipeline_failed: '❌',
-    dataset_import_completed: '📥',
+    // Dataset Enrichment (Admin)
     dataset_validation_completed: '✔️',
     dataset_enrichment_completed: '🔧',
-    rate_limit_warning: '⏰',
+    // System (Admin)
     rate_limit_exhausted: '🚨',
     system: '💬',
+    // User-facing
+    high_risk_detected: '⚠️',
+    build_prediction_ready: '🎯',
 }
 
 export function NotificationDropdown({ className }: NotificationDropdownProps) {

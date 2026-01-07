@@ -21,7 +21,6 @@ from app.tasks.base import PipelineTask, SafeTask, TaskState
 from app.tasks.shared import extract_features_for_build
 from app.tasks.shared.events import publish_build_status as publish_build_update
 from app.tasks.shared.events import publish_repo_status as publish_status
-from app.tasks.shared.processing_tracker import ProcessingTracker
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +78,9 @@ def start_processing_phase(
     last_checkpoint_id = repo_config.last_processed_import_build_id
 
     if last_checkpoint_id:
-        logger.info(f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds")
+        logger.info(
+            f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds"
+        )
     else:
         logger.info(f"{log_ctx} No checkpoint, processing all builds")
 
@@ -90,7 +91,11 @@ def start_processing_phase(
 
     if not pending_builds:
         logger.info(f"{log_ctx} No new builds to process for {repo_config_id}")
-        return {"status": "completed", "builds": 0, "message": "No new builds to process"}
+        return {
+            "status": "completed",
+            "builds": 0,
+            "message": "No new builds to process",
+        }
 
     # Get the last build ID for checkpoint update (will be set AFTER processing)
     last_build_id = pending_builds[-1].id
@@ -183,7 +188,9 @@ def dispatch_build_processing(
     import_build_repo = ModelImportBuildRepository(self.db)
 
     if not raw_build_run_ids:
-        logger.info(f"{corr_prefix} No builds to process for repo config {repo_config_id}")
+        logger.info(
+            f"{corr_prefix} No builds to process for repo config {repo_config_id}"
+        )
         repo_config_repo.update_repository(
             repo_config_id,
             {"status": ModelImportStatus.PROCESSED.value},
@@ -194,11 +201,14 @@ def dispatch_build_processing(
     raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
     build_run_map = {str(r.id): r for r in raw_build_runs}
 
-    ingested_builds = import_build_repo.find_by_raw_build_run_ids(repo_config_id, raw_build_run_ids)
+    ingested_builds = import_build_repo.find_by_raw_build_run_ids(
+        repo_config_id, raw_build_run_ids
+    )
 
     # Sort by created_at ascending (oldest first) for temporal features
     ingested_builds.sort(
-        key=lambda ib: build_run_map.get(str(ib.raw_build_run_id), ib).created_at or ib.created_at
+        key=lambda ib: build_run_map.get(str(ib.raw_build_run_id), ib).created_at
+        or ib.created_at
     )
 
     run_oids = [ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)]
@@ -218,7 +228,9 @@ def dispatch_build_processing(
         # O(1) lookup from maps
         raw_build_run = build_run_map.get(run_id_str)
         if not raw_build_run:
-            logger.warning(f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping")
+            logger.warning(
+                f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping"
+            )
             continue
 
         # Check if already exists and processed
@@ -293,7 +305,9 @@ def dispatch_build_processing(
         for build_id in model_build_id_strs
     ]
 
-    logger.info(f"{corr_prefix} Dispatching {total_builds} builds for sequential processing")
+    logger.info(
+        f"{corr_prefix} Dispatching {total_builds} builds for sequential processing"
+    )
 
     # Chain: B1 → B2 → B3 → ... → finalize
     # Each build processes after the previous one completes
@@ -359,41 +373,39 @@ def finalize_model_processing(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     logger.info(f"{corr_prefix} Finalizing model processing for {repo_config_id}")
 
-    # Get results from Redis tracker (scoped to this processing batch)
-    tracker = ProcessingTracker(self.redis, repo_config_id, correlation_id)
-    tracker_results = tracker.get_results()
-
-    success_count = tracker_results["success_count"]
-    failed_count = tracker_results["failed_count"]
-    skipped_count = tracker_results["skipped_count"]
-    builds_for_prediction = tracker_results["builds_for_prediction"]
-    total_count = success_count + failed_count + skipped_count
-
-    logger.info(
-        f"{corr_prefix} Processing results from tracker: "
-        f"success={success_count}, failed={failed_count}, skipped={skipped_count}"
+    # Get results from database (not Redis tracker)
+    model_build_repo = ModelTrainingBuildRepository(self.db)
+    aggregated_stats = model_build_repo.aggregate_stats_by_repo_config(
+        ObjectId(repo_config_id)
     )
 
-    # Determine final status - always PROCESSED
-    # FAILED is only set by PipelineTask on unhandled exceptions
-    final_status = ModelImportStatus.PROCESSED
+    # Get counts from aggregated stats
+    success_count = aggregated_stats.get("completed", 0) + aggregated_stats.get(
+        "partial", 0
+    )
+    failed_count = aggregated_stats.get("failed", 0)
+    total_count = aggregated_stats.get("total", 0)
+
+    logger.info(
+        f"{corr_prefix} Processing results from DB: "
+        f"success={success_count}, failed={failed_count}, total={total_count}"
+    )
 
     # Log warning if all builds failed (but don't set FAILED status)
     if failed_count > 0 and success_count == 0:
         logger.warning(f"{corr_prefix} All builds failed processing ({failed_count})")
 
-    # Update repo config status and SET CHECKPOINT NOW (after processing completes)
-    model_build_repo = ModelTrainingBuildRepository(self.db)
-    aggregated_stats = model_build_repo.aggregate_stats_by_repo_config(ObjectId(repo_config_id))
+    # Get builds ready for prediction from database
+    builds_ready = model_build_repo.find_builds_for_prediction(ObjectId(repo_config_id))
+    builds_for_prediction = [str(b.id) for b in builds_ready]
 
     repo_config_repo = ModelRepoConfigRepository(self.db)
     update_data = {
-        "status": final_status.value,
         "last_synced_at": datetime.utcnow(),
         "builds_processing_failed": aggregated_stats["builds_processing_failed"],
     }
 
-    # Set checkpoint ONLY after successful processing
+    # Set checkpoint after extraction completes (before prediction)
     if last_import_build_id:
         update_data["last_processed_import_build_id"] = ObjectId(last_import_build_id)
         logger.info(f"{corr_prefix} Setting checkpoint to {last_import_build_id}")
@@ -402,16 +414,16 @@ def finalize_model_processing(
 
     publish_status(
         repo_config_id,
-        final_status.value,
+        "processing",
         f"Extracted features from {success_count}/{total_count} builds, starting prediction...",
         stats={
             "builds_processing_failed": failed_count,
         },
     )
 
-    # Dispatch batch prediction using build IDs from Redis tracker
+    # Dispatch batch prediction using chord (wait for all to complete)
     if builds_for_prediction:
-        from celery import group
+        from celery import chord
 
         batch_size = settings.PREDICTION_BUILDS_PER_BATCH
         batches = [
@@ -424,12 +436,22 @@ def finalize_model_processing(
             f"({len(builds_for_prediction)} builds, batch_size={batch_size})"
         )
 
-        # Run all prediction batches in parallel
-        prediction_tasks = [predict_builds_batch.si(repo_config_id, batch) for batch in batches]
-        group(prediction_tasks).apply_async()
-
-    # Cleanup Redis tracker keys
-    tracker.cleanup()
+        # Use chord: run all predictions in parallel, then call finalize_prediction
+        prediction_tasks = [
+            predict_builds_batch.si(repo_config_id, batch) for batch in batches
+        ]
+        callback = finalize_prediction.si(
+            repo_config_id=repo_config_id,
+            total_builds=len(builds_for_prediction),
+            correlation_id=correlation_id,
+        )
+        chord(prediction_tasks)(callback)
+    else:
+        # No predictions needed - set status to PROCESSED immediately
+        repo_config_repo.update_repository(
+            repo_config_id, {"status": ModelImportStatus.PROCESSED.value}
+        )
+        publish_status(repo_config_id, "processed", "No builds to predict")
 
     return {
         "repo_config_id": repo_config_id,
@@ -437,9 +459,140 @@ def finalize_model_processing(
         "processed": total_count,
         "success": success_count,
         "failed": failed_count,
-        "skipped": skipped_count,
-        "status": final_status,
+        "status": "predicting",
         "aggregated_stats": aggregated_stats,
+    }
+
+
+@celery_app.task(
+    bind=True,
+    base=PipelineTask,
+    name="app.tasks.processing.finalize_prediction",
+    queue="prediction",
+    soft_time_limit=60,
+    time_limit=120,
+)
+def finalize_prediction(
+    self: PipelineTask,
+    repo_config_id: str,
+    total_builds: int,
+    correlation_id: str = "",
+) -> Dict[str, Any]:
+    """
+    Finalize prediction phase after all prediction batches complete.
+
+    This is the chord callback from finalize_model_processing.
+    Sets the repository status to PROCESSED and publishes final status.
+
+    Args:
+        repo_config_id: The repository config ID
+        total_builds: Total number of builds that were predicted
+        correlation_id: Correlation ID for tracing
+    """
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    logger.info(f"{corr_prefix} Finalizing prediction for {repo_config_id}")
+
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+    model_build_repo = ModelTrainingBuildRepository(self.db)
+
+    # Count prediction results
+    prediction_stats = model_build_repo.aggregate_prediction_stats(
+        ObjectId(repo_config_id)
+    )
+    predicted_count = prediction_stats.get("predicted", 0)
+    prediction_failed = prediction_stats.get("failed", 0)
+
+    # Set final status to PROCESSED
+    repo_config_repo.update_repository(
+        repo_config_id,
+        {"status": ModelImportStatus.PROCESSED.value},
+    )
+
+    logger.info(
+        f"{corr_prefix} Prediction complete: {predicted_count} predicted, "
+        f"{prediction_failed} failed out of {total_builds} total"
+    )
+
+    publish_status(
+        repo_config_id,
+        "processed",
+        f"Processing complete: {predicted_count}/{total_builds} builds predicted",
+        stats={
+            "predicted": predicted_count,
+            "prediction_failed": prediction_failed,
+        },
+    )
+
+    # =========================================================================
+    # NOTIFY USERS WITH REPO ACCESS
+    # =========================================================================
+    try:
+        from app.services.notification_service import notify_users_for_repo
+
+        # Get repo details for notification
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
+        if repo_config and repo_config.raw_repo_id:
+            # Count predictions by risk level
+            risk_counts = model_build_repo.aggregate_risk_counts(
+                ObjectId(repo_config_id)
+            )
+            high_count = risk_counts.get("HIGH", 0)
+            medium_count = risk_counts.get("MEDIUM", 0)
+            low_count = risk_counts.get("LOW", 0)
+
+            # Get HIGH risk builds for individual alerts (limit 3)
+            high_risk_builds = []
+            if high_count > 0:
+                high_risk_builds = model_build_repo.find_high_risk_builds(
+                    ObjectId(repo_config_id), limit=3
+                )
+
+            # Send notifications to all users with access
+            notify_users_for_repo(
+                db=self.db,
+                raw_repo_id=repo_config.raw_repo_id,
+                repo_name=repo_config.full_name,
+                repo_id=repo_config_id,
+                high_risk_builds=[
+                    {"build_number": b.build_number} for b in high_risk_builds
+                ],
+                prediction_summary={
+                    "high": high_count,
+                    "medium": medium_count,
+                    "low": low_count,
+                },
+            )
+            logger.info(
+                f"{corr_prefix} Sent notifications: {high_count} HIGH, "
+                f"{medium_count} MEDIUM, {low_count} LOW"
+            )
+
+            # =========================================================================
+            # NOTIFY ADMINS ABOUT PIPELINE COMPLETION
+            # =========================================================================
+            from app.services.notification_service import (
+                notify_pipeline_completed_to_admins,
+            )
+
+            notify_pipeline_completed_to_admins(
+                db=self.db,
+                repo_name=repo_config.full_name,
+                predicted_count=predicted_count,
+                failed_count=prediction_failed,
+                high_count=high_count,
+                medium_count=medium_count,
+                low_count=low_count,
+            )
+    except Exception as e:
+        # Don't fail the task if notifications fail
+        logger.warning(f"{corr_prefix} Failed to send user notifications: {e}")
+
+    return {
+        "repo_config_id": repo_config_id,
+        "status": "processed",
+        "predicted": predicted_count,
+        "failed": prediction_failed,
+        "total": total_builds,
     }
 
 
@@ -482,7 +635,9 @@ def process_workflow_run(
         }
     )
     if not model_build:
-        logger.info(f"{corr_prefix} ModelTrainingBuild {model_build_id} not PENDING, skipping")
+        logger.info(
+            f"{corr_prefix} ModelTrainingBuild {model_build_id} not PENDING, skipping"
+        )
         return {"status": "skipped", "message": "Not pending or not found"}
 
     raw_build_run = raw_build_run_repo.find_by_id(model_build.raw_build_run_id)
@@ -510,10 +665,15 @@ def process_workflow_run(
         """Mark build as FAILED and update stats."""
         model_build_repo.update_one(
             build_id,
-            {"extraction_status": ExtractionStatus.FAILED.value, "extraction_error": str(exc)},
+            {
+                "extraction_status": ExtractionStatus.FAILED.value,
+                "extraction_error": str(exc),
+            },
         )
         if not is_reprocess:
-            repo_config_repo.increment_builds_processing_failed(ObjectId(repo_config_id))
+            repo_config_repo.increment_builds_processing_failed(
+                ObjectId(repo_config_id)
+            )
         publish_build_update(repo_config_id, build_id, "failed")
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -523,7 +683,9 @@ def process_workflow_run(
             model_build_repo.update_one(
                 build_id, {"extraction_status": ExtractionStatus.IN_PROGRESS.value}
             )
-            publish_build_update(repo_config_id, build_id, ExtractionStatus.IN_PROGRESS.value)
+            publish_build_update(
+                repo_config_id, build_id, ExtractionStatus.IN_PROGRESS.value
+            )
             state.phase = "EXTRACTING"
 
         if state.phase == "EXTRACTING":
@@ -567,18 +729,15 @@ def process_workflow_run(
         model_build_repo.update_one(build_id, updates)
 
         # Update stats
-        if not is_reprocess and updates["extraction_status"] == ExtractionStatus.FAILED.value:
-            repo_config_repo.increment_builds_processing_failed(ObjectId(repo_config_id))
+        if (
+            not is_reprocess
+            and updates["extraction_status"] == ExtractionStatus.FAILED.value
+        ):
+            repo_config_repo.increment_builds_processing_failed(
+                ObjectId(repo_config_id)
+            )
 
         publish_build_update(repo_config_id, build_id, updates["extraction_status"])
-
-        # Track in Redis
-        if correlation_id:
-            tracker = ProcessingTracker(self.redis, repo_config_id, correlation_id)
-            if result["status"] in ("completed", "partial"):
-                tracker.record_success(build_id)
-            else:
-                tracker.record_failure(build_id)
 
         return {
             "status": result["status"],
@@ -634,7 +793,9 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
         return {"status": "error", "message": "Repository Config not found"}
 
     # === GROUP 1: Extraction failed → need full pipeline ===
-    extraction_failed_builds = model_build_repo.find_failed_builds(ObjectId(repo_config_id))
+    extraction_failed_builds = model_build_repo.find_failed_builds(
+        ObjectId(repo_config_id)
+    )
     extraction_failed_builds.sort(key=lambda b: b.build_created_at or b.created_at)
 
     # === GROUP 2: Extraction OK but prediction failed → predict only ===
@@ -646,7 +807,9 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
     prediction_count = len(prediction_failed_builds)
 
     if extraction_count == 0 and prediction_count == 0:
-        logger.info(f"{corr_prefix} No failed builds found for repository {repo_config_id}")
+        logger.info(
+            f"{corr_prefix} No failed builds found for repository {repo_config_id}"
+        )
         return {
             "status": "completed",
             "extraction_failed": 0,
@@ -658,10 +821,6 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
         f"{corr_prefix} Found {extraction_count} extraction failures, "
         f"{prediction_count} prediction failures"
     )
-
-    # Initialize tracker for this retry batch
-    tracker = ProcessingTracker(self.redis, repo_config_id, correlation_id)
-    tracker.initialize(extraction_count)
 
     # Update repo status
     repo_config_repo.update_repository(
@@ -703,7 +862,9 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
             )
             prediction_only_ids.append(str(build.id))
         except Exception as e:
-            logger.warning(f"{corr_prefix} Failed to reset prediction for {build.id}: {e}")
+            logger.warning(
+                f"{corr_prefix} Failed to reset prediction for {build.id}: {e}"
+            )
 
     # === DISPATCH TASKS ===
     tasks_dispatched = 0
@@ -731,7 +892,9 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
         )
         workflow.apply_async()
         tasks_dispatched += len(extraction_build_ids)
-        logger.info(f"{corr_prefix} Dispatched {len(extraction_build_ids)} extraction tasks")
+        logger.info(
+            f"{corr_prefix} Dispatched {len(extraction_build_ids)} extraction tasks"
+        )
 
     # Dispatch prediction batch (parallel - no temporal dependency)
     if prediction_only_ids:
@@ -741,7 +904,9 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
             prediction_only_ids[i : i + batch_size]
             for i in range(0, len(prediction_only_ids), batch_size)
         ]
-        prediction_tasks = [predict_builds_batch.si(repo_config_id, batch) for batch in batches]
+        prediction_tasks = [
+            predict_builds_batch.si(repo_config_id, batch) for batch in batches
+        ]
         group(prediction_tasks).apply_async()
         tasks_dispatched += len(prediction_only_ids)
         logger.info(
@@ -793,7 +958,9 @@ def handle_processing_chain_error(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     error_msg = str(exc) if exc else "Unknown processing error"
 
-    logger.error(f"{corr_prefix} Processing chain failed for {repo_config_id}: {error_msg}")
+    logger.error(
+        f"{corr_prefix} Processing chain failed for {repo_config_id}: {error_msg}"
+    )
 
     model_build_repo = ModelTrainingBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -957,7 +1124,9 @@ def predict_builds_batch(
                     )
                     continue
 
-                feature_vector = feature_vector_repo.find_by_id(model_build.feature_vector_id)
+                feature_vector = feature_vector_repo.find_by_id(
+                    model_build.feature_vector_id
+                )
                 if not feature_vector or not feature_vector.features:
                     model_build_repo.update_one(
                         build_id,
@@ -979,9 +1148,13 @@ def predict_builds_batch(
                             max_depth=9,
                         )
                         if history_vectors:
-                            temporal_history = [v.features for v in reversed(history_vectors)]
+                            temporal_history = [
+                                v.features for v in reversed(history_vectors)
+                            ]
                     except Exception as e:
-                        logger.warning(f"Failed to fetch temporal history for {build_id}: {e}")
+                        logger.warning(
+                            f"Failed to fetch temporal history for {build_id}: {e}"
+                        )
 
                 was_previously_failed = (
                     model_build.prediction_status == ExtractionStatus.FAILED.value
@@ -1020,7 +1193,9 @@ def predict_builds_batch(
                 )
 
             for build_info in builds_to_predict:
-                normalized = prediction_service.normalize_features(build_info["features"])
+                normalized = prediction_service.normalize_features(
+                    build_info["features"]
+                )
                 build_info["normalized_features"] = normalized
                 feature_vector_repo.update_normalized_features(
                     build_info["feature_vector_id"],
@@ -1092,7 +1267,9 @@ def predict_builds_batch(
                         retried_success_count += 1
 
                 model_build_repo.update_one(build_info["id"], updates)
-                publish_build_update(repo_config_id, build_info["id"], updates["prediction_status"])
+                publish_build_update(
+                    repo_config_id, build_info["id"], updates["prediction_status"]
+                )
 
             # Update repo config stats
             if retried_success_count > 0:
@@ -1104,7 +1281,9 @@ def predict_builds_batch(
                     ObjectId(repo_config_id), new_failure_count
                 )
             if succeeded > 0:
-                repo_config_repo.increment_builds_completed(ObjectId(repo_config_id), succeeded)
+                repo_config_repo.increment_builds_completed(
+                    ObjectId(repo_config_id), succeeded
+                )
 
             # Notify UI about repo stats changes
             if retried_success_count > 0 or new_failure_count > 0 or succeeded > 0:

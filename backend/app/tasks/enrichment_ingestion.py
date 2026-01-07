@@ -6,15 +6,15 @@ This module handles the ingestion phase of dataset version enrichment:
 2. aggregate_ingestion_results - Chord callback: aggregate ingestion results
 3. handle_enrichment_chord_error - Error handler for ingestion failures
 4. dispatch_version_scans - Dispatch scans per unique commit (async)
-5. reingest_failed_builds - Retry FAILED builds (not MISSING_RESOURCE)
+5. reingest_failed_builds - Retry FAILED builds
 
 After ingestion completes, user triggers Phase 2 (processing) via
 start_enrichment_processing in enrichment_processing.py.
 """
 
-import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List
 
 from bson import ObjectId
@@ -22,7 +22,6 @@ from celery import chord, group
 
 from app.celery_app import celery_app
 from app.core.tracing import TracingContext
-from app.entities.dataset_build import DatasetBuild
 from app.entities.dataset_import_build import (
     DatasetImportBuild,
     DatasetImportBuildStatus,
@@ -45,7 +44,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.start_enrichment",
-    queue="processing",
+    queue="ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
@@ -99,21 +98,14 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         logger.error(f"Version {version_id} not found")
         return {"status": "error", "error": "Version not found"}
 
-    # Mark as started
-    version_repo.mark_started(version_id, task_id=self.request.id)
-
     try:
         # Load dataset
         dataset = dataset_repo.find_by_id(dataset_version.dataset_id)
         if not dataset:
             raise ValueError(f"Dataset {dataset_version.dataset_id} not found")
 
-        # Get validated builds
-        validated_builds = dataset_build_repo.find_validated_builds(
-            str(dataset_version.dataset_id)
-        )
-
-        builds_total = len(validated_builds)
+        # builds_total is already set during version creation from validation_stats
+        builds_total = dataset_version.builds_total
         if builds_total == 0:
             raise ValueError("No validated builds found. Please run validation first.")
 
@@ -123,18 +115,20 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         )
         validated_raw_repo_ids = [str(stat.raw_repo_id) for stat in repo_stats_list]
 
+        # Mark as started ingestion
         version_repo.update_one(
             version_id,
             {
-                "builds_total": builds_total,
                 "status": VersionStatus.INGESTING.value,
+                "started_at": datetime.utcnow(),
+                "task_id": self.request.id,
             },
         )
         # Publish initial progress via WebSocket
         publish_enrichment_update(
             version_id=version_id,
             status="ingesting",
-            builds_processed=0,
+            builds_features_extracted=0,
             builds_total=builds_total,
         )
         logger.info(
@@ -174,7 +168,7 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
         import_builds_created = _create_import_builds_for_version(
             db=self.db,
             version_id=version_id,
-            validated_builds=validated_builds,
+            dataset_id=str(dataset_version.dataset_id),
             required_resources=list(required_resources),
         )
         logger.info(
@@ -223,9 +217,7 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
                     raw_repo_id, build_csv_id, ci_provider
                 )
                 if raw_build_run and raw_build_run.commit_sha:
-                    commit_shas.append(
-                        raw_build_run.effective_sha or raw_build_run.commit_sha
-                    )
+                    commit_shas.append(raw_build_run.commit_sha)
             commit_shas = list(set(commit_shas))
 
             # Build ingestion chain for this repo
@@ -270,13 +262,12 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
                 version_id,
                 {
                     "status": VersionStatus.INGESTED.value,
-                    "ingestion_progress": 100,
                 },
             )
             publish_enrichment_update(
                 version_id=version_id,
                 status=VersionStatus.INGESTED.value,
-                builds_processed=0,
+                builds_features_extracted=0,
                 builds_total=builds_total,
             )
             return {
@@ -335,7 +326,7 @@ def start_enrichment(self: PipelineTask, version_id: str) -> Dict[str, Any]:
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.aggregate_ingestion_results",
-    queue="processing",
+    queue="ingestion",
     soft_time_limit=30,
     time_limit=60,
 )
@@ -356,28 +347,6 @@ def aggregate_ingestion_results(
 
     version_repo = DatasetVersionRepository(self.db)
     import_build_repo = DatasetImportBuildRepository(self.db)
-
-    # NOTE: Redis results are no longer used for status determination.
-    # Resource status is now progressively saved directly to DB by shared tasks.
-    # We only log stats from Redis for debugging purposes.
-    all_results = _fetch_and_parse_results(
-        self.redis, correlation_id, results, corr_prefix
-    )
-    logger.info(
-        f"{corr_prefix}[aggregate] Chord returned {len(all_results)} results (for logging only)"
-    )
-
-    # Cleanup Redis key
-    if correlation_id:
-        try:
-            self.redis.delete(f"ingestion:results:{correlation_id}")
-        except Exception as e:
-            logger.warning(f"{corr_prefix} Failed to cleanup Redis key: {e}")
-
-    # === NOTE: Resource status updates are now done progressively ===
-    # The shared ingestion tasks (clone_repo, create_worktree_chunk, download_logs_chunk)
-    # now save resource status directly to DB as they complete.
-    # We now determine final BUILD status by querying resource_status from DB.
 
     from datetime import datetime
 
@@ -474,7 +443,6 @@ def aggregate_ingestion_results(
         version_id,
         {
             "status": final_status.value,
-            "ingestion_progress": 100,
             "builds_ingested": ingested,
             "builds_missing_resource": missing_resource,
             "builds_ingestion_failed": failed,
@@ -490,7 +458,7 @@ def aggregate_ingestion_results(
     publish_enrichment_update(
         version_id=version_id,
         status=final_status.value,
-        builds_processed=0,
+        builds_features_extracted=0,
         builds_total=total_builds,
         builds_ingested=ingested,
         builds_missing_resource=missing_resource,
@@ -511,7 +479,7 @@ def aggregate_ingestion_results(
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.handle_enrichment_chord_error",
-    queue="processing",
+    queue="ingestion",
     soft_time_limit=60,
     time_limit=120,
 )
@@ -613,7 +581,7 @@ def handle_enrichment_chord_error(
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.reingest_failed_builds",
-    queue="processing",
+    queue="ingestion",
     soft_time_limit=300,
     time_limit=360,
 )
@@ -652,14 +620,14 @@ def reingest_failed_builds(
             "message": msg,
         }
 
-    # Reset to PENDING and clear error fields
+    # Reset to CREATED and clear error fields
     reset_count = 0
     for build in failed_imports:
         try:
             import_build_repo.update_one(
                 str(build.id),
                 {
-                    "status": DatasetImportBuildStatus.PENDING.value,
+                    "status": DatasetImportBuildStatus.CREATED.value,
                     "ingestion_error": None,
                     "failed_at": None,
                 },
@@ -671,10 +639,6 @@ def reingest_failed_builds(
     if reset_count == 0:
         return {"status": "error", "message": "Failed to reset any builds"}
 
-    # Update version status
-    version_repo.update_one(version_id, {"status": VersionStatus.INGESTING.value})
-
-    # Re-trigger ingestion for this version
     start_enrichment.delay(version_id)
 
     logger.info(f"Re-triggered ingestion for {reset_count} failed imports")
@@ -690,98 +654,110 @@ def reingest_failed_builds(
 def _create_import_builds_for_version(
     db,
     version_id: str,
-    validated_builds: List[DatasetBuild],
+    dataset_id: str,
     required_resources: List[str],
 ) -> int:
     """
-    Create DatasetImportBuild records for all validated builds in a version.
+    Create DatasetImportBuild records for validated builds that need ingestion.
+
+    Skip builds that already have import records with status:
+    - INGESTED: Already completed
+    - INGESTING: Currently processing
+    - MISSING_RESOURCE: Not retryable
+
+    Only creates records for:
+    - Builds without import records (new)
+    - Builds with CREATED status (waiting for ingestion)
 
     Args:
         db: Database connection
         version_id: DatasetVersion ID
-        validated_builds: List of validated DatasetBuild entities
+        dataset_id: Dataset ID to get validated builds from
         required_resources: List of required resource names for ingestion
 
     Returns:
         Number of import build records created
     """
+    from app.config import settings
+
     import_build_repo = DatasetImportBuildRepository(db)
+    dataset_build_repo = DatasetBuildRepository(db)
     raw_build_run_repo = RawBuildRunRepository(db)
     raw_repo_repo = RawRepositoryRepository(db)
 
+    chunk_size = settings.INGESTION_IMPORT_BUILDS_PER_CHUNK
+
+    # Get existing import builds for this version to check duplicates
+    # Use set for O(1) lookup instead of dict
+    existing_imports = import_build_repo.find_by_version(version_id)
+    existing_by_dataset_build = {
+        str(imp.dataset_build_id): imp.status for imp in existing_imports
+    }
+
     import_builds = []
+    skipped_count = 0
+    total_created = 0
 
-    for dataset_build in validated_builds:
-        # Skip builds without raw references
-        if not dataset_build.raw_run_id or not dataset_build.raw_repo_id:
-            continue
+    # Use paginated iterator to handle large datasets (100K+ builds)
+    for batch in dataset_build_repo.iterate_validated_builds(
+        dataset_id, batch_size=chunk_size
+    ):
+        for dataset_build in batch:
+            # Skip builds without raw references
+            if not dataset_build.raw_run_id or not dataset_build.raw_repo_id:
+                continue
 
-        # Get raw build run for denormalized fields
-        raw_build_run = raw_build_run_repo.find_by_id(dataset_build.raw_run_id)
-        if not raw_build_run:
-            continue
+            # Check if import build already exists
+            existing_status = existing_by_dataset_build.get(str(dataset_build.id))
+            if existing_status:
+                # Skip if already processed (INGESTED, INGESTING, MISSING_RESOURCE)
+                # Only allow re-creation for CREATED (will be picked up by ingestion)
+                if existing_status != DatasetImportBuildStatus.CREATED:
+                    skipped_count += 1
+                    continue
 
-        # Get raw repo for full_name
-        raw_repo = raw_repo_repo.find_by_id(dataset_build.raw_repo_id)
-        repo_full_name = raw_repo.full_name if raw_repo else ""
+            # Get raw build run for denormalized fields
+            raw_build_run = raw_build_run_repo.find_by_id(dataset_build.raw_run_id)
+            if not raw_build_run:
+                continue
 
-        import_build = DatasetImportBuild(
-            _id=None,
-            dataset_version_id=ObjectId(version_id),
-            dataset_build_id=dataset_build.id,
-            raw_repo_id=dataset_build.raw_repo_id,
-            raw_build_run_id=dataset_build.raw_run_id,
-            status=DatasetImportBuildStatus.PENDING,
-            resource_status={},
-            required_resources=required_resources,
-            ci_run_id=raw_build_run.ci_run_id or "",
-            commit_sha=raw_build_run.effective_sha or raw_build_run.commit_sha or "",
-            repo_full_name=repo_full_name,
-        )
-        import_builds.append(import_build)
+            # Get raw repo for full_name
+            raw_repo = raw_repo_repo.find_by_id(dataset_build.raw_repo_id)
+            repo_full_name = raw_repo.full_name if raw_repo else ""
 
+            import_build = DatasetImportBuild(
+                _id=None,
+                dataset_version_id=ObjectId(version_id),
+                dataset_build_id=dataset_build.id,
+                raw_repo_id=dataset_build.raw_repo_id,
+                raw_build_run_id=dataset_build.raw_run_id,
+                status=DatasetImportBuildStatus.CREATED,
+                resource_status={},
+                required_resources=required_resources,
+                ci_run_id=raw_build_run.ci_run_id or "",
+                commit_sha=raw_build_run.commit_sha or "",
+                repo_full_name=repo_full_name,
+            )
+            import_builds.append(import_build)
+
+            # Chunked bulk insert to avoid memory issues with large datasets
+            if len(import_builds) >= chunk_size:
+                import_build_repo.bulk_insert(import_builds)
+                total_created += len(import_builds)
+                logger.info(
+                    f"[_create_import_builds] Inserted chunk of {len(import_builds)} builds "
+                    f"(total: {total_created})"
+                )
+                import_builds = []
+
+    # Insert remaining builds
     if import_builds:
         import_build_repo.bulk_insert(import_builds)
-        logger.info(
-            f"[_create_import_builds] Created {len(import_builds)} import builds "
-            f"for version {version_id}"
-        )
+        total_created += len(import_builds)
 
-    return len(import_builds)
+    logger.info(
+        f"[_create_import_builds] Created {total_created} import builds, "
+        f"skipped {skipped_count} already processed for version {version_id}"
+    )
 
-
-def _fetch_and_parse_results(
-    redis_client,
-    correlation_id: str,
-    fallback_results: Any,
-    log_prefix: str,
-) -> List[Dict[str, Any]]:
-    """Fetch results from Redis or use fallback (same pattern as model_ingestion)."""
-    all_results = []
-
-    if correlation_id:
-        try:
-            key = f"ingestion:results:{correlation_id}"
-            redis_results: List[bytes] = redis_client.lrange(key, 0, -1)  # type: ignore[assignment]
-            if redis_results:
-                logger.info(
-                    f"{log_prefix} Fetched {len(redis_results)} results from Redis"
-                )
-                for r_str in redis_results:
-                    try:
-                        all_results.append(json.loads(r_str))
-                    except Exception as e:
-                        logger.warning(
-                            f"{log_prefix} Failed to decode Redis result: {e}"
-                        )
-        except Exception as e:
-            logger.error(f"{log_prefix} Error fetching results from Redis: {e}")
-
-    if not all_results:
-        if isinstance(fallback_results, list):
-            all_results = fallback_results
-        elif isinstance(fallback_results, dict):
-            all_results = [fallback_results]
-        logger.info(f"{log_prefix} Used {len(all_results)} results from task arguments")
-
-    return all_results
+    return total_created

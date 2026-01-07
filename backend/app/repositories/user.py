@@ -74,6 +74,20 @@ class UserRepository(BaseRepository[User]):
         """Find all users with a specific role."""
         return self.find_many({"role": role})
 
+    def find_users_with_repo_access(self, raw_repo_id) -> List[User]:
+        """
+        Find all users who have access to a specific repository.
+
+        Users are matched by having the repo in their github_accessible_repos list.
+        This field is populated during GitHub OAuth sync based on user's GitHub access.
+        """
+        from bson import ObjectId
+
+        repo_oid = (
+            ObjectId(raw_repo_id) if isinstance(raw_repo_id, str) else raw_repo_id
+        )
+        return self.find_many({"github_accessible_repos": repo_oid})
+
     def update_settings(
         self, user_id: str, browser_notifications: Optional[bool] = None
     ) -> Optional[User]:

@@ -105,7 +105,9 @@ def start_sonar_scan_for_version_commit(
 
             worktree_path = get_worktree_path(github_repo_id, commit_sha)
             if not worktree_path.exists():
-                error_msg = f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
+                error_msg = (
+                    f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
+                )
                 logger.error(error_msg)
                 scan_repo.mark_failed(scan_record.id, error_msg)
                 raise ValueError(error_msg)
@@ -129,7 +131,9 @@ def start_sonar_scan_for_version_commit(
             worktree_path_str = state.meta["worktree_path"]
 
             project_key = component_key.rsplit("_", 1)[0]
-            sonar_tool = SonarQubeTool(project_key=project_key, github_repo_id=github_repo_id)
+            sonar_tool = SonarQubeTool(
+                project_key=project_key, github_repo_id=github_repo_id
+            )
             sonar_tool.scan_commit(
                 commit_sha=commit_sha,
                 full_name=repo_full_name,
@@ -142,7 +146,10 @@ def start_sonar_scan_for_version_commit(
                 f"{corr_prefix} SonarQube scan initiated for {component_key}, waiting for webhook"
             )
 
-            state.meta["result"] = {"status": "scanning", "component_key": component_key}
+            state.meta["result"] = {
+                "status": "scanning",
+                "component_key": component_key,
+            }
             state.phase = "DONE"
 
         # Phase: DONE
@@ -181,7 +188,9 @@ def export_metrics_from_webhook(
         component_key: SonarQube component/project key
         analysis_status: Status from webhook ("SUCCESS", "FAILED", etc.)
     """
-    logger.info(f"Processing SonarQube webhook for {component_key}, status={analysis_status}")
+    logger.info(
+        f"Processing SonarQube webhook for {component_key}, status={analysis_status}"
+    )
 
     db = get_database()
     scan_repo = SonarCommitScanRepository(db)
@@ -209,6 +218,19 @@ def export_metrics_from_webhook(
                 status="failed",
                 error=error_msg,
             )
+
+            version_repo.increment_scans_failed(str(scan_record.dataset_version_id))
+            try:
+                from app.services.notification_service import (
+                    check_and_notify_enrichment_completed,
+                )
+
+                check_and_notify_enrichment_completed(
+                    db=db, version_id=str(scan_record.dataset_version_id)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to check enrichment notification: {e}")
+
             return {"status": "failed", "component_key": component_key}
 
         # Get version to determine which metrics to fetch
@@ -259,6 +281,20 @@ def export_metrics_from_webhook(
             metrics=metrics,
             builds_affected=updated_count,
         )
+
+        version_repo.increment_scans_completed(str(scan_record.dataset_version_id))
+
+        # Check if all scans are complete for enrichment notification
+        try:
+            from app.services.notification_service import (
+                check_and_notify_enrichment_completed,
+            )
+
+            check_and_notify_enrichment_completed(
+                db=db, version_id=str(scan_record.dataset_version_id)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to check enrichment notification: {e}")
 
         return {
             "status": "success",

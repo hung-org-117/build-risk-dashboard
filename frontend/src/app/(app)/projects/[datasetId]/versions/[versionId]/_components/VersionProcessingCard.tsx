@@ -14,27 +14,34 @@ import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
 interface VersionProcessingCardProps {
-    buildsProcessed: number;
+    buildsExtracted: number;
     buildsIngested: number;
-    buildsProcessingFailed: number;
+    buildsExtractionFailed: number;
     status: string;
     canStartProcessing: boolean;
     onStartProcessing?: () => void;
     onRetryFailed?: () => void;
     startLoading?: boolean;
     retryLoading?: boolean;
+    // Scan tracking
+    scansCompleted?: number;
+    scansTotal?: number;
+    scansFailed?: number;
 }
 
 export function VersionProcessingCard({
-    buildsProcessed,
+    buildsExtracted,
     buildsIngested,
-    buildsProcessingFailed,
+    buildsExtractionFailed,
     status,
     canStartProcessing,
     onStartProcessing,
     onRetryFailed,
     startLoading = false,
     retryLoading = false,
+    scansCompleted = 0,
+    scansTotal = 0,
+    scansFailed = 0,
 }: VersionProcessingCardProps) {
     const s = status.toLowerCase();
     const isProcessing = s === "processing";
@@ -42,8 +49,13 @@ export function VersionProcessingCard({
     const notStarted = s === "ingested";
 
     const total = buildsIngested;
-    const processed = buildsProcessed + buildsProcessingFailed;
+    const processed = buildsExtracted + buildsExtractionFailed;
     const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+    // Scan progress
+    const scansDone = scansCompleted + scansFailed;
+    const scanPercent = scansTotal > 0 ? Math.round((scansDone / scansTotal) * 100) : 0;
+    const hasScans = scansTotal > 0;
 
     return (
         <Card>
@@ -77,7 +89,7 @@ export function VersionProcessingCard({
                 </div>
             </CardHeader>
             <CardContent className="space-y-4">
-                {/* Progress */}
+                {/* Feature Extraction Progress */}
                 <div className="p-4 rounded-lg border bg-slate-50 dark:bg-slate-900/50">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium">
@@ -87,7 +99,7 @@ export function VersionProcessingCard({
                             "text-sm",
                             isComplete ? "text-green-600" : "text-muted-foreground"
                         )}>
-                            {buildsProcessed}/{total}
+                            {buildsExtracted}/{total}
                         </span>
                     </div>
                     <Progress value={percent} className="h-2" />
@@ -97,16 +109,47 @@ export function VersionProcessingCard({
                             {isProcessing && "In progress..."}
                             {isComplete && "Complete"}
                         </p>
-                        {buildsProcessingFailed > 0 && (
+                        {buildsExtractionFailed > 0 && (
                             <p className="text-xs text-red-600">
-                                {buildsProcessingFailed} failed
+                                {buildsExtractionFailed} failed
                             </p>
                         )}
                     </div>
                 </div>
 
+                {/* Scan Metrics Progress (only show if scans configured) */}
+                {hasScans && (
+                    <div className="p-4 rounded-lg border bg-slate-50 dark:bg-slate-900/50">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium flex items-center gap-2">
+                                🔍 Scan Metrics
+                                {isProcessing && scanPercent < 100 && (
+                                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                )}
+                            </span>
+                            <span className={cn(
+                                "text-sm",
+                                scanPercent === 100 ? "text-green-600" : "text-muted-foreground"
+                            )}>
+                                {scansCompleted}/{scansTotal}
+                            </span>
+                        </div>
+                        <Progress value={scanPercent} className="h-2" />
+                        <div className="flex justify-between mt-2">
+                            <p className="text-xs text-muted-foreground">
+                                Trivy + SonarQube
+                            </p>
+                            {scansFailed > 0 && (
+                                <p className="text-xs text-red-600">
+                                    {scansFailed} failed
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Retry Action */}
-                {onRetryFailed && buildsProcessingFailed > 0 && (
+                {onRetryFailed && buildsExtractionFailed > 0 && (
                     <Button
                         variant="outline"
                         size="sm"
@@ -118,7 +161,7 @@ export function VersionProcessingCard({
                         ) : (
                             <RotateCcw className="mr-2 h-4 w-4" />
                         )}
-                        Retry Failed ({buildsProcessingFailed})
+                        Retry Failed ({buildsExtractionFailed})
                     </Button>
                 )}
             </CardContent>

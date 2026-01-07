@@ -150,7 +150,7 @@ class DatasetVersionService:
                 feature_configs=feature_configs or {},
                 scan_metrics=normalized_scan_metrics,
                 scan_config=normalized_scan_config,
-                builds_total=dataset.rows or 0,
+                builds_total=dataset.validation_stats.builds_found,
                 status=VersionStatus.QUEUED,
             )
 
@@ -228,24 +228,6 @@ class DatasetVersionService:
             filename=filename,
             media_type=media_type,
         )
-
-    def get_ingestion_progress(
-        self, dataset_id: str, version_id: str, user_id: str
-    ) -> dict:
-        """Get ingestion progress summary for a dataset version."""
-        self._verify_dataset_access(dataset_id, user_id)
-        self._get_version(dataset_id, version_id)
-
-        import_repo = DatasetImportBuildRepository(self._db)
-        status_counts = import_repo.count_by_status(version_id)
-        total = sum(status_counts.values())
-        resource_status = import_repo.get_resource_status_summary(version_id)
-
-        return {
-            "total": total,
-            "status_counts": status_counts,
-            "resource_status": resource_status,
-        }
 
     def get_import_builds(
         self,
@@ -759,8 +741,8 @@ class DatasetVersionService:
                 "builds_total": version.builds_total,
                 "builds_ingested": version.builds_ingested,
                 "builds_missing_resource": version.builds_missing_resource,
-                "builds_processed": version.builds_processed,
-                "builds_processing_failed": version.builds_processing_failed,
+                "builds_features_extracted": version.builds_features_extracted,
+                "builds_extraction_failed": version.builds_extraction_failed,
                 "selected_features": version.selected_features,
                 "scan_metrics": version.scan_metrics,
                 "created_at": (

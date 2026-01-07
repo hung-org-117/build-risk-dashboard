@@ -217,7 +217,7 @@ export default function UserReposPage() {
                                         <tr
                                             key={repo.id}
                                             className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                                            onClick={() => router.push(`/repos/${repo.id}/builds`)}
+                                            onClick={() => router.push(`/my-repos/${repo.id}/builds`)}
                                         >
                                             <td className="px-6 py-4 font-medium text-foreground">
                                                 {repo.full_name}

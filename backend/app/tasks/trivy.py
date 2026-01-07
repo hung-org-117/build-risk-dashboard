@@ -87,6 +87,20 @@ def start_trivy_scan_for_version_commit(
             status="failed",
             error=error_msg,
         )
+        # Increment scans_failed counter
+        try:
+            from app.repositories.dataset_version import DatasetVersionRepository
+
+            version_repo = DatasetVersionRepository(db)
+            version_repo.increment_scans_failed(version_id)
+            # Check if all scans are now done (even with failures)
+            from app.services.notification_service import (
+                check_and_notify_enrichment_completed,
+            )
+
+            check_and_notify_enrichment_completed(db=db, version_id=version_id)
+        except Exception as e:
+            logger.warning(f"Failed to update scan failure stats: {e}")
 
     def _cleanup(state: TaskState) -> None:
         """Reset scan status for retry."""
@@ -104,7 +118,9 @@ def start_trivy_scan_for_version_commit(
 
             worktree_path = get_worktree_path(github_repo_id, commit_sha)
             if not worktree_path.exists():
-                error_msg = f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
+                error_msg = (
+                    f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
+                )
                 logger.error(error_msg)
                 trivy_scan_repo.mark_failed(scan_record.id, error_msg)
                 raise ValueError(error_msg)
@@ -141,7 +157,9 @@ def start_trivy_scan_for_version_commit(
 
             if scan_result.get("status") == "failed":
                 error_msg = scan_result.get("error", "Unknown error")
-                logger.error(f"{corr_prefix} Trivy scan failed for {commit_sha[:8]}: {error_msg}")
+                logger.error(
+                    f"{corr_prefix} Trivy scan failed for {commit_sha[:8]}: {error_msg}"
+                )
                 trivy_scan_repo.mark_failed(scan_record.id, error_msg)
                 return {"status": "error", "error": error_msg}
 
@@ -189,12 +207,31 @@ def start_trivy_scan_for_version_commit(
                 builds_affected=updated_count,
             )
 
+            # Increment scans_completed counter
+            from app.repositories.dataset_version import DatasetVersionRepository
+
+            version_repo = DatasetVersionRepository(db)
+            version_repo.increment_scans_completed(version_id)
+
             state.meta["result"] = {
                 "status": "success",
                 "builds_updated": updated_count,
                 "vuln_total": filtered_metrics.get("vuln_total", 0),
                 "scan_duration_ms": scan_duration_ms,
             }
+
+            # Check if all scans are complete for enrichment notification
+            try:
+                from app.services.notification_service import (
+                    check_and_notify_enrichment_completed,
+                )
+
+                check_and_notify_enrichment_completed(db=db, version_id=version_id)
+            except Exception as e:
+                logger.warning(
+                    f"{corr_prefix} Failed to check enrichment notification: {e}"
+                )
+
             state.phase = "DONE"
 
         # Phase: DONE
