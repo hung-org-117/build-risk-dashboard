@@ -16,6 +16,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 from pymongo.database import Database
 
+from app.dtos.scan_statistics import (
+    MetricSummary,
+    ScanMetricsStatisticsResponse,
+    ScanSummary,
+    SonarSummary,
+    TrivySummary,
+)
 from app.dtos.statistics import (
     BuildStatusBreakdown,
     CategoricalDistribution,
@@ -29,13 +36,6 @@ from app.dtos.statistics import (
     NumericStats,
     VersionStatistics,
     VersionStatisticsResponse,
-)
-from app.dtos.scan_statistics import (
-    MetricSummary,
-    ScanMetricsStatisticsResponse,
-    ScanSummary,
-    SonarSummary,
-    TrivySummary,
 )
 from app.entities.dataset_enrichment_build import DatasetEnrichmentBuild
 from app.repositories.data_quality_repository import DataQualityRepository

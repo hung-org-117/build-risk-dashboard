@@ -1,14 +1,5 @@
-"""
-Seed script for TravisTorrent dataset template.
-
-Creates a template with all available features from the code registry.
-Run with: python -m app.scripts.seed_travistorrent_template
-
-Feature names are explicitly listed here for clarity and maintainability.
-When adding new features, add them to the appropriate FEATURES_* set below.
-"""
-
 import logging
+
 from app.database.mongo import get_database
 
 # Import DEFAULT_FEATURES from constants (always extracted, not user-selectable)

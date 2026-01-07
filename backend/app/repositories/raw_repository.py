@@ -1,6 +1,6 @@
 """Repository for RawRepository entities (shared raw GitHub repository data)."""
 
-from typing import List, Optional
+from typing import Optional
 
 from app.entities.raw_repository import RawRepository
 from app.repositories.base import BaseRepository

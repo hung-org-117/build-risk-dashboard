@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from pymongo.client_session import ClientSession
 from pymongo.database import Database
 

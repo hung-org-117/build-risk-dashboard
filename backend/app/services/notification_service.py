@@ -750,7 +750,7 @@ def notify_pipeline_completed_to_admins(
                 type=NotificationType.PIPELINE_COMPLETED,
                 title="✅ Pipeline Complete",
                 message=message,
-                link=f"/repositories",
+                link="/repositories",
                 metadata={
                     "repo_name": repo_name,
                     "predicted": predicted_count,
@@ -785,7 +785,7 @@ def notify_pipeline_failed_to_admins(
                 type=NotificationType.PIPELINE_FAILED,
                 title="❌ Pipeline Failed",
                 message=f"{repo_name}: {error_message[:200]}",
-                link=f"/repositories",
+                link="/repositories",
                 metadata={
                     "repo_name": repo_name,
                     "error": error_message,

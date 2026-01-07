@@ -2,7 +2,7 @@
 Scan Statistics DTOs - Data transfer objects for scan metrics statistics endpoints.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
