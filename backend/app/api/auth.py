@@ -175,4 +175,3 @@ def logout(response: Response):
         secure=not settings.DEBUG,
         samesite="lax",
     )
-

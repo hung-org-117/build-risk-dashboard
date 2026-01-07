@@ -52,10 +52,9 @@ class GTestParser(FrameworkParser):
         total = int(total_match.group("total"))
         duration_ms = int(total_match.group("duration"))
 
-        passed = 0
         passed_match = self.PASSED_PATTERN.search(text)
         if passed_match:
-            passed = int(passed_match.group("passed"))
+            int(passed_match.group("passed"))
 
         failed = 0
         failed_match = self.FAILED_PATTERN.search(text)
@@ -107,7 +106,7 @@ class Catch2Parser(FrameworkParser):
         match = self.TEST_CASES_PATTERN.search(text)
         if match:
             total = int(match.group("total"))
-            passed = int(match.group("passed"))
+            int(match.group("passed"))
             failed = int(match.group("failed") or 0)
 
             return ParsedLog(

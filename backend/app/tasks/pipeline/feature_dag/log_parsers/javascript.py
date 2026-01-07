@@ -41,7 +41,7 @@ class JestParser(FrameworkParser):
             return None
 
         total = int(match.group("total"))
-        passed = int(match.group("passed") or 0)
+        int(match.group("passed") or 0)
         failed = int(match.group("failed") or 0)
         skipped = int(match.group("skipped") or 0)
 
@@ -184,7 +184,7 @@ class VitestParser(FrameworkParser):
             return None
 
         total = int(match.group("total"))
-        passed = int(match.group("passed") or 0)
+        int(match.group("passed") or 0)
         failed = int(match.group("failed") or 0)
         skipped = int(match.group("skipped") or 0)
 

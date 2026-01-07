@@ -2,7 +2,6 @@
 Health check endpoints
 """
 
-
 from fastapi import APIRouter, Depends
 from pymongo.database import Database
 

@@ -13,7 +13,6 @@ from app.repositories.base import BaseRepository
 
 
 class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
-
     def __init__(self, db) -> None:
         super().__init__(db, "model_training_builds", ModelTrainingBuild)
 

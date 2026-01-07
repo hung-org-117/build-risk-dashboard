@@ -277,11 +277,6 @@ class DatasetVersionService:
                         if build.get("ingested_at")
                         else None
                     ),
-                    "ingested_at": (
-                        build["ingested_at"].isoformat()
-                        if build.get("ingested_at")
-                        else None
-                    ),
                     "resource_status": build.get("resource_status", {}),
                     "required_resources": build.get("required_resources", []),
                     # RawBuildRun fields for detailed view

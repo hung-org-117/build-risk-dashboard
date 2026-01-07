@@ -130,16 +130,16 @@ class RedisTokenPool:
         local raw_key = KEYS[4]
         local now_ts = tonumber(ARGV[1])
         local now_iso = ARGV[2]
-        
+
         -- Get all tokens sorted by priority (highest remaining quota first)
         local tokens = redis.call('ZREVRANGE', pool_key, 0, -1)
-        
+
         local earliest_cooldown = nil
-        
+
         for i, token_hash in ipairs(tokens) do
             local cooldown_key = cooldown_prefix .. ':' .. token_hash
             local cooldown = redis.call('GET', cooldown_key)
-            
+
             if cooldown then
                 local cooldown_ts = tonumber(cooldown)
                 if cooldown_ts > now_ts then
@@ -153,7 +153,7 @@ class RedisTokenPool:
                     cooldown = nil
                 end
             end
-            
+
             if not cooldown then
                 -- Token is available, check if raw token exists
                 local raw_token = redis.call('HGET', raw_key, token_hash)
@@ -162,18 +162,18 @@ class RedisTokenPool:
                     local stats_key = stats_prefix .. ':' .. token_hash
                     redis.call('HINCRBY', stats_key, 'total_requests', 1)
                     redis.call('HSET', stats_key, 'last_used_at', now_iso)
-                    
+
                     -- Return token_hash and raw_token
                     return {token_hash, raw_token}
                 end
             end
         end
-        
+
         -- No tokens available, return earliest cooldown if any
         if earliest_cooldown then
             return {'__COOLDOWN__', tostring(earliest_cooldown)}
         end
-        
+
         return nil
         """
 

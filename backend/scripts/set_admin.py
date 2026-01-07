@@ -79,7 +79,7 @@ def list_users():
     print("\n📋 Current Users:")
     print("-" * 60)
     for user in users:
-        role_badge = "👑 ADMIN" if user.get("role") == "admin" else "👤 User"
+        role_badge = "ADMIN" if user.get("role") == "admin" else "👤 User"
         print(
             f"  {role_badge} | {user.get('email', 'N/A')} | {user.get('name', 'N/A')}"
         )

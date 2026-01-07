@@ -69,7 +69,7 @@ class EmailTemplateRenderer:
 
         import logging
 
-        logger = logging.getLogger(__name__)
+        logging.getLogger(__name__)
 
         # Load and compile content template
         content_source = self._load_template(template_name)

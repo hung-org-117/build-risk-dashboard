@@ -413,7 +413,7 @@ class FeatureService:
         feature_info = self._extract_feature_info()
         resources = set()
 
-        for feat_name, info in feature_info.items():
+        for _feat_name, info in feature_info.items():
             if info["extractor_node"] == node_name:
                 for dep in info["depends_on"]:
                     if dep not in feature_info:

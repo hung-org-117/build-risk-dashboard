@@ -47,4 +47,3 @@ class UserDetailResponse(BaseModel):
     role: str = "user"
     created_at: Optional[str] = None
     github: GitHubInfo
-
