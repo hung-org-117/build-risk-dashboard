@@ -1715,7 +1715,7 @@ SCAN_BATCH_DELAY_SECONDS = 0.5
 
 - **RedisLock**: Prevent concurrent operations (clone, worktree)
 
-> **Note**: ProcessingTracker và ingestion results tracking đã được thay thế bằng database queries để đảm bảo data durability.
+> **Note**: Tracking kết quả (ingestion, enrichment) sử dụng trực tiếp database queries để đảm bảo data durability
 
 ### 5. Parallelization
 

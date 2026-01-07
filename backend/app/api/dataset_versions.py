@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 import logging
 import os
 from typing import List, Optional
@@ -8,7 +9,6 @@ from fastapi.responses import StreamingResponse
 from app.database.mongo import get_db
 from app.dtos.dataset_version import (
     CreateVersionRequest,
-    IngestionProgressResponse,
     VersionListResponse,
     VersionResponse,
 )

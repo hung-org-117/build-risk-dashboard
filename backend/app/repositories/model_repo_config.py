@@ -18,41 +18,6 @@ class ModelRepoConfigRepository(BaseRepository[ModelRepoConfig]):
     def __init__(self, db) -> None:
         super().__init__(db, "model_repo_configs", ModelRepoConfig)
 
-    def find_by_user_and_repo(
-        self,
-        user_id: ObjectId | str,
-        raw_repo_id: ObjectId | str,
-    ) -> Optional[ModelRepoConfig]:
-        """Find config by user and raw repository."""
-        doc = self.collection.find_one(
-            {
-                "user_id": self.ensure_object_id(user_id),
-                "raw_repo_id": self.ensure_object_id(raw_repo_id),
-            }
-        )
-        return ModelRepoConfig(**doc) if doc else None
-
-    def find_by_raw_repo(
-        self,
-        raw_repo_id: ObjectId | str,
-    ) -> List[ModelRepoConfig]:
-        """Find all configs by raw repository ID."""
-        docs = self.collection.find({"raw_repo_id": self.ensure_object_id(raw_repo_id)})
-        return [ModelRepoConfig(**doc) for doc in docs]
-
-    def list_by_user(
-        self,
-        user_id: ObjectId,
-        skip: int = 0,
-        limit: int = 100,
-        query: Optional[dict] = None,
-    ) -> tuple[List[ModelRepoConfig], int]:
-        """List all configs for a user with pagination."""
-        if query is None:
-            query = {}
-        query["user_id"] = user_id
-        return self.paginate(query, sort=[("created_at", -1)], skip=skip, limit=limit)
-
     def list_with_access_control(
         self,
         user_id: ObjectId,

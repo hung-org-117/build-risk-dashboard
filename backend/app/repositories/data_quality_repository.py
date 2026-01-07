@@ -31,24 +31,9 @@ class DataQualityRepository(BaseRepository[DataQualityReport]):
             {"version_id": self._to_object_id(version_id)},
         )
 
-    def find_all_by_version(self, version_id: str, limit: int = 10) -> List[DataQualityReport]:
-        """
-        Get report history for a version.
-
-        Args:
-            version_id: Dataset version ID
-            limit: Maximum number of reports to return
-
-        Returns:
-            List of DataQualityReport ordered by created_at desc
-        """
-        return self.find_many(
-            {"version_id": self._to_object_id(version_id)},
-            sort=[("created_at", -1)],
-            limit=limit,
-        )
-
-    def find_by_dataset(self, dataset_id: str, limit: int = 50) -> List[DataQualityReport]:
+    def find_by_dataset(
+        self, dataset_id: str, limit: int = 50
+    ) -> List[DataQualityReport]:
         """
         Get all quality reports for a dataset.
 

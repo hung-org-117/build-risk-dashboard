@@ -208,26 +208,6 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
             }
         )
 
-    def find_by_dataset_build_ids(
-        self,
-        version_id: str,
-        dataset_build_ids: List[str],
-    ) -> List[DatasetImportBuild]:
-        """Batch query: Find all import builds by their dataset_build_ids."""
-        if not dataset_build_ids:
-            return []
-
-        oids = [ObjectId(bid) for bid in dataset_build_ids if ObjectId.is_valid(bid)]
-        if not oids:
-            return []
-
-        return self.find_many(
-            {
-                "dataset_version_id": ObjectId(version_id),
-                "dataset_build_id": {"$in": oids},
-            }
-        )
-
     def delete_by_version(
         self, version_id: str, session: ClientSession | None = None
     ) -> int:

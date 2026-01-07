@@ -43,19 +43,9 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
             limit=limit,
         )
 
-    def find_by_repo(
-        self,
-        raw_repo_id: str,
-        limit: int = 20,
-    ) -> List[FeatureAuditLog]:
-        """Find recent audit logs for a specific repository."""
-        return self.find_many(
-            {"raw_repo_id": self._to_object_id(raw_repo_id)},
-            sort=[("created_at", -1)],
-            limit=limit,
-        )
-
-    def delete_by_raw_repo_id(self, raw_repo_id, category: AuditLogCategory, session=None) -> int:
+    def delete_by_raw_repo_id(
+        self, raw_repo_id, category: AuditLogCategory, session=None
+    ) -> int:
         result = self.collection.delete_many(
             {
                 "raw_repo_id": self._to_object_id(raw_repo_id),
@@ -80,18 +70,6 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
             session=session,
         )
         return result.deleted_count
-
-    def find_by_build(self, raw_build_run_id: str) -> Optional[FeatureAuditLog]:
-        """Find an audit log by raw build run ID."""
-        return self.find_one({"raw_build_run_id": self._to_object_id(raw_build_run_id)})
-
-    def find_by_enrichment_build(self, enrichment_build_id: str) -> Optional[FeatureAuditLog]:
-        """Find an audit log by enrichment build ID."""
-        return self.find_one({"enrichment_build_id": self._to_object_id(enrichment_build_id)})
-
-    def find_by_training_build(self, training_build_id: str) -> Optional[FeatureAuditLog]:
-        """Find an audit log by training build ID."""
-        return self.find_one({"training_build_id": self._to_object_id(training_build_id)})
 
     def find_recent_cursor(
         self,
@@ -132,23 +110,6 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
         next_cursor = str(logs[-1].id) if logs and has_more else None
 
         return logs, next_cursor, has_more
-
-    def find_by_version(
-        self,
-        version_id: str,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> Tuple[List[FeatureAuditLog], int]:
-        """Find audit logs for a specific dataset version."""
-
-        # Find all enrichment builds for this version, then get their audit logs
-        query = {"enrichment_build_id": {"$exists": True}}
-        return self.paginate(
-            query,
-            sort=[("created_at", -1)],
-            skip=skip,
-            limit=limit,
-        )
 
     def find_by_dataset_cursor(
         self,

@@ -1,9 +1,7 @@
-"""Repository for FeatureVector entities - single source of truth for extracted features."""
-
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
 from pymongo import ASCENDING, IndexModel, ReturnDocument
@@ -52,14 +50,6 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
             # Indexes may already exist with different options
             pass
 
-    def find_by_build_run(
-        self,
-        raw_build_run_id: ObjectId,
-    ) -> Optional[FeatureVector]:
-        """Find feature vector by raw build run ID."""
-        doc = self.collection.find_one({"raw_build_run_id": raw_build_run_id})
-        return FeatureVector(**doc) if doc else None
-
     def find_by_repo_and_build(
         self,
         raw_repo_id: ObjectId,
@@ -90,12 +80,15 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
         skipped_features: Optional[List[str]] = None,
     ) -> FeatureVector:
         """
-        Atomic upsert feature vector by business key (raw_repo_id + raw_build_run_id + scope + config_id).
+        Atomic upsert feature vector by business key.
 
+        Uses (raw_repo_id + raw_build_run_id + scope + config_id) as key.
         Creates new document or updates existing one atomically.
         """
         status_value = (
-            extraction_status.value if hasattr(extraction_status, "value") else extraction_status
+            extraction_status.value
+            if hasattr(extraction_status, "value")
+            else extraction_status
         )
 
         query = {
@@ -142,78 +135,6 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
             return_document=ReturnDocument.AFTER,
         )
         return FeatureVector(**doc)
-
-    def get_or_create(
-        self,
-        raw_repo_id: ObjectId,
-        raw_build_run_id: ObjectId,
-    ) -> Tuple[FeatureVector, bool]:
-        """
-        Get existing feature vector or create new pending one.
-
-        Returns (feature_vector, was_created).
-        """
-        doc = self.collection.find_one_and_update(
-            {
-                "raw_repo_id": raw_repo_id,
-                "raw_build_run_id": raw_build_run_id,
-            },
-            {
-                "$setOnInsert": {
-                    "raw_repo_id": raw_repo_id,
-                    "raw_build_run_id": raw_build_run_id,
-                    "extraction_status": ExtractionStatus.PENDING.value,
-                    "features": {},
-                    "feature_count": 0,
-                    "dag_version": "1.0",
-                    "created_at": datetime.utcnow(),
-                },
-            },
-            upsert=True,
-            return_document=ReturnDocument.AFTER,
-        )
-        feature_vector = FeatureVector(**doc)
-        was_created = (
-            doc.get("created_at") is not None
-            and (datetime.utcnow() - doc.get("created_at", datetime.utcnow())).total_seconds() < 2
-        )
-        return feature_vector, was_created
-
-    def find_by_tr_prev_build(
-        self,
-        raw_repo_id: ObjectId,
-        tr_prev_build: str,
-    ) -> Optional[FeatureVector]:
-        """
-        Find the next build in the temporal chain.
-
-        Used by temporal features to walk backward through build history.
-        """
-        doc = self.collection.find_one(
-            {
-                "raw_repo_id": raw_repo_id,
-                "tr_prev_build": tr_prev_build,
-            }
-        )
-        return FeatureVector(**doc) if doc else None
-
-    def find_by_ci_run_id(
-        self,
-        raw_repo_id: ObjectId,
-        ci_run_id: str,
-    ) -> Optional[FeatureVector]:
-        """
-        Find feature vector by CI run ID (stored in tr_prev_build of next build).
-
-        Looks up by querying features.tr_prev_build field.
-        """
-        doc = self.collection.find_one(
-            {
-                "raw_repo_id": raw_repo_id,
-                "features.tr_prev_build": ci_run_id,
-            }
-        )
-        return FeatureVector(**doc) if doc else None
 
     def find_many_by_raw_build_run_ids(
         self,
@@ -285,8 +206,9 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
             result.append(feature_vector)
 
             # Get the tr_prev_build from the dedicated field (or fallback to features)
-            current_ci_run_id = feature_vector.tr_prev_build or feature_vector.features.get(
-                "tr_prev_build"
+            current_ci_run_id = (
+                feature_vector.tr_prev_build
+                or feature_vector.features.get("tr_prev_build")
             )
 
         return result
@@ -319,18 +241,6 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
             return_document=ReturnDocument.AFTER,
         )
         return FeatureVector(**doc) if doc else None
-
-    def delete_by_raw_repo(
-        self,
-        raw_repo_id: ObjectId,
-        session=None,
-    ) -> int:
-        """Delete all feature vectors for a repository."""
-        result = self.collection.delete_many(
-            {"raw_repo_id": raw_repo_id},
-            session=session,
-        )
-        return result.deleted_count
 
     def delete_by_ids(
         self,

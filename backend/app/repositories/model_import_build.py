@@ -1,7 +1,3 @@
-"""
-ModelImportBuild Repository - Database operations for model import builds.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -95,23 +91,6 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         return self.find_by_repo_config(
             config_id, status=ModelImportBuildStatus.FETCHED
         )
-
-    def find_missing_resource_builds(
-        self, config_id: str, after_id: Optional[ObjectId] = None
-    ) -> List[ModelImportBuild]:
-        """Find builds with missing resources (expected, not retryable).
-
-        Args:
-            config_id: ModelRepoConfig ID
-            after_id: Only return builds with _id > after_id (for checkpoint filtering)
-        """
-        query = {
-            "model_repo_config_id": ObjectId(config_id),
-            "status": ModelImportBuildStatus.MISSING_RESOURCE.value,
-        }
-        if after_id:
-            query["_id"] = {"$gt": after_id}
-        return self.find_many(query)
 
     def find_failed_builds(
         self, config_id: str, after_id: Optional[ObjectId] = None

@@ -19,60 +19,6 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
     def __init__(self, db) -> None:
         super().__init__(db, "dataset_enrichment_builds", DatasetEnrichmentBuild)
 
-    def find_by_dataset_build_id(
-        self,
-        dataset_id: ObjectId,
-        dataset_build_id: ObjectId,
-    ) -> Optional[DatasetEnrichmentBuild]:
-        """Find build by dataset and dataset build ID."""
-        doc = self.collection.find_one(
-            {
-                "dataset_id": dataset_id,
-                "dataset_build_id": dataset_build_id,
-            }
-        )
-        return DatasetEnrichmentBuild(**doc) if doc else None
-
-    def find_by_workflow_run(
-        self,
-        dataset_id: ObjectId,
-        raw_build_run_id: ObjectId,
-    ) -> Optional[DatasetEnrichmentBuild]:
-        """Find build by dataset and workflow run."""
-        doc = self.collection.find_one(
-            {
-                "dataset_id": dataset_id,
-                "raw_build_run_id": raw_build_run_id,
-            }
-        )
-        return DatasetEnrichmentBuild(**doc) if doc else None
-
-    def list_by_dataset(
-        self,
-        dataset_id: ObjectId,
-        skip: int = 0,
-        limit: int = 100,
-        status: Optional[ExtractionStatus] = None,
-    ) -> tuple[List[DatasetEnrichmentBuild], int]:
-        """List builds for a dataset with pagination."""
-        query: Dict[str, Any] = {"dataset_id": dataset_id}
-        if status:
-            query["extraction_status"] = (
-                status.value if hasattr(status, "value") else status
-            )
-
-        return self.paginate(query, sort=[("_id", 1)], skip=skip, limit=limit)
-
-    def list_by_version(
-        self,
-        dataset_version_id: ObjectId,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> tuple[List[DatasetEnrichmentBuild], int]:
-        """List builds for a dataset version with pagination."""
-        query = {"dataset_version_id": dataset_version_id}
-        return self.paginate(query, sort=[("_id", 1)], skip=skip, limit=limit)
-
     def find_by_version(
         self,
         dataset_version_id: str | ObjectId,

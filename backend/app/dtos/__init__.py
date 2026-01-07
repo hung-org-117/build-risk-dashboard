@@ -1,5 +1,3 @@
-"""Data Transfer Objects (DTOs) for API requests and responses"""
-
 from .admin_user import (
     AdminUserListResponse,
     AdminUserResponse,
@@ -60,15 +58,8 @@ from .feature import (
 )
 from .github import (
     GithubAuthorizeResponse,
-    # GithubInstallationListResponse,
-    # GithubInstallationResponse,
     GithubOAuthInitRequest,
     GithubRepositoryStatus,
-)
-from .integration import (
-    SonarWebhookPayload,
-    ToolInfoResponse,
-    ToolsListResponse,
 )
 from .notification import (
     CreateNotificationRequest,
@@ -125,8 +116,6 @@ __all__ = [
     "RepoDistributionEntry",
     # GitHub
     "GithubAuthorizeResponse",
-    # "GithubInstallationListResponse",
-    # "GithubInstallationResponse",
     "GithubOAuthInitRequest",
     "GithubRepositoryStatus",
     # Repository
@@ -207,8 +196,4 @@ __all__ = [
     # User Settings
     "UserSettingsResponse",
     "UpdateUserSettingsRequest",
-    # Integration / Scan
-    "ToolInfoResponse",
-    "ToolsListResponse",
-    "SonarWebhookPayload",
 ]

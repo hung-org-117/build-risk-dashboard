@@ -17,11 +17,6 @@ class RawRepositoryRepository(BaseRepository[RawRepository]):
         doc = self.collection.find_one({"full_name": full_name})
         return RawRepository(**doc) if doc else None
 
-    def find_by_github_repo_id(self, github_repo_id: int) -> Optional[RawRepository]:
-        """Find repository by GitHub's internal repository ID."""
-        doc = self.collection.find_one({"github_repo_id": github_repo_id})
-        return RawRepository(**doc) if doc else None
-
     def upsert_by_full_name(
         self,
         full_name: str,
@@ -39,11 +34,3 @@ class RawRepositoryRepository(BaseRepository[RawRepository]):
             # Create new
             repo = RawRepository(full_name=full_name, **kwargs)
             return self.insert_one(repo)
-
-    def list_all(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> tuple[List[RawRepository], int]:
-        """List all raw repositories with pagination."""
-        return self.paginate({}, skip=skip, limit=limit)

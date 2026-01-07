@@ -5,7 +5,7 @@ import { useWebSocket } from "@/contexts/websocket-context";
 import {
     SystemStatsCard,
     LogsViewer,
-    MetricsChart,
+    GrafanaLinksCard,
 } from "@/components/monitoring";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Activity } from "lucide-react";
@@ -226,19 +226,19 @@ export default function MonitoringPage() {
             {/* System Stats */}
             <SystemStatsCard stats={systemStats} isLoading={isLoadingStats} />
 
-            {/* Metrics Chart */}
-            <MetricsChart />
+            {/* Grafana Integration */}
+            <GrafanaLinksCard />
 
-            {/* System Logs */}
+            {/* Recent Errors (Simplified Logs) */}
             <LogsViewer
-                logs={logs}
+                logs={logs.filter(log => ["ERROR", "WARN", "WARNING"].includes(log.level.toUpperCase()))}
                 isLoading={isLoadingLogs}
                 onRefresh={fetchLogs}
                 isPaused={isPaused}
                 onTogglePause={() => setIsPaused(!isPaused)}
                 containerFilter={containerFilter}
                 onContainerFilterChange={setContainerFilter}
-                levelFilter={levelFilter}
+                levelFilter="error"
                 onLevelFilterChange={setLevelFilter}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
