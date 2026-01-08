@@ -358,6 +358,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASS:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
+    ports:
+      - "3001:3000"  # Expose Grafana for local access
     volumes:
       - ./monitoring/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
       - grafana_data:/var/lib/grafana

@@ -1,0 +1,31 @@
+<h2>⚠️ High Risk Build{{#if (gt count 1)}}s{{/if}} Detected</h2>
+
+<div class="alert-warning">
+    <strong>{{count}} build{{#if (gt count 1)}}s{{/if}} in {{repo_name}} predicted as HIGH risk!</strong>
+    <p>These builds may have a higher probability of failure.</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{count}}</div>
+        <div class="stat-label">High Risk Builds</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{repo_name}}</div>
+        <div class="stat-label">Repository</div>
+    </div>
+</div>
+
+<h3>📋 Affected Builds</h3>
+<p>Build IDs: <code>{{builds_str}}</code></p>
+
+<h3>💡 Recommended Actions</h3>
+<ul>
+    <li>Review the flagged builds before deployment</li>
+    <li>Check code changes and test coverage</li>
+    <li>Consider additional testing for high-risk changes</li>
+</ul>
+
+<p style="text-align: center; margin-top: 20px;">
+    <a href="{{app_url}}{{link}}" class="button">View High Risk Builds</a>
+</p>

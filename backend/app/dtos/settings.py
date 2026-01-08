@@ -9,21 +9,27 @@ class CircleCISettingsDto(BaseModel):
     """CircleCI integration settings."""
 
     base_url: str = "https://circleci.com/api/v2"
-    token: Optional[str] = Field(None, description="Token (write-only, returns masked on read)")
+    token: Optional[str] = Field(
+        None, description="Token (write-only, returns masked on read)"
+    )
 
 
 class TravisCISettingsDto(BaseModel):
     """Travis CI integration settings."""
 
     base_url: str = "https://api.travis-ci.com"
-    token: Optional[str] = Field(None, description="Token (write-only, returns masked on read)")
+    token: Optional[str] = Field(
+        None, description="Token (write-only, returns masked on read)"
+    )
 
 
 class SonarQubeSettingsDto(BaseModel):
     """SonarQube code quality settings."""
 
     host_url: str = "http://localhost:9000"
-    token: Optional[str] = Field(None, description="Token (write-only, returns masked on read)")
+    token: Optional[str] = Field(
+        None, description="Token (write-only, returns masked on read)"
+    )
     webhook_secret: Optional[str] = Field(
         None, description="Webhook secret (write-only, returns masked on read)"
     )
@@ -36,19 +42,27 @@ class SonarQubeSettingsDto(BaseModel):
 class TrivySettingsDto(BaseModel):
     """Trivy security scanner settings."""
 
-    server_url: Optional[str] = Field(None, description="Trivy server URL for client/server mode")
+    server_url: Optional[str] = Field(
+        None, description="Trivy server URL for client/server mode"
+    )
     # Default config content (trivy.yaml)
-    default_config: Optional[str] = Field(None, description="Default trivy.yaml config content")
+    default_config: Optional[str] = Field(
+        None, description="Default trivy.yaml config content"
+    )
 
 
 class EmailNotificationTypeTogglesDto(BaseModel):
     """Toggle which notification types trigger email."""
 
+    # Model Pipeline
     pipeline_completed: bool = False
     pipeline_failed: bool = True
-    dataset_validation_completed: bool = False
+
+    # Dataset Enrichment
     dataset_enrichment_completed: bool = True
-    rate_limit_warning: bool = False
+    dataset_enrichment_failed: bool = True
+
+    # System
     rate_limit_exhausted: bool = True
     system_alerts: bool = True
 

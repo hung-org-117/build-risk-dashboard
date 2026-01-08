@@ -609,12 +609,20 @@ export interface GithubAuthorizeResponse {
   state: string;
 }
 
+export interface NotificationSubscription {
+  in_app: boolean;
+  email: boolean;
+}
+
 export interface UserAccount {
   id: string;
   email: string;
   name?: string | null;
   role: "admin" | "user";
   notification_email?: string | null;
+  browser_notifications: boolean;
+  email_notifications_enabled: boolean;
+  subscriptions: Record<string, NotificationSubscription>;
   created_at: string;
   github?: {
     connected: boolean;
@@ -623,6 +631,14 @@ export interface UserAccount {
     avatar_url?: string;
     token_status?: string;
   };
+}
+
+export interface UserUpdatePayload {
+  name?: string | null;
+  notification_email?: string | null;
+  browser_notifications?: boolean;
+  email_notifications_enabled?: boolean;
+  subscriptions?: Record<string, NotificationSubscription>;
 }
 
 export interface AuthVerifyResponse {
@@ -928,11 +944,13 @@ export interface TrivySettings {
 }
 
 export interface EmailNotificationTypeToggles {
+  // Model Pipeline
   pipeline_completed: boolean;
   pipeline_failed: boolean;
-  dataset_validation_completed: boolean;
+  // Dataset Enrichment
   dataset_enrichment_completed: boolean;
-  rate_limit_warning: boolean;
+  dataset_enrichment_failed: boolean;
+  // System
   rate_limit_exhausted: boolean;
   system_alerts: boolean;
 }

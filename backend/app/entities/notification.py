@@ -16,8 +16,8 @@ class NotificationType(str, Enum):
     PIPELINE_FAILED = "pipeline_failed"
 
     # Dataset Enrichment (Admin)
-    DATASET_VALIDATION_COMPLETED = "dataset_validation_completed"
     DATASET_ENRICHMENT_COMPLETED = "dataset_enrichment_completed"
+    DATASET_ENRICHMENT_FAILED = "dataset_enrichment_failed"
 
     # System (Admin)
     RATE_LIMIT_EXHAUSTED = "rate_limit_exhausted"

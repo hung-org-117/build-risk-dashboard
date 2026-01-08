@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckCheck, ExternalLink, Bell, Loader2 } from 'lucide-react'
+import { CheckCheck, ExternalLink, Bell, Loader2, Filter } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -11,15 +11,21 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
+    // Model Pipeline
     pipeline_completed: '✅',
     pipeline_failed: '❌',
-    dataset_import_completed: '📥',
-    dataset_validation_completed: '✔️',
+    // Dataset Enrichment
     dataset_enrichment_completed: '🔧',
-    rate_limit_warning: '⏰',
+    dataset_enrichment_failed: '💔',
+    // System
     rate_limit_exhausted: '🚨',
     system: '💬',
+    // User-facing
+    high_risk_detected: '⚠️',
+    build_prediction_ready: '🎯',
 }
+
+type FilterStatus = 'all' | 'unread' | 'read'
 
 const ITEMS_PER_PAGE = 10
 const SCROLL_THRESHOLD_PX = 140
@@ -33,6 +39,7 @@ export function NotificationsList() {
     const [isMarkingAll, setIsMarkingAll] = useState(false)
     const [nextCursor, setNextCursor] = useState<string | null>(null)
     const [hasMore, setHasMore] = useState(false)
+    const [filter, setFilter] = useState<FilterStatus>('all')
 
     // Initial load
     const loadNotifications = useCallback(async () => {
@@ -144,31 +151,84 @@ export function NotificationsList() {
         }
     }
 
+    // Filter notifications based on selected filter
+    const filteredNotifications = notifications.filter((n) => {
+        if (filter === 'unread') return !n.is_read
+        if (filter === 'read') return n.is_read
+        return true
+    })
+
+    const unreadCount = notifications.filter((n) => !n.is_read).length
+
     return (
         <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h3 className="text-lg font-medium">Notification History</h3>
                     <p className="text-sm text-muted-foreground">
                         Recent activity from your pipelines and datasets.
                     </p>
                 </div>
-                {notifications.some((notificationItem) => !notificationItem.is_read) && (
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleMarkAllAsRead}
-                        disabled={isMarkingAll || isLoading}
-                        className="gap-2"
-                    >
-                        {isMarkingAll ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                            <CheckCheck className="h-4 w-4" />
-                        )}
-                        Mark all as read
-                    </Button>
-                )}
+                <div className="flex items-center gap-2">
+                    {/* Filter pills */}
+                    <div className="flex items-center gap-1 rounded-lg border bg-muted/50 p-1">
+                        <button
+                            onClick={() => setFilter('all')}
+                            className={cn(
+                                "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                                filter === 'all'
+                                    ? "bg-background shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            All
+                        </button>
+                        <button
+                            onClick={() => setFilter('unread')}
+                            className={cn(
+                                "px-3 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1",
+                                filter === 'unread'
+                                    ? "bg-background shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            Unread
+                            {unreadCount > 0 && (
+                                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] text-white">
+                                    {unreadCount}
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setFilter('read')}
+                            className={cn(
+                                "px-3 py-1 text-xs font-medium rounded-md transition-colors",
+                                filter === 'read'
+                                    ? "bg-background shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            Read
+                        </button>
+                    </div>
+                    {/* Mark all as read button */}
+                    {unreadCount > 0 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleMarkAllAsRead}
+                            disabled={isMarkingAll || isLoading}
+                            className="gap-2"
+                        >
+                            {isMarkingAll ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <CheckCheck className="h-4 w-4" />
+                            )}
+                            <span className="hidden sm:inline">Mark all as read</span>
+                        </Button>
+                    )}
+                </div>
             </div>
 
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
@@ -177,14 +237,18 @@ export function NotificationsList() {
                         <Loader2 className="h-6 w-6 animate-spin text-blue-500 mb-2" />
                         <p className="text-sm">Loading notifications...</p>
                     </div>
-                ) : notifications.length === 0 ? (
+                ) : filteredNotifications.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                         <div className="rounded-full bg-slate-100 p-3 dark:bg-slate-800 mb-3">
                             <Bell className="h-6 w-6 text-slate-400" />
                         </div>
-                        <h3 className="font-medium text-foreground">No notifications yet</h3>
+                        <h3 className="font-medium text-foreground">
+                            {filter === 'unread' ? 'No unread notifications' :
+                                filter === 'read' ? 'No read notifications' :
+                                    'No notifications yet'}
+                        </h3>
                         <p className="text-sm mt-1">
-                            Activity will show up here.
+                            {filter !== 'all' ? 'Try a different filter.' : 'Activity will show up here.'}
                         </p>
                     </div>
                 ) : (
@@ -194,7 +258,7 @@ export function NotificationsList() {
                         className="max-h-[420px] overflow-y-auto sm:max-h-[520px]"
                     >
                         <div className="divide-y">
-                            {notifications.map((notification) => (
+                            {filteredNotifications.map((notification) => (
                                 <div
                                     key={notification.id}
                                     onClick={() => handleNotificationClick(notification)}
@@ -213,7 +277,7 @@ export function NotificationsList() {
                                                 className={cn(
                                                     "text-sm font-medium",
                                                     !notification.is_read &&
-                                                        "text-blue-700 dark:text-blue-400"
+                                                    "text-blue-700 dark:text-blue-400"
                                                 )}
                                             >
                                                 {notification.title}

@@ -567,9 +567,6 @@ def finalize_prediction(
                 f"{medium_count} MEDIUM, {low_count} LOW"
             )
 
-            # =========================================================================
-            # NOTIFY ADMINS ABOUT PIPELINE COMPLETION
-            # =========================================================================
             from app.services.notification_service import (
                 notify_pipeline_completed_to_admins,
             )
@@ -1018,6 +1015,20 @@ def handle_processing_chain_error(
             "failed",
             f"Processing failed: {error_msg}. Use Retry Failed to retry.",
         )
+
+    # Notify admins about processing failure
+    try:
+        from app.services.notification_service import notify_pipeline_failed_to_admins
+
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
+        repo_name = repo_config.full_name if repo_config else repo_config_id
+        notify_pipeline_failed_to_admins(
+            db=self.db,
+            repo_name=repo_name,
+            error_message=f"Processing failed: {error_msg}",
+        )
+    except Exception as e:
+        logger.warning(f"{corr_prefix} Failed to send failure notification: {e}")
 
     return {
         "status": "handled",

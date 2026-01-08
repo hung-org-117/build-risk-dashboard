@@ -129,15 +129,20 @@ class EmailNotificationTypeToggles(BaseEntity):
 
     When email is enabled, these toggles control which events
     actually send email notifications to recipients.
+    All default to False - admin must explicitly enable each type.
     """
 
-    pipeline_completed: bool = False  # Not urgent, default OFF
-    pipeline_failed: bool = True  # Important, default ON
-    dataset_validation_completed: bool = False  # Not urgent, default OFF
-    dataset_enrichment_completed: bool = True  # Important milestone, default ON
-    rate_limit_warning: bool = False  # Frequent, default OFF
-    rate_limit_exhausted: bool = True  # CRITICAL, always recommended ON
-    system_alerts: bool = True  # Important, default ON
+    # Model Pipeline
+    pipeline_completed: bool = False
+    pipeline_failed: bool = False
+
+    # Dataset Enrichment
+    dataset_enrichment_completed: bool = False
+    dataset_enrichment_failed: bool = False
+
+    # System
+    rate_limit_exhausted: bool = False
+    system_alerts: bool = False
 
 
 class NotificationSettings(BaseEntity):

@@ -9,30 +9,20 @@
         <div class="stat-value">{{repo_name}}</div>
         <div class="stat-label">Repository</div>
     </div>
-    <div class="stat-item">
-        <div class="stat-value">{{build_id}}</div>
-        <div class="stat-label">Build ID</div>
-    </div>
 </div>
 
 <h3>Error Details</h3>
-<div class="alert-info">
-    <code style="word-break: break-all;">{{error}}</code>
-</div>
+<div
+    style="background: #fee; border-radius: 6px; padding: 16px; margin: 16px 0; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word;">
+    {{error_message}}</div>
 
-{{#if node_failures}}
-<h3>Failed Nodes</h3>
+<h3>💡 Recommended Actions</h3>
 <ul>
-    {{#each node_failures}}
-    <li>{{this}}</li>
-    {{/each}}
+    <li>Check the repository logs for more details</li>
+    <li>Review recent changes to the pipeline configuration</li>
+    <li>Retry the failed processing if it was a transient error</li>
 </ul>
-{{/if}}
-
-{{#if retry_count}}
-<p>🔄 This pipeline was retried {{retry_count}} time(s).</p>
-{{/if}}
 
 <p style="text-align: center; margin-top: 20px;">
-    <a href="{{app_url}}/admin/repos" class="button">View Repositories</a>
+    <a href="{{app_url}}/repositories" class="button">View Repositories</a>
 </p>

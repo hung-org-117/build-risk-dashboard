@@ -346,6 +346,65 @@ def create_notification(
     return repo.insert_one(notification)
 
 
+def _send_admin_email(
+    db: Database,
+    notification_type: str,
+    template_name: str,
+    subject: str,
+    context: dict,
+) -> bool:
+    """
+    Send email to admin recipients if the notification type is enabled.
+
+    Checks ApplicationSettings.notifications for:
+    1. email_enabled (master toggle)
+    2. email_recipients (list of emails)
+    3. email_type_toggles[notification_type] (per-type toggle)
+
+    Returns True if email was sent, False otherwise.
+    """
+    try:
+        from app.repositories.settings import SettingsRepository
+
+        settings_repo = SettingsRepository(db)
+        settings = settings_repo.get_settings()
+
+        # Check master toggle
+        if not settings.notifications.email_enabled:
+            logger.debug(f"Admin email disabled (master toggle off)")
+            return False
+
+        # Check per-type toggle
+        toggles = settings.notifications.email_type_toggles
+        toggle_key = notification_type.replace(
+            "-", "_"
+        )  # e.g. pipeline-failed -> pipeline_failed
+        if not getattr(toggles, toggle_key, False):
+            logger.debug(
+                f"Admin email for {notification_type} disabled (type toggle off)"
+            )
+            return False
+
+        # Get recipients
+        recipients_str = settings.notifications.email_recipients or ""
+        recipients = [r.strip() for r in recipients_str.split(",") if r.strip()]
+        if not recipients:
+            logger.debug(f"No admin email recipients configured")
+            return False
+
+        # Render and send email
+        manager = get_notification_manager()
+        html_body = render_email(template_name, context, subject=subject)
+        return manager.send_gmail(
+            subject=subject,
+            html_body=html_body,
+            to_recipients=recipients,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send admin email for {notification_type}: {e}")
+        return False
+
+
 # =============================================================================
 # Event-Specific Notification Functions
 # =============================================================================
@@ -390,30 +449,6 @@ def notify_pipeline_failed(
         message=f"Feature extraction for {repo_name} build #{build_id} failed: {error}",
         link="/admin/repos",
         metadata={"repo_name": repo_name, "build_id": build_id, "error": error},
-    )
-
-
-def notify_dataset_validation_completed(
-    db: Database,
-    user_id: ObjectId,
-    dataset_name: str,
-    dataset_id: str,
-    repos_valid: int,
-    repos_invalid: int,
-) -> Notification:
-    """Dataset validation completed - in-app only."""
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.DATASET_VALIDATION_COMPLETED,
-        title="Dataset Validation Completed",
-        message=f"Validation for '{dataset_name}' completed. {repos_valid} valid, {repos_invalid} invalid repos.",
-        link=f"/admin/datasets/{dataset_id}",
-        metadata={
-            "dataset_id": dataset_id,
-            "repos_valid": repos_valid,
-            "repos_invalid": repos_invalid,
-        },
     )
 
 
@@ -549,7 +584,7 @@ def notify_system_error_to_admins(
     Notify all admins about a system error.
 
     Called from MongoDBLogHandler when ERROR/CRITICAL logs occur.
-    Uses in-app notifications only (not Gmail to avoid spam).
+    Sends in-app notifications and optionally email if system_alerts toggle is enabled.
 
     Args:
         db: Database connection
@@ -566,6 +601,7 @@ def notify_system_error_to_admins(
     user_repo = UserRepository(db)
     admin_users = user_repo.find_by_role("admin")
 
+    # In-app notifications
     for admin in admin_users:
         try:
             create_notification(
@@ -585,39 +621,23 @@ def notify_system_error_to_admins(
                 f"Failed to create error notification for admin {admin.id}: {e}"
             )
 
+    # Email notification (if enabled via system_alerts toggle)
+    _send_admin_email(
+        db=db,
+        notification_type="system_alerts",
+        template_name="system_error",
+        subject=f"⚠️ System Error: {source}",
+        context={
+            "source": source,
+            "message": truncated_message,
+            "correlation_id": correlation_id or "N/A",
+        },
+    )
+
 
 # =============================================================================
 # User-Facing Notifications
 # =============================================================================
-
-
-def notify_high_risk_detected(
-    db: Database,
-    user_id: ObjectId,
-    repo_name: str,
-    build_number: int,
-    repo_id: str,
-) -> Notification:
-    """
-    Alert user when HIGH risk build detected in their repo.
-
-    Use when prediction phase finds a HIGH risk build for a repo
-    that the user has access to via GitHub.
-    """
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.HIGH_RISK_DETECTED,
-        title="⚠️ High Risk Build Detected",
-        message=f"Build #{build_number} in {repo_name} predicted as HIGH risk.",
-        link=f"/my-repos/{repo_id}/builds",
-        metadata={
-            "repo_name": repo_name,
-            "build_number": build_number,
-            "repo_id": repo_id,
-            "risk_level": "HIGH",
-        },
-    )
 
 
 def notify_prediction_ready(
@@ -659,6 +679,47 @@ def notify_prediction_ready(
     )
 
 
+def notify_high_risk_builds_batch(
+    db: Database,
+    user_id: ObjectId,
+    repo_name: str,
+    repo_id: str,
+    ci_run_ids: List[str],
+) -> Notification:
+    """
+    Aggregated notification for multiple HIGH risk builds in one processing batch.
+
+    Instead of sending individual notifications per build, this combines
+    all high-risk builds from the same processing run into a single alert.
+    """
+    count = len(ci_run_ids)
+    if count == 0:
+        return None
+
+    # Format ci_run_ids for display (show first 5, then "and X more")
+    if count <= 5:
+        builds_str = ", ".join(ci_run_ids)
+    else:
+        first_five = ", ".join(ci_run_ids[:5])
+        builds_str = f"{first_five} and {count - 5} more"
+
+    return create_notification(
+        db=db,
+        user_id=user_id,
+        type=NotificationType.HIGH_RISK_DETECTED,
+        title=f"⚠️ {count} High Risk Build{'s' if count > 1 else ''} Detected",
+        message=f"{repo_name}: Builds {builds_str} predicted as HIGH risk.",
+        link=f"/repositories/{repo_id}/builds?risk=HIGH",
+        metadata={
+            "repo_name": repo_name,
+            "repo_id": repo_id,
+            "ci_run_ids": ci_run_ids,
+            "count": count,
+            "risk_level": "HIGH",
+        },
+    )
+
+
 def notify_users_for_repo(
     db: Database,
     raw_repo_id: ObjectId,
@@ -670,12 +731,14 @@ def notify_users_for_repo(
     """
     Notify all users with access to a repository about predictions.
 
+    Respects user subscription preferences for in-app and email notifications.
+
     Args:
         db: Database connection
         raw_repo_id: RawRepository ObjectId (for user access lookup)
         repo_name: Repository full name for display
         repo_id: ModelRepoConfig ID for links
-        high_risk_builds: List of HIGH risk build dicts (max 3 alerts sent)
+        high_risk_builds: List of HIGH risk build dicts (aggregated into single notification)
         prediction_summary: Dict with high/medium/low counts
     """
     from app.repositories.user import UserRepository
@@ -685,30 +748,99 @@ def notify_users_for_repo(
 
     for user in users:
         try:
-            # Summary notification
-            if prediction_summary:
-                notify_prediction_ready(
-                    db=db,
-                    user_id=user.id,
-                    repo_name=repo_name,
-                    repo_id=repo_id,
-                    high_count=prediction_summary.get("high", 0),
-                    medium_count=prediction_summary.get("medium", 0),
-                    low_count=prediction_summary.get("low", 0),
+            # Get user's subscription preferences
+            subscriptions = getattr(user, "subscriptions", {}) or {}
+            email_enabled = getattr(user, "email_notifications_enabled", False)
+            user_email = getattr(user, "notification_email", None) or user.email
+
+            # HIGH RISK DETECTED notifications
+            if high_risk_builds and len(high_risk_builds) > 0:
+                high_risk_sub = subscriptions.get("high_risk_detected", {})
+                send_in_app = (
+                    high_risk_sub.get("in_app", True) if high_risk_sub else True
+                )
+                send_email = (
+                    high_risk_sub.get("email", False) if high_risk_sub else False
                 )
 
-            # Alert for HIGH risk builds (limit to 3)
-            if high_risk_builds:
-                for build in high_risk_builds[:3]:
-                    notify_high_risk_detected(
+                ci_run_ids = [b.get("ci_run_id", "") for b in high_risk_builds]
+                count = len(ci_run_ids)
+
+                # In-app notification
+                if send_in_app:
+                    notify_high_risk_builds_batch(
                         db=db,
                         user_id=user.id,
                         repo_name=repo_name,
-                        build_number=build.get("build_number", 0),
                         repo_id=repo_id,
+                        ci_run_ids=ci_run_ids,
                     )
+
+                # Email notification (if user enabled and subscribed)
+                if send_email and email_enabled and user_email:
+                    _send_high_risk_email(
+                        to_email=user_email,
+                        repo_name=repo_name,
+                        repo_id=repo_id,
+                        ci_run_ids=ci_run_ids,
+                        count=count,
+                    )
+
+            # BUILD PREDICTION READY notifications
+            if prediction_summary:
+                pred_sub = subscriptions.get("build_prediction_ready", {})
+                send_in_app = pred_sub.get("in_app", True) if pred_sub else True
+
+                if send_in_app:
+                    notify_prediction_ready(
+                        db=db,
+                        user_id=user.id,
+                        repo_name=repo_name,
+                        repo_id=repo_id,
+                        high_count=prediction_summary.get("high", 0),
+                        medium_count=prediction_summary.get("medium", 0),
+                        low_count=prediction_summary.get("low", 0),
+                    )
+
         except Exception as e:
             logger.warning(f"Failed to notify user {user.id} for repo {repo_name}: {e}")
+
+
+def _send_high_risk_email(
+    to_email: str,
+    repo_name: str,
+    repo_id: str,
+    ci_run_ids: List[str],
+    count: int,
+) -> bool:
+    """Send email alert for high-risk builds to a user."""
+    try:
+        # Format builds for email
+        if count <= 5:
+            builds_str = ", ".join(ci_run_ids)
+        else:
+            first_five = ", ".join(ci_run_ids[:5])
+            builds_str = f"{first_five} and {count - 5} more"
+
+        manager = get_notification_manager()
+        html_body = render_email(
+            "high_risk_detected",
+            {
+                "repo_name": repo_name,
+                "builds_str": builds_str,
+                "count": count,
+                "link": f"/repositories/{repo_id}/builds?risk=HIGH",
+            },
+            subject=f"⚠️ {count} High Risk Build{'s' if count > 1 else ''} Detected",
+        )
+        return manager.send_gmail(
+            subject=f"⚠️ {count} High Risk Build{'s' if count > 1 else ''} in {repo_name}",
+            html_body=html_body,
+            to_recipients=[to_email],
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send high-risk email to {to_email}: {e}")
+        return False
 
 
 # =============================================================================
@@ -771,12 +903,14 @@ def notify_pipeline_failed_to_admins(
 ) -> None:
     """
     Notify all admins when Model Pipeline fails completely.
+    Sends in-app notification to all admins and optionally email if enabled.
     """
     from app.repositories.user import UserRepository
 
     user_repo = UserRepository(db)
     admin_users = user_repo.find_by_role("admin")
 
+    # In-app notifications
     for admin in admin_users:
         try:
             create_notification(
@@ -794,41 +928,22 @@ def notify_pipeline_failed_to_admins(
         except Exception as e:
             logger.warning(f"Failed to notify admin {admin.id}: {e}")
 
+    # Email notification (if enabled)
+    _send_admin_email(
+        db=db,
+        notification_type="pipeline_failed",
+        template_name="pipeline_failed",
+        subject=f"❌ Pipeline Failed: {repo_name}",
+        context={
+            "repo_name": repo_name,
+            "error_message": error_message[:500],
+        },
+    )
+
 
 # =============================================================================
 # Admin Notifications - Dataset Enrichment
 # =============================================================================
-
-
-def notify_dataset_validation_to_admin(
-    db: Database,
-    user_id: ObjectId,
-    dataset_name: str,
-    dataset_id: str,
-    repos_valid: int,
-    builds_valid: int,
-    builds_total: int,
-) -> Notification:
-    """
-    Notify admin when dataset validation phase completes.
-
-    Called from aggregate_validation_results task.
-    """
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.DATASET_VALIDATION_COMPLETED,
-        title="✔️ Dataset Validation Complete",
-        message=f"{dataset_name}: {repos_valid} repos, {builds_valid}/{builds_total} builds validated.",
-        link=f"/projects/{dataset_id}",
-        metadata={
-            "dataset_name": dataset_name,
-            "dataset_id": dataset_id,
-            "repos_valid": repos_valid,
-            "builds_valid": builds_valid,
-            "builds_total": builds_total,
-        },
-    )
 
 
 def notify_enrichment_completed_to_admin(
@@ -908,7 +1023,7 @@ def notify_enrichment_failed_to_admin(
     create_notification(
         db=db,
         user_id=dataset.user_id,
-        type=NotificationType.DATASET_ENRICHMENT_COMPLETED,
+        type=NotificationType.DATASET_ENRICHMENT_FAILED,
         title="⚠️ Enrichment Failed",
         message=message,
         link=f"/projects/{str(dataset.id)}",

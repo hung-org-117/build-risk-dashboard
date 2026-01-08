@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
-import { ShieldCheck, Workflow, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload } from "lucide-react";
+import { ShieldCheck, Workflow, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload, Timer } from "lucide-react";
 
 import GridLayout from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
@@ -376,6 +376,18 @@ export default function OverviewPage() {
             value={metrics.success_rate}
             format="percentage"
             sublabel="Build success ratio"
+            isEditing={isEditing}
+          />
+        );
+      case "avg_duration":
+        return (
+          <StatCard
+            className={commonCardClass}
+            icon={<Timer className="h-5 w-5 text-orange-500 flex-shrink-0" />}
+            title={widget.title}
+            value={metrics.average_duration_minutes}
+            format="minutes"
+            sublabel="Average build duration"
             isEditing={isEditing}
           />
         );

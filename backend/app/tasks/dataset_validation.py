@@ -893,26 +893,6 @@ def aggregate_validation_results(
         f"{repos_valid}/{total_repos} repos, {builds_found}/{total_builds} builds"
     )
 
-    # =========================================================================
-    # NOTIFY ADMIN ABOUT VALIDATION COMPLETION
-    # =========================================================================
-    try:
-        from app.services.notification_service import notify_dataset_validation_to_admin
-
-        dataset = dataset_repo.find_by_id(dataset_id)
-        if dataset:
-            notify_dataset_validation_to_admin(
-                db=db,
-                user_id=dataset.user_id,
-                dataset_name=dataset.name,
-                dataset_id=dataset_id,
-                repos_valid=repos_valid,
-                builds_valid=builds_found,
-                builds_total=total_builds,
-            )
-    except Exception as e:
-        logger.warning(f"{log_ctx} Failed to send validation notification: {e}")
-
     return {
         "status": "completed",
         "dataset_id": dataset_id,

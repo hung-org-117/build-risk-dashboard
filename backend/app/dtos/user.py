@@ -1,11 +1,16 @@
-"""User and authentication DTOs"""
-
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.entities.base import PyObjectIdStr
+
+
+class NotificationSubscriptionDto(BaseModel):
+    """Per-event notification channel flags."""
+
+    in_app: bool = True
+    email: bool = False
 
 
 class UserResponse(BaseModel):
@@ -14,6 +19,9 @@ class UserResponse(BaseModel):
     name: Optional[str] = None
     role: Literal["admin", "user"] = "user"
     notification_email: Optional[str] = None
+    browser_notifications: bool = True
+    email_notifications_enabled: bool = False
+    subscriptions: Dict[str, NotificationSubscriptionDto] = Field(default_factory=dict)
     created_at: datetime
 
     model_config = ConfigDict(populate_by_name=True)
@@ -22,6 +30,9 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     notification_email: Optional[str] = None
+    browser_notifications: Optional[bool] = None
+    email_notifications_enabled: Optional[bool] = None
+    subscriptions: Optional[Dict[str, NotificationSubscriptionDto]] = None
 
 
 class OAuthIdentityResponse(BaseModel):

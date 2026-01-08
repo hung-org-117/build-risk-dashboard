@@ -1,0 +1,33 @@
+<h2>⚠️ System Error</h2>
+
+<div class="alert-warning">
+    <strong>A system error occurred in {{source}}</strong>
+    <p>The system encountered an error that may require attention.</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-item">
+        <div class="stat-value">{{source}}</div>
+        <div class="stat-label">Source Module</div>
+    </div>
+    <div class="stat-item">
+        <div class="stat-value">{{correlation_id}}</div>
+        <div class="stat-label">Correlation ID</div>
+    </div>
+</div>
+
+<h3>📋 Error Details</h3>
+<div
+    style="background: #f8f9fa; border-radius: 6px; padding: 16px; margin: 16px 0; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word;">
+    {{message}}</div>
+
+<h3>💡 Recommended Actions</h3>
+<ul>
+    <li>Check the logs for more details using the Correlation ID</li>
+    <li>Review recent system changes or deployments</li>
+    <li>Monitor for recurring errors</li>
+</ul>
+
+<p style="text-align: center; margin-top: 20px;">
+    <a href="{{app_url}}/admin/monitoring" class="button">View Monitoring</a>
+</p>
