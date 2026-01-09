@@ -19,10 +19,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 
 # Install Python dependencies
-RUN uv sync --frozen --no-dev
+# Install Python dependencies (without project) to leverage caching
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy application code
 COPY . .
+
+# Install project
+RUN uv sync --frozen --no-dev
 
 # Expose port
 EXPOSE 8000

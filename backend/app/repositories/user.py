@@ -55,10 +55,6 @@ class UserRepository(BaseRepository[User]):
         )
         return User(**result) if result else None
 
-    def update_role(self, user_id: str, role: str) -> Optional[User]:
-        """Update a user's role"""
-        return self.update_user(user_id, {"role": role})
-
     def delete_user(self, user_id: str) -> bool:
         """Delete a user by ID"""
         from bson import ObjectId

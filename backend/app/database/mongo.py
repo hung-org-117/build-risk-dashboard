@@ -4,6 +4,7 @@ from __future__ import annotations
 MongoDB connection helpers.
 """
 
+import logging
 from contextlib import contextmanager
 from typing import Generator
 
@@ -11,7 +12,7 @@ from pymongo import MongoClient
 from pymongo.client_session import ClientSession
 from pymongo.database import Database
 
-from app.config import settings
+logger = logging.getLogger(__name__)
 
 _client: MongoClient | None = None
 
@@ -19,11 +20,21 @@ _client: MongoClient | None = None
 def get_client() -> MongoClient:
     global _client
     if _client is None:
-        _client = MongoClient(settings.MONGODB_URI)
+        # Import settings lazily to ensure env vars are loaded
+        from app.config import settings
+
+        uri = settings.MONGODB_URI
+        logger.warning(
+            f"=== MONGODB DEBUG === Initializing MongoClient with URI: {uri}"
+        )
+        _client = MongoClient(uri)
     return _client
 
 
 def get_database() -> Database:
+    # Import settings lazily
+    from app.config import settings
+
     client = get_client()
     return client[settings.MONGODB_DB_NAME]
 

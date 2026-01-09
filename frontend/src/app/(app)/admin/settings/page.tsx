@@ -1,13 +1,12 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Bell, Github, Server, Settings as SettingsIcon } from 'lucide-react'
+import { Github, Server, Settings as SettingsIcon } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 import { GitHubTokensTab } from '@/components/settings/github-tokens-tab'
 import { IntegrationsTab } from '@/components/settings/integrations-tab'
-import { NotificationsTab } from '@/components/settings/notifications-tab'
 
 export default function SettingsPage() {
   const router = useRouter()
@@ -33,13 +32,13 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            Configure integrations, notifications, and pipeline settings
+            Configure integrations and pipeline settings
           </p>
         </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 lg:w-auto">
+        <TabsList className="grid w-full grid-cols-2 lg:w-auto">
           <TabsTrigger value="integrations" className="gap-2">
             <Server className="h-4 w-4" />
             <span className="hidden sm:inline">Integrations</span>
@@ -47,10 +46,6 @@ export default function SettingsPage() {
           <TabsTrigger value="tokens" className="gap-2">
             <Github className="h-4 w-4" />
             <span className="hidden sm:inline">GitHub Tokens</span>
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="gap-2">
-            <Bell className="h-4 w-4" />
-            <span className="hidden sm:inline">Notifications</span>
           </TabsTrigger>
         </TabsList>
 
@@ -60,10 +55,6 @@ export default function SettingsPage() {
 
         <TabsContent value="tokens" className="mt-6">
           <GitHubTokensTab />
-        </TabsContent>
-
-        <TabsContent value="notifications" className="mt-6">
-          <NotificationsTab />
         </TabsContent>
       </Tabs>
     </div>

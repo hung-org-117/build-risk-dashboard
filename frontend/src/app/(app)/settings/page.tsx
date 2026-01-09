@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Bell, Loader2, User, Mail, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Bell, Loader2, User, Mail, AlertTriangle, History, Save } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
@@ -33,21 +33,80 @@ const USER_NOTIFICATION_TYPES = [
     },
 ];
 
+// Admin-only notification types
+const ADMIN_NOTIFICATION_TYPES = [
+    {
+        category: 'Model Pipeline',
+        description: 'Feature extraction and prediction notifications',
+        events: [
+            {
+                key: 'pipeline_completed',
+                label: 'Pipeline Completed',
+                description: 'When feature extraction completes successfully',
+                isCritical: false,
+            },
+            {
+                key: 'pipeline_failed',
+                label: 'Pipeline Failed',
+                description: 'When feature extraction pipeline fails',
+                isCritical: true,
+            },
+        ],
+    },
+    {
+        category: 'Dataset Enrichment',
+        description: 'Dataset enrichment notifications',
+        events: [
+            {
+                key: 'dataset_enrichment_completed',
+                label: 'Enrichment Completed',
+                description: 'When dataset enrichment process completes',
+                isCritical: false,
+            },
+            {
+                key: 'dataset_enrichment_failed',
+                label: 'Enrichment Failed',
+                description: 'When dataset enrichment process fails',
+                isCritical: true,
+            },
+        ],
+    },
+    {
+        category: 'System',
+        description: 'System and rate limit notifications',
+        events: [
+            {
+                key: 'rate_limit_exhausted',
+                label: 'Rate Limit Exhausted',
+                description: 'When all GitHub tokens are rate limited',
+                isCritical: true,
+            },
+            {
+                key: 'system_alerts',
+                label: 'System Alerts',
+                description: 'Important system notifications',
+                isCritical: true,
+            },
+        ],
+    },
+];
+
 export default function SettingsPage() {
     const { toast } = useToast();
     const searchParams = useSearchParams();
     const router = useRouter();
-    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const [activeTab, setActiveTab] = useState('notifications');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [user, setUser] = useState<UserAccount | null>(null);
+    const [originalUser, setOriginalUser] = useState<UserAccount | null>(null);
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
     // Sync tab with URL
     useEffect(() => {
         const tab = searchParams.get('tab');
-        if (tab && ['notifications', 'profile'].includes(tab)) {
+        if (tab && ['notifications', 'profile', 'history'].includes(tab)) {
             setActiveTab(tab);
         }
     }, [searchParams]);
@@ -65,6 +124,7 @@ export default function SettingsPage() {
             try {
                 const userData = await usersApi.getCurrentUser();
                 setUser(userData);
+                setOriginalUser(userData);
             } catch {
                 toast({
                     title: 'Error loading settings',
@@ -77,19 +137,39 @@ export default function SettingsPage() {
         loadUser();
     }, [toast]);
 
-    // Auto-save function
-    const saveSettings = useCallback(async (updates: Partial<UserAccount>) => {
+    // Check for unsaved changes
+    useEffect(() => {
+        if (!user || !originalUser) {
+            setHasUnsavedChanges(false);
+            return;
+        }
+        const hasChanges =
+            user.browser_notifications !== originalUser.browser_notifications ||
+            user.email_notifications_enabled !== originalUser.email_notifications_enabled ||
+            user.notification_email !== originalUser.notification_email ||
+            JSON.stringify(user.subscriptions) !== JSON.stringify(originalUser.subscriptions);
+        setHasUnsavedChanges(hasChanges);
+    }, [user, originalUser]);
+
+    // Save function
+    const handleSave = useCallback(async () => {
         if (!user) return;
 
         setIsSaving(true);
         try {
             const updatedUser = await usersApi.updateCurrentUser({
-                browser_notifications: updates.browser_notifications ?? user.browser_notifications,
-                email_notifications_enabled: updates.email_notifications_enabled ?? user.email_notifications_enabled,
-                notification_email: updates.notification_email ?? user.notification_email,
-                subscriptions: updates.subscriptions ?? user.subscriptions,
+                browser_notifications: user.browser_notifications,
+                email_notifications_enabled: user.email_notifications_enabled,
+                notification_email: user.notification_email,
+                subscriptions: user.subscriptions,
             });
             setUser(updatedUser);
+            setOriginalUser(updatedUser);
+            setHasUnsavedChanges(false);
+            toast({
+                title: 'Settings saved',
+                description: 'Your notification preferences have been updated.',
+            });
         } catch {
             toast({
                 title: 'Error saving settings',
@@ -100,35 +180,19 @@ export default function SettingsPage() {
         }
     }, [user, toast]);
 
-    // Debounced auto-save
-    const debouncedSave = useCallback((updates: Partial<UserAccount>) => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
-        }
-        saveTimeoutRef.current = setTimeout(() => {
-            saveSettings(updates);
-        }, 800);
-    }, [saveSettings]);
-
     const handleBrowserNotificationsChange = (checked: boolean) => {
         if (!user) return;
-        const updated = { ...user, browser_notifications: checked };
-        setUser(updated);
-        debouncedSave({ browser_notifications: checked });
+        setUser({ ...user, browser_notifications: checked });
     };
 
     const handleEmailNotificationsChange = (checked: boolean) => {
         if (!user) return;
-        const updated = { ...user, email_notifications_enabled: checked };
-        setUser(updated);
-        debouncedSave({ email_notifications_enabled: checked });
+        setUser({ ...user, email_notifications_enabled: checked });
     };
 
     const handleEmailChange = (email: string) => {
         if (!user) return;
-        const updated = { ...user, notification_email: email || null };
-        setUser(updated);
-        debouncedSave({ notification_email: email || null });
+        setUser({ ...user, notification_email: email || null });
     };
 
     const handleSubscriptionChange = (
@@ -145,9 +209,14 @@ export default function SettingsPage() {
                 [channel]: checked,
             },
         };
-        const updated = { ...user, subscriptions: newSubscriptions };
-        setUser(updated);
-        debouncedSave({ subscriptions: newSubscriptions });
+        setUser({ ...user, subscriptions: newSubscriptions });
+    };
+
+    const handleDiscardChanges = () => {
+        if (originalUser) {
+            setUser(originalUser);
+            setHasUnsavedChanges(false);
+        }
     };
 
     if (isLoading) {
@@ -173,7 +242,7 @@ export default function SettingsPage() {
             </div>
 
             <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-2 max-w-md">
+                <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="notifications" className="flex items-center gap-2">
                         <Bell className="h-4 w-4" />
                         Notifications
@@ -181,6 +250,10 @@ export default function SettingsPage() {
                     <TabsTrigger value="profile" className="flex items-center gap-2">
                         <User className="h-4 w-4" />
                         Profile
+                    </TabsTrigger>
+                    <TabsTrigger value="history" className="flex items-center gap-2">
+                        <History className="h-4 w-4" />
+                        History
                     </TabsTrigger>
                 </TabsList>
 
@@ -345,23 +418,120 @@ export default function SettingsPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Save indicator */}
-                    {isSaving && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Saving...
-                        </div>
+                    {/* Admin Event Subscriptions - Only visible for admins */}
+                    {user.role === 'admin' && (
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    Admin Notifications
+                                    <Badge variant="secondary" className="text-xs">Admin Only</Badge>
+                                </CardTitle>
+                                <CardDescription>
+                                    System and pipeline notifications for administrators.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-6">
+                                {ADMIN_NOTIFICATION_TYPES.map((category) => (
+                                    <div key={category.category} className="space-y-3">
+                                        <div className="border-b pb-2">
+                                            <h4 className="font-semibold text-sm">{category.category}</h4>
+                                            <p className="text-xs text-muted-foreground">{category.description}</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {/* Header for this category */}
+                                            <div className="grid grid-cols-[1fr,80px,80px] gap-2 text-xs font-medium text-muted-foreground">
+                                                <div>Event</div>
+                                                <div className="text-center">In-App</div>
+                                                <div className="text-center">Email</div>
+                                            </div>
+                                            {/* Event rows */}
+                                            {category.events.map((event) => {
+                                                const sub = user.subscriptions[event.key] || { in_app: true, email: false };
+                                                return (
+                                                    <div
+                                                        key={event.key}
+                                                        className="grid grid-cols-[1fr,80px,80px] gap-2 items-center py-2"
+                                                    >
+                                                        <div className="space-y-0.5">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-medium text-sm">{event.label}</span>
+                                                                {event.isCritical && (
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                                                                        <AlertTriangle className="h-3 w-3" />
+                                                                        Critical
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {event.description}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex justify-center">
+                                                            <Switch
+                                                                checked={sub.in_app}
+                                                                onCheckedChange={(checked) =>
+                                                                    handleSubscriptionChange(event.key, 'in_app', checked)
+                                                                }
+                                                            />
+                                                        </div>
+                                                        <div className="flex justify-center">
+                                                            <Switch
+                                                                checked={sub.email}
+                                                                disabled={!user.email_notifications_enabled}
+                                                                onCheckedChange={(checked) =>
+                                                                    handleSubscriptionChange(event.key, 'email', checked)
+                                                                }
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </CardContent>
+                        </Card>
                     )}
 
-                    {/* Notification History */}
-                    <NotificationsList />
+                    {/* Save Button Section */}
+                    <div className="flex items-center justify-end gap-3 pt-4">
+                        {hasUnsavedChanges && (
+                            <span className="text-sm text-amber-600 font-medium">
+                                You have unsaved changes
+                            </span>
+                        )}
+                        {hasUnsavedChanges && (
+                            <Button
+                                variant="outline"
+                                onClick={handleDiscardChanges}
+                                disabled={isSaving}
+                            >
+                                Discard
+                            </Button>
+                        )}
+                        <Button
+                            onClick={handleSave}
+                            disabled={!hasUnsavedChanges || isSaving}
+                            className="gap-2"
+                        >
+                            {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <Save className="h-4 w-4" />
+                            )}
+                            {isSaving ? 'Saving...' : 'Save Settings'}
+                        </Button>
+                    </div>
                 </TabsContent>
 
                 <TabsContent value="profile" className="space-y-6">
                     <ProfileSettings />
                 </TabsContent>
+
+                <TabsContent value="history" className="space-y-6">
+                    <NotificationsList />
+                </TabsContent>
             </Tabs>
         </div>
     );
 }
-

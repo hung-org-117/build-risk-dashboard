@@ -226,7 +226,7 @@ export default function UserReposPage() {
                                                 <RepoStatusBadge status={repo.status} />
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
-                                                {formatTimestamp(repo.last_scanned_at)}
+                                                {formatTimestamp(repo.last_synced_at)}
                                             </td>
                                             <td className="px-6 py-4 text-muted-foreground">
                                                 {repo.builds_fetched.toLocaleString()}
@@ -237,38 +237,38 @@ export default function UserReposPage() {
                             </tbody>
                         </table>
                     </div>
+                    <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4 text-sm text-muted-foreground dark:border-slate-800">
+                        <div>
+                            {total > 0
+                                ? `Showing ${pageStart}-${pageEnd} of ${total} repositories`
+                                : "No repositories to display"}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {tableLoading && (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            )}
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePageChange("prev")}
+                                disabled={page === 1 || tableLoading}
+                            >
+                                Previous
+                            </Button>
+                            <span className="text-xs">
+                                Page {page} of {totalPages}
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePageChange("next")}
+                                disabled={page >= totalPages || tableLoading}
+                            >
+                                Next
+                            </Button>
+                        </div>
+                    </div>
                 </CardContent>
-                <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 text-sm text-muted-foreground dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        {total > 0
-                            ? `Showing ${pageStart}-${pageEnd} of ${total} repositories`
-                            : "No repositories to display"}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {tableLoading && (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handlePageChange("prev")}
-                            disabled={page === 1 || tableLoading}
-                        >
-                            Previous
-                        </Button>
-                        <span className="text-xs">
-                            Page {page} of {totalPages}
-                        </span>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handlePageChange("next")}
-                            disabled={page >= totalPages || tableLoading}
-                        >
-                            Next
-                        </Button>
-                    </div>
-                </div>
             </Card>
         </div>
     );

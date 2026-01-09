@@ -829,7 +829,7 @@ def handle_fetch_chord_error(
     bind=True,
     base=PipelineTask,
     name="app.tasks.model_ingestion.dispatch_ingestion",
-    queue="ingestion",
+    queue="model_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
@@ -947,7 +947,7 @@ def dispatch_ingestion(
     bind=True,
     base=PipelineTask,
     name="app.tasks.model_ingestion.aggregate_model_ingestion_results",
-    queue="ingestion",
+    queue="model_ingestion",
     soft_time_limit=30,
     time_limit=60,
 )
@@ -1112,7 +1112,7 @@ def aggregate_model_ingestion_results(
     bind=True,
     base=PipelineTask,
     name="app.tasks.model_ingestion.handle_ingestion_chord_error",
-    queue="ingestion",
+    queue="model_ingestion",
     soft_time_limit=60,
     time_limit=120,
 )
@@ -1222,7 +1222,7 @@ def handle_ingestion_chord_error(
     bind=True,
     base=PipelineTask,
     name="app.tasks.ingestion.reingest_failed_builds",
-    queue="ingestion",
+    queue="model_ingestion",
     soft_time_limit=600,
     time_limit=900,
 )
@@ -1348,7 +1348,7 @@ def reingest_failed_builds(
     bind=True,
     base=SafeTask,
     name="app.tasks.model_ingestion.ingest_webhook_build",
-    queue="ingestion",
+    queue="model_ingestion",
     soft_time_limit=300,
     time_limit=360,
     max_retries=3,

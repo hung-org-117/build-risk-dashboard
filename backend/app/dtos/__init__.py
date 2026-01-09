@@ -81,7 +81,6 @@ from .settings import (
     ApplicationSettingsResponse,
     ApplicationSettingsUpdateRequest,
     CircleCISettingsDto,
-    NotificationSettingsDto,
     SonarQubeSettingsDto,
     TravisCISettingsDto,
     TrivySettingsDto,
@@ -182,7 +181,6 @@ __all__ = [
     "TravisCISettingsDto",
     "SonarQubeSettingsDto",
     "TrivySettingsDto",
-    "NotificationSettingsDto",
     # Admin User
     "AdminUserResponse",
     "AdminUserListResponse",

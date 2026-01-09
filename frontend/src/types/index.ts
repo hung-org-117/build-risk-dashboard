@@ -964,30 +964,11 @@ export interface TrivySettings {
   default_config?: string | null;
 }
 
-export interface EmailNotificationTypeToggles {
-  // Model Pipeline
-  pipeline_completed: boolean;
-  pipeline_failed: boolean;
-  // Dataset Enrichment
-  dataset_enrichment_completed: boolean;
-  dataset_enrichment_failed: boolean;
-  // System
-  rate_limit_exhausted: boolean;
-  system_alerts: boolean;
-}
-
-export interface NotificationSettings {
-  email_enabled: boolean;
-  email_recipients: string;
-  email_type_toggles: EmailNotificationTypeToggles;
-}
-
 export interface ApplicationSettings {
   circleci: CircleCISettings;
   travis: TravisCISettings;
   sonarqube: SonarQubeSettings;
   trivy: TrivySettings;
-  notifications: NotificationSettings;
 }
 
 // Dashboard Layout Types

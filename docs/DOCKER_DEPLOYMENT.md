@@ -4,242 +4,196 @@ Hướng dẫn triển khai Build Risk Dashboard sử dụng Docker Compose.
 
 ## 📋 Yêu Cầu
 
-- Docker Engine 24+
-- Docker Compose v2+
+- Debian/Ubuntu server
 - 8GB RAM minimum (SonarQube requires 4GB)
 - 50GB disk space
 
-## 🚀 Quick Start
+## 🔧 1. System Prerequisites
 
-### 1. Clone và cấu hình
-
-```bash
-# Clone repository
-git clone https://github.com/your-org/build-risk-dashboard.git
-cd build-risk-dashboard
-
-# Copy env file
-cp .env.prod.example .env
-
-# Generate secrets
-echo "SECRET_KEY=$(openssl rand -hex 32)" >> .env
-echo "NEXTAUTH_SECRET=$(openssl rand -hex 32)" >> .env
-```
-
-### 2. Cấu hình `.env`
-
-Chỉnh sửa file `.env` với các giá trị thực tế:
+### 1.1 Update & Install Base Packages
 
 ```bash
-nano .env
+sudo apt update
+sudo apt install -y git python3 python3-pip htop
+sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
 ```
 
-**Các biến quan trọng:**
-
-| Variable | Mô tả | Ví dụ |
-|----------|-------|-------|
-| `SECRET_KEY` | Backend JWT secret | `openssl rand -hex 32` |
-| `NEXTAUTH_SECRET` | NextAuth secret | `openssl rand -hex 32` |
-| `RABBITMQ_PASS` | RabbitMQ password | Strong password |
-| `GRAFANA_PASS` | Grafana admin password | Strong password |
-| `NEXT_PUBLIC_API_URL` | Backend API URL | `http://your-domain/api` |
-| `NEXT_PUBLIC_WS_URL` | WebSocket URL | `ws://your-domain/api/ws/events` |
-| `GITHUB_TOKENS` | GitHub PATs (comma-separated) | `ghp_xxx,ghp_yyy` |
-
-### 3. Build và khởi động
+### 1.2 Install Docker
 
 ```bash
-# Build images
-docker-compose -f docker-compose.prod.yml build
+# Add Docker GPG key
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
-# Start all services
-docker-compose -f docker-compose.prod.yml up -d
+# Add Docker repository
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Check logs
-docker-compose -f docker-compose.prod.yml logs -f
+# Install Docker
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io
+
+# Add user to docker group (logout and login after)
+sudo usermod -aG docker $USER
 ```
 
-### 4. Verify deployment
+### 1.3 SonarQube System Requirements
 
 ```bash
-# Check all containers are running
-docker-compose -f docker-compose.prod.yml ps
-
-# Test health endpoints
-curl http://localhost/api/health
-curl http://localhost:3001/api/health  # Grafana
-```
-
-## 🏗️ Architecture
-
-```
-                    ┌─────────────────────────────────────────────────────────┐
-                    │                    DOCKER NETWORK                        │
-                    │                                                          │
-                    │  ┌─────────┐    ┌─────────────┐    ┌─────────────────┐  │
-   Port 80 ─────────┼──│  Nginx  │────│  Frontend   │────│    Backend      │  │
-                    │  │ (proxy) │    │  (Next.js)  │    │   (FastAPI)     │──┼── Port 8000 (internal)
-                    │  └─────────┘    └─────────────┘    └─────────────────┘  │
-                    │                                              │           │
-                    │                                              ▼           │
-                    │  ┌─────────────────────────────────────────────────────┐│
-                    │  │                   DATA LAYER                        ││
-                    │  │  ┌────────┐  ┌──────────┐  ┌───────┐  ┌──────────┐  ││
-                    │  │  │MongoDB │  │ RabbitMQ │  │ Redis │  │PostgreSQL│  ││
-                    │  │  │(27017) │  │  (5672)  │  │(6379) │  │ (5432)   │  ││
-                    │  │  └────────┘  └──────────┘  └───────┘  └──────────┘  ││
-                    │  └─────────────────────────────────────────────────────┘│
-                    │                                                          │
-                    │  ┌─────────────────────────────────────────────────────┐│
-                    │  │                  WORKER LAYER                        ││
-                    │  │  ┌──────────────┐  ┌─────────────┐                   ││
-                    │  │  │Celery Worker │  │ Celery Beat │                   ││
-                    │  │  └──────────────┘  └─────────────┘                   ││
-                    │  └─────────────────────────────────────────────────────┘│
-                    │                                                          │
-                    │  ┌─────────────────────────────────────────────────────┐│
-                    │  │                  TOOLS LAYER                         ││
-                    │  │  ┌───────────┐  ┌───────┐                            ││
-                    │  │  │ SonarQube │  │ Trivy │                            ││
-                    │  │  │  (9000)   │  │(4954) │                            ││
-                    │  │  └───────────┘  └───────┘                            ││
-                    │  └─────────────────────────────────────────────────────┘│
-                    │                                                          │
-   Port 3001 ───────┼──┌─────────────────────────────────────────────────────┐│
-                    │  │                 MONITORING LAYER                     ││
-                    │  │  ┌─────────┐ ┌────────┐ ┌───────────┐ ┌───────┐     ││
-                    │  │  │ Grafana │ │Promethe│ │   Loki    │ │ Alloy │     ││
-                    │  │  │ (3001)  │ │us(9090)│ │  (3100)   │ │(12345)│     ││
-                    │  │  └─────────┘ └────────┘ └───────────┘ └───────┘     ││
-                    │  └─────────────────────────────────────────────────────┘│
-                    └─────────────────────────────────────────────────────────┘
-```
-
-## 📁 Services
-
-| Service | Container | Port | Mô tả |
-|---------|-----------|------|-------|
-| **nginx** | prod-nginx | 80 | Reverse proxy |
-| **backend** | prod-backend | 8000 | FastAPI server |
-| **frontend** | prod-frontend | 3000 | Next.js app |
-| **celery-worker** | prod-celery-worker | - | Background tasks |
-| **celery-beat** | prod-celery-beat | - | Scheduled tasks |
-| **mongo** | prod-mongo | 27017 | Database |
-| **rabbitmq** | prod-rabbitmq | 5672 | Message broker |
-| **redis** | prod-redis | 6379 | Cache & results |
-| **sonarqube** | prod-sonarqube | 9000 | Code quality |
-| **trivy** | prod-trivy | 4954 | Vulnerability scanner |
-| **loki** | prod-loki | 3100 | Log aggregation |
-| **prometheus** | prod-prometheus | 9090 | Metrics |
-| **grafana** | prod-grafana | **3001** | Monitoring UI |
-| **alloy** | prod-alloy | 12345 | Log collector |
-
-## 🔧 Commands
-
-### Container Management
-
-```bash
-# Start all
-docker-compose -f docker-compose.prod.yml up -d
-
-# Stop all
-docker-compose -f docker-compose.prod.yml down
-
-# Restart specific service
-docker-compose -f docker-compose.prod.yml restart backend
-
-# Scale workers
-docker-compose -f docker-compose.prod.yml up -d --scale celery-worker=3
-
-# View logs
-docker-compose -f docker-compose.prod.yml logs -f backend celery-worker
-```
-
-### Database Operations
-
-```bash
-# Backup MongoDB
-docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
-
-# Restore MongoDB
-docker exec -i prod-mongo mongorestore --archive --gzip < backup.gz
-```
-
-### Monitoring Access
-
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| Grafana | http://localhost:3001 | `admin` / `GRAFANA_PASS` |
-| RabbitMQ | http://localhost:15672 | `RABBITMQ_USER` / `RABBITMQ_PASS` |
-| SonarQube | http://localhost:9000 | `admin` / `admin` (change on first login) |
-
-## 📊 Grafana Dashboards
-
-Dashboards được tự động load từ `monitoring/dashboards/`:
-
-- **Build Risk Overview** - Stats, risk distribution, recent builds
-- **Pipeline Monitoring** - Pipeline status, Celery workers, infrastructure
-- **Business Metrics** - Risk trends, API performance, errors
-- **Model Pipeline Details** - Repository processing status
-- **Dataset Enrichment Details** - Dataset enrichment progress
-
-## ⚠️ Troubleshooting
-
-### MongoDB không khởi động
-
-```bash
-# Check logs
-docker-compose -f docker-compose.prod.yml logs mongo
-
-# Reset replica set
-docker-compose -f docker-compose.prod.yml down -v
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-### SonarQube out of memory
-
-```bash
-# Increase vm.max_map_count (required for Elasticsearch)
+# Required for Elasticsearch in SonarQube
 sudo sysctl -w vm.max_map_count=262144
 
 # Make permanent
 echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
 ```
 
-### Celery tasks not running
+## 🚀 2. Quick Start
+
+### 2.1 Clone và chuẩn bị
 
 ```bash
-# Check RabbitMQ connection
-docker-compose -f docker-compose.prod.yml logs rabbitmq
+# Clone repository
+git clone https://github.com/your-org/build-risk-dashboard.git
+cd build-risk-dashboard
 
-# Check worker logs
-docker-compose -f docker-compose.prod.yml logs celery-worker
+# Copy config production
+cp .env.prod .env
 
-# Verify queues
+# Đảm bảo file GitHub Private Key (.pem) nằm ở thư mục gốc
+# Tên file phải khớp với cấu hình trong docker-compose.prod.yml:
+# builddefection.2025-11-17.private-key.pem
+```
+
+### 2.2 Generate Secrets
+
+```bash
+# Generate SECRET_KEY mới và cập nhật vào .env
+SECRET_KEY=$(openssl rand -hex 32)
+sed -i "s/SECRET_KEY=.*/SECRET_KEY=$SECRET_KEY/" .env
+```
+
+### 2.3 Environment Variables (.env)
+
+Mở file `.env` và cập nhật các giá trị sau:
+
+**1. Domain & URLs**
+- `DOMAIN_NAME`: IP hoặc Domain của server (VD: `10.128.0.9`). Đây là biến helper để tự điền các URL bên dưới.
+- `NEXT_PUBLIC_API_URL`: `http://{DOMAIN}:8000/api`
+- `NEXT_PUBLIC_WS_URL`: `ws://{DOMAIN}:8000/api/ws/events`
+- `FRONTEND_BASE_URL`: `http://{DOMAIN}:3000`
+
+**2. GitHub Configuration (BẮT BUỘC)**
+- `GITHUB_APP_ID`: App ID từ GitHub App settings.
+- `GITHUB_INSTALLATION_ID`: Installation ID.
+- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`: OAuth app credentials.
+- `GITHUB_ORGANIZATION`: Tên organization (VD: `hung-org-117`).
+- `GITHUB_APP_PRIVATE_KEY`: Giữ nguyên đường dẫn `/app/builddefection.2025-11-17.private-key.pem` (đã được mount tự động).
+
+**3. External Services**
+- `RABBITMQ_PASS`: Set password mạnh.
+- `GRAFANA_PASS`: Set password admin Grafana.
+- `GMAIL_*`: Cấu hình nếu muốn gửi email thông báo.
+
+### 2.4 Build và khởi động
+
+```bash
+# Build images
+docker compose -f docker-compose.prod.yml build
+
+# Start all services
+docker compose -f docker-compose.prod.yml up -d
+
+# Check logs
+docker compose -f docker-compose.prod.yml logs -f
+```
+
+## ⚙️ 3. Post-Deployment Configuration
+
+### 3.1 Configure SonarQube (Required)
+
+1.  **Chờ khởi động**: SonarQube mất 2-3 phút để start.
+    ```bash
+    docker-compose -f docker-compose.prod.yml logs -f sonarqube
+    ```
+2.  **Truy cập**: `http://YOUR_SERVER_IP:9000`
+    - Login: `admin` / `admin`
+    - Đổi password ngay lập tức.
+
+3.  **Tạo Token & Webhook**:
+    Thay `YOUR_NEW_PASSWORD` bằng password mới của bạn:
+
+    ```bash
+    # Generate Token
+    curl -u "admin:YOUR_NEW_PASSWORD" -X POST \
+      "http://localhost:9000/api/user_tokens/generate" \
+      -d "name=build-risk-token" -d "type=USER_TOKEN"
+    
+    # Copy token nhận được và cập nhật vào .env: SONAR_TOKEN=...
+    ```
+
+    ```bash
+    # Create Webhook (để báo kết quả về backend)
+    curl -u "admin:YOUR_NEW_PASSWORD" -X POST \
+      "http://localhost:9000/api/webhooks/create" \
+      -d "name=Build Risk Webhook" \
+      -d "url=http://backend:8000/api/integrations/webhooks/sonarqube/pipeline" \
+      -d "secret=change-me-to-secure-secret"
+    ```
+
+4.  **Restart Backend**:
+    Sau khi cập nhật `SONAR_TOKEN` trong `.env`:
+    ```bash
+    docker compose -f docker-compose.prod.yml restart backend celery-worker
+    ```
+
+### 3.2 Verify Grafana
+
+- URL: `http://YOUR_SERVER_IP:3001`
+- Login: `admin` / `GRAFANA_PASS` (từ .env)
+- Kiểm tra folder **Build Risk Dashboard** để thấy các dashboards.
+
+## 🏗️ Architecture & Ports
+
+| Service | Host Port | Internal Port | URL (Example) |
+|---------|-----------|---------------|---------------|
+| **Frontend** | 3000 | 3000 | `http://IP:3000` |
+| **Backend** | 8000 | 8000 | `http://IP:8000` |
+| **Grafana** | 3001 | 3000 | `http://IP:3001` |
+| **SonarQube**| 9000 | 9000 | `http://IP:9000` |
+| **RabbitMQ** | 15672 | 15672 | `http://IP:15672` |
+
+```
+Browser ──┬──→ Frontend (:3000)
+          ├──→ Backend (:8000)
+          └──→ Grafana (:3001)
+
+Internal: Backend ↔ MongoDB/Redis/RabbitMQ/SonarQube
+```
+
+## 🔧 Common Commands
+
+```bash
+# Stop all
+docker-compose -f docker-compose.prod.yml down
+
+# Xem logs backend & worker
+docker-compose -f docker-compose.prod.yml logs -f backend celery-worker
+
+# Kiểm tra hàng đợi RabbitMQ
 docker exec prod-rabbitmq rabbitmqctl list_queues
+
+# Backup MongoDB
+docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
 ```
 
-### Grafana dashboards not loading
+## ⚠️ Troubleshooting
 
-```bash
-# Check provisioning
-docker-compose -f docker-compose.prod.yml logs grafana
+**GitHub App lỗi (401/403):**
+- Kiểm tra `GITHUB_APP_PRIVATE_KEY` trong `.env` phải trỏ đúng đường dẫn `/app/...pem`.
+- Kiểm tra file `.pem` có tồn tại ở thư mục gốc host không.
+- Kiểm tra `GITHUB_APP_ID` và `GITHUB_INSTALLATION_ID` chính xác.
 
-# Verify dashboard files
-docker exec prod-grafana ls /etc/grafana/provisioning/dashboards/json/
-```
+**SonarQube OOM (Exit code 78/137):**
+- Chạy: `sudo sysctl -w vm.max_map_count=262144`
 
-## 🔐 Security Checklist
-
-- [ ] Change all default passwords in `.env`
-- [ ] Generate strong `SECRET_KEY` and `NEXTAUTH_SECRET`
-- [ ] Restrict ports exposure in production (only 80, 3001)
-- [ ] Enable HTTPS with SSL certificates (update nginx.conf)
-- [ ] Configure firewall rules
-- [ ] Set up regular backups
-
-## 📚 Related Docs
-
-- [GRAFANA_SETUP.md](./GRAFANA_SETUP.md) - Grafana configuration details
-- [MODEL_PIPELINE_FLOW.md](../MODEL_PIPELINE_FLOW.md) - Model pipeline documentation
-- [DATASET_ENRICHMENT_FLOW.md](../DATASET_ENRICHMENT_FLOW.md) - Dataset enrichment flow
+**Celery Worker không chạy task:**
+- Kiểm tra logs: `docker-compose -f docker-compose.prod.yml logs -f celery-worker`
+- Đảm bảo `GITHUB_ORGANIZATION` đã set trong `.env`.

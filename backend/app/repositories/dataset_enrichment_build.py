@@ -139,7 +139,7 @@ class DatasetEnrichmentBuildRepository(BaseRepository[DatasetEnrichmentBuild]):
                 "computed_at": now,
                 "created_at": now,
                 "updated_at": now,
-                "extraction_status": "PENDING",
+                "extraction_status": "pending",
                 "features": {},
                 "feature_count": 0,
                 "scan_metrics": {},

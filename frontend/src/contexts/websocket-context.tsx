@@ -8,6 +8,7 @@ import React, {
     useState,
     useCallback,
 } from "react";
+import { useToast } from "@/components/ui/use-toast";
 
 type WebSocketMessage = {
     type: string;
@@ -31,6 +32,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         Record<string, Set<(payload: any) => void>>
     >({});
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const { toast } = useToast();
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -69,6 +71,15 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             try {
                 const message: WebSocketMessage = JSON.parse(event.data);
                 const { type, payload } = message;
+
+                // Handle User Notification (Toast)
+                if (type === "USER_NOTIFICATION") {
+                    toast({
+                        title: payload.title,
+                        description: payload.message,
+                        variant: "default",
+                    });
+                }
 
                 // Notify subscribers via context
                 if (subscribersRef.current[type]) {

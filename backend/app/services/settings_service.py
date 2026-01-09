@@ -13,8 +13,6 @@ from app.dtos.settings import (
     ApplicationSettingsResponse,
     ApplicationSettingsUpdateRequest,
     CircleCISettingsDto,
-    EmailNotificationTypeTogglesDto,
-    NotificationSettingsDto,
     SonarQubeSettingsDto,
     TravisCISettingsDto,
     TrivySettingsDto,
@@ -24,8 +22,6 @@ from app.entities.settings import (
     DEFAULT_TRIVY_CONFIG,
     ApplicationSettings,
     CircleCISettings,
-    EmailNotificationTypeToggles,
-    NotificationSettings,
     SonarQubeSettings,
     TravisCISettings,
     TrivySettings,
@@ -102,20 +98,15 @@ class SettingsService:
                     self._decrypt_token(db_settings.sonarqube.token_encrypted or "")
                 ),
                 webhook_secret=self._mask_token(
-                    self._decrypt_token(db_settings.sonarqube.webhook_secret_encrypted or "")
+                    self._decrypt_token(
+                        db_settings.sonarqube.webhook_secret_encrypted or ""
+                    )
                 ),
                 default_config=db_settings.sonarqube.default_config,
             ),
             trivy=TrivySettingsDto(
                 server_url=db_settings.trivy.server_url,
                 default_config=db_settings.trivy.default_config,
-            ),
-            notifications=NotificationSettingsDto(
-                email_enabled=db_settings.notifications.email_enabled,
-                email_recipients=db_settings.notifications.email_recipients,
-                email_type_toggles=EmailNotificationTypeTogglesDto(
-                    **db_settings.notifications.email_type_toggles.model_dump()
-                ),
             ),
         )
 
@@ -136,17 +127,14 @@ class SettingsService:
             sonarqube=SonarQubeSettingsDto(
                 host_url=app_config.SONAR_HOST_URL,
                 token=self._mask_token(app_config.SONAR_TOKEN),
-                webhook_secret=self._mask_token(getattr(app_config, "SONAR_WEBHOOK_SECRET", None)),
+                webhook_secret=self._mask_token(
+                    getattr(app_config, "SONAR_WEBHOOK_SECRET", None)
+                ),
                 default_config=DEFAULT_SONARQUBE_CONFIG,
             ),
             trivy=TrivySettingsDto(
                 server_url=getattr(app_config, "TRIVY_SERVER_URL", None),
                 default_config=DEFAULT_TRIVY_CONFIG,
-            ),
-            notifications=NotificationSettingsDto(
-                email_enabled=False,
-                email_recipients="",
-                email_type_toggles=EmailNotificationTypeTogglesDto(),
             ),
         )
 
@@ -161,8 +149,12 @@ class SettingsService:
         # Update CircleCI
         if request.circleci:
             circleci_data = request.circleci.model_dump(exclude_none=True)
-            if circleci_data.get("token") and not circleci_data["token"].startswith("****"):
-                circleci_data["token_encrypted"] = self._encrypt_token(circleci_data.pop("token"))
+            if circleci_data.get("token") and not circleci_data["token"].startswith(
+                "****"
+            ):
+                circleci_data["token_encrypted"] = self._encrypt_token(
+                    circleci_data.pop("token")
+                )
             else:
                 circleci_data.pop("token", None)
             # Merge with existing
@@ -177,24 +169,30 @@ class SettingsService:
         if request.travis:
             travis_data = request.travis.model_dump(exclude_none=True)
             if travis_data.get("token") and not travis_data["token"].startswith("****"):
-                travis_data["token_encrypted"] = self._encrypt_token(travis_data.pop("token"))
+                travis_data["token_encrypted"] = self._encrypt_token(
+                    travis_data.pop("token")
+                )
             else:
                 travis_data.pop("token", None)
             existing.travis = TravisCISettings(
                 base_url=travis_data.get("base_url", existing.travis.base_url),
-                token_encrypted=travis_data.get("token_encrypted", existing.travis.token_encrypted),
+                token_encrypted=travis_data.get(
+                    "token_encrypted", existing.travis.token_encrypted
+                ),
             )
 
         # Update SonarQube
         if request.sonarqube:
             sonar_data = request.sonarqube.model_dump(exclude_none=True)
             if sonar_data.get("token") and not sonar_data["token"].startswith("****"):
-                sonar_data["token_encrypted"] = self._encrypt_token(sonar_data.pop("token"))
+                sonar_data["token_encrypted"] = self._encrypt_token(
+                    sonar_data.pop("token")
+                )
             else:
                 sonar_data.pop("token", None)
-            if sonar_data.get("webhook_secret") and not sonar_data["webhook_secret"].startswith(
-                "****"
-            ):
+            if sonar_data.get("webhook_secret") and not sonar_data[
+                "webhook_secret"
+            ].startswith("****"):
                 sonar_data["webhook_secret_encrypted"] = self._encrypt_token(
                     sonar_data.pop("webhook_secret")
                 )
@@ -207,9 +205,12 @@ class SettingsService:
                     "token_encrypted", existing.sonarqube.token_encrypted
                 ),
                 webhook_secret_encrypted=sonar_data.get(
-                    "webhook_secret_encrypted", existing.sonarqube.webhook_secret_encrypted
+                    "webhook_secret_encrypted",
+                    existing.sonarqube.webhook_secret_encrypted,
                 ),
-                default_config=sonar_data.get("default_config", existing.sonarqube.default_config),
+                default_config=sonar_data.get(
+                    "default_config", existing.sonarqube.default_config
+                ),
             )
 
         # Update Trivy
@@ -217,23 +218,9 @@ class SettingsService:
             trivy_data = request.trivy.model_dump(exclude_none=True)
             existing.trivy = TrivySettings(
                 server_url=trivy_data.get("server_url", existing.trivy.server_url),
-                default_config=trivy_data.get("default_config", existing.trivy.default_config),
-            )
-
-        # Update Notifications
-        if request.notifications:
-            notif_data = request.notifications.model_dump(exclude_none=True)
-            # Handle nested email_type_toggles
-            toggles_data = notif_data.pop("email_type_toggles", None)
-            new_toggles = existing.notifications.email_type_toggles
-            if toggles_data:
-                new_toggles = EmailNotificationTypeToggles(**toggles_data)
-            existing.notifications = NotificationSettings(
-                email_enabled=notif_data.get("email_enabled", existing.notifications.email_enabled),
-                email_recipients=notif_data.get(
-                    "email_recipients", existing.notifications.email_recipients
+                default_config=trivy_data.get(
+                    "default_config", existing.trivy.default_config
                 ),
-                email_type_toggles=new_toggles,
             )
 
         # Save to database
@@ -297,11 +284,6 @@ class SettingsService:
             trivy=TrivySettings(
                 server_url=getattr(app_config, "TRIVY_SERVER_URL", None),
                 default_config=DEFAULT_TRIVY_CONFIG,
-            ),
-            notifications=NotificationSettings(
-                email_enabled=False,
-                email_recipients="",
-                email_type_toggles=EmailNotificationTypeToggles(),
             ),
         )
 

@@ -260,7 +260,28 @@ class NotificationManager:
             link=link,
             metadata=metadata,
         )
-        return repo.insert_one(notification)
+        result = repo.insert_one(notification)
+
+        # Publish real-time event
+        try:
+            from app.tasks.shared.events import publish_event
+
+            payload = {
+                "user_id": str(user_id),
+                "type": type.value,
+                "title": title,
+                "message": message,
+                "link": link,
+                "metadata": metadata,
+                "created_at": (
+                    result.created_at.isoformat() if result.created_at else None
+                ),
+            }
+            publish_event("USER_NOTIFICATION", payload)
+        except Exception as e:
+            logger.warning(f"Failed to publish user notification event: {e}")
+
+        return result
 
     # -------------------------------------------------------------------------
     # Gmail Notifications
@@ -343,7 +364,26 @@ def create_notification(
         link=link,
         metadata=metadata,
     )
-    return repo.insert_one(notification)
+    result = repo.insert_one(notification)
+
+    # Publish real-time event
+    try:
+        from app.tasks.shared.events import publish_event
+
+        payload = {
+            "user_id": str(user_id),
+            "type": type.value,
+            "title": title,
+            "message": message,
+            "link": link,
+            "metadata": metadata,
+            "created_at": result.created_at.isoformat() if result.created_at else None,
+        }
+        publish_event("USER_NOTIFICATION", payload)
+    except Exception as e:
+        logger.warning(f"Failed to publish user notification event: {e}")
+
+    return result
 
 
 def _send_admin_email(
@@ -997,7 +1037,7 @@ def notify_enrichment_failed_to_admin(
 
     Called from handle_enrichment_processing_chain_error.
     """
-    from app.repositories.dataset import DatasetRepository
+    from app.repositories.dataset_repository import DatasetRepository
     from app.repositories.dataset_version import DatasetVersionRepository
 
     version_repo = DatasetVersionRepository(db)
@@ -1106,7 +1146,7 @@ def check_and_notify_enrichment_completed(
     logger.info(f"Version {version_id} enrichment complete - sending notification")
 
     # Get dataset info for notification
-    from app.repositories.dataset import DatasetRepository
+    from app.repositories.dataset_repository import DatasetRepository
 
     dataset_repo = DatasetRepository(db)
     dataset = dataset_repo.find_by_id(version.dataset_id)

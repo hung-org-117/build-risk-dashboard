@@ -55,7 +55,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                     "computed_at": now,
                     "created_at": now,
                     "updated_at": now,
-                    "extraction_status": "PENDING",
+                    "extraction_status": "pending",
                     "features": {},
                     "feature_count": 0,
                     "scan_metrics": {},
@@ -139,7 +139,8 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
 
         Returns builds where:
         - extraction_status is 'completed' or 'partial'
-        - prediction_status is 'pending'
+        - predicted_label is None (not predicted yet)
+        - prediction_error is None (not failed)
         """
         return self.find_many(
             {
@@ -150,7 +151,8 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                         ExtractionStatus.PARTIAL.value,
                     ]
                 },
-                "prediction_status": ExtractionStatus.PENDING.value,
+                "predicted_label": None,
+                "prediction_error": None,
             }
         )
 

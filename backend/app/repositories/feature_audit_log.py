@@ -201,3 +201,20 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
         )
 
         return logs, total
+
+    def find_by_enrichment_build(
+        self,
+        enrichment_build_id: str,
+    ) -> Optional[FeatureAuditLog]:
+        """
+        Find audit log for a specific enrichment build.
+
+        Args:
+            enrichment_build_id: The DatasetEnrichmentBuild ID
+
+        Returns:
+            FeatureAuditLog or None if not found
+        """
+        return self.find_one(
+            {"enrichment_build_id": self._to_object_id(enrichment_build_id)}
+        )

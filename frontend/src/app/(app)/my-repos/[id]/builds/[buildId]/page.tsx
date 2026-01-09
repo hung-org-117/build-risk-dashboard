@@ -103,6 +103,34 @@ function formatDuration(seconds?: number | null): string {
     return `${mins}m ${secs}s`;
 }
 
+function RiskBadge({ level, confidence }: { level: string; confidence?: number }) {
+    const l = level.toUpperCase();
+    const confLabel = confidence ? ` (${(confidence * 100).toFixed(0)}%)` : "";
+
+    if (l === "LOW") {
+        return (
+            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                <CheckCircle2 className="h-3 w-3" /> Low Risk{confLabel}
+            </Badge>
+        );
+    }
+    if (l === "MEDIUM") {
+        return (
+            <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
+                <AlertTriangle className="h-3 w-3" /> Medium Risk{confLabel}
+            </Badge>
+        );
+    }
+    if (l === "HIGH") {
+        return (
+            <Badge variant="destructive" className="gap-1">
+                <XCircle className="h-3 w-3" /> High Risk{confLabel}
+            </Badge>
+        );
+    }
+    return <Badge variant="secondary">{level}</Badge>;
+}
+
 export default function UserBuildDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -178,7 +206,7 @@ export default function UserBuildDetailPage() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.push(`/repos/${repoId}/builds`)}
+                    onClick={() => router.push(`/my-repos/${repoId}/builds`)}
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
@@ -246,6 +274,82 @@ export default function UserBuildDetailPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Risk Prediction */}
+            {build.has_training_data && (build.predicted_label || build.prediction_status || build.prediction_error) && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            Risk Prediction
+                            <div className="flex gap-2">
+                                {build.predicted_label && (
+                                    <RiskBadge
+                                        level={build.predicted_label}
+                                        confidence={build.prediction_confidence ?? undefined}
+                                    />
+                                )}
+                                {build.prediction_status && build.prediction_status !== 'completed' && (
+                                    <Badge
+                                        variant={build.prediction_status === 'failed' ? 'destructive' : 'outline'}
+                                        className="capitalize"
+                                    >
+                                        {build.prediction_status}
+                                    </Badge>
+                                )}
+                            </div>
+                        </CardTitle>
+                        <CardDescription>ML model prediction for this build</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {build.prediction_error ? (
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/50">
+                                <div className="flex items-start gap-3">
+                                    <div className="p-1 bg-red-100 dark:bg-red-900/40 rounded-full shrink-0">
+                                        <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="font-medium text-sm text-red-900 dark:text-red-200">Prediction Failed</p>
+                                        <p className="text-sm text-red-800/90 dark:text-red-300/90 leading-relaxed font-mono text-xs">
+                                            {build.prediction_error}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : !build.predicted_label ? (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
+                                <p className="text-muted-foreground">Prediction pending or in progress...</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                                <div className="rounded-lg border p-4">
+                                    <p className="text-xs text-muted-foreground">Risk Level</p>
+                                    <p className="font-medium mt-1">{build.predicted_label}</p>
+                                </div>
+                                <div className="rounded-lg border p-4">
+                                    <p className="text-xs text-muted-foreground">Confidence</p>
+                                    <p className="font-medium mt-1">
+                                        {build.prediction_confidence
+                                            ? `${(build.prediction_confidence * 100).toFixed(1)}%`
+                                            : "—"}
+                                    </p>
+                                </div>
+                                <div className="rounded-lg border p-4">
+                                    <p className="text-xs text-muted-foreground">Uncertainty</p>
+                                    <p className="font-medium mt-1">
+                                        {build.prediction_uncertainty
+                                            ? build.prediction_uncertainty.toFixed(3)
+                                            : "—"}
+                                    </p>
+                                </div>
+                                <div className="rounded-lg border p-4">
+                                    <p className="text-xs text-muted-foreground">Predicted At</p>
+                                    <p className="font-medium mt-1 text-sm">{formatDateTime(build.predicted_at)}</p>
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Extracted Features */}
             <Card>

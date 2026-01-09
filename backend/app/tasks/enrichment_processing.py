@@ -880,7 +880,7 @@ def process_version_export_job(self: PipelineTask, job_id: str) -> Dict[str, Any
     bind=True,
     base=PipelineTask,
     name="app.tasks.version_enrichment.dispatch_version_scans",
-    queue="processing",
+    queue="dataset_processing",
     soft_time_limit=300,
     time_limit=600,
 )

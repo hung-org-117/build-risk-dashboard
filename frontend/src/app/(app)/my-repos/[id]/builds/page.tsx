@@ -85,6 +85,39 @@ function ExtractionStatusBadge({ status, hasTrainingData }: { status?: string; h
     return <Badge variant="secondary">{status || "Unknown"}</Badge>;
 }
 
+function RiskBadge({ level, confidence }: { level?: string; confidence?: number }) {
+    if (!level) return <span className="text-muted-foreground">—</span>;
+
+    const riskLevel = level.toUpperCase();
+    const confLabel = confidence ? ` ${(confidence * 100).toFixed(0)}%` : "";
+
+    if (riskLevel === "LOW") {
+        return (
+            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                Low{confLabel}
+            </Badge>
+        );
+    }
+    if (riskLevel === "MEDIUM") {
+        return (
+            <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Med{confLabel}
+            </Badge>
+        );
+    }
+    if (riskLevel === "HIGH") {
+        return (
+            <Badge variant="destructive" className="gap-1">
+                <XCircle className="h-3 w-3" />
+                High{confLabel}
+            </Badge>
+        );
+    }
+    return <Badge variant="secondary">{level}</Badge>;
+}
+
 export default function UserBuildsPage() {
     const params = useParams();
     const router = useRouter();
@@ -247,7 +280,7 @@ export default function UserBuildsPage() {
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">Commit</th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">Branch</th>
                                     <th className="px-6 py-3 text-left font-semibold text-slate-500">Date</th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">Features</th>
+                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">Risk Label Prediction</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -262,7 +295,10 @@ export default function UserBuildsPage() {
                                         <tr
                                             key={build.id}
                                             className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                                            onClick={() => router.push(`/my-repos/${repoId}/builds/${build.id}`)}
+                                            onClick={() => {
+                                                const targetId = build.training_build_id || build.id;
+                                                router.push(`/my-repos/${repoId}/builds/${targetId}`);
+                                            }}
                                         >
                                             <td className="px-6 py-4 font-medium">#{build.build_number || "—"}</td>
                                             <td className="px-6 py-4">
@@ -277,7 +313,10 @@ export default function UserBuildsPage() {
                                             <td className="px-6 py-4 text-muted-foreground text-xs">{build.branch}</td>
                                             <td className="px-6 py-4 text-muted-foreground">{formatTimestamp(build.created_at)}</td>
                                             <td className="px-6 py-4">
-                                                <ExtractionStatusBadge status={build.extraction_status} hasTrainingData={build.has_training_data} />
+                                                <RiskBadge
+                                                    level={build.predicted_label}
+                                                    confidence={build.prediction_confidence}
+                                                />
                                             </td>
                                         </tr>
                                     ))

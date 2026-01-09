@@ -13,9 +13,13 @@ import logging
 from typing import List, Set
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
+from pymongo.database import Database
 
 from app.config import settings
+from app.database.mongo import get_db
+from app.middleware.auth import get_current_user
+from app.repositories.model_repo_config import ModelRepoConfigRepository
 
 logger = logging.getLogger(__name__)
 
@@ -169,13 +173,37 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws/events")
-async def events_websocket(websocket: WebSocket):
+async def events_websocket(
+    websocket: WebSocket,
+    user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db),
+):
     """
     WebSocket endpoint for general event broadcasts.
 
     Connect to receive server-wide events published to Redis 'events' channel.
+    Secured: Requires authentication and filters events based on user access.
     """
     await manager.connect(websocket)
+
+    # 1. Load user permissions (accessible repos)
+    user_id = str(user["_id"])
+    role = user.get("role", "user")
+
+    repo_config_repo = ModelRepoConfigRepository(db)
+    accessible_raw_repo_ids = user.get("github_accessible_repos", [])
+
+    allowed_config_ids = set()
+    if accessible_raw_repo_ids:
+        # User has access to ModelRepoConfigs linked to these RawRepos
+        configs = repo_config_repo.find_many(
+            {"raw_repo_id": {"$in": accessible_raw_repo_ids}}
+        )
+        allowed_config_ids = {str(c.id) for c in configs}
+
+    logger.info(
+        f"WebSocket connected for user {user_id}. Access to {len(allowed_config_ids)} repos."
+    )
 
     # Create Redis subscription for this connection
     redis_client = await get_async_redis()
@@ -183,16 +211,54 @@ async def events_websocket(websocket: WebSocket):
     await pubsub.subscribe("events")
 
     async def listen_redis():
-        """Listen for Redis events and broadcast to this websocket."""
+        """Listen for Redis events and broadcast to this websocket if authorized."""
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     data = message["data"]
                     if isinstance(data, bytes):
                         data = data.decode("utf-8")
+
                     try:
+                        event = json.loads(data)
+                        event_type = event.get("type")
+                        payload = event.get("payload", {})
+
+                        # === FILTERING LOGIC ===
+
+                        # 1. User Notifications (Direct Message)
+                        if event_type == "USER_NOTIFICATION":
+                            target_user_id = payload.get("user_id")
+                            if target_user_id and target_user_id != user_id:
+                                continue  # Not for this user
+
+                        # 2. Repo/Build Events (RBAC)
+                        elif event_type in ("REPO_UPDATE", "BUILD_UPDATE"):
+                            repo_id = payload.get("repo_id")
+                            if role != "admin":
+                                # If missing repo_id or user doesn't have access, skip
+                                if not repo_id or repo_id not in allowed_config_ids:
+                                    continue
+
+                        # 3. System Events (Admin only)
+                        elif event_type == "SYSTEM":
+                            if role != "admin":
+                                continue
+
+                        # 4. Scan/Ingestion (RBAC via repo_id)
+                        elif event_type in ("SCAN_UPDATE", "INGESTION_BUILD_UPDATE"):
+                            # Attempt to find repo_id from payload
+                            # Note: payload might use 'version_id' for dataset pipeline, distinct from repo_id
+                            repo_id = payload.get("repo_id")
+                            if repo_id and role != "admin":
+                                if repo_id not in allowed_config_ids:
+                                    continue
+
+                        # === END FILTERING ===
+
                         await websocket.send_text(data)
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"Error processing event filter: {e}")
                         break
         except Exception as e:
             logger.error(f"Redis listener error: {e}")
@@ -227,7 +293,7 @@ async def events_websocket(websocket: WebSocket):
                 pass
 
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
+        logger.info(f"WebSocket client disconnected for user {user_id}")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:

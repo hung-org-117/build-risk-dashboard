@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     )
 
     # --- Processing Phase (feature extraction) ---
-    PROCESSING_BUILDS_PER_BATCH: int = 50  # Builds processed per enrichment batch
+    PROCESSING_BUILDS_PER_BATCH: int = 20  # Builds processed per enrichment batch
 
     # --- Prediction Phase (risk prediction) ---
     PREDICTION_BUILDS_PER_BATCH: int = 10  # Builds predicted per batch
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
 
     # --- Git/Log Constraints ---
     GIT_MAX_LOG_SIZE_MB: int = 10  # Skip logs larger than this
-    GIT_COMMIT_REPLAY_MAX_DEPTH: int = 50  # Max depth for fork commit replay
+    GIT_COMMIT_REPLAY_MAX_DEPTH: int = 100  # Max depth for fork commit replay
     GIT_LOG_UNAVAILABLE_THRESHOLD: int = 10  # Stop after N consecutive unavailable
 
     # --- Scanning Phase (Trivy, SonarQube) ---
@@ -142,9 +142,12 @@ class Settings(BaseSettings):
         else:
             print("! Gmail API not configured (GMAIL_TOKEN_JSON missing).")
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
 
 settings = Settings()

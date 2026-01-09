@@ -124,37 +124,6 @@ class TrivySettings(BaseEntity):
     default_config: str = Field(default=DEFAULT_TRIVY_CONFIG)
 
 
-class EmailNotificationTypeToggles(BaseEntity):
-    """Toggle which notification types trigger email.
-
-    When email is enabled, these toggles control which events
-    actually send email notifications to recipients.
-    All default to False - admin must explicitly enable each type.
-    """
-
-    # Model Pipeline
-    pipeline_completed: bool = False
-    pipeline_failed: bool = False
-
-    # Dataset Enrichment
-    dataset_enrichment_completed: bool = False
-    dataset_enrichment_failed: bool = False
-
-    # System
-    rate_limit_exhausted: bool = False
-    system_alerts: bool = False
-
-
-class NotificationSettings(BaseEntity):
-    """Notification settings (email only)."""
-
-    email_enabled: bool = False
-    email_recipients: str = ""
-    email_type_toggles: EmailNotificationTypeToggles = Field(
-        default_factory=EmailNotificationTypeToggles
-    )
-
-
 class ApplicationSettings(BaseEntity):
     """Main application settings document - UI-editable configs only."""
 
@@ -170,6 +139,3 @@ class ApplicationSettings(BaseEntity):
     # Scan tool settings
     sonarqube: SonarQubeSettings = Field(default_factory=SonarQubeSettings)
     trivy: TrivySettings = Field(default_factory=TrivySettings)
-
-    # Notifications
-    notifications: NotificationSettings = Field(default_factory=NotificationSettings)

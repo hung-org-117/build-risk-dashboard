@@ -51,32 +51,6 @@ class TrivySettingsDto(BaseModel):
     )
 
 
-class EmailNotificationTypeTogglesDto(BaseModel):
-    """Toggle which notification types trigger email."""
-
-    # Model Pipeline
-    pipeline_completed: bool = False
-    pipeline_failed: bool = True
-
-    # Dataset Enrichment
-    dataset_enrichment_completed: bool = True
-    dataset_enrichment_failed: bool = True
-
-    # System
-    rate_limit_exhausted: bool = True
-    system_alerts: bool = True
-
-
-class NotificationSettingsDto(BaseModel):
-    """Notification settings (email only)."""
-
-    email_enabled: bool = False
-    email_recipients: str = ""
-    email_type_toggles: EmailNotificationTypeTogglesDto = Field(
-        default_factory=EmailNotificationTypeTogglesDto
-    )
-
-
 class ApplicationSettingsResponse(BaseModel):
     """Full application settings response."""
 
@@ -84,7 +58,6 @@ class ApplicationSettingsResponse(BaseModel):
     travis: TravisCISettingsDto
     sonarqube: SonarQubeSettingsDto
     trivy: TrivySettingsDto
-    notifications: NotificationSettingsDto
 
 
 class ApplicationSettingsUpdateRequest(BaseModel):
@@ -94,4 +67,3 @@ class ApplicationSettingsUpdateRequest(BaseModel):
     travis: Optional[TravisCISettingsDto] = None
     sonarqube: Optional[SonarQubeSettingsDto] = None
     trivy: Optional[TrivySettingsDto] = None
-    notifications: Optional[NotificationSettingsDto] = None
