@@ -15,107 +15,27 @@ import {
 import { formatTimestamp } from "@/lib/utils";
 import type { Build, RepoDetail } from "@/types";
 
-import { MiniStepper } from "../../_components/MiniStepper";
-import { CollectionCard } from "../../_components/CollectionCard";
-import { ProcessingCard } from "../../_components/ProcessingCard";
-import { CurrentPhaseCard } from "../../_components/CurrentPhaseCard";
+import { MiniStepper } from "@/app/(app)/repositories/_components/MiniStepper";
+import { CollectionCard } from "@/app/(app)/repositories/_components/CollectionCard";
+import { ProcessingCard } from "@/app/(app)/repositories/_components/ProcessingCard";
+import { CurrentPhaseCard } from "@/app/(app)/repositories/_components/CurrentPhaseCard"; // Not used in the pasted code but imported
 
-interface ImportProgress {
-
-    checkpoint: {
-        has_checkpoint: boolean;
-        last_checkpoint_at: string | null;
-        accepted_failed: number;
-        stats: Record<string, number>;
-        current_processing_build_number?: number | null;
-    };
-    import_builds: {
-        pending: number;
-        fetched: number;
-        ingesting: number;
-        ingested: number;
-        missing_resource: number;
-        total: number;
-    };
-    resource_status?: Record<string, Record<string, number>>;
-    training_builds: {
-        pending: number;
-        completed: number;
-        partial: number;
-        failed: number;
-        total: number;
-        with_prediction?: number;
-        pending_prediction?: number;
-        prediction_failed?: number;
-    };
-}
+import { ImportProgress } from "../RepoContext";
 
 interface OverviewTabProps {
     repo: RepoDetail;
     progress: ImportProgress | null;
     builds: Build[];
-    // Action handlers
-    onSync: () => void;
-    onRetryIngestion: () => void;
-    onStartProcessing: () => void;
-    onRetryFailed: () => void;
-    // Loading states
-    syncLoading: boolean;
-    retryIngestionLoading: boolean;
-    startProcessingLoading: boolean;
-    retryFailedLoading: boolean;
-}
-
-function StatusBadge({ status }: { status: string }) {
-    const s = status.toLowerCase();
-    if (s === "success" || s === "passed") {
-        return (
-            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
-                <CheckCircle2 className="h-3 w-3" /> Passed
-            </Badge>
-        );
-    }
-    if (s === "failure" || s === "failed") {
-        return (
-            <Badge variant="destructive" className="gap-1">
-                <XCircle className="h-3 w-3" /> Failed
-            </Badge>
-        );
-    }
-    return <Badge variant="secondary">{status}</Badge>;
-}
-
-function ExtractionBadge({ status, hasTrainingData }: { status?: string; hasTrainingData: boolean }) {
-    if (!hasTrainingData) {
-        return (
-            <Badge variant="outline" className="border-slate-400 text-slate-500 gap-1">
-                <Clock className="h-3 w-3" /> Pending
-            </Badge>
-        );
-    }
-    const s = (status || "").toLowerCase();
-    if (s === "completed") {
-        return (
-            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
-                <CheckCircle2 className="h-3 w-3" /> Done
-            </Badge>
-        );
-    }
-    if (s === "partial") {
-        return (
-            <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
-                <AlertCircle className="h-3 w-3" /> Partial
-            </Badge>
-        );
-    }
-    if (s === "failed") {
-        return (
-            <Badge variant="destructive" className="gap-1">
-                <XCircle className="h-3 w-3" /> Failed
-            </Badge>
-        );
-    }
-    return <Badge variant="secondary">{status || "—"}</Badge>;
+    // Action handlers - optional for read-only views
+    onSync?: () => void;
+    onRetryIngestion?: () => void;
+    onStartProcessing?: () => void;
+    onRetryFailed?: () => void;
+    // Loading states - optional
+    syncLoading?: boolean;
+    retryIngestionLoading?: boolean;
+    startProcessingLoading?: boolean;
+    retryFailedLoading?: boolean;
 }
 
 export function OverviewTab({
@@ -132,10 +52,7 @@ export function OverviewTab({
     retryFailedLoading,
 }: OverviewTabProps) {
     const router = useRouter();
-    const repoId = repo.id;
     const status = repo.status || "queued";
-
-    const canStartProcessing = ["ingested", "processed"].includes(status.toLowerCase());
 
     return (
         <div className="space-y-6">

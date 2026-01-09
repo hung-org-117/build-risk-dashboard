@@ -10,20 +10,7 @@ import type { Notification } from '@/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
-const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
-    // Model Pipeline
-    pipeline_completed: '✅',
-    pipeline_failed: '❌',
-    // Dataset Enrichment
-    dataset_enrichment_completed: '🔧',
-    dataset_enrichment_failed: '💔',
-    // System
-    rate_limit_exhausted: '🚨',
-    system: '💬',
-    // User-facing
-    high_risk_detected: '⚠️',
-    build_prediction_ready: '🎯',
-}
+
 
 type FilterStatus = 'all' | 'unread' | 'read'
 
@@ -267,9 +254,7 @@ export function NotificationsList() {
                                         !notification.is_read && "bg-blue-50/40 dark:bg-blue-900/10"
                                     )}
                                 >
-                                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-lg dark:bg-slate-800">
-                                        {NOTIFICATION_TYPE_ICONS[notification.type] || '📌'}
-                                    </div>
+
 
                                     <div className="flex-1 min-w-0 space-y-1">
                                         <div className="flex items-center justify-between gap-2">

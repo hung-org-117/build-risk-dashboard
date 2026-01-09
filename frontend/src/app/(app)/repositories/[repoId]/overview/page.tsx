@@ -1,7 +1,7 @@
 "use client";
 
-import { useRepo } from "../repo-context";
-import { OverviewTab } from "../_tabs/OverviewTab";
+import { useRepo } from "@/components/repositories/RepoContext";
+import { OverviewTab } from "@/components/repositories/tabs/OverviewTab";
 
 export default function OverviewPage() {
     const {

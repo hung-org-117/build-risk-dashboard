@@ -14,20 +14,7 @@ interface NotificationDropdownProps {
     className?: string
 }
 
-const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
-    // Model Pipeline (Admin)
-    pipeline_completed: '✅',
-    pipeline_failed: '❌',
-    // Dataset Enrichment (Admin)
-    dataset_validation_completed: '✔️',
-    dataset_enrichment_completed: '🔧',
-    // System (Admin)
-    rate_limit_exhausted: '🚨',
-    system: '💬',
-    // User-facing
-    high_risk_detected: '⚠️',
-    build_prediction_ready: '🎯',
-}
+
 
 export function NotificationDropdown({ className }: NotificationDropdownProps) {
     const router = useRouter()
@@ -178,9 +165,7 @@ export function NotificationDropdown({ className }: NotificationDropdownProps) {
                                         tabIndex={0}
                                     >
                                         <div className="flex items-start gap-3">
-                                            <span className="text-lg">
-                                                {NOTIFICATION_TYPE_ICONS[notification.type] || '📌'}
-                                            </span>
+
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2">
                                                     <p className="text-sm font-medium truncate">{notification.title}</p>

@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buildApi } from "@/lib/api";
-import { useRepo } from "../repo-context";
+import { useRepo } from "../RepoContext";
 import type { UnifiedBuild } from "@/types";
 import {
     AreaChart,

@@ -32,7 +32,7 @@ import { formatDateTime } from "@/lib/utils";
 import type {
   RepositoryRecord
 } from "@/types";
-import { ImportProgressDisplay } from "./_components/ImportProgressDisplay";
+import { ImportProgressDisplay } from "@/components/repositories/ImportProgressDisplay";
 
 
 const PAGE_SIZE = 20;

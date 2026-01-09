@@ -1,21 +1,16 @@
 "use client";
 
 import {
-    ArrowLeft,
     CheckCircle2,
     Clock,
     GitCommit,
     Loader2,
     XCircle,
     AlertCircle,
-    Globe,
-    Lock,
-    GitBranch,
-    ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/use-debounce";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,9 +22,10 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { buildApi, reposApi } from "@/lib/api";
+import { buildApi } from "@/lib/api";
 import { formatTimestamp } from "@/lib/utils";
-import type { Build, RepoDetail } from "@/types";
+import type { Build } from "@/types";
+import { useRepo } from "@/components/repositories/RepoContext";
 
 const PAGE_SIZE = 20;
 
@@ -50,39 +46,6 @@ function StatusBadge({ status }: { status: string }) {
         );
     }
     return <Badge variant="secondary">{status}</Badge>;
-}
-
-function ExtractionStatusBadge({ status, hasTrainingData }: { status?: string; hasTrainingData: boolean }) {
-    if (!hasTrainingData) {
-        return (
-            <Badge variant="outline" className="border-slate-400 text-slate-500 gap-1">
-                <Clock className="h-3 w-3" /> Not Started
-            </Badge>
-        );
-    }
-    const s = (status || "").toLowerCase();
-    if (s === "completed") {
-        return (
-            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
-                <CheckCircle2 className="h-3 w-3" /> Done
-            </Badge>
-        );
-    }
-    if (s === "pending") {
-        return (
-            <Badge variant="secondary" className="gap-1">
-                <Loader2 className="h-3 w-3 animate-spin" /> Processing
-            </Badge>
-        );
-    }
-    if (s === "failed") {
-        return (
-            <Badge variant="destructive" className="gap-1">
-                <XCircle className="h-3 w-3" /> Failed
-            </Badge>
-        );
-    }
-    return <Badge variant="secondary">{status || "Unknown"}</Badge>;
 }
 
 function RiskBadge({ level, confidence }: { level?: string; confidence?: number }) {
@@ -119,11 +82,13 @@ function RiskBadge({ level, confidence }: { level?: string; confidence?: number 
 }
 
 export default function UserBuildsPage() {
-    const params = useParams();
     const router = useRouter();
-    const repoId = params.id as string;
+    // Use context for repoId and general info, but we can fetch builds independently for pagination/search
+    // Or we could enhance context to support pagination.
+    // For now, let's keep local fetching for the table to support independent search/pagination state
+    // but without reloading repo details.
+    const { repoId } = useRepo();
 
-    const [repo, setRepo] = useState<RepoDetail | null>(null);
     const [builds, setBuilds] = useState<Build[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
@@ -132,15 +97,6 @@ export default function UserBuildsPage() {
 
     const [searchQuery, setSearchQuery] = useState("");
     const debouncedSearchQuery = useDebounce(searchQuery, 500);
-
-    const loadRepo = useCallback(async () => {
-        try {
-            const data = await reposApi.get(repoId);
-            setRepo(data);
-        } catch (err) {
-            console.error(err);
-        }
-    }, [repoId]);
 
     const loadBuilds = useCallback(
         async (pageNumber = 1, withSpinner = false) => {
@@ -165,9 +121,10 @@ export default function UserBuildsPage() {
     );
 
     useEffect(() => {
-        loadRepo();
-        loadBuilds(1, true);
-    }, [loadRepo, loadBuilds]);
+        if (repoId) {
+            loadBuilds(1, true);
+        }
+    }, [loadBuilds, repoId]);
 
     const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
     const pageStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -183,9 +140,9 @@ export default function UserBuildsPage() {
         }
     };
 
-    if (loading && !repo) {
+    if (loading) {
         return (
-            <div className="flex min-h-[60vh] items-center justify-center">
+            <div className="flex h-40 items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
         );
@@ -194,25 +151,6 @@ export default function UserBuildsPage() {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => router.push("/my-repos")}
-                        className="gap-2"
-                    >
-                        <ArrowLeft className="h-4 w-4" />
-                        Back to Repos
-                    </Button>
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight">
-                            {repo?.full_name || "Repository Builds"}
-                        </h1>
-                        <p className="text-muted-foreground">
-                            View build history and details
-                        </p>
-                    </div>
-                </div>
                 <div className="w-64">
                     <Input
                         placeholder="Search builds..."
@@ -222,48 +160,6 @@ export default function UserBuildsPage() {
                     />
                 </div>
             </div>
-
-
-
-            {repo && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <CardTitle className="text-lg">{repo.full_name}</CardTitle>
-                                <Badge variant={repo.is_private ? "secondary" : "outline"} className="gap-1">
-                                    {repo.is_private ? <Lock className="h-3 w-3" /> : <Globe className="h-3 w-3" />}
-                                    {repo.is_private ? "Private" : "Public"}
-                                </Badge>
-                            </div>
-                            {repo.metadata?.html_url && (
-                                <a
-                                    href={repo.metadata.html_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-                                >
-                                    <ExternalLink className="h-4 w-4" />
-                                    View on GitHub
-                                </a>
-                            )}
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex flex-wrap gap-6 text-sm">
-                            <div className="flex items-center gap-2">
-                                <GitBranch className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-muted-foreground">Branch:</span>
-                                <span className="font-medium">{repo.default_branch || "main"}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-muted-foreground">Total builds:</span>
-                                <span className="font-medium">{repo.builds_fetched.toLocaleString()}</span>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
 
             <Card>
                 <CardHeader>

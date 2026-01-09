@@ -16,9 +16,9 @@ import { Button } from "@/components/ui/button";
 import {
     Card,
     CardContent,
-    CardDescription,
     CardHeader,
     CardTitle,
+    CardDescription,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useWebSocket } from "@/contexts/websocket-context";
@@ -31,7 +31,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
     const params = useParams();
     const router = useRouter();
     const pathname = usePathname();
-    const repoId = params.repoId as string;
+    const repoId = params.id as string; // Note: [id] folder uses 'id' param, admin used [repoId]
 
     const [repo, setRepo] = useState<RepoDetail | null>(null);
     const [progress, setProgress] = useState<ImportProgress | null>(null);
@@ -107,7 +107,6 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
             chunk_index: number;
             error: string;
         }>) => {
-            // Check if error is for this repo (by id)
             if (repo?.id === event.detail.repo_id) {
                 toast({
                     variant: "destructive",
@@ -134,6 +133,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
             loadProgress();
         } catch (err) {
             console.error(err);
+            toast({ variant: "destructive", title: "Action Failed", description: "Could not start processing." });
         } finally {
             setStartProcessingLoading(false);
         }
@@ -144,8 +144,10 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
         try {
             await reposApi.triggerLazySync(repoId);
             loadRepo();
+            toast({ title: "Sync Started", description: "Repository sync initiated." });
         } catch (err) {
             console.error(err);
+            toast({ variant: "destructive", title: "Sync Failed", description: "Could not trigger sync." });
         } finally {
             setSyncLoading(false);
         }
@@ -157,8 +159,10 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
             await reposApi.reingestFailed(repoId);
             loadRepo();
             loadProgress();
+            toast({ title: "Retry Started", description: "Retrying failed ingestion tasks." });
         } catch (err) {
             console.error(err);
+            toast({ variant: "destructive", title: "Action Failed", description: "Could not retry ingestion." });
         } finally {
             setRetryIngestionLoading(false);
         }
@@ -170,8 +174,10 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
             await reposApi.reprocessFailed(repoId);
             loadRepo();
             loadProgress();
+            toast({ title: "Retry Started", description: "Retrying failed processing tasks." });
         } catch (err) {
             console.error(err);
+            toast({ variant: "destructive", title: "Action Failed", description: "Could not retry processing." });
         } finally {
             setRetryProcessingLoading(false);
         }
@@ -192,13 +198,13 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                     <CardHeader>
                         <CardTitle>Repository not found</CardTitle>
                         <CardDescription>
-                            The repository you are looking for does not exist.
+                            The repository you are looking for does not exist or you do not have access.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <Button onClick={() => router.push("/repositories")}>
+                        <Button onClick={() => router.push("/my-repos")}>
                             <ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to Repositories
+                            Back to My Repositories
                         </Button>
                     </CardContent>
                 </Card>
@@ -206,12 +212,12 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
         );
     }
 
-    // Determine active tab from pathname
-    const isOverviewActive = pathname === `/repositories/${repoId}` || pathname.endsWith("/overview");
+    // Determine active tab
+    const isOverviewActive = pathname === `/my-repos/${repoId}` || pathname.endsWith("/overview");
     const isBuildsActive = pathname.includes("/builds");
     const isAnalyticsActive = pathname.includes("/analytics");
-    // Check if we're on a build detail page (hide tabs for cleaner UI)
-    const isBuildDetailPage = pathname.includes("/build/") && pathname.split("/").length > 4;
+    const isBuildDetailPage = pathname.includes("/build/") || (pathname.includes("/builds/") && pathname.split("/").length > 5);
+    // my-repos/[id]/builds/[buildId] -> length is roughly 5 or 6 parts depending on splitting
 
     const contextValue: RepoContextType = {
         repo,
@@ -235,14 +241,13 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
     return (
         <RepoContext.Provider value={contextValue}>
             <div className="space-y-6">
-                {/* Header - simplified on build detail page */}
                 {!isBuildDetailPage && (
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => router.push("/repositories")}
+                                onClick={() => router.push("/my-repos")}
                                 className="gap-2"
                             >
                                 <ArrowLeft className="h-4 w-4" />
@@ -286,12 +291,11 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                     </div>
                 )}
 
-                {/* Tab Navigation - hide on build detail page */}
                 {!isBuildDetailPage && (
                     <div className="border-b w-full">
                         <nav className="flex w-full">
                             <Link
-                                href={`/repositories/${repoId}/overview`}
+                                href={`/my-repos/${repoId}/overview`}
                                 className={cn(
                                     "flex-1 text-center pb-3 text-sm font-medium transition-colors border-b-2",
                                     isOverviewActive
@@ -302,7 +306,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                                 Overview
                             </Link>
                             <Link
-                                href={`/repositories/${repoId}/builds`}
+                                href={`/my-repos/${repoId}/builds`}
                                 className={cn(
                                     "flex-1 text-center pb-3 text-sm font-medium transition-colors border-b-2",
                                     isBuildsActive
@@ -313,7 +317,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                                 Builds
                             </Link>
                             <Link
-                                href={`/repositories/${repoId}/analytics`}
+                                href={`/my-repos/${repoId}/analytics`}
                                 className={cn(
                                     "flex-1 text-center pb-3 text-sm font-medium transition-colors border-b-2",
                                     isAnalyticsActive
@@ -327,7 +331,6 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                     </div>
                 )}
 
-                {/* Page Content */}
                 {children}
             </div>
         </RepoContext.Provider>
