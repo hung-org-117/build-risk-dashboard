@@ -171,7 +171,6 @@ export function UploadDatasetModal({
                                 ciProviderMode={step1.ciProviderMode}
                                 ciProviderColumn={step1.ciProviderColumn}
                                 ciProviders={ciProviders}
-                                buildFilters={step1.buildFilters}
                                 mappings={step1.mappings}
                                 isMappingValid={step1.isMappingValid}
                                 isDatasetCreated={!!wizard.datasetId}
@@ -182,7 +181,6 @@ export function UploadDatasetModal({
                                 onCiProviderChange={step1.setCiProvider}
                                 onCiProviderModeChange={step1.setCiProviderMode}
                                 onCiProviderColumnChange={step1.setCiProviderColumn}
-                                onBuildFiltersChange={step1.setBuildFilters}
                                 onMappingChange={step1.handleMappingChange}
                                 onClearFile={step1.handleClearFile}
                             />

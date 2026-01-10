@@ -43,16 +43,6 @@ class ValidationStatsDto(BaseModel):
     repo_stats: List[RepoValidationStatsDto] = Field(default_factory=list)
 
 
-class BuildValidationFiltersDto(BaseModel):
-    """Filters applied during build validation."""
-
-    exclude_bots: bool = False
-    only_completed: bool = True
-
-    # Available: success, failure, cancelled, skipped, timed_out, action_required, neutral, stale
-    allowed_conclusions: List[str] = Field(default_factory=lambda: ["success", "failure"])
-
-
 class DatasetResponse(BaseModel):
     id: PyObjectIdStr = Field(..., alias="_id")
     user_id: Optional[PyObjectIdStr] = None
@@ -73,9 +63,6 @@ class DatasetResponse(BaseModel):
 
     # CI Provider
     ci_provider: Optional[str] = None
-
-    # Build validation filters
-    build_filters: BuildValidationFiltersDto = Field(default_factory=BuildValidationFiltersDto)
 
     # Validation status fields (unified validation)
     validation_status: str = "pending"
@@ -137,5 +124,4 @@ class DatasetUpdateRequest(BaseModel):
     description: Optional[str] = None
     mapped_fields: Optional[DatasetMappingDto] = None
     ci_provider: Optional[str] = None
-    build_filters: Optional[BuildValidationFiltersDto] = None
     setup_step: Optional[int] = None

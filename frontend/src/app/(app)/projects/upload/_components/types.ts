@@ -1,4 +1,4 @@
-import { BuildValidationFilters, CIProviderOption, DatasetRecord, ValidationStats } from "@/types";
+import { CIProviderOption, DatasetRecord, ValidationStats } from "@/types";
 
 export type MappingKey = "build_id" | "repo_name";
 export type Step = 1 | 2;
@@ -29,7 +29,6 @@ export interface StepUploadProps {
     ciProviderMode: CIProviderMode;
     ciProviderColumn: string;
     ciProviders: CIProviderOption[];
-    buildFilters: BuildValidationFilters;
     mappings: Record<MappingKey, string>;
     isMappingValid: boolean;
     isDatasetCreated: boolean;
@@ -40,7 +39,6 @@ export interface StepUploadProps {
     onCiProviderChange: (value: string) => void;
     onCiProviderModeChange: (mode: CIProviderMode) => void;
     onCiProviderColumnChange: (column: string) => void;
-    onBuildFiltersChange: (filters: BuildValidationFilters) => void;
     onMappingChange: (field: MappingKey, value: string) => void;
     onClearFile: () => void;
 }

@@ -20,11 +20,29 @@ import {
 } from "@/components/ui/select";
 
 import { ColumnSelector } from "./ColumnSelector";
-import type { StepUploadProps, MappingKey } from "./types";
+import type { MappingKey, CIProviderMode } from "./types";
+import type { CIProviderOption } from "@/types";
 
-interface UploadFormProps extends Omit<StepUploadProps, "preview" | "isDatasetCreated" | "onClearFile"> {
+interface UploadFormProps {
     previewExists: boolean;
     columns: string[];
+    uploading: boolean;
+    name: string;
+    description: string;
+    ciProvider: string;
+    ciProviderMode: CIProviderMode;
+    ciProviderColumn: string;
+    ciProviders: CIProviderOption[];
+    mappings: Record<MappingKey, string>;
+    isMappingValid: boolean;
+    fileInputRef: React.RefObject<HTMLInputElement | null>;
+    onFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void;
+    onNameChange: (value: string) => void;
+    onDescriptionChange: (value: string) => void;
+    onCiProviderChange: (value: string) => void;
+    onCiProviderModeChange: (mode: CIProviderMode) => void;
+    onCiProviderColumnChange: (column: string) => void;
+    onMappingChange: (field: MappingKey, value: string) => void;
 }
 
 export function UploadForm({
@@ -36,7 +54,6 @@ export function UploadForm({
     ciProviderMode,
     ciProviderColumn,
     ciProviders,
-    buildFilters,
     mappings,
     isMappingValid,
     fileInputRef,
@@ -46,7 +63,6 @@ export function UploadForm({
     onCiProviderChange,
     onCiProviderModeChange,
     onCiProviderColumnChange,
-    onBuildFiltersChange,
     onMappingChange,
     columns,
 }: UploadFormProps) {
@@ -212,87 +228,6 @@ export function UploadForm({
                         />
                     </div>
                 )}
-            </div>
-
-            <div className="h-px bg-border" />
-
-            {/* Filters */}
-            <div className="space-y-4">
-                <h3 className="text-sm font-semibold uppercase text-muted-foreground tracking-wider flex items-center gap-2">
-                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-700 text-[10px] dark:bg-slate-800 dark:text-slate-300">4</span>
-                    Filters
-                </h3>
-
-                <div className="space-y-4 p-4 rounded-lg bg-muted/40 border">
-                    <div className="flex flex-col gap-3">
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={buildFilters.only_completed}
-                                onChange={(e) =>
-                                    onBuildFiltersChange({
-                                        ...buildFilters,
-                                        only_completed: e.target.checked,
-                                    })
-                                }
-                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="text-sm font-medium">Only completed builds</span>
-                        </label>
-                        <label className="flex items-center gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={buildFilters.exclude_bots}
-                                onChange={(e) =>
-                                    onBuildFiltersChange({
-                                        ...buildFilters,
-                                        exclude_bots: e.target.checked,
-                                    })
-                                }
-                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="text-sm font-medium">Exclude bot commits</span>
-                        </label>
-                    </div>
-
-                    <div className="space-y-3 pt-2 border-t">
-                        <Label className="text-xs uppercase text-muted-foreground">Conclusions</Label>
-                        <div className="flex flex-wrap gap-2">
-                            {[
-                                { value: "success", label: "Success", color: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800" },
-                                { value: "failure", label: "Failure", color: "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800" },
-                                { value: "cancelled", label: "Cancelled", color: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700" },
-                                { value: "skipped", label: "Skipped", color: "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700" },
-                                { value: "timed_out", label: "Timed Out", color: "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800" },
-                                { value: "neutral", label: "Neutral", color: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800" },
-                                { value: "action_required", label: "Action Required", color: "bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800" },
-                            ].map((option) => {
-                                const isSelected = buildFilters.allowed_conclusions.includes(option.value);
-                                return (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        onClick={() => {
-                                            const newConclusions = isSelected
-                                                ? buildFilters.allowed_conclusions.filter((c) => c !== option.value)
-                                                : [...buildFilters.allowed_conclusions, option.value];
-                                            onBuildFiltersChange({
-                                                ...buildFilters,
-                                                allowed_conclusions: newConclusions,
-                                            });
-                                        }}
-                                        className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-all ${isSelected
-                                            ? option.color
-                                            : "bg-background text-muted-foreground border-transparent hover:bg-muted"
-                                            }`}
-                                    >
-                                        {option.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     );

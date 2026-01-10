@@ -23,7 +23,9 @@ class DatasetMapping(BaseModel):
 
     build_id: Optional[str] = None
     repo_name: Optional[str] = None
-    ci_provider: Optional[str] = None  # Column name for CI provider (multi-provider mode)
+    ci_provider: Optional[str] = (
+        None  # Column name for CI provider (multi-provider mode)
+    )
 
 
 class DatasetStats(BaseModel):
@@ -47,16 +49,6 @@ class ValidationStats(BaseModel):
     builds_filtered: int = 0
 
 
-class BuildValidationFilters(BaseModel):
-    """Filters applied during build validation."""
-
-    exclude_bots: bool = False
-    only_completed: bool = True
-
-    # Available: success, failure, cancelled, skipped, timed_out, action_required, neutral, stale
-    allowed_conclusions: List[str] = Field(default_factory=lambda: ["success", "failure"])
-
-
 class DatasetProject(BaseEntity):
     """Dataset/project metadata stored in MongoDB."""
 
@@ -77,10 +69,6 @@ class DatasetProject(BaseEntity):
     ci_provider: Optional[CIProvider] = Field(
         default=CIProvider.GITHUB_ACTIONS,
         description="CI provider for the dataset (None if using column mapping)",
-    )
-    build_filters: BuildValidationFilters = Field(
-        default_factory=BuildValidationFilters,
-        description="Filters applied during build validation",
     )
 
     # Validation status

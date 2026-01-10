@@ -25,7 +25,6 @@ from .dashboard import (
     RepoDistributionEntry,
 )
 from .dataset import (
-    BuildValidationFiltersDto,
     DatasetCreateRequest,
     DatasetListResponse,
     DatasetResponse,
@@ -144,7 +143,6 @@ __all__ = [
     "DatasetResponse",
     "DatasetListResponse",
     "DatasetCreateRequest",
-    "BuildValidationFiltersDto",
     "RepoValidationItem",
     "RepoValidationResponse",
     # Dataset templates

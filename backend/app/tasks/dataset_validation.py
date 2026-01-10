@@ -542,21 +542,12 @@ def validate_builds_chunk(
     ci_config = get_provider_config(ci_provider)
     ci_client = get_ci_provider(ci_provider, config=ci_config, db=db)
 
-    # Load build filters from dataset
-    dataset_repo = DatasetRepository(db)
-    dataset = dataset_repo.find_by_id(dataset_id)
-    build_filters = getattr(dataset, "build_filters", None)
-    if build_filters is None:
-        # Default filters
-        exclude_bots = False
-        only_completed = True
-        allowed_conclusions = ["success", "failure"]
-    else:
-        exclude_bots = getattr(build_filters, "exclude_bots", False)
-        only_completed = getattr(build_filters, "only_completed", True)
-        allowed_conclusions = getattr(
-            build_filters, "allowed_conclusions", ["success", "failure"]
-        )
+    # Hardcoded filters (matching model_ingestion.py behavior)
+    # - exclude_bots: True (skip dependabot, renovate, etc.)
+    # - only_completed: True (only process completed builds)
+    # - allowed conclusions: SUCCESS, FAILURE (skip SKIPPED, ACTION_REQUIRED, STALE, CANCELLED)
+    exclude_bots = True
+    only_completed = True
 
     build_ids = [b["build_id"] for b in builds]
     existing_builds = dataset_build_repo.find_many(
@@ -598,26 +589,31 @@ def validate_builds_chunk(
         logger.error(f"Failed to fetch build details for {repo_name}: {e}")
         build_results = [e] * len(builds_to_validate)
 
-    # Helper to check if build should be filtered
+    # Helper to check if build should be filtered (matching model_ingestion.py logic)
     def should_filter_build(build_data: BuildData) -> tuple[bool, str]:
-        """Check if build should be filtered based on dataset filters."""
-        conclusion = (
-            build_data.conclusion.value
-            if hasattr(build_data.conclusion, "value")
-            else build_data.conclusion
-        )
+        """Check if build should be filtered based on hardcoded filters."""
+        from app.ci_providers.models import BuildConclusion, BuildStatus
 
         # Check only_completed filter
-        if only_completed and not ci_client.is_build_completed(build_data):
+        if only_completed and build_data.status != BuildStatus.COMPLETED:
             return True, "Build not completed"
 
         # Check exclude_bots filter
         if exclude_bots and getattr(build_data, "is_bot_commit", False):
             return True, "Bot commit"
 
-        # Check if conclusion is in allowed list
-        if conclusion not in allowed_conclusions:
-            return True, f"Conclusion '{conclusion}' not in allowed list"
+        # Filter conclusions matching model_ingestion.py
+        conclusion = build_data.conclusion
+        if conclusion in (
+            BuildConclusion.SKIPPED,
+            BuildConclusion.ACTION_REQUIRED,
+            BuildConclusion.STALE,
+            BuildConclusion.CANCELLED,
+        ):
+            conclusion_str = (
+                conclusion.value if hasattr(conclusion, "value") else conclusion
+            )
+            return True, f"Conclusion '{conclusion_str}' filtered"
 
         return False, ""
 

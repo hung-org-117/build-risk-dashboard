@@ -94,22 +94,6 @@ export interface DatasetStats {
 
 export type DatasetPreviewRow = Record<string, string | number>;
 
-export interface BuildValidationFilters {
-  exclude_bots: boolean;
-  only_completed: boolean;
-  allowed_conclusions: string[];
-}
-
-// Available build conclusions for multi-select
-export const BUILD_CONCLUSION_OPTIONS = [
-  { value: "success", label: "Success", description: "Build passed" },
-  { value: "failure", label: "Failure", description: "Build failed" },
-  { value: "cancelled", label: "Cancelled", description: "Build was cancelled" },
-  { value: "skipped", label: "Skipped", description: "Build was skipped" },
-  { value: "timed_out", label: "Timed Out", description: "Build timed out" },
-  { value: "neutral", label: "Neutral", description: "No clear pass/fail" },
-] as const;
-
 export interface DatasetRecord {
   id: string;
   user_id?: string | null;
@@ -124,7 +108,6 @@ export interface DatasetRecord {
   mapped_fields: DatasetMapping;
   stats: DatasetStats;
   ci_provider?: string | null;
-  build_filters?: BuildValidationFilters;
   source_languages?: string[];
   test_frameworks?: string[];
   preview: DatasetPreviewRow[];
@@ -213,11 +196,7 @@ export interface DatasetUpdatePayload {
   name?: string;
   description?: string | null;
   mapped_fields?: DatasetMapping;
-  stats?: DatasetStats;
   ci_provider?: string | null;
-  build_filters?: BuildValidationFilters;
-  source_languages?: string[];
-  test_frameworks?: string[];
   setup_step?: number;
 }
 

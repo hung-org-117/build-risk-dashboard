@@ -423,10 +423,9 @@ class DatasetService:
         - name, description
         - mapped_fields (build_id, repo_name columns)
         - ci_provider
-        - build_filters (exclude_bots, only_completed, allowed_conclusions)
         - setup_step
         """
-        from app.entities.dataset import BuildValidationFilters, DatasetValidationStatus
+        from app.entities.dataset import DatasetValidationStatus
 
         dataset = self.repo.find_by_id(dataset_id)
         if not dataset:
@@ -438,7 +437,7 @@ class DatasetService:
         # These fields affect which builds are validated, so changing them
         # after validation would invalidate the results
         if dataset.validation_status == DatasetValidationStatus.COMPLETED:
-            config_fields = ["mapped_fields", "ci_provider", "build_filters"]
+            config_fields = ["mapped_fields", "ci_provider"]
             if any(updates.get(f) is not None for f in config_fields):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -466,12 +465,6 @@ class DatasetService:
 
         if updates.get("ci_provider") is not None:
             update_data["ci_provider"] = updates["ci_provider"]
-
-        if updates.get("build_filters") is not None:
-            bf = updates["build_filters"]
-            if hasattr(bf, "model_dump"):
-                bf = bf.model_dump()
-            update_data["build_filters"] = BuildValidationFilters(**bf).model_dump()
 
         if updates.get("setup_step") is not None:
             update_data["setup_step"] = updates["setup_step"]

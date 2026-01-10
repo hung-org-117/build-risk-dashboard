@@ -79,8 +79,7 @@ export default function UploadDatasetPage() {
                             ciProvider={step1.ciProvider}
                             ciProviderMode={step1.ciProviderMode}
                             ciProviderColumn={step1.ciProviderColumn}
-                            ciProviders={step1.ciProviders} // Hook return needs consistent naming
-                            buildFilters={step1.buildFilters}
+                            ciProviders={step1.ciProviders}
                             mappings={step1.mappings}
                             isMappingValid={step1.isMappingValid}
                             fileInputRef={step1.fileInputRef}
@@ -90,7 +89,6 @@ export default function UploadDatasetPage() {
                             onCiProviderChange={step1.setCiProvider}
                             onCiProviderModeChange={step1.setCiProviderMode}
                             onCiProviderColumnChange={step1.setCiProviderColumn}
-                            onBuildFiltersChange={step1.setBuildFilters}
                             onMappingChange={step1.handleMappingChange}
                         />
                     ) : (
