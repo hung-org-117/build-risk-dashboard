@@ -1,45 +1,69 @@
 """
-MLScenarioImportBuild Entity - Tracks builds through ingestion.
+IngestionBuild Entity - Tracks builds through the ingestion pipeline.
 
-Similar to DatasetImportBuild but references MLScenario instead of DatasetVersion.
-Tracks per-resource status (clone, worktree, logs).
+This entity tracks builds through ingestion stages (clone → worktree → logs).
+Unified from DatasetImportBuild and MLScenarioImportBuild.
+
+Key design principles:
+- Scenario tracking: Links build to TrainingScenario
+- Status tracking: Tracks build through PENDING → INGESTING → INGESTED
+- Per-resource tracking: Extensible resource_status dict for granular error tracking
 """
 
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.entities.base import BaseEntity, PyObjectId
-from app.entities.dataset_import_build import ResourceStatus, ResourceStatusEntry
 
 
-class MLScenarioImportBuildStatus(str, Enum):
-    """Status of a build in the ML scenario ingestion pipeline."""
+class IngestionStatus(str, Enum):
+    """Status of a build in the ingestion pipeline."""
 
     PENDING = "pending"  # Waiting for ingestion
     INGESTING = "ingesting"  # Ingestion in progress
-    INGESTED = "ingested"  # All resources ready
+    INGESTED = "ingested"  # Resources ready for processing
     MISSING_RESOURCE = "missing_resource"  # Expected: logs expired (not retryable)
-    FAILED = "failed"  # Actual error (retryable)
+    FAILED = "failed"  # Actual error: timeout, network (retryable)
 
 
-class MLScenarioImportBuild(BaseEntity):
+class ResourceStatus(str, Enum):
+    """Status of a single resource in ingestion."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class ResourceStatusEntry(BaseModel):
+    """Status entry for a single resource."""
+
+    status: ResourceStatus = ResourceStatus.PENDING
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class TrainingIngestionBuild(BaseEntity):
     """
-    Tracks a build through the ML scenario ingestion pipeline.
+    Tracks a build through the ingestion pipeline.
 
-    Links builds to MLScenario and tracks resource status.
+    Links builds to TrainingScenario for ingestion tracking.
+    Unified from DatasetImportBuild and MLScenarioImportBuild.
     """
 
     class Config:
-        collection = "ml_scenario_import_builds"
+        collection = "training_ingestion_builds"
         use_enum_values = True
 
     # Parent reference
     scenario_id: PyObjectId = Field(
         ...,
-        description="Reference to ml_scenarios",
+        description="Reference to training_scenarios",
     )
 
     # Raw data references
@@ -53,12 +77,12 @@ class MLScenarioImportBuild(BaseEntity):
     )
 
     # Pipeline status
-    status: MLScenarioImportBuildStatus = Field(
-        default=MLScenarioImportBuildStatus.PENDING,
+    status: IngestionStatus = Field(
+        default=IngestionStatus.PENDING,
         description="Pipeline status",
     )
 
-    # Per-resource status tracking (reuse from dataset_import_build)
+    # Per-resource status tracking
     resource_status: Dict[str, ResourceStatusEntry] = Field(
         default_factory=dict,
         description="Per-resource status. Keys: 'git_history', 'git_worktree', 'build_logs'",

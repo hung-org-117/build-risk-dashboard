@@ -1,33 +1,33 @@
 """
-Repository for MLScenario entity.
+Repository for TrainingScenario entity.
 
-Provides CRUD and query operations for ML Scenario configurations.
+Provides CRUD and query operations for Training Scenario configurations.
 """
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from bson import ObjectId
 from pymongo.database import Database
 
-from app.entities.ml_scenario import MLScenario, MLScenarioStatus
+from app.entities.training_scenario import TrainingScenario, ScenarioStatus
 
 from .base import BaseRepository
 
 
-class MLScenarioRepository(BaseRepository[MLScenario]):
-    """MongoDB repository for ML Scenario configurations."""
+class TrainingScenarioRepository(BaseRepository[TrainingScenario]):
+    """MongoDB repository for Training Scenario configurations."""
 
     def __init__(self, db: Database):
-        super().__init__(db, "ml_scenarios", MLScenario)
+        super().__init__(db, "training_scenarios", TrainingScenario)
 
     def list_by_user(
         self,
         user_id: str,
         skip: int = 0,
         limit: int = 0,
-        status_filter: Optional[MLScenarioStatus] = None,
+        status_filter: Optional[ScenarioStatus] = None,
         q: Optional[str] = None,
-    ) -> tuple[list[MLScenario], int]:
+    ) -> tuple[list[TrainingScenario], int]:
         """
         List scenarios for a user with optional filters.
 
@@ -66,8 +66,8 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
         self,
         skip: int = 0,
         limit: int = 0,
-        status_filter: Optional[MLScenarioStatus] = None,
-    ) -> tuple[list[MLScenario], int]:
+        status_filter: Optional[ScenarioStatus] = None,
+    ) -> tuple[list[TrainingScenario], int]:
         """List all scenarios (admin view)."""
         query: Dict[str, Any] = {}
 
@@ -83,30 +83,21 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
 
     def find_by_name(
         self, name: str, user_id: Optional[str] = None
-    ) -> Optional[MLScenario]:
-        """
-        Find scenario by name, optionally scoped to a user.
-
-        Args:
-            name: Scenario name to search for
-            user_id: Optional user ID to scope the search
-
-        Returns:
-            MLScenario if found, None otherwise
-        """
+    ) -> Optional[TrainingScenario]:
+        """Find scenario by name, optionally scoped to a user."""
         query: Dict[str, Any] = {"name": name}
         if user_id:
             query["created_by"] = self._to_object_id(user_id)
         return self.find_one(query)
 
-    def get_active_scenarios(self) -> List[MLScenario]:
+    def get_active_scenarios(self) -> List[TrainingScenario]:
         """Get scenarios currently being processed (not completed/failed)."""
         active_statuses = [
-            MLScenarioStatus.QUEUED.value,
-            MLScenarioStatus.FILTERING.value,
-            MLScenarioStatus.INGESTING.value,
-            MLScenarioStatus.PROCESSING.value,
-            MLScenarioStatus.SPLITTING.value,
+            ScenarioStatus.QUEUED.value,
+            ScenarioStatus.FILTERING.value,
+            ScenarioStatus.INGESTING.value,
+            ScenarioStatus.PROCESSING.value,
+            ScenarioStatus.SPLITTING.value,
         ]
         return self.find_many(
             {"status": {"$in": active_statuses}},
@@ -116,22 +107,10 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
     def update_status(
         self,
         scenario_id: str,
-        status: MLScenarioStatus,
+        status: ScenarioStatus,
         error_message: Optional[str] = None,
-    ) -> Optional[MLScenario]:
-        """
-        Update scenario status with optional error message.
-
-        Args:
-            scenario_id: Scenario ID to update
-            status: New status value
-            error_message: Optional error message (for failed status)
-
-        Returns:
-            Updated MLScenario or None if not found
-        """
-        from datetime import datetime
-
+    ) -> Optional[TrainingScenario]:
+        """Update scenario status with optional error message."""
         updates: Dict[str, Any] = {
             "status": status.value,
             "updated_at": datetime.utcnow(),
@@ -139,7 +118,7 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
 
         if error_message is not None:
             updates["error_message"] = error_message
-        elif status != MLScenarioStatus.FAILED:
+        elif status != ScenarioStatus.FAILED:
             updates["error_message"] = None
 
         return self.update_one(scenario_id, updates)
@@ -152,23 +131,8 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
         builds_features_extracted: Optional[int] = None,
         builds_missing_resource: Optional[int] = None,
         builds_failed: Optional[int] = None,
-    ) -> Optional[MLScenario]:
-        """
-        Update scenario statistics counters.
-
-        Args:
-            scenario_id: Scenario ID to update
-            builds_total: Total builds found during filtering
-            builds_ingested: Builds with completed ingestion
-            builds_features_extracted: Builds with completed processing
-            builds_missing_resource: Builds with missing resources
-            builds_failed: Builds that failed
-
-        Returns:
-            Updated MLScenario or None if not found
-        """
-        from datetime import datetime
-
+    ) -> Optional[TrainingScenario]:
+        """Update scenario statistics counters."""
         updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
 
         if builds_total is not None:
@@ -190,21 +154,8 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
         train_count: int,
         val_count: int,
         test_count: int,
-    ) -> Optional[MLScenario]:
-        """
-        Update scenario with final split counts after splitting phase.
-
-        Args:
-            scenario_id: Scenario ID to update
-            train_count: Number of records in train split
-            val_count: Number of records in validation split
-            test_count: Number of records in test split
-
-        Returns:
-            Updated MLScenario or None if not found
-        """
-        from datetime import datetime
-
+    ) -> Optional[TrainingScenario]:
+        """Update scenario with final split counts after splitting phase."""
         updates = {
             "train_count": train_count,
             "val_count": val_count,
@@ -219,19 +170,7 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
         counter_field: str,
         increment_by: int = 1,
     ) -> bool:
-        """
-        Atomically increment a counter field.
-
-        Args:
-            scenario_id: Scenario ID to update
-            counter_field: Field name (e.g., "builds_ingested")
-            increment_by: Amount to increment (default 1)
-
-        Returns:
-            True if document was updated
-        """
-        from datetime import datetime
-
+        """Atomically increment a counter field."""
         result = self.collection.update_one(
             {"_id": self._to_object_id(scenario_id)},
             {
@@ -251,8 +190,6 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
 
     def mark_feature_extraction_completed(self, scenario_id: str) -> bool:
         """Mark feature extraction as completed."""
-        from datetime import datetime
-
         result = self.collection.update_one(
             {"_id": self._to_object_id(scenario_id)},
             {
@@ -266,8 +203,6 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
 
     def mark_scan_extraction_completed(self, scenario_id: str) -> bool:
         """Mark scan extraction as completed (all scans done)."""
-        from datetime import datetime
-
         result = self.collection.update_one(
             {"_id": self._to_object_id(scenario_id)},
             {
@@ -281,10 +216,8 @@ class MLScenarioRepository(BaseRepository[MLScenario]):
 
     def set_scans_total(
         self, scenario_id: str, scans_total: int
-    ) -> Optional[MLScenario]:
+    ) -> Optional[TrainingScenario]:
         """Set the total number of scans to run."""
-        from datetime import datetime
-
         return self.update_one(
             scenario_id,
             {

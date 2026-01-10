@@ -1,7 +1,8 @@
 """
-Repository for MLScenarioEnrichmentBuild entity.
+Repository for EnrichmentBuild entity.
 
 Tracks builds through processing and split assignment.
+Unified from DatasetEnrichmentBuildRepository and MLScenarioEnrichmentBuildRepository.
 """
 
 from datetime import datetime
@@ -10,17 +11,17 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from pymongo.database import Database
 
-from app.entities.ml_scenario_enrichment_build import MLScenarioEnrichmentBuild
+from app.entities.training_enrichment_build import TrainingEnrichmentBuild
 from app.entities.enums import ExtractionStatus
 
 from .base import BaseRepository
 
 
-class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBuild]):
-    """MongoDB repository for ML scenario enrichment builds."""
+class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild]):
+    """MongoDB repository for enrichment builds."""
 
     def __init__(self, db: Database):
-        super().__init__(db, "ml_scenario_enrichment_builds", MLScenarioEnrichmentBuild)
+        super().__init__(db, "training_enrichment_builds", TrainingEnrichmentBuild)
 
     def find_by_scenario(
         self,
@@ -29,7 +30,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         split_assignment: Optional[str] = None,
         skip: int = 0,
         limit: int = 0,
-    ) -> tuple[list[MLScenarioEnrichmentBuild], int]:
+    ) -> tuple[list[TrainingEnrichmentBuild], int]:
         """
         Find enrichment builds for a scenario with filters.
 
@@ -62,7 +63,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         self,
         scenario_id: str,
         batch_size: int = 50,
-    ) -> List[MLScenarioEnrichmentBuild]:
+    ) -> List[TrainingEnrichmentBuild]:
         """Get enrichment builds ready for feature extraction."""
         return self.find_many(
             {
@@ -73,31 +74,31 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
             limit=batch_size,
         )
 
-    def bulk_create_from_import_builds(
+    def bulk_create_from_ingestion_builds(
         self,
         scenario_id: str,
-        import_build_data: List[Dict[str, Any]],
+        ingestion_build_data: List[Dict[str, Any]],
     ) -> int:
         """
-        Bulk create enrichment builds from ingested import builds.
+        Bulk create enrichment builds from ingested builds.
 
         Args:
             scenario_id: Scenario ID
-            import_build_data: List of dicts with import build info
+            ingestion_build_data: List of dicts with ingestion build info
 
         Returns:
             Number of enrichment builds created
         """
-        if not import_build_data:
+        if not ingestion_build_data:
             return 0
 
         scenario_oid = self._to_object_id(scenario_id)
         documents = []
 
-        for data in import_build_data:
-            doc = MLScenarioEnrichmentBuild(
+        for data in ingestion_build_data:
+            doc = TrainingEnrichmentBuild(
                 scenario_id=scenario_oid,
-                scenario_import_build_id=data["scenario_import_build_id"],
+                ingestion_build_id=data["ingestion_build_id"],
                 raw_repo_id=data["raw_repo_id"],
                 raw_build_run_id=data["raw_build_run_id"],
                 ci_run_id=data.get("ci_run_id", ""),
@@ -105,6 +106,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
                 repo_full_name=data.get("repo_full_name", ""),
                 outcome=data.get("outcome"),
                 group_value=data.get("group_value"),
+                build_started_at=data.get("build_started_at"),
                 extraction_status=ExtractionStatus.PENDING,
             )
             documents.append(doc)
@@ -112,10 +114,10 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         inserted = self.insert_many(documents)
         return len(inserted)
 
-    def upsert_for_import_build(
+    def upsert_for_ingestion_build(
         self,
         scenario_id: str,
-        scenario_import_build_id: str,
+        ingestion_build_id: str,
         raw_repo_id: str,
         raw_build_run_id: str,
         ci_run_id: str = "",
@@ -123,26 +125,24 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         repo_full_name: str = "",
         outcome: Optional[int] = None,
         build_started_at: Optional[datetime] = None,
-    ) -> MLScenarioEnrichmentBuild:
+    ) -> TrainingEnrichmentBuild:
         """
-        Create or get existing enrichment build for an import build.
+        Create or get existing enrichment build for an ingestion build.
 
         Returns existing enrichment build if already created.
         """
         existing = self.find_one(
             {
                 "scenario_id": self._to_object_id(scenario_id),
-                "scenario_import_build_id": self._to_object_id(
-                    scenario_import_build_id
-                ),
+                "ingestion_build_id": self._to_object_id(ingestion_build_id),
             }
         )
         if existing:
             return existing
 
-        doc = MLScenarioEnrichmentBuild(
+        doc = TrainingEnrichmentBuild(
             scenario_id=self._to_object_id(scenario_id),
-            scenario_import_build_id=self._to_object_id(scenario_import_build_id),
+            ingestion_build_id=self._to_object_id(ingestion_build_id),
             raw_repo_id=self._to_object_id(raw_repo_id),
             raw_build_run_id=self._to_object_id(raw_build_run_id),
             ci_run_id=ci_run_id,
@@ -175,7 +175,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         extraction_status: ExtractionStatus,
         feature_vector_id: Optional[str] = None,
         error_message: Optional[str] = None,
-    ) -> Optional[MLScenarioEnrichmentBuild]:
+    ) -> Optional[TrainingEnrichmentBuild]:
         """Update extraction status and optionally link feature vector."""
         updates: Dict[str, Any] = {"extraction_status": extraction_status.value}
 
@@ -224,7 +224,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
     def get_completed_with_features(
         self,
         scenario_id: str,
-    ) -> List[MLScenarioEnrichmentBuild]:
+    ) -> List[TrainingEnrichmentBuild]:
         """Get all completed enrichment builds that have feature vectors."""
         return self.find_many(
             {
@@ -276,7 +276,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         for all enrichment builds in the same scenario that share the same commit.
 
         Args:
-            scenario_id: MLScenario ID
+            scenario_id: Scenario ID
             commit_sha: Git commit SHA
             scan_features: Filtered metrics to add
             prefix: Feature prefix ('sonar_' or 'trivy_')
@@ -291,7 +291,7 @@ class MLScenarioEnrichmentBuildRepository(BaseRepository[MLScenarioEnrichmentBui
         pipeline = [
             {"$match": {"scenario_id": scenario_id, "commit_sha": commit_sha}},
             {"$match": {"feature_vector_id": {"$ne": None}}},
-            # Verify feature vector is in ML_SCENARIO scope
+            # Verify feature vector is in TRAINING_SCENARIO scope
             {
                 "$lookup": {
                     "from": "feature_vectors",

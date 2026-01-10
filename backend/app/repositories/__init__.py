@@ -4,11 +4,22 @@ from .base import BaseRepository
 from .data_quality_repository import DataQualityRepository
 from .dataset_build_repository import DatasetBuildRepository
 
+# === NEW REPOSITORIES (Architecture Merge) ===
+# Build Source repositories
+from .build_source import BuildSourceRepository
+from .source_build import SourceBuildRepository
+from .source_repo_stats import SourceRepoStatsRepository
+
+# Training Pipeline repositories
+from .training_scenario import TrainingScenarioRepository
+from .training_ingestion_build import TrainingIngestionBuildRepository
+from .training_enrichment_build import TrainingEnrichmentBuildRepository
+from .training_dataset_split import TrainingDatasetSplitRepository
+
+# === LEGACY REPOSITORIES (to be removed after migration) ===
 # Dataset enrichment flow repositories
 from .dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from .dataset_import_build import DatasetImportBuildRepository
-
-# Dataset repositories
 from .dataset_repository import DatasetRepository
 from .dataset_template_repository import DatasetTemplateRepository
 from .feature_audit_log import FeatureAuditLogRepository
@@ -18,14 +29,10 @@ from .model_repo_config import ModelRepoConfigRepository
 from .model_training_build import ModelTrainingBuildRepository
 from .notification import NotificationRepository
 
-# ML Scenario Builder repositories
-from .ml_scenario import MLScenarioRepository
-from .ml_scenario_import_build import MLScenarioImportBuildRepository
-from .ml_scenario_enrichment_build import MLScenarioEnrichmentBuildRepository
-from .ml_dataset_split import MLDatasetSplitRepository
+# ML Scenario Builder repositories (legacy)
+# DELETED
 
 # Other repositories
-# from .github_installation import GithubInstallationRepository
 from .oauth_identity import OAuthIdentityRepository
 from .raw_build_run import RawBuildRunRepository
 
@@ -35,6 +42,17 @@ from .user import UserRepository
 
 __all__ = [
     "BaseRepository",
+    # === NEW REPOSITORIES ===
+    # Build Source
+    "BuildSourceRepository",
+    "SourceBuildRepository",
+    "SourceRepoStatsRepository",
+    # Training Pipeline
+    "TrainingScenarioRepository",
+    "TrainingIngestionBuildRepository",
+    "TrainingEnrichmentBuildRepository",
+    "TrainingDatasetSplitRepository",
+    # === LEGACY REPOSITORIES ===
     # Raw data (shared)
     "RawRepositoryRepository",
     "RawBuildRunRepository",
@@ -53,9 +71,4 @@ __all__ = [
     "NotificationRepository",
     # Data Quality
     "DataQualityRepository",
-    # ML Scenario Builder
-    "MLScenarioRepository",
-    "MLScenarioImportBuildRepository",
-    "MLScenarioEnrichmentBuildRepository",
-    "MLDatasetSplitRepository",
 ]

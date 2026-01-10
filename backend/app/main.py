@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     admin_users,
     auth,
+    build_sources,
     dashboard,
     dataset_validation,
     dataset_versions,
@@ -18,7 +19,6 @@ from app.api import (
     health,
     integrations,
     logs,
-    ml_scenarios,
     model_repos,
     monitoring,
     notifications,
@@ -27,6 +27,7 @@ from app.api import (
     statistics,
     templates,
     tokens,
+    training_scenarios,
     user_settings,
     users,
     webhook,
@@ -98,7 +99,12 @@ app.include_router(sse.router, prefix="/api", tags=["SSE"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(features.router, prefix="/api", tags=["Feature Definitions"])
 app.include_router(datasets.router, prefix="/api", tags=["Datasets"])
-app.include_router(ml_scenarios.router, prefix="/api", tags=["ML Scenarios"])
+
+app.include_router(
+    training_scenarios.router,
+    prefix="/api/training-scenarios",
+    tags=["Training Scenarios"],
+)
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
 app.include_router(
     dataset_validation.router, prefix="/api", tags=["Dataset Validation"]
@@ -110,6 +116,7 @@ app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(user_settings.router, prefix="/api", tags=["User Settings"])
 app.include_router(statistics.router, prefix="/api", tags=["Statistics"])
+app.include_router(build_sources.router, prefix="/api", tags=["Build Sources"])
 
 
 # Admin-only routes

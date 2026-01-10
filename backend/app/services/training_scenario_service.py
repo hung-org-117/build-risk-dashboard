@@ -1,0 +1,476 @@
+"""
+Training Scenario Service - Business logic for Training Pipeline.
+
+Handles:
+- YAML config parsing and validation
+- Scenario CRUD operations
+- Pipeline orchestration (Ingestion → Processing → Generation)
+"""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+from bson import ObjectId
+from fastapi import HTTPException, status
+from pymongo.database import Database
+
+from app import paths
+from app.dtos.training_scenario import (
+    DataSourceConfigDTO,
+    FeatureConfigDTO,
+    OutputConfigDTO,
+    PreprocessingConfigDTO,
+    SplittingConfigDTO,
+    TrainingScenarioCreate,
+    TrainingScenarioResponse,
+    TrainingScenarioUpdate,
+)
+from app.entities.training_dataset_split import TrainingDatasetSplit
+from app.entities.training_scenario import (
+    DataSourceConfig,
+    FeatureConfig,
+    OutputConfig,
+    PreprocessingConfig,
+    ScenarioStatus,
+    SplittingConfig,
+    TrainingScenario,
+)
+from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
+from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
+from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
+from app.repositories.raw_build_run import RawBuildRunRepository
+from app.repositories.raw_repository import RawRepositoryRepository
+from app.repositories.training_scenario import TrainingScenarioRepository
+
+logger = logging.getLogger(__name__)
+
+
+class TrainingScenarioService:
+    """Service for Training Scenario operations."""
+
+    def __init__(self, db: Database):
+        self.db = db
+        self.scenario_repo = TrainingScenarioRepository(db)
+        self.ingestion_build_repo = TrainingIngestionBuildRepository(db)
+        self.enrichment_build_repo = TrainingEnrichmentBuildRepository(db)
+        self.split_repo = TrainingDatasetSplitRepository(db)
+
+        # Legacy/Raw repos
+        self.raw_repo_repo = RawRepositoryRepository(db)
+        self.raw_build_run_repo = RawBuildRunRepository(db)
+
+    # =========================================================================
+    # CRUD Operations
+    # =========================================================================
+
+    def list_scenarios(
+        self,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 20,
+        status_filter: Optional[ScenarioStatus] = None,
+        q: Optional[str] = None,
+    ) -> Tuple[List[TrainingScenarioResponse], int]:
+        """List scenarios for a user."""
+        scenarios, total = self.scenario_repo.list_by_user(
+            user_id=user_id,
+            skip=skip,
+            limit=limit,
+            status_filter=status_filter,
+            q=q,
+        )
+        return [self._to_response(s) for s in scenarios], total
+
+    def get_scenario(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> TrainingScenarioResponse:
+        """Get scenario details."""
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Scenario {scenario_id} not found",
+            )
+
+        # Optional: Permission check if ownership enforced
+        # if scenario.created_by and str(scenario.created_by) != user_id: ...
+
+        return self._to_response(scenario)
+
+    def create_scenario(
+        self,
+        user_id: str,
+        data: TrainingScenarioCreate,
+    ) -> TrainingScenarioResponse:
+        """Create a new scenario from YAML config."""
+        # Check for duplicate name
+        existing = self.scenario_repo.find_by_name(data.name, user_id)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Scenario with name '{data.name}' already exists",
+            )
+
+        # Parse and validate YAML
+        parsed_config = self._parse_yaml_config(data.yaml_config)
+
+        # Create scenario entity
+        scenario = TrainingScenario(
+            name=data.name,
+            description=data.description,
+            version=parsed_config.get("version", data.version),
+            yaml_config=data.yaml_config,
+            data_source_config=self._parse_data_source_config(
+                parsed_config.get("data_source", {})
+            ),
+            feature_config=self._parse_feature_config(
+                parsed_config.get("features", {})
+            ),
+            splitting_config=self._parse_splitting_config(
+                parsed_config.get("splitting", {})
+            ),
+            preprocessing_config=self._parse_preprocessing_config(
+                parsed_config.get("preprocessing", {})
+            ),
+            output_config=self._parse_output_config(parsed_config.get("output", {})),
+            status=ScenarioStatus.QUEUED,
+            created_by=ObjectId(user_id),
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+
+        created = self.scenario_repo.insert_one(scenario)
+
+        # Create scenario directory
+        scenario_dir = paths.get_ml_scenario_dir(str(created.id))
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save YAML config file
+        config_path = paths.get_ml_scenario_config_path(str(created.id))
+        config_path.write_text(data.yaml_config)
+
+        logger.info(f"Created TrainingScenario: {created.id} - {data.name}")
+        return self._to_response(created)
+
+    def update_scenario(
+        self,
+        scenario_id: str,
+        user_id: str,
+        data: TrainingScenarioUpdate,
+    ) -> TrainingScenarioResponse:
+        """Update scenario fields."""
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Scenario {scenario_id} not found",
+            )
+
+        # Cannot update if processing rules apply (e.g. actively running)
+        if scenario.status in (
+            ScenarioStatus.FILTERING,
+            ScenarioStatus.INGESTING,
+            ScenarioStatus.PROCESSING,
+            ScenarioStatus.SPLITTING,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot update scenario while pipeline is running",
+            )
+
+        updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
+
+        if data.name is not None:
+            existing = self.scenario_repo.find_by_name(data.name, user_id)
+            if existing and str(existing.id) != scenario_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Scenario with name '{data.name}' already exists",
+                )
+            updates["name"] = data.name
+
+        if data.description is not None:
+            updates["description"] = data.description
+
+        if data.yaml_config is not None:
+            parsed_config = self._parse_yaml_config(data.yaml_config)
+            updates["yaml_config"] = data.yaml_config
+            updates["data_source_config"] = self._parse_data_source_config(
+                parsed_config.get("data_source", {})
+            ).model_dump()
+            updates["feature_config"] = self._parse_feature_config(
+                parsed_config.get("features", {})
+            ).model_dump()
+            updates["splitting_config"] = self._parse_splitting_config(
+                parsed_config.get("splitting", {})
+            ).model_dump()
+            updates["preprocessing_config"] = self._parse_preprocessing_config(
+                parsed_config.get("preprocessing", {})
+            ).model_dump()
+            updates["output_config"] = self._parse_output_config(
+                parsed_config.get("output", {})
+            ).model_dump()
+
+            # Update saved config file
+            config_path = paths.get_ml_scenario_config_path(scenario_id)
+            config_path.write_text(data.yaml_config)
+
+            # Reset status to QUEUED if config changed
+            updates["status"] = ScenarioStatus.QUEUED.value
+
+            # Reset completion flags
+            updates["feature_extraction_completed"] = False
+            updates["scan_extraction_completed"] = False
+
+        updated = self.scenario_repo.update_one(scenario_id, updates)
+        return self._to_response(updated)
+
+    def delete_scenario(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> bool:
+        """Delete a scenario and all associated data."""
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Scenario {scenario_id} not found",
+            )
+
+        # Delete associated data
+        self.ingestion_build_repo.delete_by_scenario(scenario_id)
+        self.enrichment_build_repo.delete_by_scenario(scenario_id)
+        self.split_repo.delete_by_scenario(scenario_id)
+
+        # Delete files
+        paths.cleanup_ml_scenario_files(scenario_id)
+
+        # Delete scenario
+        self.scenario_repo.delete_one(scenario_id)
+
+        logger.info(f"Deleted TrainingScenario: {scenario_id}")
+        return True
+
+    # =========================================================================
+    # Pipeline Orchestration
+    # =========================================================================
+
+    def start_ingestion(self, scenario_id: str, user_id: str) -> Dict[str, Any]:
+        """Phase 1: Start ingestion."""
+        from app.tasks.training_ingestion import start_scenario_ingestion
+
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
+        # Allow retry if Failed or Queued
+        if scenario.status not in [
+            ScenarioStatus.QUEUED.value,
+            ScenarioStatus.FAILED.value,
+            ScenarioStatus.INGESTED.value,
+        ]:
+            # If already ingested, user might want to re-ingest?
+            # Currently we enforce strict flow or re-ingest if FAILED.
+            # If COMPLETED, user should probably create new scenario or we allow re-run.
+            # Assuming linear flow for now: QUEUED/FAILED -> INGESTING
+            pass
+
+        res = start_scenario_ingestion.delay(scenario_id)
+        return {"status": "queued", "task_id": res.id}
+
+    def start_processing(self, scenario_id: str, user_id: str) -> Dict[str, Any]:
+        """Phase 2: Start processing."""
+        from app.tasks.training_processing import start_scenario_processing
+
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
+        # Must be INGESTED (or PROCESSED/FAILED to retry)
+        if scenario.status not in [
+            ScenarioStatus.INGESTED.value,
+            ScenarioStatus.PROCESSED.value,
+            ScenarioStatus.FAILED.value,
+        ]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scenario must be INGESTED to start processing (current: {scenario.status})",
+            )
+
+        res = start_scenario_processing.delay(scenario_id)
+        return {"status": "queued", "task_id": res.id}
+
+    def generate_dataset(self, scenario_id: str, user_id: str) -> Dict[str, Any]:
+        """Phase 3: Generate Dataset (Split + Download)."""
+        from app.tasks.training_processing import generate_scenario_dataset
+
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
+        # Must be PROCESSED (or COMPLETED to re-gen)
+        if scenario.status not in [
+            ScenarioStatus.PROCESSED.value,
+            ScenarioStatus.COMPLETED.value,
+        ]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scenario must be PROCESSED to generate dataset (current: {scenario.status})",
+            )
+
+        res = generate_scenario_dataset.delay(scenario_id)
+        return {"status": "queued", "task_id": res.id}
+
+    # =========================================================================
+    # Helpers
+    # =========================================================================
+
+    def _to_response(self, scenario: TrainingScenario) -> TrainingScenarioResponse:
+        """Convert entity to DTO response."""
+        return TrainingScenarioResponse(
+            id=str(scenario.id),
+            name=scenario.name,
+            description=scenario.description,
+            version=scenario.version,
+            status=scenario.status,
+            error_message=scenario.error_message,
+            # Configs
+            data_source_config=DataSourceConfigDTO(
+                **scenario.data_source_config.model_dump()
+            ),
+            feature_config=FeatureConfigDTO(**scenario.feature_config.model_dump()),
+            splitting_config=SplittingConfigDTO(
+                **scenario.splitting_config.model_dump()
+            ),
+            preprocessing_config=PreprocessingConfigDTO(
+                **scenario.preprocessing_config.model_dump()
+            ),
+            output_config=OutputConfigDTO(**scenario.output_config.model_dump()),
+            yaml_config=scenario.yaml_config,
+            # Stats
+            builds_total=scenario.builds_total,
+            builds_ingested=scenario.builds_ingested,
+            builds_features_extracted=scenario.builds_features_extracted,
+            builds_missing_resource=scenario.builds_missing_resource,
+            builds_failed=scenario.builds_failed,
+            scans_total=scenario.scans_total,
+            scans_completed=scenario.scans_completed,
+            scans_failed=scenario.scans_failed,
+            train_count=scenario.train_count,
+            val_count=scenario.val_count,
+            test_count=scenario.test_count,
+            created_by=str(scenario.created_by) if scenario.created_by else None,
+            created_at=scenario.created_at,
+            updated_at=scenario.updated_at,
+            filtering_completed_at=scenario.filtering_completed_at,
+            ingestion_completed_at=scenario.ingestion_completed_at,
+            processing_completed_at=scenario.processing_completed_at,
+            splitting_completed_at=scenario.splitting_completed_at,
+            feature_extraction_completed=scenario.feature_extraction_completed,
+            scan_extraction_completed=scenario.scan_extraction_completed,
+        )
+
+    def _parse_yaml_config(self, yaml_string: str) -> Dict[str, Any]:
+        """Parse and validate YAML configuration."""
+        try:
+            config = yaml.safe_load(yaml_string)
+            if not isinstance(config, dict):
+                raise HTTPException(
+                    status_code=400, detail="YAML config must be a dictionary"
+                )
+            return config
+        except yaml.YAMLError as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid YAML syntax: {str(e)}"
+            )
+
+    def _parse_data_source_config(self, config: Dict[str, Any]) -> DataSourceConfig:
+        """Parse data_source section."""
+        # Mapping logic matching MLScenarioService but for new entities
+        try:
+            repo_cfg = config.get("repositories", {})
+            builds_cfg = config.get("builds", {})
+            date_range = builds_cfg.get("date_range", {})
+
+            return DataSourceConfig(
+                filter_by=repo_cfg.get("filter_by", "all"),
+                languages=repo_cfg.get("languages", []),
+                repo_names=repo_cfg.get("names", []),
+                owners=repo_cfg.get("owners", []),
+                date_start=self._parse_date(date_range.get("start")),
+                date_end=self._parse_date(date_range.get("end")),
+                conclusions=builds_cfg.get("conclusions", ["success", "failure"]),
+                exclude_bots=builds_cfg.get("exclude_bots", True),
+                ci_provider=config.get("ci_provider", "all"),
+            )
+        except Exception:
+            # Fallback or re-raise
+            return DataSourceConfig()
+
+    def _parse_feature_config(self, config: Dict[str, Any]) -> FeatureConfig:
+        return FeatureConfig(**config)
+
+    def _parse_splitting_config(self, config: Dict[str, Any]) -> SplittingConfig:
+        # Flatten structure if nested under 'config' key in YAML
+        if "config" in config:
+            # Merge top-level keys like strategy with 'config' keys
+            flat = config.copy()
+            flat.update(config["config"])
+            return SplittingConfig(**flat)
+        return SplittingConfig(**config)
+
+    def _parse_preprocessing_config(
+        self, config: Dict[str, Any]
+    ) -> PreprocessingConfig:
+        return PreprocessingConfig(**config)
+
+    def _parse_output_config(self, config: Dict[str, Any]) -> OutputConfig:
+        return OutputConfig(**config)
+
+    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
+        if not date_str:
+            return None
+        try:
+            return datetime.fromisoformat(str(date_str))
+        except:
+            return None
+
+    # =========================================================================
+    # Split Files
+    # =========================================================================
+
+    def get_scenario_splits(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Get all split files for a scenario."""
+        # Permission check via get_scenario
+        self.get_scenario(scenario_id, user_id)
+
+        splits = self.split_repo.find_by_scenario(scenario_id)
+        return [self._serialize_split(s) for s in splits]
+
+    def _serialize_split(self, split: TrainingDatasetSplit) -> Dict[str, Any]:
+        """Serialize split for API response."""
+        return {
+            "id": str(split.id),
+            "scenario_id": str(split.scenario_id),
+            "split_type": split.split_type,
+            "record_count": split.record_count,
+            "feature_count": split.feature_count,
+            "class_distribution": split.class_distribution,
+            "group_distribution": split.group_distribution,
+            "file_path": split.file_path,
+            "file_size_bytes": split.file_size_bytes,
+            "file_format": split.file_format,
+            "generated_at": (
+                split.generated_at.isoformat() if split.generated_at else None
+            ),
+            "generation_duration_seconds": split.generation_duration_seconds,
+        }

@@ -1,30 +1,30 @@
 """
-Repository for MLDatasetSplit entity.
+Repository for DatasetSplit entity.
 
 Tracks generated dataset split files.
+Renamed from MLDatasetSplitRepository.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from bson import ObjectId
 from pymongo.database import Database
 
-from app.entities.ml_dataset_split import MLDatasetSplit
+from app.entities.training_dataset_split import TrainingDatasetSplit
 
 from .base import BaseRepository
 
 
-class MLDatasetSplitRepository(BaseRepository[MLDatasetSplit]):
-    """MongoDB repository for ML dataset splits."""
+class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
+    """MongoDB repository for dataset splits."""
 
     def __init__(self, db: Database):
-        super().__init__(db, "ml_dataset_splits", MLDatasetSplit)
+        super().__init__(db, "training_dataset_splits", TrainingDatasetSplit)
 
     def find_by_scenario(
         self,
         scenario_id: str,
-    ) -> List[MLDatasetSplit]:
+    ) -> List[TrainingDatasetSplit]:
         """
         Get all splits for a scenario.
 
@@ -43,7 +43,7 @@ class MLDatasetSplitRepository(BaseRepository[MLDatasetSplit]):
         self,
         scenario_id: str,
         split_type: str,
-    ) -> Optional[MLDatasetSplit]:
+    ) -> Optional[TrainingDatasetSplit]:
         """
         Get a specific split by type.
 
@@ -52,7 +52,7 @@ class MLDatasetSplitRepository(BaseRepository[MLDatasetSplit]):
             split_type: Split type (train/validation/test/fold_N)
 
         Returns:
-            MLDatasetSplit if found
+            DatasetSplit if found
         """
         return self.find_one(
             {
@@ -75,7 +75,7 @@ class MLDatasetSplitRepository(BaseRepository[MLDatasetSplit]):
         feature_names: List[str],
         generation_duration_seconds: float,
         checksum_md5: Optional[str] = None,
-    ) -> MLDatasetSplit:
+    ) -> TrainingDatasetSplit:
         """
         Create a new dataset split record.
 
@@ -94,9 +94,9 @@ class MLDatasetSplitRepository(BaseRepository[MLDatasetSplit]):
             checksum_md5: Optional MD5 checksum
 
         Returns:
-            Created MLDatasetSplit
+            Created DatasetSplit
         """
-        split = MLDatasetSplit(
+        split = TrainingDatasetSplit(
             scenario_id=self._to_object_id(scenario_id),
             split_type=split_type,
             record_count=record_count,

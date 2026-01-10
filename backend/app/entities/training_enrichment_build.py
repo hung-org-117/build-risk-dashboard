@@ -1,8 +1,13 @@
 """
-MLScenarioEnrichmentBuild Entity - Tracks builds through processing.
+EnrichmentBuild Entity - Tracks builds through processing and split assignment.
 
-Similar to DatasetEnrichmentBuild but references MLScenario.
-Tracks feature extraction status and split assignment.
+This entity tracks builds through feature extraction and split assignment.
+Unified from DatasetEnrichmentBuild and MLScenarioEnrichmentBuild.
+
+Key design principles:
+- References FeatureVector for feature storage (single source of truth)
+- Tracks extraction status and split assignment
+- Stores outcome for stratification
 """
 
 from datetime import datetime
@@ -14,34 +19,27 @@ from app.entities.base import BaseEntity, PyObjectId
 from app.entities.enums import ExtractionStatus
 
 
-class SplitAssignment(str):
-    """Split assignment values."""
-
-    TRAIN = "train"
-    VALIDATION = "validation"
-    TEST = "test"
-
-
-class MLScenarioEnrichmentBuild(BaseEntity):
+class TrainingEnrichmentBuild(BaseEntity):
     """
-    Tracks a build through the ML scenario processing/enrichment pipeline.
+    Tracks a build through the processing/enrichment pipeline.
 
     Features are stored in FeatureVector entity, referenced by feature_vector_id.
     Split assignment is set during the splitting phase.
+    Unified from DatasetEnrichmentBuild and MLScenarioEnrichmentBuild.
     """
 
     class Config:
-        collection = "ml_scenario_enrichment_builds"
+        collection = "training_enrichment_builds"
         use_enum_values = True
 
     # Parent references
     scenario_id: PyObjectId = Field(
         ...,
-        description="Reference to ml_scenarios",
+        description="Reference to training_scenarios",
     )
-    scenario_import_build_id: PyObjectId = Field(
+    ingestion_build_id: PyObjectId = Field(
         ...,
-        description="Reference to ml_scenario_import_builds",
+        description="Reference to ingestion_builds",
     )
 
     # Raw data references
@@ -80,20 +78,20 @@ class MLScenarioEnrichmentBuild(BaseEntity):
         description="Group value for this build (e.g., 'backend', 'morning')",
     )
 
-    # Denormalized for quick queries
-    ci_run_id: str = Field(default="")
-    commit_sha: str = Field(default="")
-    repo_full_name: str = Field(default="")
-
     # Label (from RawBuildRun.conclusion, used for stratification)
     outcome: Optional[int] = Field(
         None,
         description="Build outcome: 0=success, 1=failure",
     )
 
+    # Denormalized for quick queries
+    ci_run_id: str = Field(default="")
+    commit_sha: str = Field(default="")
+    repo_full_name: str = Field(default="")
+
     # Timestamps
     build_started_at: Optional[datetime] = Field(
         None,
-        description="When the build started (from RawBuildRun.started_at) for temporal ordering",
+        description="When the build started (from RawBuildRun) for temporal ordering",
     )
     created_at: datetime = Field(default_factory=datetime.utcnow)

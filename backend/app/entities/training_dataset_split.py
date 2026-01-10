@@ -1,19 +1,21 @@
 """
-MLDatasetSplit Entity - Tracks generated split files.
+DatasetSplit Entity - Tracks generated split files.
 
 Stores metadata about each split file (train, val, test)
 including record counts, class distribution, and file paths.
+
+Renamed from MLDatasetSplit.
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
 from app.entities.base import BaseEntity, PyObjectId
 
 
-class MLDatasetSplit(BaseEntity):
+class TrainingDatasetSplit(BaseEntity):
     """
     Tracks a generated dataset split file.
 
@@ -21,12 +23,12 @@ class MLDatasetSplit(BaseEntity):
     """
 
     class Config:
-        collection = "ml_dataset_splits"
+        collection = "training_dataset_splits"
 
     # Parent reference
     scenario_id: PyObjectId = Field(
         ...,
-        description="Reference to ml_scenarios",
+        description="Reference to training_scenarios",
     )
 
     # Split identification
@@ -70,7 +72,7 @@ class MLDatasetSplit(BaseEntity):
     )
 
     # Feature list (for reference/validation)
-    feature_names: list = Field(
+    feature_names: List[str] = Field(
         default_factory=list,
         description="List of feature column names",
     )

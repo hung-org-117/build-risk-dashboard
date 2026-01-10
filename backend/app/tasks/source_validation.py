@@ -1,13 +1,14 @@
 """
-Dataset Validation Tasks - Distributed validation using MapReduce pattern.
+Source Validation Tasks - Distributed validation using MapReduce pattern.
 
-This module implements scalable validation for large CSV files (3M+ records):
+Similar to dataset_validation.py but uses BuildSource entities.
+Creates raw_build_runs from CSV data via CI provider validation.
 
 Tasks:
-1. dataset_validation_orchestrator - Main entry, reads CSV chunks, dispatches workers
-2. validate_repo_chunk - Validates batch of repos via GitHub API
-3. validate_builds_chunk - Validates batch of builds via CI API
-4. aggregate_validation_results - Collects results and updates dataset
+1. source_validation_orchestrator - Main entry, reads CSV chunks, dispatches workers
+2. validate_source_repo_chunk - Validates batch of repos via GitHub API
+3. validate_source_builds_chunk - Validates batch of builds via CI API
+4. aggregate_source_validation_results - Collects results and updates source
 
 Architecture:
     Orchestrator
@@ -33,17 +34,16 @@ from app.ci_providers.models import BuildData, CIProvider
 from app.config import settings
 from app.core.tracing import TracingContext
 from app.database.mongo import get_database
-from app.entities import DatasetBuild, DatasetBuildStatus, ValidationStats
-from app.entities.dataset import DatasetValidationStatus
-from app.repositories.dataset_build_repository import DatasetBuildRepository
-from app.repositories.dataset_repo_stats import DatasetRepoStatsRepository
-from app.repositories.dataset_repository import DatasetRepository
+from app.entities.build_source import ValidationStats, ValidationStatus
+from app.entities.source_build import SourceBuild, SourceBuildStatus
+from app.repositories.build_source import BuildSourceRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
+from app.repositories.source_build import SourceBuildRepository
+from app.repositories.source_repo_stats import SourceRepoStatsRepository
 from app.services.github.github_client import get_public_github_client
 from app.tasks.base import SafeTask
 from app.tasks.dataset_validation_helpers import (
-    batch_create_dataset_builds,
     calculate_progress,
     chunk_dict,
     chunk_list,
@@ -59,64 +59,62 @@ from app.utils.datetime import utc_now
 logger = logging.getLogger(__name__)
 
 
-class DatasetValidationTask(SafeTask):
+class SourceValidationTask(SafeTask):
     """
-    Custom task class for dataset validation with entity failure handling.
+    Custom task class for source validation with entity failure handling.
 
     Inherits from SafeTask for automatic retry with exponential backoff.
     When a task fails (timeout, unhandled error), automatically updates
-    Dataset.validation_status to FAILED and publishes WebSocket event.
+    BuildSource.validation_status to FAILED and publishes event.
     """
 
     def get_entity_failure_handler(
         self, kwargs: dict
     ) -> Optional[Callable[[str, str], None]]:
-        """Update Dataset status to FAILED when task fails."""
-        dataset_id = kwargs.get("dataset_id")
-        if not dataset_id:
+        """Update BuildSource status to FAILED when task fails."""
+        source_id = kwargs.get("source_id")
+        if not source_id:
             return None
 
         redis_client = self.redis
 
-        def update_dataset_failed(status: str, error_message: str) -> None:
+        def update_source_failed(status: str, error_message: str) -> None:
             try:
                 db = get_database()
-                dataset_repo = DatasetRepository(db)
-                dataset_repo.update_one(
-                    dataset_id,
-                    {
-                        "validation_status": DatasetValidationStatus.FAILED,
-                        "validation_error": error_message,
-                        "validation_completed_at": utc_now(),
-                    },
+                source_repo = BuildSourceRepository(db)
+                source_repo.update(
+                    source_id,
+                    validation_status=ValidationStatus.FAILED,
+                    validation_error=error_message,
+                    validation_completed_at=utc_now(),
                 )
-                # Publish WebSocket event for frontend
-                publish_dataset_update(
-                    redis_client, dataset_id, "failed", error=error_message
+                # Publish event for frontend
+                publish_source_update(
+                    redis_client, source_id, "failed", error=error_message
                 )
-                cleanup_validation_stats(redis_client, dataset_id)
+                cleanup_validation_stats(redis_client, source_id)
             except Exception as e:
-                logger.warning(f"Failed to update dataset {dataset_id} status: {e}")
+                logger.warning(f"Failed to update source {source_id} status: {e}")
 
-        return update_dataset_failed
+        return update_source_failed
 
 
-def publish_dataset_update(
+def publish_source_update(
     redis_client: redis.Redis,
-    dataset_id: str,
+    source_id: str,
     status: str,
     progress: int = 0,
     stats: Optional[Dict[str, Any]] = None,
     error: Optional[str] = None,
 ):
-    """Publish dataset validation update to Redis for WebSocket broadcast."""
+    """Publish source validation update to Redis for SSE broadcast."""
     import json
 
     try:
         payload = {
-            "type": "DATASET_UPDATE",
+            "type": "SOURCE_UPDATE",
             "payload": {
-                "dataset_id": dataset_id,
+                "source_id": source_id,
                 "validation_status": status,
                 "validation_progress": progress,
             },
@@ -128,7 +126,7 @@ def publish_dataset_update(
 
         redis_client.publish("events", json.dumps(payload))
     except Exception as e:
-        logger.error(f"Failed to publish dataset update: {e}")
+        logger.error(f"Failed to publish source update: {e}")
 
 
 # =============================================================================
@@ -138,21 +136,21 @@ def publish_dataset_update(
 
 @celery_app.task(
     bind=True,
-    base=DatasetValidationTask,
-    name="app.tasks.dataset_validation.dataset_validation_orchestrator",
-    queue="dataset_validation",
+    base=SourceValidationTask,
+    name="app.tasks.source_validation.validate_build_source_task",
+    queue="dataset_validation",  # Share queue with dataset validation
     soft_time_limit=3600,
     time_limit=3660,
 )
-def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
+def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
     """
-    Orchestrator task for distributed dataset validation.
+    Orchestrator task for distributed source validation.
 
     Reads CSV in chunks, groups by repo, and dispatches worker tasks.
     Uses Celery chord to aggregate results after all workers complete.
 
     Args:
-        dataset_id: ID of the dataset to validate
+        source_id: ID of the BuildSource to validate
 
     Returns:
         Dict with dispatch status
@@ -164,53 +162,49 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
     # Set tracing context for structured logging
     TracingContext.set(
         correlation_id=correlation_id,
-        dataset_id=dataset_id,
-        pipeline_type="dataset_validation",
+        source_id=source_id,
+        pipeline_type="source_validation",
     )
 
     db = get_database()
-    dataset_repo = DatasetRepository(db)
+    source_repo = BuildSourceRepository(db)
 
     try:
-        logger.info(
-            f"{corr_prefix}[dataset_validation] Starting for dataset {dataset_id}"
-        )
+        logger.info(f"{corr_prefix}[source_validation] Starting for source {source_id}")
 
-        # Load dataset
-        dataset = dataset_repo.find_by_id(dataset_id)
-        if not dataset:
-            raise ValueError(f"Dataset {dataset_id} not found")
+        # Load source
+        source = source_repo.find_by_id(source_id)
+        if not source:
+            raise ValueError(f"BuildSource {source_id} not found")
 
         # Mark validation started
-        dataset_repo.update_one(
-            dataset_id,
-            {
-                "validation_status": DatasetValidationStatus.VALIDATING,
-                "validation_started_at": utc_now(),
-                "validation_task_id": self.request.id,
-                "validation_progress": 0,
-                "validation_error": None,
-            },
+        source_repo.update(
+            source_id,
+            validation_status=ValidationStatus.VALIDATING,
+            validation_started_at=utc_now(),
+            validation_task_id=self.request.id,
+            validation_progress=0,
+            validation_error=None,
         )
-        publish_dataset_update(self.redis, dataset_id, "validating", progress=0)
+        publish_source_update(self.redis, source_id, "validating", progress=0)
 
         # Get configuration
-        file_path = dataset.file_path
-        build_id_column = dataset.mapped_fields.build_id
-        repo_name_column = dataset.mapped_fields.repo_name
-        ci_provider_column = dataset.mapped_fields.ci_provider
+        file_path = source.file_path
+        build_id_column = source.mapped_fields.build_id
+        repo_name_column = source.mapped_fields.repo_name
+        ci_provider_column = source.mapped_fields.ci_provider
         single_ci_provider = (
             (
-                dataset.ci_provider.value
-                if hasattr(dataset.ci_provider, "value")
-                else dataset.ci_provider
+                source.ci_provider.value
+                if hasattr(source.ci_provider, "value")
+                else source.ci_provider
             )
-            if dataset.ci_provider
+            if source.ci_provider
             else None
         )
 
         if not build_id_column or not repo_name_column:
-            raise ValueError("Dataset column mapping not configured")
+            raise ValueError("Source column mapping not configured")
 
         # Read CSV in chunks and aggregate all builds
         logger.info(f"Reading CSV in chunks from {file_path}")
@@ -230,11 +224,11 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
                 all_repo_builds[repo_name].extend(builds)
 
         # Resume logic: Skip already validated builds
-        dataset_build_repo = DatasetBuildRepository(db)
+        source_build_repo = SourceBuildRepository(db)
         validated_builds = {
-            b.build_id_from_csv
-            for b in dataset_build_repo.find_many({"dataset_id": ObjectId(dataset_id)})
-            if b.build_id_from_csv
+            b.build_id_from_source
+            for b in source_build_repo.find_by_source(source_id, limit=100000)
+            if b.build_id_from_source
         }
 
         if validated_builds:
@@ -258,20 +252,18 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
         logger.info(f"Found {total_repos} repos, {total_builds} builds to validate")
 
         if total_repos == 0:
-            dataset_repo.update_one(
-                dataset_id,
-                {
-                    "validation_status": DatasetValidationStatus.COMPLETED,
-                    "validation_completed_at": utc_now(),
-                    "validation_progress": 100,
-                    "setup_step": 2,
-                },
+            source_repo.update(
+                source_id,
+                validation_status=ValidationStatus.COMPLETED,
+                validation_completed_at=utc_now(),
+                validation_progress=100,
+                setup_step=2,
             )
-            publish_dataset_update(self.redis, dataset_id, "completed", progress=100)
+            publish_source_update(self.redis, source_id, "completed", progress=100)
             return {"status": "completed", "message": "No valid repos found"}
 
         # Initialize Redis counters
-        init_validation_stats(self.redis, dataset_id, total_repos, total_builds)
+        init_validation_stats(self.redis, source_id, total_repos, total_builds)
 
         # Chunk repos for parallel processing
         repo_chunks = list(
@@ -280,12 +272,12 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
 
         # Update total chunks in Redis
         increment_validation_stat(
-            self.redis, dataset_id, "total_chunks", len(repo_chunks)
+            self.redis, source_id, "total_chunks", len(repo_chunks)
         )
 
         repo_tasks = [
-            validate_repo_chunk.si(
-                dataset_id=dataset_id,
+            validate_source_repo_chunk.si(
+                source_id=source_id,
                 repo_builds_chunk=chunk,
                 chunk_index=i,
                 correlation_id=correlation_id,
@@ -298,8 +290,8 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
             build_chunks = list(chunk_list(builds, settings.VALIDATION_BUILDS_PER_TASK))
             for build_chunk in build_chunks:
                 build_tasks.append(
-                    validate_builds_chunk.si(
-                        dataset_id=dataset_id,
+                    validate_source_builds_chunk.si(
+                        source_id=source_id,
                         repo_name=repo_name,
                         raw_repo_id=None,  # Will be looked up in task
                         builds=build_chunk,
@@ -314,14 +306,14 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
         workflow = chain(
             group(repo_tasks),  # Stage 1: Validate repos first
             group(build_tasks),  # Stage 2: Validate builds
-            aggregate_validation_results.si(
-                dataset_id=dataset_id, correlation_id=correlation_id
+            aggregate_source_validation_results.si(
+                source_id=source_id, correlation_id=correlation_id
             ),  # Final: Aggregate results
         ).apply_async()
 
         workflow_id = workflow.id if workflow else None
         logger.info(
-            f"{corr_prefix}[dataset_validation] Dispatched {len(repo_chunks)} repo chunks, "
+            f"{corr_prefix}[source_validation] Dispatched {len(repo_chunks)} repo chunks, "
             f"workflow_id={workflow_id}"
         )
 
@@ -335,33 +327,34 @@ def dataset_validation_orchestrator(self, dataset_id: str) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.exception(f"{corr_prefix}[dataset_validation] Orchestrator failed: {e}")
-        dataset_repo.update_one(
-            dataset_id,
-            {
-                "validation_status": DatasetValidationStatus.FAILED,
-                "validation_completed_at": utc_now(),
-                "validation_error": str(e),
-                "correlation_id": correlation_id,
-            },
+        logger.exception(f"{corr_prefix}[source_validation] Orchestrator failed: {e}")
+        source_repo.update(
+            source_id,
+            validation_status=ValidationStatus.FAILED,
+            validation_completed_at=utc_now(),
+            validation_error=str(e),
         )
-        publish_dataset_update(self.redis, dataset_id, "failed", error=str(e))
+        publish_source_update(self.redis, source_id, "failed", error=str(e))
         raise
 
 
+# =============================================================================
 # Task 2: Repo Chunk Validator
+# =============================================================================
+
+
 @celery_app.task(
     bind=True,
-    base=DatasetValidationTask,
-    name="app.tasks.dataset_validation.validate_repo_chunk",
+    base=SourceValidationTask,
+    name="app.tasks.source_validation.validate_source_repo_chunk",
     queue="dataset_validation",
     soft_time_limit=600,
     time_limit=660,
     max_retries=3,
 )
-def validate_repo_chunk(
+def validate_source_repo_chunk(
     self,
-    dataset_id: str,
+    source_id: str,
     repo_builds_chunk: Dict[str, List[Dict[str, str]]],
     chunk_index: int,
     correlation_id: str = "",
@@ -370,7 +363,7 @@ def validate_repo_chunk(
     Validate a chunk of repositories and dispatch build validation tasks.
 
     Args:
-        dataset_id: Dataset being validated
+        source_id: Source being validated
         repo_builds_chunk: Dict mapping repo_name to build list
         chunk_index: Index of this chunk
         correlation_id: Correlation ID for tracing
@@ -380,7 +373,7 @@ def validate_repo_chunk(
     """
     db = get_database()
     raw_repo_repo = RawRepositoryRepository(db)
-    dataset_repo_stats_repo = DatasetRepoStatsRepository(db)
+    source_repo_stats_repo = SourceRepoStatsRepository(db)
 
     repos_valid = 0
     repos_not_found = 0
@@ -396,9 +389,9 @@ def validate_repo_chunk(
                 # Check if private
                 if repo_data.get("private"):
                     repos_private += 1
-                    increment_validation_stat(self.redis, dataset_id, "repos_private")
+                    increment_validation_stat(self.redis, source_id, "repos_private")
                     increment_validation_stat(
-                        self.redis, dataset_id, "builds_not_found", len(builds)
+                        self.redis, source_id, "builds_not_found", len(builds)
                     )
                     continue
 
@@ -413,14 +406,14 @@ def validate_repo_chunk(
                 )
 
                 repos_valid += 1
-                increment_validation_stat(self.redis, dataset_id, "repos_valid")
+                increment_validation_stat(self.redis, source_id, "repos_valid")
 
                 # Extract CI provider from first build
                 # All builds for same repo have same ci_provider
                 ci_provider = builds[0].get("ci_provider") if builds else None
 
-                dataset_repo_stats_repo.upsert_by_dataset_and_repo(
-                    dataset_id=dataset_id,
+                source_repo_stats_repo.upsert_by_source_and_repo(
+                    source_id=source_id,
                     raw_repo_id=str(raw_repo.id),
                     full_name=repo_name,
                     ci_provider=ci_provider or "github_actions",
@@ -445,19 +438,19 @@ def validate_repo_chunk(
                     logger.error(f"Failed to validate repo {repo_name}: {e}")
 
                 repos_not_found += 1
-                increment_validation_stat(self.redis, dataset_id, "repos_not_found")
+                increment_validation_stat(self.redis, source_id, "repos_not_found")
                 increment_validation_stat(
-                    self.redis, dataset_id, "builds_not_found", len(builds)
+                    self.redis, source_id, "builds_not_found", len(builds)
                 )
 
     # Update chunk completion
-    increment_validation_stat(self.redis, dataset_id, "chunks_completed")
+    increment_validation_stat(self.redis, source_id, "chunks_completed")
 
     # Publish progress update
-    stats = get_validation_stats(self.redis, dataset_id)
+    stats = get_validation_stats(self.redis, source_id)
     progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
-    publish_dataset_update(
-        self.redis, dataset_id, "validating", progress=progress, stats=stats
+    publish_source_update(
+        self.redis, source_id, "validating", progress=progress, stats=stats
     )
 
     return {
@@ -469,19 +462,23 @@ def validate_repo_chunk(
     }
 
 
+# =============================================================================
 # Task 3: Build Chunk Validator
+# =============================================================================
+
+
 @celery_app.task(
     bind=True,
-    base=DatasetValidationTask,
-    name="app.tasks.dataset_validation.validate_builds_chunk",
+    base=SourceValidationTask,
+    name="app.tasks.source_validation.validate_source_builds_chunk",
     queue="dataset_validation",
     soft_time_limit=300,
     time_limit=360,
     max_retries=3,
 )
-def validate_builds_chunk(
+def validate_source_builds_chunk(
     self,
-    dataset_id: str,
+    source_id: str,
     repo_name: str,
     raw_repo_id: str,
     builds: List[Dict[str, str]],
@@ -493,7 +490,7 @@ def validate_builds_chunk(
     Uses concurrent async requests for faster validation.
 
     Args:
-        dataset_id: Dataset being validated
+        source_id: Source being validated
         repo_name: Repository full name
         raw_repo_id: RawRepository ObjectId string
         builds: List of build info dicts
@@ -504,8 +501,10 @@ def validate_builds_chunk(
     """
     import asyncio
 
+    from app.ci_providers.models import BuildConclusion, BuildStatus
+
     db = get_database()
-    dataset_build_repo = DatasetBuildRepository(db)
+    source_build_repo = SourceBuildRepository(db)
     raw_build_run_repo = RawBuildRunRepository(db)
     raw_repo_repo = RawRepositoryRepository(db)
 
@@ -530,7 +529,7 @@ def validate_builds_chunk(
     builds_found = 0
     builds_not_found = 0
     builds_filtered = 0
-    builds_to_insert: List[DatasetBuild] = []
+    builds_to_insert: List[SourceBuild] = []
 
     # Determine CI provider from first build
     ci_provider_str = (
@@ -543,21 +542,17 @@ def validate_builds_chunk(
     ci_client = get_ci_provider(ci_provider, config=ci_config, db=db)
 
     # Hardcoded filters (matching model_ingestion.py behavior)
-    # - exclude_bots: True (skip dependabot, renovate, etc.)
-    # - only_completed: True (only process completed builds)
-    # - allowed conclusions: SUCCESS, FAILURE (skip SKIPPED, ACTION_REQUIRED, STALE, CANCELLED)
     exclude_bots = True
     only_completed = True
 
     build_ids = [b["build_id"] for b in builds]
-    existing_builds = dataset_build_repo.find_many(
+    existing_builds = source_build_repo.find_many(
         {
-            "dataset_id": ObjectId(dataset_id),
-            "raw_repo_id": ObjectId(raw_repo_id),
-            "build_id_from_csv": {"$in": build_ids},
+            "source_id": ObjectId(source_id),
+            "build_id_from_source": {"$in": build_ids},
         }
     )
-    existing_map = {b.build_id_from_csv: b for b in existing_builds}
+    existing_map = {b.build_id_from_source: b for b in existing_builds}
 
     # Filter out already validated builds
     builds_to_validate = []
@@ -565,7 +560,7 @@ def validate_builds_chunk(
         build_id = build_info["build_id"]
         existing = existing_map.get(build_id)
         if existing:
-            if existing.status == DatasetBuildStatus.FOUND:
+            if existing.status == SourceBuildStatus.FOUND:
                 builds_found += 1
             else:
                 builds_not_found += 1
@@ -592,8 +587,6 @@ def validate_builds_chunk(
     # Helper to check if build should be filtered (matching model_ingestion.py logic)
     def should_filter_build(build_data: BuildData) -> tuple[bool, str]:
         """Check if build should be filtered based on hardcoded filters."""
-        from app.ci_providers.models import BuildConclusion, BuildStatus
-
         # Check only_completed filter
         if only_completed and build_data.status != BuildStatus.COMPLETED:
             return True, "Build not completed"
@@ -655,19 +648,18 @@ def validate_builds_chunk(
                     is_bot_commit=build_data.is_bot_commit or False,
                 )
 
-                # Check if build should be filtered for dataset
+                # Check if build should be filtered
                 should_filter, filter_reason = should_filter_build(build_data)
                 if should_filter:
                     builds_filtered += 1
                     builds_to_insert.append(
-                        DatasetBuild(
-                            _id=None,
-                            dataset_id=ObjectId(dataset_id),
-                            build_id_from_csv=build_id,
-                            repo_name_from_csv=repo_name,
+                        SourceBuild(
+                            source_id=ObjectId(source_id),
+                            build_id_from_source=build_id,
+                            repo_name_from_source=repo_name,
                             raw_repo_id=ObjectId(raw_repo_id),
-                            status=DatasetBuildStatus.FILTERED,
-                            raw_run_id=raw_build_run.id,  # Reference to RawBuildRun
+                            status=SourceBuildStatus.FILTERED,
+                            raw_run_id=raw_build_run.id,
                             validation_error=f"Filtered: {filter_reason}",
                             validated_at=utc_now(),
                         )
@@ -675,13 +667,12 @@ def validate_builds_chunk(
                 else:
                     # Build passed filters
                     builds_to_insert.append(
-                        DatasetBuild(
-                            _id=None,
-                            dataset_id=ObjectId(dataset_id),
-                            build_id_from_csv=build_id,
-                            repo_name_from_csv=repo_name,
+                        SourceBuild(
+                            source_id=ObjectId(source_id),
+                            build_id_from_source=build_id,
+                            repo_name_from_source=repo_name,
                             raw_repo_id=ObjectId(raw_repo_id),
-                            status=DatasetBuildStatus.FOUND,
+                            status=SourceBuildStatus.FOUND,
                             raw_run_id=raw_build_run.id,
                             validated_at=utc_now(),
                         )
@@ -690,49 +681,43 @@ def validate_builds_chunk(
 
             else:
                 builds_to_insert.append(
-                    DatasetBuild(
-                        _id=None,
-                        dataset_id=ObjectId(dataset_id),
-                        build_id_from_csv=build_id,
-                        repo_name_from_csv=repo_name,
-                        raw_repo_id=ObjectId(raw_repo_id),
-                        status=DatasetBuildStatus.NOT_FOUND,
+                    SourceBuild(
+                        source_id=ObjectId(source_id),
+                        build_id_from_source=build_id,
+                        repo_name_from_source=repo_name,
+                        raw_repo_id=ObjectId(raw_repo_id) if raw_repo_id else None,
+                        status=SourceBuildStatus.NOT_FOUND,
                         validation_error="Build not found or incomplete",
-                        raw_run_id=None,
                         validated_at=utc_now(),
                     )
                 )
                 builds_not_found += 1
 
         except Exception as e:
-            logger.warning(f"Build validation error {repo_name}/{build_id}: {e}")
+            logger.warning(f"Error validating build {build_id}: {e}")
             builds_to_insert.append(
-                DatasetBuild(
-                    _id=None,
-                    dataset_id=ObjectId(dataset_id),
-                    build_id_from_csv=build_id,
-                    repo_name_from_csv=repo_name,
-                    raw_repo_id=ObjectId(raw_repo_id),
-                    status=DatasetBuildStatus.ERROR,
-                    validation_error=str(e),
-                    raw_run_id=None,
+                SourceBuild(
+                    source_id=ObjectId(source_id),
+                    build_id_from_source=build_id,
+                    repo_name_from_source=repo_name,
+                    raw_repo_id=ObjectId(raw_repo_id) if raw_repo_id else None,
+                    status=SourceBuildStatus.ERROR,
+                    validation_error=str(e)[:500],
                     validated_at=utc_now(),
                 )
             )
             builds_not_found += 1
 
-    # Batch insert all builds
+    # Bulk insert builds
     if builds_to_insert:
-        batch_create_dataset_builds(dataset_build_repo, builds_to_insert)
+        source_build_repo.bulk_create(builds_to_insert)
 
     # Update Redis counters
-    increment_validation_stat(self.redis, dataset_id, "builds_found", builds_found)
+    increment_validation_stat(self.redis, source_id, "builds_found", builds_found)
     increment_validation_stat(
-        self.redis, dataset_id, "builds_not_found", builds_not_found
+        self.redis, source_id, "builds_not_found", builds_not_found
     )
-    increment_validation_stat(
-        self.redis, dataset_id, "builds_filtered", builds_filtered
-    )
+    increment_validation_stat(self.redis, source_id, "builds_filtered", builds_filtered)
 
     return {
         "repo_name": repo_name,
@@ -743,155 +728,97 @@ def validate_builds_chunk(
     }
 
 
-# Task 4: Result Aggregator
+# =============================================================================
+# Task 4: Aggregator
+# =============================================================================
+
+
 @celery_app.task(
     bind=True,
-    base=DatasetValidationTask,
-    name="app.tasks.dataset_validation.aggregate_validation_results",
+    base=SourceValidationTask,
+    name="app.tasks.source_validation.aggregate_source_validation_results",
     queue="dataset_validation",
     soft_time_limit=300,
     time_limit=360,
 )
-def aggregate_validation_results(
+def aggregate_source_validation_results(
     self,
-    dataset_id: str,
+    source_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
-    Aggregate validation results from all worker tasks.
+    Aggregate validation results and finalize source.
 
-    Called as final step in chain after:
-    1. Repo validation group (creates RawRepository records)
-    2. Build validation group (validates builds, creates RawBuildRun records)
+    Called after all repo and build validation tasks complete.
 
     Args:
-        dataset_id: Dataset that was validated
+        source_id: Source being validated
         correlation_id: Correlation ID for tracing
 
     Returns:
-        Final validation summary
+        Dict with final validation stats
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    log_ctx = f"{corr_prefix}[aggregate_results][dataset={dataset_id}]"
-
-    # Set tracing context for logging
-    if correlation_id:
-        TracingContext.set(
-            correlation_id=correlation_id,
-            dataset_id=dataset_id,
-            pipeline_type="dataset_validation",
-        )
-
     db = get_database()
-    dataset_repo = DatasetRepository(db)
-    dataset_build_repo = DatasetBuildRepository(db)
-    dataset_repo_stats_repo = DatasetRepoStatsRepository(db)
-
-    # Get final stats from Redis (all tasks have completed at this point)
-    stats = get_validation_stats(self.redis, dataset_id)
-
-    total_repos = stats["total_repos"]
-    total_builds = stats["total_builds"]
-    repos_valid = stats["repos_valid"]
-    repos_not_found = stats["repos_not_found"] + stats["repos_private"]
-    builds_found = stats["builds_found"]
-    builds_not_found = stats["builds_not_found"]
-    builds_filtered = stats["builds_filtered"]
-
-    # Calculate coverage
-    build_coverage = (
-        round((builds_found / total_builds) * 100, 2) if total_builds > 0 else 0.0
-    )
+    source_repo = BuildSourceRepository(db)
+    source_build_repo = SourceBuildRepository(db)
 
     try:
-        # Aggregate builds by repo_name_from_csv
-        pipeline = [
-            {"$match": {"dataset_id": ObjectId(dataset_id)}},
-            {
-                "$group": {
-                    "_id": "$repo_name_from_csv",
-                    "raw_repo_id": {"$first": "$raw_repo_id"},
-                    "builds_total": {"$sum": 1},
-                    "builds_found": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "found"]}, 1, 0]}
-                    },
-                    "builds_not_found": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "not_found"]}, 1, 0]}
-                    },
-                    "builds_filtered": {
-                        "$sum": {"$cond": [{"$eq": ["$status", "filtered"]}, 1, 0]}
-                    },
-                }
-            },
-            {"$sort": {"_id": 1}},
-        ]
-        agg_results = list(dataset_build_repo.collection.aggregate(pipeline))
+        # Get final counts from database
+        status_counts = source_build_repo.count_by_status(source_id)
 
-        for agg in agg_results:
-            full_name = agg["_id"]
-            raw_repo_id = agg["raw_repo_id"]
+        # Build final stats
+        stats = ValidationStats(
+            repos_total=status_counts.get("repos_total", 0),
+            repos_valid=status_counts.get("repos_valid", 0),
+            repos_invalid=status_counts.get("repos_invalid", 0),
+            repos_not_found=status_counts.get("repos_not_found", 0),
+            builds_total=sum(status_counts.values()),
+            builds_found=status_counts.get(SourceBuildStatus.FOUND.value, 0),
+            builds_not_found=status_counts.get(SourceBuildStatus.NOT_FOUND.value, 0)
+            + status_counts.get(SourceBuildStatus.ERROR.value, 0),
+            builds_filtered=status_counts.get(SourceBuildStatus.FILTERED.value, 0),
+        )
 
-            # Update stats in DatasetRepoStats collection
-            if raw_repo_id:
-                dataset_repo_stats_repo.upsert_by_dataset_and_repo(
-                    dataset_id=dataset_id,
-                    raw_repo_id=str(raw_repo_id),
-                    full_name=full_name,
-                    builds_total=agg["builds_total"],
-                    builds_found=agg["builds_found"],
-                    builds_not_found=agg["builds_not_found"],
-                    builds_filtered=agg["builds_filtered"],
-                    is_valid=agg["builds_found"] > 0,
-                )
+        # Update source
+        source_repo.update(
+            source_id,
+            validation_status=ValidationStatus.COMPLETED,
+            validation_completed_at=utc_now(),
+            validation_progress=100,
+            validation_stats=stats,
+            setup_step=2,
+        )
+
+        # Publish completion event
+        publish_source_update(
+            self.redis,
+            source_id,
+            "completed",
+            progress=100,
+            stats=stats.model_dump(),
+        )
+
+        # Cleanup Redis counters
+        cleanup_validation_stats(self.redis, source_id)
+
+        logger.info(
+            f"[corr={correlation_id[:8]}] Source {source_id} validation completed: "
+            f"{stats.builds_found} found, {stats.builds_not_found} not found"
+        )
+
+        return {
+            "status": "completed",
+            "stats": stats.model_dump(),
+            "correlation_id": correlation_id,
+        }
+
     except Exception as e:
-        logger.warning(f"{log_ctx} Failed to aggregate per-repo stats: {e}")
+        logger.exception(f"Failed to aggregate source validation: {e}")
+        source_repo.update(
+            source_id,
+            validation_status=ValidationStatus.FAILED,
+            validation_error=str(e),
+            validation_completed_at=utc_now(),
+        )
+        publish_source_update(self.redis, source_id, "failed", error=str(e))
         raise
-
-    # Build final stats
-    final_stats = ValidationStats(
-        repos_total=total_repos,
-        repos_valid=repos_valid,
-        repos_not_found=repos_not_found,
-        repos_invalid=0,
-        builds_total=total_builds,
-        builds_found=builds_found,
-        builds_not_found=builds_not_found,
-        builds_filtered=builds_filtered,
-    )
-
-    # Update dataset
-    dataset_repo.update_one(
-        dataset_id,
-        {
-            "validation_status": DatasetValidationStatus.COMPLETED,
-            "validation_completed_at": utc_now(),
-            "validation_progress": 100,
-            "validation_stats": final_stats.model_dump(),
-            "setup_step": 2,
-        },
-    )
-
-    # Publish completion
-    publish_dataset_update(
-        self.redis,
-        dataset_id,
-        "completed",
-        progress=100,
-        stats=final_stats.model_dump(),
-    )
-
-    # Cleanup Redis
-    cleanup_validation_stats(self.redis, dataset_id)
-
-    logger.info(
-        f"Dataset validation completed: {dataset_id}, "
-        f"{repos_valid}/{total_repos} repos, {builds_found}/{total_builds} builds"
-    )
-
-    return {
-        "status": "completed",
-        "dataset_id": dataset_id,
-        "stats": final_stats.model_dump(),
-        "build_coverage": build_coverage,
-        "correlation_id": correlation_id,
-    }

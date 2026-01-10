@@ -80,6 +80,197 @@ export interface BuildDetail extends Build {
   prediction_error?: string;
 }
 
+// ============================================================================
+// BUILD SOURCE TYPES (New Architecture)
+// ============================================================================
+
+export type SourceValidationStatus = "pending" | "validating" | "completed" | "failed";
+
+export interface SourceMapping {
+  build_id?: string | null;
+  repo_name?: string | null;
+  ci_provider?: string | null;
+}
+
+export interface SourceValidationStats {
+  repos_total: number;
+  repos_valid: number;
+  repos_invalid: number;
+  repos_not_found: number;
+  builds_total: number;
+  builds_found: number;
+  builds_not_found: number;
+  builds_filtered: number;
+}
+
+export interface BuildSourceRecord {
+  id: string;
+  user_id?: string | null;
+  name: string;
+  description?: string | null;
+  // CSV upload fields
+  file_name?: string | null;
+  file_path?: string | null;
+  rows: number;
+  size_bytes: number;
+  columns: string[];
+  mapped_fields: SourceMapping;
+  preview: Record<string, string | number>[];
+  ci_provider?: string | null;
+  // Validation
+  validation_status: SourceValidationStatus;
+  validation_task_id?: string;
+  validation_started_at?: string;
+  validation_completed_at?: string;
+  validation_progress: number;
+  validation_stats: SourceValidationStats;
+  validation_error?: string;
+  setup_step: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BuildSourceListResponse {
+  total: number;
+  skip: number;
+  limit: number;
+  items: BuildSourceRecord[];
+}
+
+export interface BuildSourceCreatePayload {
+  name: string;
+  file_name: string;
+  rows: number;
+  size_bytes: number;
+  columns: string[];
+  description?: string | null;
+  mapped_fields?: SourceMapping;
+  preview?: Record<string, string | number>[];
+}
+
+export interface BuildSourceUpdatePayload {
+  name?: string;
+  description?: string | null;
+  mapped_fields?: SourceMapping;
+  ci_provider?: string | null;
+  setup_step?: number;
+}
+
+// ============================================================================
+// TRAINING SCENARIO TYPES (New Architecture)
+// ============================================================================
+
+export type ScenarioStatus =
+  | "queued"
+  | "filtering"
+  | "ingesting"
+  | "processing"
+  | "splitting"
+  | "completed"
+  | "failed";
+
+export interface DataSourceConfig {
+  filter_by: "all" | "by_language" | "by_name" | "by_owner";
+  languages: string[];
+  repo_names: string[];
+  owners: string[];
+  date_start?: string;
+  date_end?: string;
+  conclusions: string[];
+  exclude_bots: boolean;
+  ci_provider: string;
+}
+
+export interface FeatureConfig {
+  dag_features: string[];
+  scan_metrics: {
+    sonarqube?: string[];
+    trivy?: string[];
+  };
+  exclude: string[];
+}
+
+export interface SplittingConfig {
+  strategy: string;
+  group_by: string;
+  groups: string[];
+  ratios: Record<string, number>;
+  stratify_by: string;
+  test_groups: string[];
+  val_groups: string[];
+  train_groups: string[];
+  reduce_label?: number;
+  reduce_ratio: number;
+  novelty_group?: string;
+  novelty_label?: number;
+  temporal_ordering: boolean;
+}
+
+export interface PreprocessingConfig {
+  missing_values_strategy: string;
+  fill_value: number | string;
+  normalization_method: string;
+  strict_mode: boolean;
+}
+
+export interface OutputConfig {
+  format: string;
+  include_metadata: boolean;
+}
+
+export interface TrainingScenarioRecord {
+  id: string;
+  name: string;
+  description?: string | null;
+  version: string;
+  yaml_config: string;
+  data_source_config: DataSourceConfig;
+  feature_config: FeatureConfig;
+  splitting_config: SplittingConfig;
+  preprocessing_config: PreprocessingConfig;
+  output_config: OutputConfig;
+  status: ScenarioStatus;
+  current_task_id?: string;
+  error_message?: string;
+  // Statistics
+  builds_total: number;
+  builds_ingested: number;
+  builds_features_extracted: number;
+  builds_missing_resource: number;
+  builds_failed: number;
+  scans_total: number;
+  scans_completed: number;
+  scans_failed: number;
+  feature_extraction_completed: boolean;
+  scan_extraction_completed: boolean;
+  train_count: number;
+  val_count: number;
+  test_count: number;
+  // Timestamps
+  created_by?: string;
+  filtering_started_at?: string;
+  filtering_completed_at?: string;
+  ingestion_started_at?: string;
+  ingestion_completed_at?: string;
+  processing_started_at?: string;
+  processing_completed_at?: string;
+  splitting_started_at?: string;
+  splitting_completed_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TrainingScenarioListResponse {
+  total: number;
+  skip: number;
+  limit: number;
+  items: TrainingScenarioRecord[];
+}
+
+// ============================================================================
+// LEGACY DATASET TYPES (Keep for migration)
+// ============================================================================
+
 export interface DatasetMapping {
   build_id?: string | null;
   repo_name?: string | null;

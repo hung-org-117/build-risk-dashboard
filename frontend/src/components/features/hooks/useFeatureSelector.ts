@@ -41,14 +41,14 @@ export interface UseFeatureSelectorReturn {
     getFeatureDescription: (featureName: string) => string;
 }
 
-export function useFeatureSelector(): UseFeatureSelectorReturn {
+export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFeatureSelectorReturn {
     // State
     const [extractorNodes, setExtractorNodes] = useState<NodeInfo[]>([]);
     const [dagData, setDagData] = useState<FeatureDAGData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const [selectedFeatures, setSelectedFeatures] = useState<Set<string>>(new Set());
+    const [selectedFeatures, setSelectedFeatures] = useState<Set<string>>(initialSelectedFeatures || new Set());
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(
         new Set(["git_commit_info", "git_diff_features", "job_metadata", "test_log_parser"])
     );

@@ -156,7 +156,11 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         raw_repo_id: ObjectId,
     ) -> Optional[RawBuildRun]:
         """Get the most recent build run for a repository."""
-        doc = self.collection.find({"raw_repo_id": raw_repo_id}).sort("created_at", -1).limit(1)
+        doc = (
+            self.collection.find({"raw_repo_id": raw_repo_id})
+            .sort("created_at", -1)
+            .limit(1)
+        )
         docs = list(doc)
         return RawBuildRun(**docs[0]) if docs else None
 
@@ -210,3 +214,109 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
             }
 
         return result
+
+    def find_with_filters(
+        self,
+        date_start: Optional[datetime] = None,
+        date_end: Optional[datetime] = None,
+        languages: Optional[List[str]] = None,
+        conclusions: Optional[List[str]] = None,
+        ci_provider: Optional[str] = None,
+        exclude_bots: bool = True,
+        repo_ids: Optional[List[ObjectId]] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[List[RawBuildRun], Dict[str, Any]]:
+        """
+        Find build runs with filters and return stats for preview.
+
+        Used by Training Scenario wizard to preview matching builds.
+
+        Returns:
+            Tuple of (builds list, stats dict with total_builds, total_repos, outcome_distribution)
+        """
+        query: Dict[str, Any] = {}
+
+        # Date range filter
+        if date_start or date_end:
+            query["run_started_at"] = {}
+            if date_start:
+                query["run_started_at"]["$gte"] = date_start
+            if date_end:
+                query["run_started_at"]["$lte"] = date_end
+
+        # Conclusion filter
+        if conclusions:
+            query["conclusion"] = {"$in": conclusions}
+
+        # CI provider filter
+        if ci_provider and ci_provider != "all":
+            query["provider"] = ci_provider
+
+        # Exclude bot commits
+        if exclude_bots:
+            query["is_bot_commit"] = {"$ne": True}
+
+        # Repo IDs filter (for language filtering - requires join with raw_repositories)
+        if repo_ids:
+            query["raw_repo_id"] = {"$in": repo_ids}
+
+        # Get paginated builds
+        builds, total = self.paginate(
+            query,
+            sort=[("run_created_at", -1)],
+            skip=skip,
+            limit=limit,
+        )
+
+        # Get stats via aggregation
+        stats_pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_builds": {"$sum": 1},
+                    "unique_repos": {"$addToSet": "$raw_repo_id"},
+                    "success_count": {
+                        "$sum": {"$cond": [{"$eq": ["$conclusion", "success"]}, 1, 0]}
+                    },
+                    "failure_count": {
+                        "$sum": {"$cond": [{"$eq": ["$conclusion", "failure"]}, 1, 0]}
+                    },
+                    "other_count": {
+                        "$sum": {
+                            "$cond": [
+                                {"$nin": ["$conclusion", ["success", "failure"]]},
+                                1,
+                                0,
+                            ]
+                        }
+                    },
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "total_builds": 1,
+                    "total_repos": {"$size": "$unique_repos"},
+                    "outcome_distribution": {
+                        "success": "$success_count",
+                        "failure": "$failure_count",
+                        "other": "$other_count",
+                    },
+                }
+            },
+        ]
+
+        stats_result = list(self.collection.aggregate(stats_pipeline))
+        stats = (
+            stats_result[0]
+            if stats_result
+            else {
+                "total_builds": 0,
+                "total_repos": 0,
+                "outcome_distribution": {"success": 0, "failure": 0, "other": 0},
+            }
+        )
+
+        return builds, stats

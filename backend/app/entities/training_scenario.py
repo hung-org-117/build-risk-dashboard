@@ -1,10 +1,11 @@
 """
-MLScenario Entity - ML Dataset Scenario Builder.
+TrainingScenario Entity - Training pipeline configuration and tracking.
 
 Stores YAML configuration and tracks scenario progress through phases:
 QUEUED → FILTERING → INGESTING → PROCESSING → SPLITTING → COMPLETED
 
-Similar to DatasetProject but uses YAML config instead of CSV upload.
+This entity replaces both MLScenario and DatasetVersion, providing a unified
+training pipeline configuration.
 """
 
 from datetime import datetime
@@ -16,14 +17,16 @@ from pydantic import Field
 from app.entities.base import BaseEntity, PyObjectId
 
 
-class MLScenarioStatus(str, Enum):
-    """Status of ML scenario through the pipeline."""
+class ScenarioStatus(str, Enum):
+    """Status of training scenario through the pipeline."""
 
     QUEUED = "queued"  # Initial state after creation
     FILTERING = "filtering"  # Phase 1: Querying builds from DB
-    INGESTING = "ingesting"  # Phase 2: Clone, worktree, logs
-    PROCESSING = "processing"  # Phase 3: Feature extraction + scans
-    SPLITTING = "splitting"  # Phase 4: Applying split strategy
+    INGESTING = "ingesting"  # Phase 1: Clone, worktree, logs
+    INGESTED = "ingested"  # Phase 1 complete, user can review + trigger processing
+    PROCESSING = "processing"  # Phase 2: Feature extraction + scans
+    PROCESSED = "processed"  # Phase 2 complete, user can trigger split/download
+    SPLITTING = "splitting"  # Phase 3: Applying split strategy
     COMPLETED = "completed"  # All phases done, files ready
     FAILED = "failed"  # Error occurred
 
@@ -102,6 +105,15 @@ class FeatureConfig(BaseEntity):
     exclude: List[str] = Field(
         default_factory=list,
         description="Features to exclude (supports wildcards)",
+    )
+    # Tool configurations (editable via UI)
+    scan_tool_config: Dict[str, Any] = Field(
+        default_factory=lambda: {"sonarqube": {}, "trivy": {}},
+        description="Scan tool settings: {'sonarqube': {...}, 'trivy': {...}}",
+    )
+    extractor_configs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-language/framework extractor settings",
     )
 
 
@@ -189,16 +201,16 @@ class OutputConfig(BaseEntity):
     include_metadata: bool = True
 
 
-class MLScenario(BaseEntity):
+class TrainingScenario(BaseEntity):
     """
-    ML Dataset Scenario configuration and tracking.
+    Training pipeline configuration and tracking.
 
     Stores YAML configuration parsed into structured fields,
     and tracks progress through the 4 phases.
     """
 
     class Config:
-        collection = "ml_scenarios"
+        collection = "training_scenarios"
         use_enum_values = True
 
     # Basic info
@@ -214,7 +226,9 @@ class MLScenario(BaseEntity):
 
     # Parsed configuration sections
     data_source_config: DataSourceConfig = Field(default_factory=DataSourceConfig)
-    feature_config: FeatureConfig = Field(default_factory=FeatureConfig)
+    feature_config: FeatureConfig = Field(
+        default_factory=FeatureConfig
+    )  # Includes scan_tool_config and extractor_configs
     splitting_config: SplittingConfig = Field(default_factory=SplittingConfig)
     preprocessing_config: PreprocessingConfig = Field(
         default_factory=PreprocessingConfig
@@ -222,8 +236,8 @@ class MLScenario(BaseEntity):
     output_config: OutputConfig = Field(default_factory=OutputConfig)
 
     # Pipeline status
-    status: MLScenarioStatus = Field(
-        default=MLScenarioStatus.QUEUED,
+    status: ScenarioStatus = Field(
+        default=ScenarioStatus.QUEUED,
         description="Current pipeline status",
     )
     current_task_id: Optional[str] = Field(
@@ -254,7 +268,7 @@ class MLScenario(BaseEntity):
         description="Builds that failed (retryable)",
     )
 
-    # === SCAN TRACKING ===
+    # Scan tracking
     scans_total: int = Field(
         default=0,
         description="Total scans to run (unique commits × enabled tools)",
@@ -268,7 +282,7 @@ class MLScenario(BaseEntity):
         description="Failed scans",
     )
 
-    # === COMPLETION FLAGS ===
+    # Completion flags
     feature_extraction_completed: bool = Field(
         default=False,
         description="All DAG features extracted",

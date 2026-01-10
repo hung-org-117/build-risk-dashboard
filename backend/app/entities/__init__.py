@@ -10,20 +10,56 @@ from .data_quality import (
     QualityIssueSeverity,
 )
 
-# Dataset entities
+# === NEW ENTITIES (Architecture Merge) ===
+# Build Source (data collection layer)
+from .build_source import (
+    BuildSource,
+    SourceMapping,
+    ValidationStats,
+    ValidationStatus,
+)
+from .source_build import SourceBuild, SourceBuildStatus
+from .source_repo_stats import SourceRepoStats
+
+# Training Pipeline (training layer)
+from .training_scenario import (
+    DataSourceConfig,
+    FeatureConfig,
+    GroupByDimension,
+    OutputConfig,
+    PreprocessingConfig,
+    ScenarioStatus,
+    SplitStrategy,
+    SplittingConfig,
+    TrainingScenario,
+)
+from .training_ingestion_build import (
+    TrainingIngestionBuild,
+    IngestionStatus,
+    ResourceStatus,
+    ResourceStatusEntry,
+)
+from .training_enrichment_build import TrainingEnrichmentBuild
+from .training_dataset_split import TrainingDatasetSplit
+
+# === LEGACY ENTITIES (to be removed after migration) ===
+# Dataset entities (legacy - use BuildSource instead)
 from .dataset import (
     DatasetMapping,
     DatasetProject,
     DatasetStats,
     DatasetValidationStatus,
-    ValidationStats,
+    ValidationStats as LegacyValidationStats,
 )
 from .dataset_build import DatasetBuild, DatasetBuildStatus
+from .dataset_repo_stats import DatasetRepoStats
 
-# Dataset enrichment flow entities
+# Dataset enrichment flow entities (legacy - use unified entities)
 from .dataset_enrichment_build import DatasetEnrichmentBuild
 from .dataset_import_build import DatasetImportBuild, DatasetImportBuildStatus
 from .dataset_template import DatasetTemplate
+from .dataset_version import DatasetVersion, VersionStatus
+
 
 # Shared enums
 from .enums import (
@@ -37,17 +73,6 @@ from .feature_audit_log import (
     NodeExecutionResult,
     NodeExecutionStatus,
 )
-from .ml_dataset_split import MLDatasetSplit
-
-# ML Scenario Builder entities
-from .ml_scenario import (
-    GroupByDimension,
-    MLScenario,
-    MLScenarioStatus,
-    SplitStrategy,
-)
-from .ml_scenario_enrichment_build import MLScenarioEnrichmentBuild
-from .ml_scenario_import_build import MLScenarioImportBuild, MLScenarioImportBuildStatus
 
 # Model training flow entities
 from .model_import_build import ModelImportBuild, ModelImportBuildStatus
@@ -56,7 +81,6 @@ from .model_training_build import ModelTrainingBuild
 from .notification import Notification, NotificationType
 
 # Other entities
-# from .github_installation import GithubInstallation
 from .oauth_identity import OAuthIdentity
 from .raw_build_run import RawBuildRun
 
@@ -68,6 +92,33 @@ __all__ = [
     # Base
     "BaseEntity",
     "PyObjectId",
+    # === NEW ENTITIES ===
+    # Build Source
+    "BuildSource",
+    "SourceMapping",
+    "ValidationStats",
+    "ValidationStatus",
+    "SourceBuild",
+    "SourceBuildStatus",
+    "SourceRepoStats",
+    # Training Scenario
+    "TrainingScenario",
+    "ScenarioStatus",
+    "DataSourceConfig",
+    "FeatureConfig",
+    "SplittingConfig",
+    "PreprocessingConfig",
+    "OutputConfig",
+    "SplitStrategy",
+    "GroupByDimension",
+    # Ingestion & Enrichment
+    "TrainingIngestionBuild",
+    "IngestionStatus",
+    "ResourceStatus",
+    "ResourceStatusEntry",
+    "TrainingEnrichmentBuild",
+    "TrainingDatasetSplit",
+    # === LEGACY ENTITIES ===
     # Enums
     "TestFramework",
     "ExtractionStatus",
@@ -79,21 +130,31 @@ __all__ = [
     "ModelImportBuild",
     "ModelImportBuildStatus",
     "ModelTrainingBuild",
+    # Legacy dataset
     "DatasetEnrichmentBuild",
     "DatasetImportBuild",
     "DatasetImportBuildStatus",
     "DatasetProject",
     "DatasetMapping",
     "DatasetStats",
-    "ValidationStats",
     "DatasetValidationStatus",
     "DatasetBuild",
     "DatasetBuildStatus",
+    "DatasetRepoStats",
+    "DatasetVersion",
+    "VersionStatus",
+    # Legacy ML Scenario
+    "MLScenario",
+    "MLScenarioStatus",
+    "MLScenarioImportBuild",
+    "MLScenarioImportBuildStatus",
+    "MLScenarioEnrichmentBuild",
+    "MLDatasetSplit",
+    # Other
     "OAuthIdentity",
     "User",
     "DatasetTemplate",
     "FeatureAuditLog",
-    "FeatureAuditLogStatus",
     "AuditLogCategory",
     "NodeExecutionResult",
     "NodeExecutionStatus",
@@ -107,13 +168,4 @@ __all__ = [
     "QualityEvaluationStatus",
     "QualityIssue",
     "QualityIssueSeverity",
-    # ML Scenario Builder
-    "MLScenario",
-    "MLScenarioStatus",
-    "SplitStrategy",
-    "GroupByDimension",
-    "MLScenarioImportBuild",
-    "MLScenarioImportBuildStatus",
-    "MLScenarioEnrichmentBuild",
-    "MLDatasetSplit",
 ]
