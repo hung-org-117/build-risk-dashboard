@@ -20,7 +20,6 @@ class FeatureCategory(str, Enum):
     TEAM = "team"
     METADATA = "metadata"
     WORKFLOW = "workflow"
-    # New categories from Circle CI research
     DEVOPS = "devops"  # DevOps file detection and analysis
     BUILD_HISTORY = "build_history"  # Link to previous build features
     COMMITTER = "committer"  # Committer experience features
@@ -192,7 +191,9 @@ def format_features_for_storage(
 
         # Get output format from FEATURE_REGISTRY (single source of truth)
         defn = FEATURE_REGISTRY.get(name)
-        output_format = defn.output_format if defn and defn.output_format else OutputFormat.RAW
+        output_format = (
+            defn.output_format if defn and defn.output_format else OutputFormat.RAW
+        )
 
         if value is None:
             result[name] = None

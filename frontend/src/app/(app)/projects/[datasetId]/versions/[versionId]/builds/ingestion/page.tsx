@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -67,7 +67,7 @@ const getImportStatusConfig = (status: string) => {
 export default function IngestionPage() {
     const params = useParams<{ datasetId: string; versionId: string }>();
     const router = useRouter();
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
     const datasetId = params.datasetId;
     const versionId = params.versionId;
 

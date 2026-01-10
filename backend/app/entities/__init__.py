@@ -37,6 +37,17 @@ from .feature_audit_log import (
     NodeExecutionResult,
     NodeExecutionStatus,
 )
+from .ml_dataset_split import MLDatasetSplit
+
+# ML Scenario Builder entities
+from .ml_scenario import (
+    GroupByDimension,
+    MLScenario,
+    MLScenarioStatus,
+    SplitStrategy,
+)
+from .ml_scenario_enrichment_build import MLScenarioEnrichmentBuild
+from .ml_scenario_import_build import MLScenarioImportBuild, MLScenarioImportBuildStatus
 
 # Model training flow entities
 from .model_import_build import ModelImportBuild, ModelImportBuildStatus
@@ -96,4 +107,13 @@ __all__ = [
     "QualityEvaluationStatus",
     "QualityIssue",
     "QualityIssueSeverity",
+    # ML Scenario Builder
+    "MLScenario",
+    "MLScenarioStatus",
+    "SplitStrategy",
+    "GroupByDimension",
+    "MLScenarioImportBuild",
+    "MLScenarioImportBuildStatus",
+    "MLScenarioEnrichmentBuild",
+    "MLDatasetSplit",
 ]

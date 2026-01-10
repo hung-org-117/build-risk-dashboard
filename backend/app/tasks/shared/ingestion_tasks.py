@@ -812,7 +812,6 @@ async def _download_log_for_build(
 
     try:
         build_run = build_run_repo.find_by_repo_and_build_id(raw_repo_id, build_id)
-
         if build_run and build_run.logs_available:
             # Verify log files actually exist on disk
             expected_logs_dir = get_build_logs_path(github_repo_id, build_id)

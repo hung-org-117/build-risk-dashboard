@@ -22,8 +22,11 @@ from app.tasks.pipeline.feature_dag._metadata import requires_config
 logger = logging.getLogger(__name__)
 
 
-@tag(group="build_log")
-def tr_build_id(build_run: BuildRunInput) -> str:
+# === Build Metadata ===
+
+
+@tag(group="build")
+def build_id(build_run: BuildRunInput) -> str:
     """Workflow run ID.
 
     Returns the original CI run ID as a string to preserve
@@ -32,20 +35,20 @@ def tr_build_id(build_run: BuildRunInput) -> str:
     return build_run.ci_run_id
 
 
-@tag(group="build_log")
-def tr_build_number(build_run: BuildRunInput) -> int:
+@tag(group="build")
+def build_number(build_run: BuildRunInput) -> int:
     """Workflow run number."""
     return build_run.build_number or 0
 
 
-@tag(group="build_log")
-def tr_original_commit(build_run: BuildRunInput) -> str:
+@tag(group="build")
+def build_trigger_sha(build_run: BuildRunInput) -> str:
     """Original commit SHA that triggered the build."""
     return build_run.commit_sha
 
 
-@tag(group="build_log")
-def tr_status(build_run: BuildRunInput) -> str:
+@tag(group="build")
+def build_status(build_run: BuildRunInput) -> str:
     """
     Normalized build status.
 
@@ -71,8 +74,8 @@ def tr_status(build_run: BuildRunInput) -> str:
     return status_map.get(conclusion, conclusion)
 
 
-@tag(group="build_log")
-def tr_status_num(tr_status: str) -> int:
+@tag(group="build")
+def build_status_num(build_status: str) -> int:
     """
     Numeric build status for model input.
 
@@ -82,11 +85,11 @@ def tr_status_num(tr_status: str) -> int:
     - other -> -1
     """
     status_map = {"passed": 0, "failed": 1}
-    return status_map.get(tr_status, -1)
+    return status_map.get(build_status, -1)
 
 
-@tag(group="build_log")
-def tr_duration(build_run: BuildRunInput) -> float:
+@tag(group="build")
+def build_duration_sec(build_run: BuildRunInput) -> float:
     """
     Build duration in seconds.
 
@@ -104,7 +107,79 @@ def tr_duration(build_run: BuildRunInput) -> float:
     return 0.0
 
 
-@tag(group="build_log")
+@tag(group="build")
+def build_started_at(build_run: BuildRunInput) -> Optional[str]:
+    """Build start timestamp in ISO format."""
+    if build_run.created_at:
+        return build_run.created_at.isoformat()
+    return None
+
+
+@tag(group="build")
+def build_ci_provider(build_run: BuildRunInput) -> str:
+    """CI/CD provider name."""
+    return build_run.ci_provider
+
+
+@tag(group="build")
+def build_day_of_week(build_run: BuildRunInput) -> str:
+    """Day of week when build was triggered (Monday-Sunday)."""
+    if build_run.created_at:
+        return build_run.created_at.strftime("%A")
+    return "Unknown"
+
+
+@tag(group="build")
+def build_hour(build_run: BuildRunInput) -> int:
+    """Hour when build was triggered (0-23 UTC)."""
+    if build_run.created_at:
+        return build_run.created_at.hour
+    return 0
+
+
+@tag(group="build")
+def build_hour_sin(build_hour: int) -> float:
+    """Sine encoding of build hour for cyclic representation."""
+    import math
+
+    return math.sin(2 * math.pi * build_hour / 24)
+
+
+@tag(group="build")
+def build_hour_cos(build_hour: int) -> float:
+    """Cosine encoding of build hour for cyclic representation."""
+    import math
+
+    return math.cos(2 * math.pi * build_hour / 24)
+
+
+@tag(group="build")
+def build_hour_risk(build_hour: int) -> float:
+    """Risk score based on build hour (higher at night)."""
+    # Night hours (10pm - 6am) are higher risk
+    if build_hour >= 22 or build_hour < 6:
+        return 0.8
+    elif build_hour >= 18 or build_hour < 9:
+        return 0.5
+    return 0.2
+
+
+# === Repository Metadata ===
+
+
+@tag(group="repo")
+def repo_full_name(repo: RepoInput) -> str:
+    """Full repository name (owner/repo)."""
+    return repo.full_name
+
+
+@tag(group="repo")
+def repo_language(repo: RepoInput) -> Optional[str]:
+    """Primary programming language."""
+    return repo.main_lang.lower() if repo.main_lang else None
+
+
+@tag(group="repo")
 @requires_config(
     source_languages={
         "type": "list",
@@ -114,53 +189,15 @@ def tr_duration(build_run: BuildRunInput) -> float:
         "default": [],
     }
 )
-def tr_log_lan_all(feature_config: FeatureConfigInput) -> List[str]:
+def repo_languages_all(feature_config: FeatureConfigInput) -> List[str]:
     """All source languages for the repository."""
-    return [lang.lower() for lang in feature_config.get("source_languages", [], scope="repo")] or [
-        ""
-    ]
+    return [
+        lang.lower()
+        for lang in feature_config.get("source_languages", [], scope="repo")
+    ] or [""]
 
 
-@tag(group="metadata")
-def gh_project_name(repo: RepoInput) -> str:
-    """Full repository name (owner/repo)."""
-    return repo.full_name
-
-
-@tag(group="metadata")
-def gh_lang(repo: RepoInput) -> Optional[str]:
-    """Primary programming language."""
-    return repo.main_lang.lower() if repo.main_lang else None
-
-
-@tag(group="metadata")
-def ci_provider(build_run: BuildRunInput) -> str:
-    """CI/CD provider name."""
-    return build_run.ci_provider
-
-
-@tag(group="metadata")
-def git_trigger_commit(build_run: BuildRunInput) -> str:
-    """
-    Commit SHA that triggered the build.
-
-    CI Provider Differences:
-    - GitHub Actions: Returns head_sha directly (no virtual commits)
-    - Circle CI: Returns commit SHA directly (no virtual commits)
-    - Travis CI: For PR builds, Travis creates virtual merge commits.
-                 We resolve to actual commit by parsing commit message.
-
-    Returns:
-        The actual commit SHA that triggered the build.
-    """
-    ci_provider = build_run.ci_provider
-
-    # For Travis CI PR builds, resolve virtual merge commit
-    if ci_provider == "travis_ci":
-        return _resolve_travis_trigger_commit(build_run)
-
-    # For GitHub Actions and Circle CI, commit_sha is the real commit
-    return build_run.commit_sha
+# === PR Info ===
 
 
 def _is_pr_build(build_run: BuildRunInput) -> bool:
@@ -184,7 +221,9 @@ def _is_pr_build(build_run: BuildRunInput) -> bool:
 
     elif ci_provider == "travis_ci":
         # Travis uses pull_request (bool) or pull_req (PR number)
-        return raw_data.get("pull_request", False) or raw_data.get("pull_req") is not None
+        return (
+            raw_data.get("pull_request", False) or raw_data.get("pull_req") is not None
+        )
 
     elif ci_provider == "circleci":
         # Circle CI: check for pull_requests array or branch pattern
@@ -200,59 +239,8 @@ def _is_pr_build(build_run: BuildRunInput) -> bool:
     )
 
 
-def _resolve_travis_trigger_commit(build_run: BuildRunInput) -> str:
-    """
-    Resolve Travis CI virtual merge commit to actual commit.
-
-    When Travis CI builds a PR, it creates a virtual merge commit by merging
-    the PR head into the target branch. The commit message looks like:
-    "Merge abc123def into main"
-
-    For PR builds, we extract the actual PR commit SHA from this message.
-    For non-PR builds, we return the original commit SHA.
-    """
-    import re
-
-    commit_sha = build_run.commit_sha
-
-    # Use CI-agnostic PR check
-    if not _is_pr_build(build_run):
-        # Non-PR builds: commit_sha is the real commit
-        return commit_sha
-
-    # For PR builds, try to resolve from commit message
-    raw_data = build_run.raw_data
-    commit_message = raw_data.get("commit_message", "") or raw_data.get("message", "")
-
-    # Match pattern: "Merge abc123 into xyz789" or "Merge abc123 into main"
-    match = re.search(r"Merge\s+([a-f0-9]+)\s+into\s+", commit_message, re.IGNORECASE)
-
-    if match:
-        actual_sha = match.group(1)
-        logger.info(f"Resolved Travis virtual commit {commit_sha[:8]} to actual {actual_sha[:8]}")
-        return actual_sha
-
-    # Fallback: return original commit_sha
-    logger.debug(f"Could not resolve Travis virtual commit from message: {commit_message[:50]}")
-    return commit_sha
-
-
-@tag(group="metadata")
-def gh_build_started_at(build_run: BuildRunInput) -> Optional[str]:
-    """Build start timestamp in ISO format."""
-    if build_run.created_at:
-        return build_run.created_at.isoformat()
-    return None
-
-
-@tag(group="metadata")
-def git_branch(build_run: BuildRunInput) -> Optional[str]:
-    """Branch name (uses normalized field from RawBuildRun)."""
-    return build_run.branch
-
-
-@tag(group="metadata")
-def gh_is_pr(build_run: BuildRunInput) -> bool:
+@tag(group="pr")
+def pr_is_triggered(build_run: BuildRunInput) -> bool:
     """Whether this build is triggered by a pull request (works with all CI providers)."""
     return _is_pr_build(build_run)
 
@@ -288,7 +276,9 @@ def _find_primary_pr(payload: dict) -> Optional[dict]:
         base_repo_name = pr.get("base", {}).get("repo", {}).get("name", "?")
 
         if base_repo_id == repo_id:
-            logger.info(f"Found primary PR #{pr_number} (base.repo.id matches repository.id)")
+            logger.info(
+                f"Found primary PR #{pr_number} (base.repo.id matches repository.id)"
+            )
             return pr
         else:
             logger.debug(
@@ -296,7 +286,9 @@ def _find_primary_pr(payload: dict) -> Optional[dict]:
                 f"(id={base_repo_id}) != repo_id={repo_id}"
             )
 
-    logger.debug(f"No primary PR found among {len(pull_requests)} PRs (all are fork PRs)")
+    logger.debug(
+        f"No primary PR found among {len(pull_requests)} PRs (all are fork PRs)"
+    )
     return None
 
 
@@ -353,14 +345,14 @@ def _get_pr_number(build_run: BuildRunInput) -> Optional[int]:
     return None
 
 
-@tag(group="metadata")
-def gh_pull_req_num(build_run: BuildRunInput) -> Optional[int]:
+@tag(group="pr")
+def pr_number(build_run: BuildRunInput) -> Optional[int]:
     """Pull request number (works with GitHub Actions, Travis CI, Circle CI)."""
     return _get_pr_number(build_run)
 
 
-@tag(group="metadata")
-def gh_pr_created_at(
+@tag(group="pr")
+def pr_created_at(
     build_run: BuildRunInput,
     github_client: GitHubClientInput,
 ) -> Optional[str]:
@@ -369,17 +361,117 @@ def gh_pr_created_at(
 
     Works with all CI providers since we always fetch from GitHub API.
     """
-    pr_number = _get_pr_number(build_run)
-    if not pr_number:
+    pr_num = _get_pr_number(build_run)
+    if not pr_num:
         return None
 
     try:
         full_name = github_client.full_name
-        logger.debug(f"Fetching PR #{pr_number} details from GitHub API for {full_name}")
-        pr_details = github_client.client.get_pull_request(full_name, pr_number)
+        logger.debug(f"Fetching PR #{pr_num} details from GitHub API for {full_name}")
+        pr_details = github_client.client.get_pull_request(full_name, pr_num)
         created_at = pr_details.get("created_at")
-        logger.debug(f"PR #{pr_number} created_at: {created_at}")
+        logger.debug(f"PR #{pr_num} created_at: {created_at}")
         return created_at
     except Exception as e:
-        logger.warning(f"Failed to fetch PR #{pr_number} details: {e}")
+        logger.warning(f"Failed to fetch PR #{pr_num} details: {e}")
         return None
+
+
+@tag(group="pr")
+def pr_has_bug_label(build_run: BuildRunInput) -> bool:
+    """Whether the PR has any bug-related labels."""
+    raw_data = build_run.raw_data
+
+    # Check for labels in PR data
+    pull_requests = raw_data.get("pull_requests", [])
+    if not pull_requests:
+        return False
+
+    pr = pull_requests[0] if pull_requests else {}
+    labels = pr.get("labels", [])
+
+    bug_keywords = ["bug", "fix", "hotfix", "patch", "issue", "defect"]
+    for label in labels:
+        label_name = (
+            label.get("name", "").lower()
+            if isinstance(label, dict)
+            else str(label).lower()
+        )
+        if any(keyword in label_name for keyword in bug_keywords):
+            return True
+
+    return False
+
+
+# === Git Info (also in build extractor for basic fields) ===
+
+
+@tag(group="git")
+def git_trigger_sha(build_run: BuildRunInput) -> str:
+    """
+    Commit SHA that triggered the build.
+
+    CI Provider Differences:
+    - GitHub Actions: Returns head_sha directly (no virtual commits)
+    - Circle CI: Returns commit SHA directly (no virtual commits)
+    - Travis CI: For PR builds, Travis creates virtual merge commits.
+                 We resolve to actual commit by parsing commit message.
+
+    Returns:
+        The actual commit SHA that triggered the build.
+    """
+    ci_provider = build_run.ci_provider
+
+    # For Travis CI PR builds, resolve virtual merge commit
+    if ci_provider == "travis_ci":
+        return _resolve_travis_trigger_commit(build_run)
+
+    # For GitHub Actions and Circle CI, commit_sha is the real commit
+    return build_run.commit_sha
+
+
+def _resolve_travis_trigger_commit(build_run: BuildRunInput) -> str:
+    """
+    Resolve Travis CI virtual merge commit to actual commit.
+
+    When Travis CI builds a PR, it creates a virtual merge commit by merging
+    the PR head into the target branch. The commit message looks like:
+    "Merge abc123def into main"
+
+    For PR builds, we extract the actual PR commit SHA from this message.
+    For non-PR builds, we return the original commit SHA.
+    """
+    import re
+
+    commit_sha = build_run.commit_sha
+
+    # Use CI-agnostic PR check
+    if not _is_pr_build(build_run):
+        # Non-PR builds: commit_sha is the real commit
+        return commit_sha
+
+    # For PR builds, try to resolve from commit message
+    raw_data = build_run.raw_data
+    commit_message = raw_data.get("commit_message", "") or raw_data.get("message", "")
+
+    # Match pattern: "Merge abc123 into xyz789" or "Merge abc123 into main"
+    match = re.search(r"Merge\s+([a-f0-9]+)\s+into\s+", commit_message, re.IGNORECASE)
+
+    if match:
+        actual_sha = match.group(1)
+        logger.info(
+            f"Resolved Travis virtual commit {commit_sha[:8]} to actual {actual_sha[:8]}"
+        )
+        return actual_sha
+
+    # Fallback: return original commit_sha
+    logger.debug(
+        f"Could not resolve Travis virtual commit from message: {commit_message[:50]}"
+    )
+    return commit_sha
+
+
+@tag(group="git")
+def git_branch(build_run: BuildRunInput) -> Optional[str]:
+    """Branch name (uses normalized field from RawBuildRun)."""
+    return build_run.branch

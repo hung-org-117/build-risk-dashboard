@@ -126,13 +126,11 @@ class GitHubActionsProvider(CIProviderInterface):
         limit: Optional[int] = None,
         page: int = 1,
         branch: Optional[str] = None,
-        only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
     ) -> List[BuildData]:
         """Fetch workflow runs from GitHub Actions (single page)."""
         builds = []
-        consecutive_unavailable = 0
 
         per_page = min(limit or 100, 100)
         params = {"per_page": per_page, "page": page}
@@ -156,21 +154,6 @@ class GitHubActionsProvider(CIProviderInterface):
                 if exclude_bots and is_bot:
                     logger.debug(f"Skipping bot commit: {build_data.commit_author}")
                     continue
-
-                if only_with_logs:
-                    logs_available = client.logs_available(repo_name, int(run["id"]))
-                    build_data.logs_available = logs_available
-                    if not logs_available:
-                        consecutive_unavailable += 1
-                        if consecutive_unavailable >= settings.GIT_LOG_UNAVAILABLE_THRESHOLD:
-                            logger.warning(
-                                f"Reached {consecutive_unavailable} consecutive unavailable logs "
-                                f"for {repo_name} - may be permission issue, stopping fetch"
-                            )
-                            break
-                        continue
-                    else:
-                        consecutive_unavailable = 0
 
                 builds.append(build_data)
 
@@ -251,7 +234,9 @@ class GitHubActionsProvider(CIProviderInterface):
                             )
                         )
                     except GithubLogsUnavailableError as e:
-                        logger.debug(f"Logs unavailable for job {job.job_id}: {e.reason}")
+                        logger.debug(
+                            f"Logs unavailable for job {job.job_id}: {e.reason}"
+                        )
                     except Exception as e:
                         logger.warning(f"Failed to fetch log for job {job.job_id}: {e}")
 
@@ -293,15 +278,21 @@ class GitHubActionsProvider(CIProviderInterface):
 
         created_at = None
         if run.get("created_at"):
-            created_at = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+            created_at = datetime.fromisoformat(
+                run["created_at"].replace("Z", "+00:00")
+            )
 
         started_at = None
         if run.get("run_started_at"):
-            started_at = datetime.fromisoformat(run["run_started_at"].replace("Z", "+00:00"))
+            started_at = datetime.fromisoformat(
+                run["run_started_at"].replace("Z", "+00:00")
+            )
 
         completed_at = None
         if run.get("updated_at") and raw_status == "completed":
-            completed_at = datetime.fromisoformat(run["updated_at"].replace("Z", "+00:00"))
+            completed_at = datetime.fromisoformat(
+                run["updated_at"].replace("Z", "+00:00")
+            )
 
         duration = None
         if started_at and completed_at:
@@ -314,7 +305,9 @@ class GitHubActionsProvider(CIProviderInterface):
             branch=run.get("head_branch"),
             commit_sha=run.get("head_sha"),
             commit_message=(
-                run.get("head_commit", {}).get("message") if run.get("head_commit") else None
+                run.get("head_commit", {}).get("message")
+                if run.get("head_commit")
+                else None
             ),
             commit_author=(
                 run.get("head_commit", {}).get("author", {}).get("name")
@@ -337,11 +330,15 @@ class GitHubActionsProvider(CIProviderInterface):
         """Parse GitHub Actions job to JobData."""
         started_at = None
         if job.get("started_at"):
-            started_at = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
+            started_at = datetime.fromisoformat(
+                job["started_at"].replace("Z", "+00:00")
+            )
 
         completed_at = None
         if job.get("completed_at"):
-            completed_at = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
+            completed_at = datetime.fromisoformat(
+                job["completed_at"].replace("Z", "+00:00")
+            )
 
         duration = None
         if started_at and completed_at:
@@ -350,7 +347,9 @@ class GitHubActionsProvider(CIProviderInterface):
         return JobData(
             job_id=str(job["id"]),
             job_name=job.get("name", "unknown"),
-            status=self.normalize_status(job.get("conclusion") or job.get("status", "unknown")),
+            status=self.normalize_status(
+                job.get("conclusion") or job.get("status", "unknown")
+            ),
             started_at=started_at,
             completed_at=completed_at,
             duration_seconds=duration,

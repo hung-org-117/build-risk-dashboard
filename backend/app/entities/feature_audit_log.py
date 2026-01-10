@@ -19,6 +19,7 @@ class AuditLogCategory(str, Enum):
 
     MODEL_TRAINING = "model_training"
     DATASET_ENRICHMENT = "dataset_enrichment"
+    ML_SCENARIO = "ml_scenario"
 
 
 class NodeExecutionStatus(str, Enum):
@@ -53,7 +54,9 @@ class NodeExecutionResult(BaseEntity):
 
     error: Optional[str] = None
     warning: Optional[str] = None
-    skip_reason: Optional[str] = Field(None, description="Reason for skipping if status is SKIPPED")
+    skip_reason: Optional[str] = Field(
+        None, description="Reason for skipping if status is SKIPPED"
+    )
     retry_count: int = 0
 
     class Config:
@@ -144,7 +147,9 @@ class FeatureAuditLog(BaseEntity):
         """Mark audit log as successfully completed."""
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
-            self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
+            self.duration_ms = (
+                self.completed_at - self.started_at
+            ).total_seconds() * 1000
         self.features_extracted = features
         self.feature_count = len(features)
         self._update_node_counts()
@@ -154,7 +159,9 @@ class FeatureAuditLog(BaseEntity):
         """Mark audit log as failed."""
         self.completed_at = datetime.now(timezone.utc)
         if self.started_at:
-            self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
+            self.duration_ms = (
+                self.completed_at - self.started_at
+            ).total_seconds() * 1000
         self.errors.append(error)
         self._update_node_counts()
         return self
@@ -167,6 +174,8 @@ class FeatureAuditLog(BaseEntity):
     def _update_node_counts(self) -> None:
         """Update node execution counts from results."""
         self.nodes_executed = len(self.node_results)
-        self.nodes_succeeded = sum(1 for r in self.node_results if r.status == "success")
+        self.nodes_succeeded = sum(
+            1 for r in self.node_results if r.status == "success"
+        )
         self.nodes_failed = sum(1 for r in self.node_results if r.status == "failed")
         self.nodes_skipped = sum(1 for r in self.node_results if r.status == "skipped")

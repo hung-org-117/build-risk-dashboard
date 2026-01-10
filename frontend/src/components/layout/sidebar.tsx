@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
-import { Activity, BadgeCheck, Database, GitBranch, Home, PanelLeft, PanelLeftClose, Settings, Users } from "lucide-react";
+import { Activity, BadgeCheck, Beaker, Database, GitBranch, Home, PanelLeft, PanelLeftClose, Settings, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -38,6 +38,13 @@ const navigation = [
     label: "Data Enrichments",
     href: "/projects",
     icon: Database,
+    adminOnly: true, // Admin only
+    userOnly: false,
+  },
+  {
+    label: "ML Scenarios",
+    href: "/ml-scenarios",
+    icon: Beaker,
     adminOnly: true, // Admin only
     userOnly: false,
   },

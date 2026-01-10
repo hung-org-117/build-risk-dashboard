@@ -7,7 +7,7 @@ from app.tasks.pipeline.feature_dag.extractors import (
     temporal,
 )
 
-DEFAULT_FEATURES = {"tr_build_id", "gh_project_name", "ci_provider"}
+DEFAULT_FEATURES = {"build_id", "repo_full_name", "build_ci_provider"}
 
 HAMILTON_MODULES = [
     build,
@@ -26,6 +26,8 @@ def get_input_resource_names() -> frozenset:
     These are Hamilton DAG inputs, not actual feature values.
     Derived from INPUT_REGISTRY for single source of truth.
     """
-    from app.tasks.pipeline.shared.resources import get_input_resource_names as _get_names
+    from app.tasks.pipeline.shared.resources import (
+        get_input_resource_names as _get_names,
+    )
 
     return _get_names()

@@ -533,8 +533,8 @@ class DatasetService:
             },
             # Unwind the joined array (1:1 relationship)
             {"$unwind": {"path": "$raw_build", "preserveNullAndEmptyArrays": True}},
-            # Sort by raw_build.started_at descending (newest first)
-            {"$sort": {"raw_build.started_at": -1}},
+            # Sort by raw_build.run_started_at descending (newest first)
+            {"$sort": {"raw_build.run_started_at": -1}},
             # Pagination
             {"$skip": skip},
             {"$limit": limit},
@@ -555,13 +555,13 @@ class DatasetService:
                     "commit_message": "$raw_build.commit_message",
                     "commit_author": "$raw_build.commit_author",
                     "conclusion": "$raw_build.conclusion",
-                    "started_at": "$raw_build.started_at",
-                    "completed_at": "$raw_build.completed_at",
+                    "started_at": "$raw_build.run_started_at",
+                    "completed_at": "$raw_build.run_completed_at",
                     "duration_seconds": "$raw_build.duration_seconds",
                     "logs_available": "$raw_build.logs_available",
                     "web_url": "$raw_build.web_url",
-                    # Use started_at as created_at (created_at not stored in DB)
-                    "created_at": "$raw_build.started_at",
+                    # Use run_started_at as created_at
+                    "created_at": "$raw_build.run_started_at",
                 }
             },
         ]

@@ -413,7 +413,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         results = list(self.collection.aggregate(pipeline))
 
         stats = {
-            "builds_processed": 0,  # completed + partial
+            "builds_features_extracted": 0,  # completed + partial
             "builds_processing_failed": 0,
             "total_pending": 0,
         }
@@ -426,7 +426,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                 ExtractionStatus.COMPLETED.value,
                 ExtractionStatus.PARTIAL.value,
             ):
-                stats["builds_processed"] += count
+                stats["builds_features_extracted"] += count
             elif status == ExtractionStatus.FAILED.value:
                 stats["builds_processing_failed"] += count
             elif status == ExtractionStatus.PENDING.value:

@@ -1,4 +1,4 @@
-"""Feature definitions for Temporal domain."""
+"""Feature definitions for Temporal/History domain."""
 
 from typing import Dict
 
@@ -10,18 +10,22 @@ from app.tasks.pipeline.feature_dag._types import (
 )
 
 TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
-    "tr_prev_build": FeatureDefinition(
-        name="tr_prev_build",
+    # === Build History ===
+    "history_prev_build_id": FeatureDefinition(
+        name="history_prev_build_id",
         display_name="Previous Build ID",
         description="ID of the previous build for this commit chain",
         category=FeatureCategory.BUILD_HISTORY,
         data_type=FeatureDataType.STRING,
         extractor_node="temporal",
-        required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.RAW_BUILD_RUNS],
+        required_resources=[
+            FeatureResource.GIT_HISTORY,
+            FeatureResource.RAW_BUILD_RUNS,
+        ],
         nullable=True,
     ),
-    "prev_built_result": FeatureDefinition(
-        name="prev_built_result",
+    "history_prev_result": FeatureDefinition(
+        name="history_prev_result",
         display_name="Previous Build Result",
         description="Outcome of the previous build (passed, failed, etc.)",
         category=FeatureCategory.BUILD_HISTORY,
@@ -30,8 +34,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         nullable=True,
     ),
-    "same_committer": FeatureDefinition(
-        name="same_committer",
+    "history_same_committer": FeatureDefinition(
+        name="history_same_committer",
         display_name="Same Committer",
         description="Whether committer is same as previous build",
         category=FeatureCategory.BUILD_HISTORY,
@@ -39,8 +43,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
     ),
-    "time_since_prev_build": FeatureDefinition(
-        name="time_since_prev_build",
+    "history_days_since_prev": FeatureDefinition(
+        name="history_days_since_prev",
         display_name="Time Since Previous Build",
         description="Days since previous build completed",
         category=FeatureCategory.BUILD_HISTORY,
@@ -50,37 +54,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         unit="days",
         nullable=True,
     ),
-    "committer_fail_history": FeatureDefinition(
-        name="committer_fail_history",
-        display_name="Committer Fail Rate",
-        description="Overall fail rate of this committer",
-        category=FeatureCategory.COMMITTER,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-        valid_range=(0.0, 1.0),
-    ),
-    "committer_recent_fail_history": FeatureDefinition(
-        name="committer_recent_fail_history",
-        display_name="Committer Recent Fail Rate",
-        description="Fail rate in last N builds by this committer",
-        category=FeatureCategory.COMMITTER,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-        valid_range=(0.0, 1.0),
-    ),
-    "committer_avg_exp": FeatureDefinition(
-        name="committer_avg_exp",
-        display_name="Committer Experience",
-        description="Average experience of committers (builds per person)",
-        category=FeatureCategory.COMMITTER,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-    ),
-    "project_fail_history": FeatureDefinition(
-        name="project_fail_history",
+    "history_project_fail_rate": FeatureDefinition(
+        name="history_project_fail_rate",
         display_name="Project Fail Rate",
         description="Overall fail rate of the project",
         category=FeatureCategory.BUILD_HISTORY,
@@ -89,8 +64,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
-    "project_fail_recent": FeatureDefinition(
-        name="project_fail_recent",
+    "history_project_fail_recent": FeatureDefinition(
+        name="history_project_fail_recent",
         display_name="Project Recent Fail Rate",
         description="Fail rate in last N builds of the project",
         category=FeatureCategory.BUILD_HISTORY,
@@ -99,8 +74,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
-    "is_prev_failed": FeatureDefinition(
-        name="is_prev_failed",
+    "history_prev_failed": FeatureDefinition(
+        name="history_prev_failed",
         display_name="Previous Build Failed",
         description="Whether the previous build failed",
         category=FeatureCategory.BUILD_HISTORY,
@@ -109,17 +84,17 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         nullable=True,
     ),
-    "prev_fail_streak": FeatureDefinition(
-        name="prev_fail_streak",
-        display_name="Previous Fail Streak",
+    "history_fail_streak": FeatureDefinition(
+        name="history_fail_streak",
+        display_name="Fail Streak",
         description="Number of consecutive failed builds before this one",
         category=FeatureCategory.BUILD_HISTORY,
         data_type=FeatureDataType.INTEGER,
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
     ),
-    "fail_rate_last_10": FeatureDefinition(
-        name="fail_rate_last_10",
+    "history_fail_rate_10": FeatureDefinition(
+        name="history_fail_rate_10",
         display_name="Fail Rate Last 10",
         description="Failure rate in last 10 builds",
         category=FeatureCategory.BUILD_HISTORY,
@@ -128,11 +103,41 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
-    "avg_src_churn_last_5": FeatureDefinition(
-        name="avg_src_churn_last_5",
+    "history_avg_churn_5": FeatureDefinition(
+        name="history_avg_churn_5",
         display_name="Avg Churn Last 5",
         description="Average source code churn in last 5 builds",
         category=FeatureCategory.BUILD_HISTORY,
+        data_type=FeatureDataType.FLOAT,
+        extractor_node="temporal",
+        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+    ),
+    # === Author/Committer ===
+    "author_fail_rate": FeatureDefinition(
+        name="author_fail_rate",
+        display_name="Author Fail Rate",
+        description="Overall fail rate of this committer",
+        category=FeatureCategory.COMMITTER,
+        data_type=FeatureDataType.FLOAT,
+        extractor_node="temporal",
+        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        valid_range=(0.0, 1.0),
+    ),
+    "author_fail_rate_recent": FeatureDefinition(
+        name="author_fail_rate_recent",
+        display_name="Author Recent Fail Rate",
+        description="Fail rate in last N builds by this committer",
+        category=FeatureCategory.COMMITTER,
+        data_type=FeatureDataType.FLOAT,
+        extractor_node="temporal",
+        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        valid_range=(0.0, 1.0),
+    ),
+    "author_experience": FeatureDefinition(
+        name="author_experience",
+        display_name="Author Experience",
+        description="Average experience of committers (builds per person)",
+        category=FeatureCategory.COMMITTER,
         data_type=FeatureDataType.FLOAT,
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
@@ -147,8 +152,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
-    "is_new_contributor": FeatureDefinition(
-        name="is_new_contributor",
+    "author_is_new": FeatureDefinition(
+        name="author_is_new",
         display_name="New Contributor",
         description="Whether author has fewer than 5 builds in this project",
         category=FeatureCategory.COMMITTER,
@@ -156,8 +161,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
     ),
-    "days_since_last_author_commit": FeatureDefinition(
-        name="days_since_last_author_commit",
+    "author_days_since_commit": FeatureDefinition(
+        name="author_days_since_commit",
         display_name="Days Since Author's Last Commit",
         description="Days since this author's previous build",
         category=FeatureCategory.COMMITTER,

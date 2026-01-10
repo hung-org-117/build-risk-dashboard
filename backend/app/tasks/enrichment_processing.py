@@ -1001,6 +1001,14 @@ def dispatch_version_scans(
 
     if total_commits == 0:
         logger.info(f"{corr_prefix} No commits to scan for version {version_id[:8]}")
+        # Mark scans as completed if no scans needed
+        version_repo.update_one(
+            version_id,
+            {
+                "scans_total": 0,
+                "scan_extraction_completed": True,
+            },
+        )
         return {
             "status": "completed",
             "builds_scanned": builds_scanned,
@@ -1013,9 +1021,24 @@ def dispatch_version_scans(
     ]
     total_batches = len(batches)
 
+    # Calculate scans_total: commits × enabled_tools
+    enabled_tools = (1 if has_sonar else 0) + (1 if has_trivy else 0)
+    scans_total = total_commits * enabled_tools
+
+    # Update version with scans_total BEFORE dispatching
+    version_repo.update_one(
+        version_id,
+        {
+            "scans_total": scans_total,
+            "scans_completed": 0,
+            "scans_failed": 0,
+            "scan_extraction_completed": False,
+        },
+    )
+
     logger.info(
         f"{corr_prefix} Collected {total_commits} unique commits from {builds_scanned} builds, "
-        f"splitting into {total_batches} batches"
+        f"splitting into {total_batches} batches, scans_total={scans_total}"
     )
 
     # Step 3: Build sequential chain of batch tasks
@@ -1048,11 +1071,20 @@ def dispatch_version_scans(
         f"{corr_prefix} Dispatched sequential scan chain with {total_batches} batches"
     )
 
+    # Publish SSE event with scan progress
+    publish_enrichment_update(
+        version_id=version_id,
+        status=version.status if hasattr(version, "status") else "processing",
+        scans_total=scans_total,
+        scans_completed=0,
+    )
+
     return {
         "status": "dispatched",
         "builds_scanned": builds_scanned,
         "total_commits": total_commits,
         "total_batches": total_batches,
+        "scans_total": scans_total,
         "has_sonar": has_sonar,
         "has_trivy": has_trivy,
     }

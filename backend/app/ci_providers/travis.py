@@ -4,7 +4,6 @@ from typing import List, Optional
 
 import httpx
 
-from app.config import settings
 from app.utils.datetime import ensure_naive_utc
 
 from .base import CIProviderInterface
@@ -89,7 +88,6 @@ class TravisCIProvider(CIProviderInterface):
         limit: Optional[int] = None,
         page: int = 1,
         branch: Optional[str] = None,
-        only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
     ) -> List[BuildData]:
@@ -115,7 +113,6 @@ class TravisCIProvider(CIProviderInterface):
             params["state"] = "passed,failed"
 
         builds = []
-        consecutive_unavailable = 0
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 url,
@@ -153,21 +150,6 @@ class TravisCIProvider(CIProviderInterface):
                     ):
                         continue
 
-                if only_with_logs:
-                    logs_available = await self._check_logs_available(client, build["id"])
-                    build_data.logs_available = logs_available
-                    if not logs_available:
-                        consecutive_unavailable += 1
-                        if consecutive_unavailable >= settings.GIT_LOG_UNAVAILABLE_THRESHOLD:
-                            logger.warning(
-                                f"Reached {consecutive_unavailable} consecutive unavailable logs "
-                                f"for {repo_name} - may be permission issue, stopping fetch"
-                            )
-                            break
-                        continue
-                    else:
-                        consecutive_unavailable = 0
-
                 builds.append(build_data)
 
                 if limit is not None and len(builds) >= limit:
@@ -175,7 +157,9 @@ class TravisCIProvider(CIProviderInterface):
 
         return builds[:limit] if limit else builds
 
-    async def _check_logs_available(self, client: httpx.AsyncClient, build_id: int) -> bool:
+    async def _check_logs_available(
+        self, client: httpx.AsyncClient, build_id: int
+    ) -> bool:
         """Check if logs are still available for a build."""
         base_url = self._get_base_url()
         jobs_url = f"{base_url}/build/{build_id}/jobs"
@@ -349,11 +333,15 @@ class TravisCIProvider(CIProviderInterface):
         # Parse timestamps
         created_at = None
         if build.get("started_at"):
-            created_at = datetime.fromisoformat(build["started_at"].replace("Z", "+00:00"))
+            created_at = datetime.fromisoformat(
+                build["started_at"].replace("Z", "+00:00")
+            )
 
         finished_at = None
         if build.get("finished_at"):
-            finished_at = datetime.fromisoformat(build["finished_at"].replace("Z", "+00:00"))
+            finished_at = datetime.fromisoformat(
+                build["finished_at"].replace("Z", "+00:00")
+            )
 
         # Duration
         duration = build.get("duration")
@@ -368,7 +356,9 @@ class TravisCIProvider(CIProviderInterface):
             branch=build.get("branch", {}).get("name") if build.get("branch") else None,
             commit_sha=commit.get("sha"),
             commit_message=commit.get("message"),
-            commit_author=(commit.get("author", {}).get("name") if commit.get("author") else None),
+            commit_author=(
+                commit.get("author", {}).get("name") if commit.get("author") else None
+            ),
             status=self.normalize_status(build.get("state", "unknown")),
             conclusion=self.normalize_conclusion(build.get("state")),
             created_at=created_at,
@@ -384,11 +374,15 @@ class TravisCIProvider(CIProviderInterface):
         """Parse Travis CI job to JobData."""
         started_at = None
         if job.get("started_at"):
-            started_at = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
+            started_at = datetime.fromisoformat(
+                job["started_at"].replace("Z", "+00:00")
+            )
 
         finished_at = None
         if job.get("finished_at"):
-            finished_at = datetime.fromisoformat(job["finished_at"].replace("Z", "+00:00"))
+            finished_at = datetime.fromisoformat(
+                job["finished_at"].replace("Z", "+00:00")
+            )
 
         duration = None
         if started_at and finished_at:

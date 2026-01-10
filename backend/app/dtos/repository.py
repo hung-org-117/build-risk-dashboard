@@ -33,10 +33,6 @@ class RepoImportRequest(BaseModel):
         le=365,
         description="Only ingest builds from the last N days",
     )
-    only_with_logs: bool = Field(
-        default=False,
-        description="Only ingest builds that still have logs available",
-    )
 
 
 class RepoResponse(BaseModel):

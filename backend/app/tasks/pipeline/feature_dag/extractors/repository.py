@@ -35,7 +35,7 @@ MAX_COMMITS_FOR_COMMENTS = 30  # Limit commits checked for GitHub API calls
 
 
 @tag(group="repo")
-def gh_repo_age(git_history: GitHistoryInput) -> Optional[float]:
+def repo_age_days(git_history: GitHistoryInput) -> Optional[float]:
     """
     Repository age in days.
     """
@@ -84,7 +84,7 @@ def gh_repo_age(git_history: GitHistoryInput) -> Optional[float]:
 
 
 @tag(group="repo")
-def gh_repo_num_commits(git_history: GitHistoryInput) -> Optional[int]:
+def repo_total_commits(git_history: GitHistoryInput) -> Optional[int]:
     """Total number of commits in repository history."""
     if not git_history.is_commit_available or not git_history.effective_sha:
         return None
@@ -109,16 +109,16 @@ def gh_repo_num_commits(git_history: GitHistoryInput) -> Optional[int]:
 
 @extract_fields(
     {
-        "gh_sloc": Optional[int],
-        "gh_test_lines_per_kloc": Optional[float],
-        "gh_test_cases_per_kloc": Optional[float],
-        "gh_asserts_cases_per_kloc": Optional[float],
+        "repo_sloc": Optional[int],
+        "repo_test_lines_per_kloc": Optional[float],
+        "repo_test_cases_per_kloc": Optional[float],
+        "repo_asserts_per_kloc": Optional[float],
     }
 )
 @tag(group="repo")
 def repo_code_metrics(
     git_worktree: GitWorktreeInput,
-    tr_log_lan_all: List[str],
+    repo_languages_all: List[str],
 ) -> Dict[str, Any]:
     """
     SLOC and test density metrics.
@@ -127,31 +127,31 @@ def repo_code_metrics(
     """
     if not git_worktree.is_ready or not git_worktree.worktree_path:
         return {
-            "gh_sloc": None,
-            "gh_test_lines_per_kloc": None,
-            "gh_test_cases_per_kloc": None,
-            "gh_asserts_cases_per_kloc": None,
+            "repo_sloc": None,
+            "repo_test_lines_per_kloc": None,
+            "repo_test_cases_per_kloc": None,
+            "repo_asserts_per_kloc": None,
         }
 
     worktree_path = git_worktree.worktree_path
-    languages = tr_log_lan_all
+    languages = repo_languages_all
 
     src_lines, test_lines, test_cases, asserts = _count_code_metrics(
         worktree_path, languages
     )
 
     metrics = {
-        "gh_sloc": src_lines,
-        "gh_test_lines_per_kloc": None,
-        "gh_test_cases_per_kloc": None,
-        "gh_asserts_cases_per_kloc": None,
+        "repo_sloc": src_lines,
+        "repo_test_lines_per_kloc": None,
+        "repo_test_cases_per_kloc": None,
+        "repo_asserts_per_kloc": None,
     }
 
     if src_lines > 0:
         kloc = src_lines / 1000.0
-        metrics["gh_test_lines_per_kloc"] = test_lines / kloc
-        metrics["gh_test_cases_per_kloc"] = test_cases / kloc
-        metrics["gh_asserts_cases_per_kloc"] = asserts / kloc
+        metrics["repo_test_lines_per_kloc"] = test_lines / kloc
+        metrics["repo_test_cases_per_kloc"] = test_cases / kloc
+        metrics["repo_asserts_per_kloc"] = asserts / kloc
 
     return metrics
 
@@ -228,10 +228,10 @@ def _count_code_metrics(
 
 @extract_fields(
     {
-        "gh_num_issue_comments": int,
-        "gh_num_commit_comments": int,
-        "gh_num_pr_comments": int,
-        "gh_description_complexity": Optional[int],
+        "pr_issue_comments": int,
+        "pr_commit_comments": int,
+        "pr_review_comments": int,
+        "pr_description_words": Optional[int],
     }
 )
 @tag(group="github")
@@ -240,16 +240,16 @@ def github_discussion_features(
     github_client: GitHubClientInput,
     repo: RepoInput,
     build_run: BuildRunInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
     raw_build_runs: RawBuildRunsCollection,
-    gh_pull_req_num: Optional[int],
-    gh_pr_created_at: Optional[str],
+    pr_number: Optional[int],
+    pr_created_at: Optional[str],
 ) -> Dict[str, Any]:
     client = github_client.client
     full_name = github_client.full_name
 
     # Get commit list
-    commits_to_check = git_all_built_commits
+    commits_to_check = git_built_commits
     if not commits_to_check:
         head_sha = build_run.commit_sha
         commits_to_check = [head_sha] if head_sha else []
@@ -283,51 +283,49 @@ def github_discussion_features(
     description_complexity = None
 
     # Use pr_number and pr_created_at from Hamilton DAG
-    pr_number = gh_pull_req_num
-    pr_created_at: Optional[datetime] = None
-    if gh_pr_created_at:
+    pr_num = pr_number
+    pr_created: Optional[datetime] = None
+    if pr_created_at:
         try:
-            pr_created_at = datetime.fromisoformat(
-                gh_pr_created_at.replace("Z", "+00:00")
-            )
+            pr_created = datetime.fromisoformat(pr_created_at.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
             pass
 
-    if pr_number:
+    if pr_num:
         try:
             # Fetch PR details for description complexity
-            pr_details = client.get_pull_request(full_name, pr_number)
+            pr_details = client.get_pull_request(full_name, pr_num)
 
             # Description complexity
             title = pr_details.get("title", "") or ""
             body = pr_details.get("body", "") or ""
             description_complexity = len(title.split()) + len(body.split())
 
-            # gh_num_issue_comments: Discussion comments on THIS PR
+            # pr_issue_comments: Discussion comments on THIS PR
             num_issue_comments = _count_pr_issue_comments(
                 client,
                 full_name,
-                pr_number,
-                from_time=pr_created_at,
+                pr_num,
+                from_time=pr_created,
                 to_time=build_start_time,
             )
 
-            # gh_num_pr_comments: Code review comments on THIS PR
+            # pr_review_comments: Code review comments on THIS PR
             num_pr_comments = _count_pr_review_comments(
                 client,
                 full_name,
-                pr_number,
-                from_time=prev_build_start_time or pr_created_at,
+                pr_num,
+                from_time=prev_build_start_time or pr_created,
                 to_time=build_start_time,
             )
         except Exception as e:
-            logger.warning(f"Failed to fetch PR data for #{pr_number}: {e}")
+            logger.warning(f"Failed to fetch PR data for #{pr_num}: {e}")
 
     return {
-        "gh_num_issue_comments": num_issue_comments,
-        "gh_num_commit_comments": num_commit_comments,
-        "gh_num_pr_comments": num_pr_comments,
-        "gh_description_complexity": description_complexity,
+        "pr_issue_comments": num_issue_comments,
+        "pr_commit_comments": num_commit_comments,
+        "pr_review_comments": num_pr_comments,
+        "pr_description_words": description_complexity,
     }
 
 
@@ -448,44 +446,3 @@ def _count_pr_review_comments(
     except Exception as e:
         logger.warning(f"Failed to count PR review comments: {e}")
         return 0
-
-
-@extract_fields(
-    {
-        "gh_has_bug_label": Optional[bool],
-    }
-)
-@tag(group="github")
-@with_retry(max_attempts=3)
-def gh_has_bug_label_feature(
-    gh_pull_req_num: Optional[int],
-    github_client: GitHubClientInput,
-) -> Dict[str, Any]:
-    """
-    Check if PR has bug-related labels.
-    Matches feature_extractors.py::extract_pr_features - checks for "bug" or "fix" in labels
-
-    Uses gh_pull_req_num from build_features.py as input.
-    """
-    result = {"gh_has_bug_label": False}
-
-    if not gh_pull_req_num:
-        return result
-
-    try:
-        full_name = github_client.full_name
-        pr_details = github_client.client.get_pull_request(full_name, gh_pull_req_num)
-
-        # Labels can be list of dicts with "name" key
-        labels = pr_details.get("labels", [])
-        label_names = [
-            lbl.get("name", "") if isinstance(lbl, dict) else str(lbl) for lbl in labels
-        ]
-
-        result["gh_has_bug_label"] = any(
-            "bug" in label.lower() or "fix" in label.lower() for label in label_names
-        )
-    except Exception as e:
-        logger.warning(f"Failed to fetch PR #{gh_pull_req_num} labels: {e}")
-
-    return result

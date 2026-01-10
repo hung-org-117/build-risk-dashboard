@@ -28,7 +28,7 @@ import type {
   DatasetRecord,
   DatasetTemplateRecord
 } from "@/types";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 
 
 
@@ -87,7 +87,7 @@ export default function DatasetsPage() {
   }, [loadDatasets]);
 
   // WebSocket subscription for real-time dataset updates
-  const { subscribe } = useWebSocket();
+  const { subscribe } = useSSE();
 
   useEffect(() => {
     const unsubscribe = subscribe("DATASET_UPDATE", (data: {

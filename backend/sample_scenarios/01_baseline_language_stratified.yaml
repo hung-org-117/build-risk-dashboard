@@ -1,0 +1,68 @@
+# =============================================================================
+# Scenario 1: Stratified Within Language Group (Baseline 70-15-15)
+# =============================================================================
+# Chia đều 70% train, 15% val, 15% test trong mỗi nhóm ngôn ngữ
+# Giữ nguyên tỷ lệ success/failure trong mỗi split
+
+scenario:
+  name: "baseline_language_stratified"
+  description: "Baseline split 70-15-15 stratified by language group"
+  version: "1.0"
+
+data_source:
+  repositories:
+    filter_by: "all"  # Lấy tất cả public repos
+  builds:
+    date_range:
+      start: "2024-01-01"
+      end: "2024-12-31"
+    conclusions: ["success", "failure"]
+    exclude_bots: true
+  ci_provider: "github_actions"
+
+features:
+  dag_features:
+    # New wildcard-friendly prefixes
+    - "build_*"      # Build metadata (ID, status, duration, timing)
+    - "git_*"        # Git operations (commits, branches, diffs)
+    - "log_*"        # Build logs (tests, frameworks)
+    - "repo_*"       # Repository stats (age, SLOC)
+    - "pr_*"         # Pull request info
+    - "team_*"       # Team metrics
+    - "history_*"    # Temporal features (prev builds, fail rates)
+    - "author_*"     # Author experience
+    - "devops_*"     # DevOps/CI config changes
+
+  # Optional: Scan metrics from security tools
+  scan_metrics:
+    sonarqube:
+      - "bugs"
+      - "vulnerabilities"
+      - "code_smells"
+      - "coverage"
+      - "duplicated_lines_density"
+    trivy:
+      - "critical"
+      - "high"
+      - "medium"
+      - "low"
+
+
+splitting:
+  strategy: "stratified_within_group"
+  group_by: "language_group"  # Groups: backend, fullstack, scripting, other
+  config:
+    ratios:
+      train: 0.70
+      val: 0.15
+      test: 0.15
+    stratify_by: "outcome"
+    
+# preprocessing:
+#   missing_values_strategy: "mean"  # or "fill", "drop"
+#   normalization_method: "z_score"  # or "min_max", "none"
+
+
+output:
+  format: "parquet"
+  include_metadata: true

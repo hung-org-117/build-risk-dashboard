@@ -61,14 +61,14 @@ export function EnrichmentPanel({
     const [currentRepo, setCurrentRepo] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    const wsRef = useRef<WebSocket | null>(null);
+    const eventSourceRef = useRef<EventSource | null>(null);
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Cleanup WebSocket on unmount
+    // Cleanup EventSource on unmount
     useEffect(() => {
         return () => {
-            if (wsRef.current) {
-                wsRef.current.close();
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
             }
             if (pollingRef.current) {
                 clearInterval(pollingRef.current);
@@ -124,7 +124,7 @@ export function EnrichmentPanel({
             setTotalRows(validation.total_rows);
 
             // Connect WebSocket
-            connectWebSocket(response.job_id);
+            connectSSE(response.job_id);
 
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to start enrichment");
@@ -132,16 +132,19 @@ export function EnrichmentPanel({
         }
     }, [datasetId, validation, selectedFeatures]);
 
-    // Connect to WebSocket for progress
-    const connectWebSocket = useCallback((jobId: string) => {
+    // Connect to SSE for progress
+    const connectSSE = useCallback((jobId: string) => {
         try {
-            const wsUrl = enrichmentApi.getWebSocketUrl(jobId);
-            const ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
+            const sseUrl = enrichmentApi.getSSEUrl(jobId);
+            const eventSource = new EventSource(sseUrl, { withCredentials: true });
+            eventSourceRef.current = eventSource;
 
-            ws.onmessage = (event) => {
+            eventSource.onmessage = (event) => {
                 try {
                     const data: EnrichmentWebSocketEvent = JSON.parse(event.data);
+
+                    // Skip heartbeats
+                    if (data.type === "heartbeat") return;
 
                     if (data.type === "progress") {
                         setProgress(data.progress_percent);
@@ -153,25 +156,22 @@ export function EnrichmentPanel({
                     } else if (data.type === "complete") {
                         setState(data.status === "completed" ? "completed" : "failed");
                         setProgress(100);
-                        ws.close();
+                        eventSource.close();
                         onEnrichmentComplete?.();
                     } else if (data.type === "error") {
                         setError(data.message);
                         setState("failed");
-                        ws.close();
+                        eventSource.close();
                     }
                 } catch (e) {
-                    console.error("WebSocket message parse error:", e);
+                    console.error("SSE message parse error:", e);
                 }
             };
 
-            ws.onerror = () => {
+            eventSource.onerror = () => {
+                eventSource.close();
                 // Fallback to polling
                 startPolling(jobId);
-            };
-
-            ws.onclose = () => {
-                wsRef.current = null;
             };
 
         } catch (err) {

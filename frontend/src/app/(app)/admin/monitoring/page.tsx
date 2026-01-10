@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import {
     SystemStatsCard,
     LogsViewer,
@@ -73,7 +73,7 @@ export default function MonitoringPage() {
     const [searchQuery, setSearchQuery] = useState("");
 
     // WebSocket
-    const { isConnected } = useWebSocket();
+    const { isConnected } = useSSE();
 
     // Fetch system stats
     const fetchSystemStats = useCallback(async () => {
@@ -138,21 +138,21 @@ export default function MonitoringPage() {
         fetchLogs();
     }, [fetchSystemStats, fetchLogs]);
 
-    // Real-time logs via WebSocket
+    // Real-time logs via SSE
     useEffect(() => {
         if (isPaused) return;
 
-        const wsUrl = (API_BASE.replace("http", "ws").replace("/api", "") + "/api/ws/logs");
-        const ws = new WebSocket(wsUrl);
+        const sseUrl = `${API_BASE}/sse/logs`;
+        const eventSource = new EventSource(sseUrl, { withCredentials: true });
 
-        ws.onopen = () => {
-            console.log("Connected to logs WebSocket");
+        eventSource.onopen = () => {
+            console.log("Connected to logs SSE");
         };
 
-        ws.onmessage = (event) => {
+        eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                if (data.type === "connected") return;
+                if (data.type === "connected" || data.type === "heartbeat") return;
 
                 const newLog: LogEntry = {
                     timestamp: data.timestamp || new Date().toISOString(),
@@ -163,20 +163,16 @@ export default function MonitoringPage() {
 
                 setLogs((prev) => [newLog, ...prev].slice(0, 200));
             } catch (error) {
-                console.error("Failed to parse WebSocket message:", error);
+                console.error("Failed to parse SSE message:", error);
             }
         };
 
-        ws.onerror = (error) => {
-            console.error("WebSocket error:", error);
-        };
-
-        ws.onclose = () => {
-            console.log("Logs WebSocket disconnected");
+        eventSource.onerror = (error) => {
+            console.error("SSE error:", error);
         };
 
         return () => {
-            ws.close();
+            eventSource.close();
         };
     }, [isPaused]);
 

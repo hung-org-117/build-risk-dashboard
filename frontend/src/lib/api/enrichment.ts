@@ -47,11 +47,8 @@ export const enrichmentApi = {
         return response.data;
     },
 
-    getWebSocketUrl: (jobId: string): string => {
-        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = process.env.NEXT_PUBLIC_API_URL
-            ?.replace(/^https?:\/\//, "")
-            ?.replace(/\/api\/?$/, "") || "localhost:8000";
-        return `${wsProtocol}//${host}/api/ws/enrichment/${jobId}`;
+    getSSEUrl: (jobId: string): string => {
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+        return `${baseUrl}/sse/enrichment/${jobId}`;
     },
 };

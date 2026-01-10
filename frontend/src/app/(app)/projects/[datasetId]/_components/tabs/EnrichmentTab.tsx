@@ -6,7 +6,7 @@ import { AlertCircle, Loader2, Sparkles } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import type { DatasetRecord } from "@/types";
 
 import { VersionHistoryTable } from "../VersionHistoryTable";
@@ -24,7 +24,7 @@ export function EnrichmentTab({
     onEnrichmentStatusChange,
 }: EnrichmentTabProps) {
     const router = useRouter();
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
 
     const {
         versions,

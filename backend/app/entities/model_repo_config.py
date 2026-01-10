@@ -61,10 +61,6 @@ class ModelRepoConfig(FeatureConfigBase):
         None,
         description="Only import builds from last N days (None = all time)",
     )
-    only_with_logs: bool = Field(
-        default=False,
-        description="Only import builds that have downloadable logs",
-    )
 
     # === STATUS (unified) ===
     status: ModelImportStatus = Field(

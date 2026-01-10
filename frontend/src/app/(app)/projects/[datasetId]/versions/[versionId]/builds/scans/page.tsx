@@ -12,6 +12,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import {
     Table,
     TableBody,
@@ -21,6 +22,7 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSSE } from "@/contexts/sse-context";
 import {
     CheckCircle2,
     ChevronLeft,
@@ -76,6 +78,7 @@ export default function ScansPage() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const pathname = usePathname();
+    const { subscribe } = useSSE();
 
     const activeTab = searchParams.get("tab") || "sonarqube";
 
@@ -86,7 +89,13 @@ export default function ScansPage() {
     const [retryAllLoading, setRetryAllLoading] = useState(false);
     const [sonarPage, setSonarPage] = useState(1);
     const [trivyPage, setTrivyPage] = useState(1);
-    // Removed local activeTab state
+    // Scan progress tracking
+    const [scanProgress, setScanProgress] = useState<{
+        scans_total: number;
+        scans_completed: number;
+        scans_failed: number;
+        scan_extraction_completed: boolean;
+    } | null>(null);
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     const handleTabChange = (value: string) => {
@@ -179,6 +188,21 @@ export default function ScansPage() {
             window.removeEventListener("SCAN_UPDATE", handleScanUpdate as EventListener);
         };
     }, [versionId, fetchScans]);
+
+    // Subscribe to SSE for enrichment scan progress updates
+    useEffect(() => {
+        const unsubscribe = subscribe("ENRICHMENT_UPDATE", (data: any) => {
+            if (data.version_id === versionId) {
+                setScanProgress({
+                    scans_total: data.scans_total ?? 0,
+                    scans_completed: data.scans_completed ?? 0,
+                    scans_failed: data.scans_failed ?? 0,
+                    scan_extraction_completed: data.scan_extraction_completed ?? false,
+                });
+            }
+        });
+        return () => unsubscribe();
+    }, [subscribe, versionId]);
 
     // Listen for SCAN_ERROR events (max retries exhausted)
     useEffect(() => {
@@ -395,58 +419,88 @@ export default function ScansPage() {
     }
 
     return (
-        <Card>
-            <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <CardTitle className="text-base">Integration Scans</CardTitle>
-                        <CardDescription>
-                            SonarQube and Trivy security scans
-                        </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleRetryAllFailed}
-                            disabled={retryAllLoading || totalFailedCount === 0}
-                            className={totalFailedCount === 0 ? "opacity-50" : ""}
-                        >
-                            {retryAllLoading ? (
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                            ) : (
-                                <RotateCcw className="h-4 w-4 mr-1" />
-                            )}
-                            Retry Failed ({totalFailedCount})
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => fetchScans()}>
-                            <RefreshCw className="h-4 w-4 mr-1" />
-                            Refresh
-                        </Button>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-                    <TabsList className="mb-4">
-                        <TabsTrigger value="sonarqube" className="flex items-center gap-2">
-                            <BarChart3 className="h-4 w-4 text-blue-600" />
-                            SonarQube
-                        </TabsTrigger>
-                        <TabsTrigger value="trivy" className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-green-600" />
-                            Trivy
-                        </TabsTrigger>
-                    </TabsList>
+        <div className="space-y-4">
+            {/* Scan Progress Banner */}
+            {scanProgress && scanProgress.scans_total > 0 && (
+                <Card>
+                    <CardContent className="py-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">Scan Progress</span>
+                            <span className="text-sm text-muted-foreground">
+                                {scanProgress.scans_completed}/{scanProgress.scans_total}
+                                {scanProgress.scans_failed > 0 && (
+                                    <span className="text-red-500 ml-1">({scanProgress.scans_failed} failed)</span>
+                                )}
+                            </span>
+                        </div>
+                        <Progress
+                            value={
+                                scanProgress.scans_total > 0
+                                    ? ((scanProgress.scans_completed + scanProgress.scans_failed) / scanProgress.scans_total) * 100
+                                    : 0
+                            }
+                            className="h-2"
+                        />
+                        {scanProgress.scan_extraction_completed && (
+                            <p className="text-xs text-green-600 mt-1">✓ All scans complete</p>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
 
-                    <TabsContent value="sonarqube">
-                        {renderScanTable(sonarData, "sonarqube", sonarPage, setSonarPage)}
-                    </TabsContent>
-                    <TabsContent value="trivy">
-                        {renderScanTable(trivyData, "trivy", trivyPage, setTrivyPage)}
-                    </TabsContent>
-                </Tabs>
-            </CardContent>
-        </Card>
+            <Card>
+                <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <CardTitle className="text-base">Integration Scans</CardTitle>
+                            <CardDescription>
+                                SonarQube and Trivy security scans
+                            </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleRetryAllFailed}
+                                disabled={retryAllLoading || totalFailedCount === 0}
+                                className={totalFailedCount === 0 ? "opacity-50" : ""}
+                            >
+                                {retryAllLoading ? (
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                ) : (
+                                    <RotateCcw className="h-4 w-4 mr-1" />
+                                )}
+                                Retry Failed ({totalFailedCount})
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => fetchScans()}>
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                                Refresh
+                            </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+                        <TabsList className="mb-4">
+                            <TabsTrigger value="sonarqube" className="flex items-center gap-2">
+                                <BarChart3 className="h-4 w-4 text-blue-600" />
+                                SonarQube
+                            </TabsTrigger>
+                            <TabsTrigger value="trivy" className="flex items-center gap-2">
+                                <Shield className="h-4 w-4 text-green-600" />
+                                Trivy
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="sonarqube">
+                            {renderScanTable(sonarData, "sonarqube", sonarPage, setSonarPage)}
+                        </TabsContent>
+                        <TabsContent value="trivy">
+                            {renderScanTable(trivyData, "trivy", trivyPage, setTrivyPage)}
+                        </TabsContent>
+                    </Tabs>
+                </CardContent>
+            </Card>
+        </div>
     );
 }

@@ -1,3 +1,12 @@
+"""
+Collaboration and Risk Features.
+
+Advanced features for build risk analysis:
+- Build history: history_prev_failed, history_fail_streak, history_fail_rate_10, history_avg_churn_5
+- Code entropy: git_change_entropy, git_files_modified_ratio, git_churn_vs_avg
+- Author experience: author_is_new, author_ownership, author_days_since_commit
+"""
+
 import collections
 import logging
 import math
@@ -43,46 +52,46 @@ def _calculate_shannon_entropy(file_changes: List[int]) -> float:
 
 @extract_fields(
     {
-        "is_prev_failed": Optional[bool],
-        "prev_fail_streak": Optional[int],
-        "fail_rate_last_10": Optional[float],
-        "avg_src_churn_last_5": Optional[float],
+        "history_prev_failed": Optional[bool],
+        "history_fail_streak": Optional[int],
+        "history_fail_rate_10": Optional[float],
+        "history_avg_churn_5": Optional[float],
     }
 )
-@tag(group="risk_temporal")
+@tag(group="history")
 def prev_build_history_features(
     raw_build_runs: RawBuildRunsCollection,
     feature_vectors: FeatureVectorsCollection,
     repo: RepoInput,
-    tr_prev_build: Optional[str],
+    history_prev_build_id: Optional[str],
 ) -> Dict[str, Any]:
     """
     Extract temporal features from previous builds based on LINEAR commit history.
 
-    Uses tr_prev_build (from git_commit_info) to correctly identify the previous
+    Uses history_prev_build_id (from git_commit_info) to correctly identify the previous
     build in the commit lineage, not just chronologically.
 
-    - is_prev_failed: True if last build (by commit lineage) failed
-    - prev_fail_streak: Count of consecutive failed builds following commit chain
-    - fail_rate_last_10: Failure rate in last 10 builds (by commit chain)
-    - avg_src_churn_last_5: Average git_diff_src_churn from last 5 builds (by commit chain)
+    - history_prev_failed: True if last build (by commit lineage) failed
+    - history_fail_streak: Count of consecutive failed builds following commit chain
+    - history_fail_rate_10: Failure rate in last 10 builds (by commit chain)
+    - history_avg_churn_5: Average git_diff_src_churn from last 5 builds (by commit chain)
     """
     from bson import ObjectId
 
     result = {
-        "is_prev_failed": None,
-        "prev_fail_streak": 0,
-        "fail_rate_last_10": 0.0,
-        "avg_src_churn_last_5": 0.0,
+        "history_prev_failed": None,
+        "history_fail_streak": 0,
+        "history_fail_rate_10": 0.0,
+        "history_avg_churn_5": 0.0,
     }
 
-    if not tr_prev_build:
+    if not history_prev_build_id:
         return result
 
     try:
-        # Walk backward through build chain using tr_prev_build links
+        # Walk backward through build chain using history_prev_build_id links
         prev_builds = []
-        current_build_id = tr_prev_build
+        current_build_id = history_prev_build_id
         max_lookback = 20
 
         while current_build_id and len(prev_builds) < max_lookback:
@@ -98,7 +107,7 @@ def prev_build_history_features(
 
             prev_builds.append(build_doc)
 
-            # Get next previous build from feature_vectors (which has tr_prev_build)
+            # Get next previous build from feature_vectors (which has history_prev_build_id)
             feature_doc = feature_vectors.find_one(
                 {
                     "raw_repo_id": ObjectId(repo.id),
@@ -106,11 +115,11 @@ def prev_build_history_features(
                 }
             )
 
-            # Use dedicated tr_prev_build field (or fallback to features dict)
+            # Use dedicated history_prev_build_id field (or fallback to features dict)
             if feature_doc:
-                next_build_id = feature_doc.get("tr_prev_build") or feature_doc.get(
-                    "features", {}
-                ).get("tr_prev_build")
+                next_build_id = feature_doc.get(
+                    "history_prev_build_id"
+                ) or feature_doc.get("features", {}).get("history_prev_build_id")
                 if next_build_id:
                     current_build_id = next_build_id
                 else:
@@ -121,15 +130,15 @@ def prev_build_history_features(
         if not prev_builds:
             return result
 
-        # 1. is_prev_failed - check last build's conclusion
+        # 1. history_prev_failed - check last build's conclusion
         last_build = prev_builds[0]
         last_conclusion = last_build.get("conclusion")
         if last_conclusion:
             if hasattr(last_conclusion, "value"):
                 last_conclusion = last_conclusion.value
-            result["is_prev_failed"] = str(last_conclusion).lower() == "failure"
+            result["history_prev_failed"] = str(last_conclusion).lower() == "failure"
 
-        # 2. prev_fail_streak - count consecutive failures
+        # 2. history_fail_streak - count consecutive failures
         streak = 0
         for b in prev_builds:
             conclusion = b.get("conclusion")
@@ -142,9 +151,9 @@ def prev_build_history_features(
                     break
             else:
                 break
-        result["prev_fail_streak"] = streak
+        result["history_fail_streak"] = streak
 
-        # 3. fail_rate_last_10 - failure rate in last 10 builds
+        # 3. history_fail_rate_10 - failure rate in last 10 builds
         last_10 = prev_builds[:10]
         if last_10:
             fail_count = 0
@@ -155,9 +164,9 @@ def prev_build_history_features(
                         conclusion = conclusion.value
                     if str(conclusion).lower() == "failure":
                         fail_count += 1
-            result["fail_rate_last_10"] = round(fail_count / len(last_10), 4)
+            result["history_fail_rate_10"] = round(fail_count / len(last_10), 4)
 
-        # 4. avg_src_churn_last_5 - average src churn from feature_vectors
+        # 4. history_avg_churn_5 - average src churn from feature_vectors
         # Use the same chain-based approach
         prev_feature_vectors = []
         for build_doc in prev_builds[:5]:
@@ -181,7 +190,9 @@ def prev_build_history_features(
                         src_churns.append(churn_val)
 
             if src_churns:
-                result["avg_src_churn_last_5"] = round(sum(src_churns) / len(src_churns), 2)
+                result["history_avg_churn_5"] = round(
+                    sum(src_churns) / len(src_churns), 2
+                )
 
     except Exception as e:
         logger.warning(f"Failed to calculate prev build history features: {e}")
@@ -189,10 +200,10 @@ def prev_build_history_features(
     return result
 
 
-@tag(group="risk_churn")
-def churn_ratio_vs_avg(
+@tag(group="git")
+def git_churn_vs_avg(
     git_diff_src_churn: int,
-    avg_src_churn_last_5: Optional[float],
+    history_avg_churn_5: Optional[float],
 ) -> float:
     """
     Compare current churn vs average of last 5 builds.
@@ -201,43 +212,47 @@ def churn_ratio_vs_avg(
     Formula: current_churn / (avg_churn + 1)
     The +1 prevents division by zero when avg is 0.
     """
-    avg = avg_src_churn_last_5 if avg_src_churn_last_5 is not None else 0.0
+    avg = history_avg_churn_5 if history_avg_churn_5 is not None else 0.0
     return round(git_diff_src_churn / (avg + 1), 4)
 
 
 @extract_fields(
     {
-        "change_entropy": Optional[float],
-        "files_modified_ratio": Optional[float],
+        "git_change_entropy": Optional[float],
+        "git_files_modified_ratio": Optional[float],
     }
 )
-@tag(group="risk_entropy")
+@tag(group="git")
 def change_entropy_features(
-    gh_diff_files_modified: int,
-    gh_diff_files_added: int,
-    gh_diff_files_deleted: int,
+    git_diff_files_modified: int,
+    git_diff_files_added: int,
+    git_diff_files_deleted: int,
     git_history: GitHistoryInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
 ) -> Dict[str, Any]:
     """
     Calculate entropy-based features.
 
-    change_entropy: Shannon entropy of changes across files.
+    git_change_entropy: Shannon entropy of changes across files.
     - Uses 'git show -m --name-only --format=' to get modified files for each commit
     - Counts occurrences of each file
     - Calculates Shannon entropy on the distribution
     """
     result = {
-        "change_entropy": 0.0,
-        "files_modified_ratio": 0.0,
+        "git_change_entropy": 0.0,
+        "git_files_modified_ratio": 0.0,
     }
 
-    # files_modified_ratio
-    total_files = gh_diff_files_modified + gh_diff_files_added + gh_diff_files_deleted
+    # git_files_modified_ratio
+    total_files = (
+        git_diff_files_modified + git_diff_files_added + git_diff_files_deleted
+    )
     if total_files > 0:
-        result["files_modified_ratio"] = round(gh_diff_files_modified / total_files, 4)
+        result["git_files_modified_ratio"] = round(
+            git_diff_files_modified / total_files, 4
+        )
 
-    # change_entropy
+    # git_change_entropy
     if not git_history.is_commit_available:
         return result
 
@@ -245,7 +260,7 @@ def change_entropy_features(
     file_counts = collections.Counter()
 
     try:
-        for sha in git_all_built_commits:
+        for sha in git_built_commits:
             # git show -m --name-only --format= SHA
             output = run_git(repo_path, ["show", "-m", "--name-only", "--format=", sha])
             if output:
@@ -254,7 +269,7 @@ def change_entropy_features(
                         file_counts[line.strip()] += 1
 
         if file_counts:
-            result["change_entropy"] = round(
+            result["git_change_entropy"] = round(
                 _calculate_shannon_entropy(list(file_counts.values())), 4
             )
 
@@ -266,45 +281,45 @@ def change_entropy_features(
 
 @extract_fields(
     {
-        "is_new_contributor": Optional[bool],
+        "author_is_new": Optional[bool],
         "author_ownership": Optional[float],
-        "days_since_last_author_commit": Optional[float],
+        "author_days_since_commit": Optional[float],
     }
 )
-@tag(group="risk_author")
+@tag(group="author")
 def author_experience_features(
     git_history: GitHistoryInput,
     build_run: BuildRunInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
 ) -> Dict[str, Any]:
     """
     Calculate author-based features matching original enrich features.
-    Optimized: combines author collection and is_new_contributor check in one loop.
+    Optimized: combines author collection and author_is_new check in one loop.
 
-    - is_new_contributor: True if any author's first commit was < 90 days ago
+    - author_is_new: True if any author's first commit was < 90 days ago
     - author_ownership: % of commits on touched files by build authors
-    - days_since_last_author_commit: Days since trigger author's previous commit
+    - author_days_since_commit: Days since trigger author's previous commit
     """
     result = {
-        "is_new_contributor": None,
+        "author_is_new": None,
         "author_ownership": 0.0,
-        "days_since_last_author_commit": None,
+        "author_days_since_commit": None,
     }
 
     if not git_history.is_commit_available:
         return result
 
     repo_path = git_history.path
-    if not git_all_built_commits:
+    if not git_built_commits:
         return result
 
     try:
-        # Optimized: Single loop to collect authors, files, and check is_new_contributor
+        # Optimized: Single loop to collect authors, files, and check author_is_new
         build_authors: set = set()
         author_emails: set = set()
         touched_files: set = set()
         is_new = False
-        first_commit_sha = git_all_built_commits[0]
+        first_commit_sha = git_built_commits[0]
         trigger_email = None
 
         # Normalize build_run.created_at once
@@ -312,7 +327,7 @@ def author_experience_features(
         if current_date and current_date.tzinfo:
             current_date = current_date.replace(tzinfo=None)
 
-        for idx, sha in enumerate(git_all_built_commits):
+        for idx, sha in enumerate(git_built_commits):
             # Get author name AND email in one git command
             author_info = run_git(repo_path, ["show", "--format=%an|%ae", "-s", sha])
             if author_info:
@@ -325,7 +340,7 @@ def author_experience_features(
                     if idx == 0:
                         trigger_email = auth_email
 
-                    # Check is_new_contributor (only if not already found)
+                    # Check author_is_new (only if not already found)
                     if not is_new and auth_email not in author_emails and current_date:
                         author_emails.add(auth_email)
                         first_commit_ts_str = run_git(
@@ -342,7 +357,9 @@ def author_experience_features(
                         if first_commit_ts_str:
                             try:
                                 first_commit_ts = int(first_commit_ts_str.strip())
-                                first_commit_date = datetime.fromtimestamp(first_commit_ts, tz=None)
+                                first_commit_date = datetime.fromtimestamp(
+                                    first_commit_ts, tz=None
+                                )
                                 days_since = (current_date - first_commit_date).days
                                 if 0 <= days_since < 90:
                                     is_new = True
@@ -353,7 +370,7 @@ def author_experience_features(
             files = get_files_in_commit(repo_path, sha)
             touched_files.update(files)
 
-        result["is_new_contributor"] = is_new
+        result["author_is_new"] = is_new
 
         # 2. author_ownership - with file limit for performance
         if touched_files and build_authors:
@@ -391,11 +408,17 @@ def author_experience_features(
             if total_commits > 0:
                 result["author_ownership"] = round(owned_commits / total_commits, 4)
 
-        # 3. days_since_last_author_commit - use cached trigger_email
+        # 3. author_days_since_commit - use cached trigger_email
         if trigger_email and current_date:
             prev_commit_output = run_git(
                 repo_path,
-                ["log", "--author=" + trigger_email, "-2", "--format=%ct", first_commit_sha],
+                [
+                    "log",
+                    "--author=" + trigger_email,
+                    "-2",
+                    "--format=%ct",
+                    first_commit_sha,
+                ],
             )
 
             if prev_commit_output:
@@ -405,68 +428,11 @@ def author_experience_features(
                         prev_ts = int(lines[1])
                         prev_date = datetime.fromtimestamp(prev_ts, tz=None)
                         diff_days = (current_date - prev_date).days
-                        result["days_since_last_author_commit"] = max(0.0, float(diff_days))
+                        result["author_days_since_commit"] = max(0.0, float(diff_days))
                     except Exception:
                         pass
 
     except Exception as e:
         logger.warning(f"Failed to calculate author features: {e}")
-
-    return result
-
-
-@extract_fields(
-    {
-        "build_time_sin": Optional[float],
-        "build_time_cos": Optional[float],
-        "build_hour_risk_score": Optional[float],
-    }
-)
-@tag(group="risk_time")
-def build_time_risk_features(
-    build_run: BuildRunInput,
-) -> Dict[str, Any]:
-    """
-    Calculate time-based risk features.
-    build_time_sin/cos: Cyclic encoding of hour of day.
-    build_hour_risk_score:
-    - 1.0: Night (0-5h) - Fatigue
-    - 0.9: Friday afternoon (after 16h)
-    - 0.8: Weekend
-    - 0.1: Normal hours
-    """
-    import math
-
-    result = {
-        "build_time_sin": 0.0,
-        "build_time_cos": 1.0,
-        "build_hour_risk_score": 0.1,  # Default to normal hours
-    }
-
-    if not build_run.created_at:
-        return result
-
-    try:
-        hour = build_run.created_at.hour
-        day_of_week = build_run.created_at.weekday()  # 0=Monday, 6=Sunday
-
-        # Cyclic encoding
-        result["build_time_sin"] = round(math.sin(2 * math.pi * hour / 24), 4)
-        result["build_time_cos"] = round(math.cos(2 * math.pi * hour / 24), 4)
-
-        # Risk score based on time (matching original exactly)
-        if 0 <= hour < 5:
-            risk = 1.0  # Night - Fatigue
-        elif day_of_week == 4 and hour >= 16:  # Friday afternoon
-            risk = 0.9
-        elif day_of_week >= 5:  # Weekend
-            risk = 0.8
-        else:
-            risk = 0.1  # Normal hours
-
-        result["build_hour_risk_score"] = risk
-
-    except Exception:
-        pass
 
     return result

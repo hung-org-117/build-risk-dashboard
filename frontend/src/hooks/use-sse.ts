@@ -2,83 +2,84 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-function buildWebSocketUrl(path: string): string {
-    const wsProtocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = process.env.NEXT_PUBLIC_API_URL
-        ?.replace(/^https?:\/\//, "")
-        ?.replace(/\/api\/?$/, "") || "localhost:8000";
+function buildSSEUrl(path: string): string {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-    return `${wsProtocol}//${host}${normalizedPath}`;
+    return `${baseUrl}${normalizedPath}`;
 }
 
-export interface UseWebSocketOptions {
+export interface UseSSEOptions {
     path: string;
     autoConnect?: boolean;
     reconnectDelay?: number;
     onMessage?: (data: any) => void;
     onOpen?: () => void;
-    onClose?: () => void;
     onError?: (error: Event) => void;
 }
 
-export interface UseWebSocketReturn {
+export interface UseSSEReturn {
     isConnected: boolean;
     connect: () => void;
     disconnect: () => void;
-    send: (data: any) => void;
 }
 
-export function useDynamicWebSocket({
+/**
+ * Hook for connecting to a specific SSE endpoint.
+ * 
+ * @example
+ * const { isConnected } = useSSE({
+ *   path: `/sse/enrichment/${jobId}`,
+ *   onMessage: (data) => console.log('Progress:', data),
+ * });
+ */
+export function useSSE({
     path,
     autoConnect = true,
     reconnectDelay = 5000,
     onMessage,
     onOpen,
-    onClose,
     onError,
-}: UseWebSocketOptions): UseWebSocketReturn {
+}: UseSSEOptions): UseSSEReturn {
     const [isConnected, setIsConnected] = useState(false);
-    const wsRef = useRef<WebSocket | null>(null);
+    const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef(true);
 
     const onMessageRef = useRef(onMessage);
     const onOpenRef = useRef(onOpen);
-    const onCloseRef = useRef(onClose);
     const onErrorRef = useRef(onError);
 
     useEffect(() => {
         onMessageRef.current = onMessage;
         onOpenRef.current = onOpen;
-        onCloseRef.current = onClose;
         onErrorRef.current = onError;
-    }, [onMessage, onOpen, onClose, onError]);
+    }, [onMessage, onOpen, onError]);
 
     const disconnect = useCallback(() => {
         if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
         }
-        if (wsRef.current) {
-            wsRef.current.close();
-            wsRef.current = null;
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
         }
         setIsConnected(false);
     }, []);
 
     const connect = useCallback(() => {
-        // Don't connect if already connected or connecting
-        if (wsRef.current?.readyState === WebSocket.OPEN ||
-            wsRef.current?.readyState === WebSocket.CONNECTING) {
+        // Don't connect if already connected
+        if (eventSourceRef.current?.readyState === EventSource.OPEN ||
+            eventSourceRef.current?.readyState === EventSource.CONNECTING) {
             return;
         }
 
         try {
-            const wsUrl = buildWebSocketUrl(path);
-            const ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
+            const sseUrl = buildSSEUrl(path);
+            const eventSource = new EventSource(sseUrl, { withCredentials: true });
+            eventSourceRef.current = eventSource;
 
-            ws.onopen = () => {
+            eventSource.onopen = () => {
                 if (!isMountedRef.current) return;
                 setIsConnected(true);
                 if (reconnectTimeoutRef.current) {
@@ -88,10 +89,14 @@ export function useDynamicWebSocket({
                 onOpenRef.current?.();
             };
 
-            ws.onmessage = (event) => {
+            eventSource.onmessage = (event) => {
                 if (!isMountedRef.current) return;
                 try {
                     const data = JSON.parse(event.data);
+
+                    // Skip heartbeats
+                    if (data.type === "heartbeat") return;
+
                     onMessageRef.current?.(data);
                 } catch {
                     // If not JSON, pass raw data
@@ -99,39 +104,27 @@ export function useDynamicWebSocket({
                 }
             };
 
-            ws.onclose = () => {
+            eventSource.onerror = (error) => {
                 if (!isMountedRef.current) return;
                 setIsConnected(false);
-                wsRef.current = null;
-                onCloseRef.current?.();
+                onErrorRef.current?.(error);
+                eventSource.close();
+                eventSourceRef.current = null;
 
                 // Auto-reconnect if enabled
                 if (reconnectDelay > 0 && !reconnectTimeoutRef.current) {
                     reconnectTimeoutRef.current = setTimeout(() => {
                         if (isMountedRef.current) {
+                            reconnectTimeoutRef.current = null;
                             connect();
                         }
                     }, reconnectDelay);
                 }
             };
-
-            ws.onerror = (error) => {
-                if (!isMountedRef.current) return;
-                onErrorRef.current?.(error);
-            };
         } catch (err) {
-            console.error("WebSocket connection error:", err);
+            console.error("SSE connection error:", err);
         }
     }, [path, reconnectDelay]);
-
-    const send = useCallback((data: any) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-            const message = typeof data === "string" ? data : JSON.stringify(data);
-            wsRef.current.send(message);
-        } else {
-            console.warn("WebSocket is not connected. Message not sent.");
-        }
-    }, []);
 
     // Auto-connect on mount
     useEffect(() => {
@@ -149,6 +142,5 @@ export function useDynamicWebSocket({
         isConnected,
         connect,
         disconnect,
-        send,
     };
 }

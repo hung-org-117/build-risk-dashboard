@@ -18,6 +18,12 @@ from .model_repo_config import ModelRepoConfigRepository
 from .model_training_build import ModelTrainingBuildRepository
 from .notification import NotificationRepository
 
+# ML Scenario Builder repositories
+from .ml_scenario import MLScenarioRepository
+from .ml_scenario_import_build import MLScenarioImportBuildRepository
+from .ml_scenario_enrichment_build import MLScenarioEnrichmentBuildRepository
+from .ml_dataset_split import MLDatasetSplitRepository
+
 # Other repositories
 # from .github_installation import GithubInstallationRepository
 from .oauth_identity import OAuthIdentityRepository
@@ -47,4 +53,9 @@ __all__ = [
     "NotificationRepository",
     # Data Quality
     "DataQualityRepository",
+    # ML Scenario Builder
+    "MLScenarioRepository",
+    "MLScenarioImportBuildRepository",
+    "MLScenarioEnrichmentBuildRepository",
+    "MLDatasetSplitRepository",
 ]

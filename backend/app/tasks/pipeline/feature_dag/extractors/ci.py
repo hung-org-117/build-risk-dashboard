@@ -1,11 +1,12 @@
 """
-Log-based Features for Hamilton Pipeline.
+Log and DevOps Features for Hamilton Pipeline.
 
-Extracts test results and other metrics from CI build logs:
-- tr_log_tests_run_sum, tr_log_tests_failed_sum, tr_log_tests_skipped_sum, tr_log_tests_ok_sum
-- tr_log_tests_fail_rate
-- tr_log_testduration_sum
-- tr_log_frameworks_all
+Extracts test results and DevOps file metrics from CI build logs:
+- log_tests_run, log_tests_failed, log_tests_skipped, log_tests_passed
+- log_tests_fail_rate
+- log_test_duration_sec
+- log_test_frameworks
+- devops_files_changed, devops_lines_changed, devops_tools_detected
 """
 
 import logging
@@ -33,16 +34,16 @@ logger = logging.getLogger(__name__)
 
 @extract_fields(
     {
-        "tr_log_frameworks_all": list,
-        "tr_log_tests_run_sum": int,
-        "tr_log_tests_failed_sum": int,
-        "tr_log_tests_skipped_sum": int,
-        "tr_log_tests_ok_sum": int,
-        "tr_log_tests_fail_rate": float,
-        "tr_log_testduration_sum": float,
+        "log_test_frameworks": list,
+        "log_tests_run": int,
+        "log_tests_failed": int,
+        "log_tests_skipped": int,
+        "log_tests_passed": int,
+        "log_tests_fail_rate": float,
+        "log_test_duration_sec": float,
     }
 )
-@tag(group="build_log")
+@tag(group="log")
 @requires_config(
     test_frameworks={
         "type": "list",
@@ -54,20 +55,20 @@ logger = logging.getLogger(__name__)
 )
 def test_log_features(
     build_logs: BuildLogsInput,
-    tr_log_lan_all: List[str],
+    repo_languages_all: List[str],
     feature_config: FeatureConfigInput,
 ) -> Dict[str, Any]:
     """
     Parse CI build logs and extract test results.
 
     Returns aggregated test metrics across all job logs:
-    - tr_log_frameworks_all: List of detected test frameworks
-    - tr_log_tests_run_sum: Total tests run
-    - tr_log_tests_failed_sum: Total tests failed
-    - tr_log_tests_skipped_sum: Total tests skipped
-    - tr_log_tests_ok_sum: Total tests passed
-    - tr_log_tests_fail_rate: Failure rate (failed/run)
-    - tr_log_testduration_sum: Total test duration in seconds
+    - log_test_frameworks: List of detected test frameworks
+    - log_tests_run: Total tests run
+    - log_tests_failed: Total tests failed
+    - log_tests_skipped: Total tests skipped
+    - log_tests_passed: Total tests passed
+    - log_tests_fail_rate: Failure rate (failed/run)
+    - log_test_duration_sec: Total test duration in seconds
     """
     if not build_logs.is_available:
         return _empty_test_results()
@@ -81,7 +82,7 @@ def test_log_features(
     tests_ok_sum = 0
     test_duration_sum = 0.0
 
-    language_hints = tr_log_lan_all
+    language_hints = repo_languages_all
     allowed_frameworks = _get_allowed_frameworks(feature_config)
 
     for log_path_str in build_logs.log_files:
@@ -129,26 +130,26 @@ def test_log_features(
     fail_rate = tests_failed_sum / tests_run_sum if tests_run_sum > 0 else 0.0
 
     return {
-        "tr_log_frameworks_all": list(frameworks),
-        "tr_log_tests_run_sum": tests_run_sum,
-        "tr_log_tests_failed_sum": tests_failed_sum,
-        "tr_log_tests_skipped_sum": tests_skipped_sum,
-        "tr_log_tests_ok_sum": tests_ok_sum,
-        "tr_log_tests_fail_rate": fail_rate,
-        "tr_log_testduration_sum": test_duration_sum,
+        "log_test_frameworks": list(frameworks),
+        "log_tests_run": tests_run_sum,
+        "log_tests_failed": tests_failed_sum,
+        "log_tests_skipped": tests_skipped_sum,
+        "log_tests_passed": tests_ok_sum,
+        "log_tests_fail_rate": fail_rate,
+        "log_test_duration_sec": test_duration_sum,
     }
 
 
 def _empty_test_results() -> Dict[str, Any]:
     """Return empty test results when logs are unavailable."""
     return {
-        "tr_log_frameworks_all": [],
-        "tr_log_tests_run_sum": 0,
-        "tr_log_tests_failed_sum": 0,
-        "tr_log_tests_skipped_sum": 0,
-        "tr_log_tests_ok_sum": 0,
-        "tr_log_tests_fail_rate": 0.0,
-        "tr_log_testduration_sum": 0.0,
+        "log_test_frameworks": [],
+        "log_tests_run": 0,
+        "log_tests_failed": 0,
+        "log_tests_skipped": 0,
+        "log_tests_passed": 0,
+        "log_tests_fail_rate": 0.0,
+        "log_test_duration_sec": 0.0,
     }
 
 
@@ -157,11 +158,13 @@ def _get_allowed_frameworks(feature_config: FeatureConfigInput) -> Optional[List
     test_frameworks = feature_config.get("test_frameworks", [])
     if not test_frameworks:
         return None
-    return [f.lower() if isinstance(f, str) else str(f).lower() for f in test_frameworks]
+    return [
+        f.lower() if isinstance(f, str) else str(f).lower() for f in test_frameworks
+    ]
 
 
-@tag(group="build_log")
-def tr_log_num_jobs(build_logs: BuildLogsInput) -> int:
+@tag(group="log")
+def log_jobs_count(build_logs: BuildLogsInput) -> int:
     """
     Get number of job log files.
 
@@ -172,8 +175,8 @@ def tr_log_num_jobs(build_logs: BuildLogsInput) -> int:
     return len(build_logs.log_files)
 
 
-@tag(group="build_log")
-def tr_jobs(build_logs: BuildLogsInput) -> str:
+@tag(group="log")
+def log_job_ids(build_logs: BuildLogsInput) -> str:
     """
     Get job IDs from the build logs.
 
@@ -195,7 +198,6 @@ def tr_jobs(build_logs: BuildLogsInput) -> str:
     return ",".join(job_ids)
 
 
-# DevOps File Detection Patterns
 # CI/CD tool patterns - mapped by tool name
 CI_TOOL_PATTERNS: Dict[str, List[str]] = {
     "Jenkins": [r".*Jenkinsfile$"],
@@ -361,15 +363,7 @@ EXCLUDE_PATTERNS = [
 
 
 def _is_devops_file(filepath: str) -> bool:
-    """
-    Check if a file is a DevOps/CI configuration file.
-
-    Args:
-        filepath: File path to check
-
-    Returns:
-        True if file is a DevOps file, False otherwise
-    """
+    """Check if a file is a DevOps/CI configuration file."""
     filepath_lower = filepath.lower()
 
     # Check exclusions first
@@ -409,15 +403,7 @@ def _is_devops_file(filepath: str) -> bool:
 
 
 def _get_devops_tool(filepath: str) -> Optional[str]:
-    """
-    Identify which DevOps tool a file belongs to.
-
-    Args:
-        filepath: File path to check
-
-    Returns:
-        Tool name if identified, None otherwise
-    """
+    """Identify which DevOps tool a file belongs to."""
     filepath_lower = filepath.lower()
 
     # Check CI tools
@@ -443,31 +429,31 @@ def _get_devops_tool(filepath: str) -> Optional[str]:
 
 @extract_fields(
     {
-        "num_of_devops_files": int,
-        "devops_change_size": int,
-        "devops_tools_used": list,
+        "devops_files_changed": int,
+        "devops_lines_changed": int,
+        "devops_tools_detected": list,
     }
 )
 @tag(group="devops")
 def devops_file_features(
     git_history: GitHistoryInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
 ) -> Dict[str, Any]:
     """
     Extract DevOps file metrics from build commits.
 
     Features:
-    - num_of_devops_files: Count of unique DevOps files changed
-    - devops_change_size: Total lines changed in DevOps files
-    - devops_tools_used: List of DevOps tools detected
+    - devops_files_changed: Count of unique DevOps files changed
+    - devops_lines_changed: Total lines changed in DevOps files
+    - devops_tools_detected: List of DevOps tools detected
 
     Analyzes all commits included in this build.
     """
     if not git_history.is_commit_available or not git_history.effective_sha:
         return {
-            "num_of_devops_files": 0,
-            "devops_change_size": 0,
-            "devops_tools_used": [],
+            "devops_files_changed": 0,
+            "devops_lines_changed": 0,
+            "devops_tools_detected": [],
         }
 
     repo_path = git_history.path
@@ -476,12 +462,14 @@ def devops_file_features(
     total_change_size = 0
 
     # Determine diff range
-    commits_to_analyze = git_all_built_commits or [git_history.effective_sha]
+    commits_to_analyze = git_built_commits or [git_history.effective_sha]
 
     for commit_sha in commits_to_analyze:
         try:
             # Get files changed in this commit with their stats
-            files_changed, change_sizes = _get_commit_file_changes(repo_path, commit_sha)
+            files_changed, change_sizes = _get_commit_file_changes(
+                repo_path, commit_sha
+            )
 
             for filepath, change_size in zip(files_changed, change_sizes, strict=False):
                 if _is_devops_file(filepath):
@@ -496,23 +484,19 @@ def devops_file_features(
             logger.warning(f"Failed to analyze commit {commit_sha[:8]}: {e}")
 
     return {
-        "num_of_devops_files": len(devops_files),
-        "devops_change_size": total_change_size,
-        "devops_tools_used": sorted(devops_tools),
+        "devops_files_changed": len(devops_files),
+        "devops_lines_changed": total_change_size,
+        "devops_tools_detected": sorted(devops_tools),
     }
 
 
-def _get_commit_file_changes(repo_path: Path, commit_sha: str) -> Tuple[List[str], List[int]]:
-    """
-    Get files changed in a commit with their line change counts.
-
-    Returns:
-        Tuple of (file_paths, change_sizes)
-    """
+def _get_commit_file_changes(
+    repo_path: Path, commit_sha: str
+) -> Tuple[List[str], List[int]]:
+    """Get files changed in a commit with their line change counts."""
     import subprocess
 
     try:
-        # git diff-tree --numstat for file-level change counts
         result = subprocess.run(
             ["git", "diff-tree", "--no-commit-id", "--numstat", "-r", commit_sha],
             cwd=str(repo_path),

@@ -24,6 +24,8 @@ celery_app = Celery(
         "app.tasks.sonar",
         "app.tasks.trivy",
         "app.tasks.shared.ingestion_tasks",
+        "app.tasks.ml_scenario_tasks",  # ML Scenario Builder
+        "app.tasks.ml_scenario_scan_helpers",  # ML Scenario Scan Dispatch
     ],
 )
 
@@ -77,6 +79,22 @@ celery_app.conf.update(
             "dataset_validation",
             Exchange("buildguard"),
             routing_key="pipeline.dataset_validation",
+        ),
+        # ML Scenario Pipeline Queues (separate from dataset enrichment)
+        Queue(
+            "scenario_ingestion",
+            Exchange("buildguard"),
+            routing_key="pipeline.scenario_ingestion",
+        ),
+        Queue(
+            "scenario_processing",
+            Exchange("buildguard"),
+            routing_key="pipeline.scenario_processing",
+        ),
+        Queue(
+            "scenario_scanning",
+            Exchange("buildguard"),
+            routing_key="pipeline.scenario_scanning",
         ),
         # Sonar: CPU-intensive external tool, long-running
         Queue(

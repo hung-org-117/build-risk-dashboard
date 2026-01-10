@@ -21,7 +21,7 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import { useToast } from "@/components/ui/use-toast";
 import { buildApi, reposApi } from "@/lib/api";
 import type { Build, RepoDetail } from "@/types";
@@ -44,7 +44,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
     const [retryIngestionLoading, setRetryIngestionLoading] = useState(false);
     const [retryProcessingLoading, setRetryProcessingLoading] = useState(false);
 
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
     const { toast } = useToast();
 
     const loadRepo = useCallback(async () => {

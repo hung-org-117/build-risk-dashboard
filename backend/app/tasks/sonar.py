@@ -15,7 +15,6 @@ from app.database.mongo import get_database
 from app.integrations.tools.sonarqube.exporter import MetricsExporter
 from app.integrations.tools.sonarqube.tool import SonarQubeTool
 from app.paths import get_worktree_path
-from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.dataset_version import DatasetVersionRepository
 from app.repositories.sonar_commit_scan import SonarCommitScanRepository
 from app.tasks.base import PipelineTask, SafeTask, TaskState
@@ -195,13 +194,17 @@ def export_metrics_from_webhook(
     db = get_database()
     scan_repo = SonarCommitScanRepository(db)
     version_repo = DatasetVersionRepository(db)
-    enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
 
     # Find scan record
     scan_record = scan_repo.find_by_component_key(component_key)
     if not scan_record:
         logger.warning(f"No scan record found for {component_key}")
         return {"status": "no_scan_record", "component_key": component_key}
+
+    # Detect pipeline type for context-aware operations
+    from app.tasks.shared.pipeline_context import PipelineContext
+
+    pipeline_ctx = PipelineContext.detect(db, str(scan_record.dataset_version_id))
 
     try:
         # Handle failed analysis
@@ -219,17 +222,21 @@ def export_metrics_from_webhook(
                 error=error_msg,
             )
 
-            version_repo.increment_scans_failed(str(scan_record.dataset_version_id))
-            try:
-                from app.services.notification_service import (
-                    check_and_notify_enrichment_completed,
-                )
+            # Increment scans_failed (context-aware for version or scenario)
+            from app.tasks.shared.scan_context_helpers import (
+                check_and_mark_scans_completed,
+                increment_scan_failed,
+            )
 
-                check_and_notify_enrichment_completed(
-                    db=db, version_id=str(scan_record.dataset_version_id)
-                )
+            increment_scan_failed(db, str(scan_record.dataset_version_id))
+            check_and_mark_scans_completed(db, str(scan_record.dataset_version_id))
+
+            # Context-aware notification (works for both DatasetVersion and MLScenario)
+            try:
+                if pipeline_ctx:
+                    pipeline_ctx.check_and_notify_completed()
             except Exception as e:
-                logger.warning(f"Failed to check enrichment notification: {e}")
+                logger.warning(f"Failed to check completion notification: {e}")
 
             return {"status": "failed", "component_key": component_key}
 
@@ -255,13 +262,17 @@ def export_metrics_from_webhook(
             scan_repo.mark_failed(scan_record.id, "No metrics available")
             return {"status": "no_metrics", "component_key": component_key}
 
-        # Backfill to all builds in version with matching commit
-        updated_count = enrichment_build_repo.backfill_by_commit_in_version(
-            version_id=scan_record.dataset_version_id,
-            commit_sha=scan_record.commit_sha,
-            scan_features=metrics,
-            prefix="sonar_",
-        )
+        # Context-aware backfill (works for both DatasetVersion and MLScenario)
+        from app.tasks.shared.pipeline_context import PipelineContext
+
+        pipeline_ctx = PipelineContext.detect(db, str(scan_record.dataset_version_id))
+        updated_count = 0
+        if pipeline_ctx:
+            updated_count = pipeline_ctx.backfill_scan_metrics_by_commit(
+                commit_sha=scan_record.commit_sha,
+                scan_features=metrics,
+                prefix="sonar_",
+            )
 
         # Mark completed (store raw metrics for debugging)
         scan_repo.mark_completed(scan_record.id, metrics, updated_count)
@@ -282,19 +293,21 @@ def export_metrics_from_webhook(
             builds_affected=updated_count,
         )
 
-        version_repo.increment_scans_completed(str(scan_record.dataset_version_id))
+        # Increment scans_completed (context-aware for version or scenario)
+        from app.tasks.shared.scan_context_helpers import (
+            increment_scan_completed,
+            check_and_mark_scans_completed,
+        )
 
-        # Check if all scans are complete for enrichment notification
+        increment_scan_completed(db, str(scan_record.dataset_version_id))
+        check_and_mark_scans_completed(db, str(scan_record.dataset_version_id))
+
+        # Context-aware notification (works for both DatasetVersion and MLScenario)
         try:
-            from app.services.notification_service import (
-                check_and_notify_enrichment_completed,
-            )
-
-            check_and_notify_enrichment_completed(
-                db=db, version_id=str(scan_record.dataset_version_id)
-            )
+            if pipeline_ctx:
+                pipeline_ctx.check_and_notify_completed()
         except Exception as e:
-            logger.warning(f"Failed to check enrichment notification: {e}")
+            logger.warning(f"Failed to check completion notification: {e}")
 
         return {
             "status": "success",

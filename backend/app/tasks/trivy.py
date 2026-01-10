@@ -15,7 +15,6 @@ from app.celery_app import celery_app
 from app.database.mongo import get_database
 from app.integrations.tools.trivy import TrivyTool
 from app.paths import get_worktree_path
-from app.repositories.dataset_enrichment_build import DatasetEnrichmentBuildRepository
 from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 from app.tasks.base import SafeTask, TaskState
 from app.tasks.shared.events import publish_scan_update
@@ -63,7 +62,11 @@ def start_trivy_scan_for_version_commit(
 
     db = get_database()
     trivy_scan_repo = TrivyCommitScanRepository(db)
-    enrichment_build_repo = DatasetEnrichmentBuildRepository(db)
+
+    # Detect pipeline type from version_id (can be DatasetVersion or MLScenario)
+    from app.tasks.shared.pipeline_context import PipelineContext
+
+    pipeline_ctx = PipelineContext.detect(db, version_id)
 
     # Pre-validation: Create or get scan record
     scan_record = trivy_scan_repo.create_or_get(
@@ -87,18 +90,19 @@ def start_trivy_scan_for_version_commit(
             status="failed",
             error=error_msg,
         )
-        # Increment scans_failed counter
+        # Increment scans_failed counter (context-aware for version or scenario)
         try:
-            from app.repositories.dataset_version import DatasetVersionRepository
-
-            version_repo = DatasetVersionRepository(db)
-            version_repo.increment_scans_failed(version_id)
-            # Check if all scans are now done (even with failures)
-            from app.services.notification_service import (
-                check_and_notify_enrichment_completed,
+            from app.tasks.shared.scan_context_helpers import (
+                check_and_mark_scans_completed,
+                increment_scan_failed,
             )
 
-            check_and_notify_enrichment_completed(db=db, version_id=version_id)
+            increment_scan_failed(db, version_id)
+            check_and_mark_scans_completed(db, version_id)
+
+            # Context-aware notification (works for both DatasetVersion and MLScenario)
+            if pipeline_ctx:
+                pipeline_ctx.check_and_notify_completed()
         except Exception as e:
             logger.warning(f"Failed to update scan failure stats: {e}")
 
@@ -178,12 +182,14 @@ def start_trivy_scan_for_version_commit(
 
             filtered_metrics = _filter_trivy_metrics(raw_metrics, selected_metrics)
 
-            updated_count = enrichment_build_repo.backfill_by_commit_in_version(
-                version_id=ObjectId(version_id),
-                commit_sha=commit_sha,
-                scan_features=filtered_metrics,
-                prefix="trivy_",
-            )
+            # Context-aware backfill (works for both DatasetVersion and MLScenario)
+            updated_count = 0
+            if pipeline_ctx:
+                updated_count = pipeline_ctx.backfill_scan_metrics_by_commit(
+                    commit_sha=commit_sha,
+                    scan_features=filtered_metrics,
+                    prefix="trivy_",
+                )
 
             trivy_scan_repo.mark_completed(
                 scan_id=scan_record.id,
@@ -207,11 +213,14 @@ def start_trivy_scan_for_version_commit(
                 builds_affected=updated_count,
             )
 
-            # Increment scans_completed counter
-            from app.repositories.dataset_version import DatasetVersionRepository
+            # Increment scans_completed counter (context-aware for version or scenario)
+            from app.tasks.shared.scan_context_helpers import (
+                check_and_mark_scans_completed,
+                increment_scan_completed,
+            )
 
-            version_repo = DatasetVersionRepository(db)
-            version_repo.increment_scans_completed(version_id)
+            increment_scan_completed(db, version_id)
+            check_and_mark_scans_completed(db, version_id)
 
             state.meta["result"] = {
                 "status": "success",
@@ -220,16 +229,13 @@ def start_trivy_scan_for_version_commit(
                 "scan_duration_ms": scan_duration_ms,
             }
 
-            # Check if all scans are complete for enrichment notification
+            # Context-aware notification (works for both DatasetVersion and MLScenario)
             try:
-                from app.services.notification_service import (
-                    check_and_notify_enrichment_completed,
-                )
-
-                check_and_notify_enrichment_completed(db=db, version_id=version_id)
+                if pipeline_ctx:
+                    pipeline_ctx.check_and_notify_completed()
             except Exception as e:
                 logger.warning(
-                    f"{corr_prefix} Failed to check enrichment notification: {e}"
+                    f"{corr_prefix} Failed to check completion notification: {e}"
                 )
 
             state.phase = "DONE"

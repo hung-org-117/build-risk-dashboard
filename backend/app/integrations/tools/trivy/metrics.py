@@ -152,6 +152,3 @@ TRIVY_METRICS: List[MetricDefinition] = [
         example_value="true",
     ),
 ]
-
-# Backward compatibility alias
-TRIVY_VULN_METRICS = TRIVY_METRICS

@@ -111,8 +111,8 @@ class ModelBuildService:
                         or raw.get("commit_sha", ""),
                         branch=raw.get("branch", ""),
                         created_at=training.get("build_created_at")
-                        or raw.get("created_at"),
-                        completed_at=raw.get("completed_at"),
+                        or raw.get("run_created_at"),
+                        completed_at=raw.get("run_completed_at"),
                         duration_seconds=raw.get("duration_seconds"),
                         web_url=raw.get("web_url"),
                         logs_available=raw.get("logs_available"),
@@ -143,7 +143,7 @@ class ModelBuildService:
             total = self.db.raw_build_runs.count_documents(query)
             raw_cursor = (
                 self.db.raw_build_runs.find(query)
-                .sort("created_at", -1)
+                .sort("run_created_at", -1)
                 .skip(skip)
                 .limit(limit)
             )
@@ -175,8 +175,8 @@ class ModelBuildService:
                         conclusion=raw.get("conclusion", "unknown"),
                         commit_sha=raw.get("commit_sha", ""),
                         branch=raw.get("branch", ""),
-                        created_at=raw.get("created_at"),
-                        completed_at=raw.get("completed_at"),
+                        created_at=raw.get("run_created_at"),
+                        completed_at=raw.get("run_completed_at"),
                         duration_seconds=raw.get("duration_seconds"),
                         web_url=raw.get("web_url"),
                         logs_available=raw.get("logs_available"),
@@ -266,8 +266,8 @@ class ModelBuildService:
             branch=raw.branch or "",
             commit_message=raw.commit_message,
             commit_author=raw.commit_author,
-            created_at=raw.created_at,
-            completed_at=raw.completed_at,
+            created_at=raw.run_created_at,
+            completed_at=raw.run_completed_at,
             duration_seconds=raw.duration_seconds,
             web_url=raw.web_url,
             provider=raw.provider or "github_actions",
@@ -339,7 +339,7 @@ class ModelBuildService:
         query = {"raw_repo_id": {"$in": raw_repo_ids}}
 
         raw_cursor = (
-            self.db.raw_build_runs.find(query).sort("created_at", -1).limit(limit)
+            self.db.raw_build_runs.find(query).sort("run_created_at", -1).limit(limit)
         )
         raw_builds = list(raw_cursor)
 
@@ -364,8 +364,8 @@ class ModelBuildService:
                     conclusion=raw.get("conclusion", "unknown"),
                     commit_sha=raw.get("commit_sha", ""),
                     branch=raw.get("branch", ""),
-                    created_at=raw.get("created_at"),
-                    completed_at=raw.get("completed_at"),
+                    created_at=raw.get("run_created_at"),
+                    completed_at=raw.get("run_completed_at"),
                     duration_seconds=raw.get("duration_seconds"),
                     web_url=raw.get("web_url"),
                     logs_available=raw.get("logs_available"),
@@ -450,8 +450,8 @@ class ModelBuildService:
                 }
             },
             {"$unwind": {"path": "$raw_build_run", "preserveNullAndEmptyArrays": True}},
-            # Sort by RawBuildRun.created_at (build creation time on CI)
-            {"$sort": {"raw_build_run.created_at": -1}},
+            # Sort by RawBuildRun.run_created_at (build creation time on CI)
+            {"$sort": {"raw_build_run.run_created_at": -1}},
             {"$skip": skip},
             {"$limit": limit},
         ]
@@ -484,7 +484,7 @@ class ModelBuildService:
                     commit_sha=imp.get("commit_sha") or raw.get("commit_sha", ""),
                     branch=raw.get("branch", ""),
                     conclusion=raw.get("conclusion", "unknown"),
-                    created_at=raw.get("created_at"),
+                    created_at=raw.get("run_created_at"),
                     web_url=raw.get("web_url"),
                     commit_message=raw.get("commit_message"),
                     commit_author=raw.get("commit_author"),
@@ -586,7 +586,7 @@ class ModelBuildService:
                     branch=raw.get("branch", ""),
                     conclusion=raw.get("conclusion", "unknown"),
                     created_at=training.get("build_created_at")
-                    or raw.get("created_at"),
+                    or raw.get("run_created_at"),
                     web_url=raw.get("web_url"),
                     extraction_status=training.get("extraction_status", "pending"),
                     extraction_error=training.get("extraction_error"),
@@ -722,7 +722,7 @@ class ModelBuildService:
                 }
             },
             # Sort by build creation time (newest first)
-            {"$sort": {"raw_build_run.created_at": -1}},
+            {"$sort": {"raw_build_run.run_created_at": -1}},
         ]
 
         # Apply phase filter in pipeline if needed
@@ -784,7 +784,7 @@ class ModelBuildService:
                     or raw_build.get("commit_sha", ""),
                     branch=raw_build.get("branch", ""),
                     ci_conclusion=raw_build.get("conclusion", "unknown"),
-                    created_at=raw_build.get("created_at"),
+                    created_at=raw_build.get("run_created_at"),
                     web_url=raw_build.get("web_url"),
                     commit_message=raw_build.get("commit_message"),
                     commit_author=raw_build.get("commit_author"),

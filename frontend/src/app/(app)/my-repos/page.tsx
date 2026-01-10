@@ -18,14 +18,14 @@ import { Button } from "@/components/ui/button";
 import { reposApi } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import type { RepositoryRecord } from "@/types";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import { ImportProgressDisplay } from "@/components/repositories/ImportProgressDisplay";
 
 const PAGE_SIZE = 20;
 
 export default function UserReposPage() {
     const router = useRouter();
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
 
     const [repositories, setRepositories] = useState<RepositoryRecord[]>([]);
     const [loading, setLoading] = useState(true);

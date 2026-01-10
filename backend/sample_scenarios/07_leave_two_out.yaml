@@ -1,0 +1,33 @@
+# =============================================================================
+# Scenario 7: Leave-Two-Out for Novelty Testing
+# =============================================================================
+# 2 language groups → Test (kiểm tra generalization lớn)
+# 1 language group → Validation
+# Còn lại → Train
+
+scenario:
+  name: "leave_two_out_novelty"
+  description: "Leave two language groups out for extreme novelty testing"
+  version: "1.0"
+
+data_source:
+  repositories:
+    filter_by: "all"
+  builds:
+    date_range:
+      start: "2024-01-01"
+      end: "2024-12-31"
+    conclusions: ["success", "failure"]
+    exclude_bots: true
+
+splitting:
+  strategy: "leave_two_out"
+  group_by: "language_group"
+  config:
+    test_groups: ["backend", "scripting"]    # Python/Java/Go + Bash/Shell → Test
+    val_groups: ["fullstack"]                 # JavaScript/TypeScript → Val
+    train_groups: ["other"]                   # Còn lại → Train
+
+output:
+  format: "csv"  # Use CSV for easier inspection
+  include_metadata: true

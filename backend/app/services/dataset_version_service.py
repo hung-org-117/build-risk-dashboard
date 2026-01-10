@@ -857,9 +857,9 @@ class DatasetVersionService:
                 if hasattr(raw_build_run.conclusion, "value")
                 else str(raw_build_run.conclusion)
             ),
-            created_at=raw_build_run.created_at,
-            started_at=raw_build_run.started_at,
-            completed_at=raw_build_run.completed_at,
+            created_at=raw_build_run.run_created_at,
+            started_at=raw_build_run.run_started_at,
+            completed_at=raw_build_run.run_completed_at,
             duration_seconds=raw_build_run.duration_seconds,
             web_url=raw_build_run.web_url,
             provider=(

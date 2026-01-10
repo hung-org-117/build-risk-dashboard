@@ -1,0 +1,37 @@
+# =============================================================================
+# Scenario 4: Extreme Novelty - Python Failures to Test
+# =============================================================================
+# Tất cả builds Python + Failure → Test only
+# Training chỉ có Python + Success và các ngôn ngữ khác
+# Mục đích: Test xem model có learn được failure patterns khi chưa thấy Python failures
+
+scenario:
+  name: "extreme_novelty_python_failures"
+  description: "Extreme novelty: all Python failures go to test only"
+  version: "1.0"
+
+data_source:
+  repositories:
+    filter_by: "all"
+  builds:
+    date_range:
+      start: "2024-01-01"
+      end: "2024-12-31"
+    conclusions: ["success", "failure"]
+    exclude_bots: true
+
+splitting:
+  strategy: "extreme_novelty"
+  group_by: "language_group"
+  config:
+    novelty_group: "backend"     # Python maps to "backend" group
+    novelty_label: 1             # Label 1 = failure
+    # All samples with (group=backend AND label=1) → Test
+    # Remaining samples split for train/val
+    ratios:
+      train: 0.85
+      val: 0.15
+
+output:
+  format: "parquet"
+  include_metadata: true

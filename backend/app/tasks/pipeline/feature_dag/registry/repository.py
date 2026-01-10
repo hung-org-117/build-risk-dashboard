@@ -10,8 +10,9 @@ from app.tasks.pipeline.feature_dag._types import (
 )
 
 REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
-    "gh_num_issue_comments": FeatureDefinition(
-        name="gh_num_issue_comments",
+    # === PR Discussion ===
+    "pr_issue_comments": FeatureDefinition(
+        name="pr_issue_comments",
         display_name="Issue Comments",
         description="Number of issue/discussion comments on the PR",
         category=FeatureCategory.DISCUSSION,
@@ -19,8 +20,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
     ),
-    "gh_num_commit_comments": FeatureDefinition(
-        name="gh_num_commit_comments",
+    "pr_commit_comments": FeatureDefinition(
+        name="pr_commit_comments",
         display_name="Commit Comments",
         description="Number of comments on commits in this build",
         category=FeatureCategory.DISCUSSION,
@@ -28,8 +29,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API],
     ),
-    "gh_num_pr_comments": FeatureDefinition(
-        name="gh_num_pr_comments",
+    "pr_review_comments": FeatureDefinition(
+        name="pr_review_comments",
         display_name="PR Review Comments",
         description="Number of code review comments on the PR",
         category=FeatureCategory.DISCUSSION,
@@ -37,8 +38,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
     ),
-    "gh_description_complexity": FeatureDefinition(
-        name="gh_description_complexity",
+    "pr_description_words": FeatureDefinition(
+        name="pr_description_words",
         display_name="Description Complexity",
         description="Word count of PR title + body",
         category=FeatureCategory.DISCUSSION,
@@ -47,8 +48,9 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.GITHUB_API],
         nullable=True,
     ),
-    "gh_repo_age": FeatureDefinition(
-        name="gh_repo_age",
+    # === Repository Stats ===
+    "repo_age_days": FeatureDefinition(
+        name="repo_age_days",
         display_name="Repository Age",
         description="Repository age in days (from first commit to build commit)",
         category=FeatureCategory.REPO_SNAPSHOT,
@@ -57,8 +59,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.GIT_HISTORY],
         unit="days",
     ),
-    "gh_repo_num_commits": FeatureDefinition(
-        name="gh_repo_num_commits",
+    "repo_total_commits": FeatureDefinition(
+        name="repo_total_commits",
         display_name="Total Commits",
         description="Total number of commits in repository history",
         category=FeatureCategory.REPO_SNAPSHOT,
@@ -66,8 +68,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_HISTORY],
     ),
-    "gh_sloc": FeatureDefinition(
-        name="gh_sloc",
+    "repo_sloc": FeatureDefinition(
+        name="repo_sloc",
         display_name="Source Lines of Code",
         description="Total source lines of code (excluding comments)",
         category=FeatureCategory.REPO_SNAPSHOT,
@@ -76,8 +78,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
     ),
-    "gh_test_lines_per_kloc": FeatureDefinition(
-        name="gh_test_lines_per_kloc",
+    "repo_test_lines_per_kloc": FeatureDefinition(
+        name="repo_test_lines_per_kloc",
         display_name="Test Lines / KLOC",
         description="Test lines per 1000 lines of source code",
         category=FeatureCategory.REPO_SNAPSHOT,
@@ -86,8 +88,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
     ),
-    "gh_test_cases_per_kloc": FeatureDefinition(
-        name="gh_test_cases_per_kloc",
+    "repo_test_cases_per_kloc": FeatureDefinition(
+        name="repo_test_cases_per_kloc",
         display_name="Test Cases / KLOC",
         description="Test cases per 1000 lines of source code",
         category=FeatureCategory.REPO_SNAPSHOT,
@@ -96,8 +98,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
     ),
-    "gh_asserts_cases_per_kloc": FeatureDefinition(
-        name="gh_asserts_cases_per_kloc",
+    "repo_asserts_per_kloc": FeatureDefinition(
+        name="repo_asserts_per_kloc",
         display_name="Assertions / KLOC",
         description="Assertions per 1000 lines of source code",
         category=FeatureCategory.REPO_SNAPSHOT,

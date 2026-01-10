@@ -1,4 +1,4 @@
-"""Feature definitions for Ci domain."""
+"""Feature definitions for CI/DevOps domain."""
 
 from typing import Dict
 
@@ -11,8 +11,9 @@ from app.tasks.pipeline.feature_dag._types import (
 )
 
 CI_FEATURES: Dict[str, FeatureDefinition] = {
-    "num_of_devops_files": FeatureDefinition(
-        name="num_of_devops_files",
+    # === DevOps ===
+    "devops_files_changed": FeatureDefinition(
+        name="devops_files_changed",
         display_name="DevOps Files Changed",
         description="Count of DevOps/CI configuration files changed in build",
         category=FeatureCategory.DEVOPS,
@@ -20,8 +21,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.GIT_HISTORY],
     ),
-    "devops_change_size": FeatureDefinition(
-        name="devops_change_size",
+    "devops_lines_changed": FeatureDefinition(
+        name="devops_lines_changed",
         display_name="DevOps Change Size",
         description="Total lines changed in DevOps files",
         category=FeatureCategory.DEVOPS,
@@ -29,8 +30,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.GIT_HISTORY],
     ),
-    "devops_tools_used": FeatureDefinition(
-        name="devops_tools_used",
+    "devops_tools_detected": FeatureDefinition(
+        name="devops_tools_detected",
         display_name="DevOps Tools",
         description="List of DevOps tools detected (Docker, K8s, etc.)",
         category=FeatureCategory.DEVOPS,
@@ -39,8 +40,9 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.GIT_HISTORY],
         output_format=OutputFormat.COMMA_SEPARATED,
     ),
-    "tr_log_frameworks_all": FeatureDefinition(
-        name="tr_log_frameworks_all",
+    # === Build Logs ===
+    "log_test_frameworks": FeatureDefinition(
+        name="log_test_frameworks",
         display_name="Test Frameworks",
         description="List of detected test frameworks",
         category=FeatureCategory.BUILD_LOG,
@@ -49,8 +51,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_LOGS],
         output_format=OutputFormat.COMMA_SEPARATED,
     ),
-    "tr_log_tests_run_sum": FeatureDefinition(
-        name="tr_log_tests_run_sum",
+    "log_tests_run": FeatureDefinition(
+        name="log_tests_run",
         display_name="Tests Run",
         description="Total tests run across all jobs",
         category=FeatureCategory.BUILD_LOG,
@@ -58,8 +60,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
     ),
-    "tr_log_tests_failed_sum": FeatureDefinition(
-        name="tr_log_tests_failed_sum",
+    "log_tests_failed": FeatureDefinition(
+        name="log_tests_failed",
         display_name="Tests Failed",
         description="Total tests failed across all jobs",
         category=FeatureCategory.BUILD_LOG,
@@ -67,8 +69,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
     ),
-    "tr_log_tests_skipped_sum": FeatureDefinition(
-        name="tr_log_tests_skipped_sum",
+    "log_tests_skipped": FeatureDefinition(
+        name="log_tests_skipped",
         display_name="Tests Skipped",
         description="Total tests skipped across all jobs",
         category=FeatureCategory.BUILD_LOG,
@@ -76,8 +78,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
     ),
-    "tr_log_tests_ok_sum": FeatureDefinition(
-        name="tr_log_tests_ok_sum",
+    "log_tests_passed": FeatureDefinition(
+        name="log_tests_passed",
         display_name="Tests Passed",
         description="Total tests passed across all jobs",
         category=FeatureCategory.BUILD_LOG,
@@ -85,8 +87,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
     ),
-    "tr_log_tests_fail_rate": FeatureDefinition(
-        name="tr_log_tests_fail_rate",
+    "log_tests_fail_rate": FeatureDefinition(
+        name="log_tests_fail_rate",
         display_name="Test Fail Rate",
         description="Failure rate (failed / run)",
         category=FeatureCategory.BUILD_LOG,
@@ -95,8 +97,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_LOGS],
         valid_range=(0.0, 1.0),
     ),
-    "tr_log_testduration_sum": FeatureDefinition(
-        name="tr_log_testduration_sum",
+    "log_test_duration_sec": FeatureDefinition(
+        name="log_test_duration_sec",
         display_name="Test Duration",
         description="Total test duration in seconds",
         category=FeatureCategory.BUILD_LOG,
@@ -105,8 +107,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_LOGS],
         unit="seconds",
     ),
-    "tr_log_num_jobs": FeatureDefinition(
-        name="tr_log_num_jobs",
+    "log_jobs_count": FeatureDefinition(
+        name="log_jobs_count",
         display_name="Number of Jobs",
         description="Number of job logs parsed from CI build",
         category=FeatureCategory.BUILD_LOG,
@@ -114,8 +116,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
     ),
-    "tr_jobs": FeatureDefinition(
-        name="tr_jobs",
+    "log_job_ids": FeatureDefinition(
+        name="log_job_ids",
         display_name="Job IDs",
         description="IDs of jobs in the CI build, comma-separated",
         category=FeatureCategory.BUILD_LOG,

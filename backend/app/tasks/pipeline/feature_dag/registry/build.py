@@ -11,8 +11,9 @@ from app.tasks.pipeline.feature_dag._types import (
 )
 
 BUILD_FEATURES: Dict[str, FeatureDefinition] = {
-    "tr_build_id": FeatureDefinition(
-        name="tr_build_id",
+    # === Build Metadata ===
+    "build_id": FeatureDefinition(
+        name="build_id",
         display_name="Build ID",
         description="Unique identifier for the workflow run",
         category=FeatureCategory.WORKFLOW,
@@ -20,8 +21,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
     ),
-    "tr_build_number": FeatureDefinition(
-        name="tr_build_number",
+    "build_number": FeatureDefinition(
+        name="build_number",
         display_name="Build Number",
         description="Sequential build number for this workflow",
         category=FeatureCategory.WORKFLOW,
@@ -29,17 +30,17 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
     ),
-    "tr_original_commit": FeatureDefinition(
-        name="tr_original_commit",
-        display_name="Original Commit",
+    "build_trigger_sha": FeatureDefinition(
+        name="build_trigger_sha",
+        display_name="Trigger Commit SHA",
         description="Original commit SHA that triggered the build",
         category=FeatureCategory.WORKFLOW,
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
     ),
-    "tr_status": FeatureDefinition(
-        name="tr_status",
+    "build_status": FeatureDefinition(
+        name="build_status",
         display_name="Build Status",
         description="Normalized build status (passed, failed, cancelled, errored)",
         category=FeatureCategory.WORKFLOW,
@@ -48,8 +49,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         valid_values=["passed", "failed", "cancelled", "errored", "unknown"],
     ),
-    "tr_status_num": FeatureDefinition(
-        name="tr_status_num",
+    "build_status_num": FeatureDefinition(
+        name="build_status_num",
         display_name="Build Status Numeric",
         description="Numeric build status for model input (0=passed, 1=failed, -1=other)",
         category=FeatureCategory.WORKFLOW,
@@ -58,8 +59,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         valid_values=[-1, 0, 1],
     ),
-    "tr_duration": FeatureDefinition(
-        name="tr_duration",
+    "build_duration_sec": FeatureDefinition(
+        name="build_duration_sec",
         display_name="Build Duration",
         description="Build duration in seconds",
         category=FeatureCategory.WORKFLOW,
@@ -68,45 +69,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         unit="seconds",
     ),
-    "tr_log_lan_all": FeatureDefinition(
-        name="tr_log_lan_all",
-        display_name="Source Languages",
-        description="All source languages for the repository",
-        category=FeatureCategory.METADATA,
-        data_type=FeatureDataType.LIST_STRING,
-        extractor_node="build",
-        required_resources=[FeatureResource.REPO],
-        output_format=OutputFormat.COMMA_SEPARATED,
-    ),
-    "gh_project_name": FeatureDefinition(
-        name="gh_project_name",
-        display_name="Project Name",
-        description="Full repository name (owner/repo)",
-        category=FeatureCategory.METADATA,
-        data_type=FeatureDataType.STRING,
-        extractor_node="build",
-        required_resources=[FeatureResource.REPO],
-    ),
-    "gh_lang": FeatureDefinition(
-        name="gh_lang",
-        display_name="Primary Language",
-        description="Primary programming language of the repository",
-        category=FeatureCategory.METADATA,
-        data_type=FeatureDataType.STRING,
-        extractor_node="build",
-        required_resources=[FeatureResource.REPO],
-    ),
-    "ci_provider": FeatureDefinition(
-        name="ci_provider",
-        display_name="CI Provider",
-        description="CI/CD provider name (github_actions, travis, circleci)",
-        category=FeatureCategory.WORKFLOW,
-        data_type=FeatureDataType.STRING,
-        extractor_node="build",
-        required_resources=[FeatureResource.BUILD_RUN],
-    ),
-    "gh_build_started_at": FeatureDefinition(
-        name="gh_build_started_at",
+    "build_started_at": FeatureDefinition(
+        name="build_started_at",
         display_name="Build Started At",
         description="Build start timestamp in ISO format",
         category=FeatureCategory.WORKFLOW,
@@ -114,47 +78,35 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
     ),
-    "gh_is_pr": FeatureDefinition(
-        name="gh_is_pr",
-        display_name="Is PR Build",
-        description="Whether this build is triggered by a pull request",
-        category=FeatureCategory.PR_INFO,
-        data_type=FeatureDataType.BOOLEAN,
+    "build_ci_provider": FeatureDefinition(
+        name="build_ci_provider",
+        display_name="CI Provider",
+        description="CI/CD provider name (github_actions, travis, circleci)",
+        category=FeatureCategory.WORKFLOW,
+        data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
     ),
-    "gh_pull_req_num": FeatureDefinition(
-        name="gh_pull_req_num",
-        display_name="PR Number",
-        description="Pull request number (works with all CI providers)",
-        category=FeatureCategory.PR_INFO,
-        data_type=FeatureDataType.INTEGER,
-        extractor_node="build",
-        required_resources=[FeatureResource.BUILD_RUN],
-        nullable=True,
-    ),
-    "gh_pr_created_at": FeatureDefinition(
-        name="gh_pr_created_at",
-        display_name="PR Created At",
-        description="Pull request creation timestamp from GitHub API",
-        category=FeatureCategory.PR_INFO,
-        data_type=FeatureDataType.DATETIME,
-        extractor_node="build",
-        required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
-        nullable=True,
-    ),
-    "day_week": FeatureDefinition(
-        name="day_week",
+    "build_day_of_week": FeatureDefinition(
+        name="build_day_of_week",
         display_name="Day of Week",
         description="Day of week when build was triggered (Monday-Sunday)",
         category=FeatureCategory.METADATA,
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
-        valid_values=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+        valid_values=[
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ],
     ),
-    "time_of_day": FeatureDefinition(
-        name="time_of_day",
+    "build_hour": FeatureDefinition(
+        name="build_hour",
         display_name="Hour of Day",
         description="Hour when build was triggered (0-23 UTC)",
         category=FeatureCategory.METADATA,
@@ -163,8 +115,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(0, 23),
     ),
-    "build_time_sin": FeatureDefinition(
-        name="build_time_sin",
+    "build_hour_sin": FeatureDefinition(
+        name="build_hour_sin",
         display_name="Build Time Sine",
         description="Sine encoding of build hour for cyclic representation",
         category=FeatureCategory.METADATA,
@@ -173,8 +125,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(-1.0, 1.0),
     ),
-    "build_time_cos": FeatureDefinition(
-        name="build_time_cos",
+    "build_hour_cos": FeatureDefinition(
+        name="build_hour_cos",
         display_name="Build Time Cosine",
         description="Cosine encoding of build hour for cyclic representation",
         category=FeatureCategory.METADATA,
@@ -183,8 +135,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(-1.0, 1.0),
     ),
-    "build_hour_risk_score": FeatureDefinition(
-        name="build_hour_risk_score",
+    "build_hour_risk": FeatureDefinition(
+        name="build_hour_risk",
         display_name="Build Hour Risk Score",
         description="Risk score based on build hour (higher at night)",
         category=FeatureCategory.METADATA,
@@ -193,8 +145,67 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
-    "gh_has_bug_label": FeatureDefinition(
-        name="gh_has_bug_label",
+    # === Repository Metadata ===
+    "repo_full_name": FeatureDefinition(
+        name="repo_full_name",
+        display_name="Repository Name",
+        description="Full repository name (owner/repo)",
+        category=FeatureCategory.METADATA,
+        data_type=FeatureDataType.STRING,
+        extractor_node="build",
+        required_resources=[FeatureResource.REPO],
+    ),
+    "repo_language": FeatureDefinition(
+        name="repo_language",
+        display_name="Primary Language",
+        description="Primary programming language of the repository",
+        category=FeatureCategory.METADATA,
+        data_type=FeatureDataType.STRING,
+        extractor_node="build",
+        required_resources=[FeatureResource.REPO],
+    ),
+    "repo_languages_all": FeatureDefinition(
+        name="repo_languages_all",
+        display_name="Source Languages",
+        description="All source languages for the repository",
+        category=FeatureCategory.METADATA,
+        data_type=FeatureDataType.LIST_STRING,
+        extractor_node="build",
+        required_resources=[FeatureResource.REPO],
+        output_format=OutputFormat.COMMA_SEPARATED,
+    ),
+    # === PR Info ===
+    "pr_is_triggered": FeatureDefinition(
+        name="pr_is_triggered",
+        display_name="Is PR Build",
+        description="Whether this build is triggered by a pull request",
+        category=FeatureCategory.PR_INFO,
+        data_type=FeatureDataType.BOOLEAN,
+        extractor_node="build",
+        required_resources=[FeatureResource.BUILD_RUN],
+    ),
+    "pr_number": FeatureDefinition(
+        name="pr_number",
+        display_name="PR Number",
+        description="Pull request number (works with all CI providers)",
+        category=FeatureCategory.PR_INFO,
+        data_type=FeatureDataType.INTEGER,
+        extractor_node="build",
+        required_resources=[FeatureResource.BUILD_RUN],
+        nullable=True,
+    ),
+    "pr_created_at": FeatureDefinition(
+        name="pr_created_at",
+        display_name="PR Created At",
+        description="Pull request creation timestamp from GitHub API",
+        category=FeatureCategory.PR_INFO,
+        data_type=FeatureDataType.DATETIME,
+        extractor_node="build",
+        required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
+        nullable=True,
+    ),
+    "pr_has_bug_label": FeatureDefinition(
+        name="pr_has_bug_label",
         display_name="Has Bug Label",
         description="Whether the PR has any bug-related labels",
         category=FeatureCategory.PR_INFO,

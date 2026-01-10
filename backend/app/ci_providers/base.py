@@ -31,7 +31,6 @@ class CIProviderInterface(ABC):
         limit: Optional[int] = None,
         page: int = 1,
         branch: Optional[str] = None,
-        only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
     ) -> List[BuildData]:
@@ -44,7 +43,6 @@ class CIProviderInterface(ABC):
             limit: Maximum number of builds per page (default: 100)
             page: Page number for pagination (1-indexed)
             branch: Filter by branch name
-            only_with_logs: If True, only fetch builds with available logs
             exclude_bots: If True, skip builds triggered by bot commits
             only_completed: If True, only fetch builds that have completed
 
@@ -133,7 +131,7 @@ class CIProviderInterface(ABC):
         # Completed status means the build has finished (regardless of conclusion)
         return build_data.status == BuildStatus.COMPLETED
 
-    def wait_rate_limit(self) -> None:
+    def wait_rate_limit(self) -> None:  # noqa: B027
         """
         Wait if necessary to respect provider-specific rate limits.
 

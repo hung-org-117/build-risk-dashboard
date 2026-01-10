@@ -13,8 +13,6 @@ from typing import List, Optional
 
 import httpx
 
-from app.config import settings
-
 from .base import CIProviderInterface
 from .factory import CIProviderRegistry
 from .models import (
@@ -73,7 +71,9 @@ class CircleCIProvider(CIProviderInterface):
         return self.config.base_url or CIRCLECI_API_BASE
 
     def _get_project_slug(self, repo_name: str) -> str:
-        if "/" in repo_name and not repo_name.startswith(("gh/", "bb/", "github/", "bitbucket/")):
+        if "/" in repo_name and not repo_name.startswith(
+            ("gh/", "bb/", "github/", "bitbucket/")
+        ):
             return f"gh/{repo_name}"
         return repo_name
 
@@ -84,7 +84,6 @@ class CircleCIProvider(CIProviderInterface):
         limit: Optional[int] = None,
         page: int = 1,
         branch: Optional[str] = None,
-        only_with_logs: bool = False,
         exclude_bots: bool = False,
         only_completed: bool = True,
     ) -> List[BuildData]:
@@ -101,7 +100,6 @@ class CircleCIProvider(CIProviderInterface):
             params["branch"] = branch
 
         builds = []
-        consecutive_unavailable = 0
         async with httpx.AsyncClient() as client:
             # Skip to the desired page by following page tokens
             current_page = 1
@@ -129,7 +127,9 @@ class CircleCIProvider(CIProviderInterface):
                         break
 
                     for pipeline in items:
-                        build_data = await self._parse_pipeline(client, pipeline, repo_name)
+                        build_data = await self._parse_pipeline(
+                            client, pipeline, repo_name
+                        )
 
                         # Skip pipelines without commit info (scheduled, API-triggered, etc.)
                         if build_data is None:
@@ -155,28 +155,11 @@ class CircleCIProvider(CIProviderInterface):
 
                             since_normalized = ensure_naive_utc(since) or since
                             created_normalized = ensure_naive_utc(build_data.created_at)
-                            if created_normalized and created_normalized < since_normalized:
+                            if (
+                                created_normalized
+                                and created_normalized < since_normalized
+                            ):
                                 continue
-
-                        if only_with_logs:
-                            logs_available = await self._check_logs_available(
-                                client, pipeline["id"]
-                            )
-                            build_data.logs_available = logs_available
-                            if not logs_available:
-                                consecutive_unavailable += 1
-                                if (
-                                    consecutive_unavailable
-                                    >= settings.GIT_LOG_UNAVAILABLE_THRESHOLD
-                                ):
-                                    logger.warning(
-                                        f"Reached {consecutive_unavailable} consecutive unavailable logs "
-                                        f"for {repo_name} - may be permission issue, stopping fetch"
-                                    )
-                                    break
-                                continue
-                            else:
-                                consecutive_unavailable = 0
 
                         builds.append(build_data)
 
@@ -191,7 +174,9 @@ class CircleCIProvider(CIProviderInterface):
 
         return builds[:limit] if limit else builds
 
-    async def _check_logs_available(self, client: httpx.AsyncClient, pipeline_id: str) -> bool:
+    async def _check_logs_available(
+        self, client: httpx.AsyncClient, pipeline_id: str
+    ) -> bool:
         """Check if logs are still available for a pipeline."""
         base_url = self._get_base_url()
         # Get workflows for pipeline
@@ -316,7 +301,9 @@ class CircleCIProvider(CIProviderInterface):
 
         return logs
 
-    async def _fetch_job_log(self, client: httpx.AsyncClient, job_id: str) -> Optional[LogFile]:
+    async def _fetch_job_log(
+        self, client: httpx.AsyncClient, job_id: str
+    ) -> Optional[LogFile]:
         """Fetch log content for a specific job."""
         base_url = self._get_base_url()
 
@@ -401,7 +388,9 @@ class CircleCIProvider(CIProviderInterface):
 
         # Skip pipelines without commit info (scheduled, API-triggered, etc.)
         if not branch or not commit_sha:
-            logger.debug(f"Skipping pipeline {pipeline.get('id')} - missing branch or commit_sha")
+            logger.debug(
+                f"Skipping pipeline {pipeline.get('id')} - missing branch or commit_sha"
+            )
             return None
 
         # Parse timestamps
@@ -409,7 +398,9 @@ class CircleCIProvider(CIProviderInterface):
         started_at = None
         stopped_at = None
         if pipeline.get("created_at"):
-            created_at = datetime.fromisoformat(pipeline["created_at"].replace("Z", "+00:00"))
+            created_at = datetime.fromisoformat(
+                pipeline["created_at"].replace("Z", "+00:00")
+            )
 
         # Get overall status from workflows
         base_url = self._get_base_url()
@@ -457,9 +448,13 @@ class CircleCIProvider(CIProviderInterface):
             repo_name=repo_name,
             branch=branch,
             commit_sha=commit_sha,
-            commit_message=(vcs.get("commit", {}).get("subject") if vcs.get("commit") else None),
+            commit_message=(
+                vcs.get("commit", {}).get("subject") if vcs.get("commit") else None
+            ),
             commit_author=(
-                vcs.get("commit", {}).get("author", {}).get("name") if vcs.get("commit") else None
+                vcs.get("commit", {}).get("author", {}).get("name")
+                if vcs.get("commit")
+                else None
             ),
             status=self.normalize_status(status),
             conclusion=self.normalize_conclusion(status),
@@ -476,11 +471,15 @@ class CircleCIProvider(CIProviderInterface):
         """Parse CircleCI job to JobData."""
         started_at = None
         if job.get("started_at"):
-            started_at = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
+            started_at = datetime.fromisoformat(
+                job["started_at"].replace("Z", "+00:00")
+            )
 
         stopped_at = None
         if job.get("stopped_at"):
-            stopped_at = datetime.fromisoformat(job["stopped_at"].replace("Z", "+00:00"))
+            stopped_at = datetime.fromisoformat(
+                job["stopped_at"].replace("Z", "+00:00")
+            )
 
         duration = None
         if started_at and stopped_at:

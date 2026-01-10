@@ -92,12 +92,17 @@ class RawBuildRun(BaseEntity):
         description="Final result when completed: success/failure/cancelled/skipped/timed_out/action_required/neutral/unknown",
     )
 
-    started_at: Optional[datetime] = Field(
+    run_created_at: Optional[datetime] = Field(
+        default=None,
+        description="When the CI workflow was created/queued (from provider API)",
+    )
+
+    run_started_at: Optional[datetime] = Field(
         default=None,
         description="When the build started running",
     )
 
-    completed_at: Optional[datetime] = Field(
+    run_completed_at: Optional[datetime] = Field(
         default=None,
         description="When the build completed",
     )

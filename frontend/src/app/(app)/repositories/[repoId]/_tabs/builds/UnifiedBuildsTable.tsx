@@ -37,7 +37,7 @@ import {
     ResourceStatusIndicator,
     TablePagination,
 } from "@/components/builds";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import { buildApi } from "@/lib/api";
 import { formatTimestamp, cn } from "@/lib/utils";
 import type { UnifiedBuild } from "@/types";
@@ -159,7 +159,7 @@ export function UnifiedBuildsTable({
     const [searchQuery, setSearchQuery] = useState("");
     const [phaseFilter, setPhaseFilter] = useState("all");
 
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
 
     const loadBuilds = useCallback(
         async (pageNumber = 1, withSpinner = false) => {

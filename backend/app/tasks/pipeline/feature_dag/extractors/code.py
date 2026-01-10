@@ -48,11 +48,11 @@ logger = logging.getLogger(__name__)
 
 @extract_fields(
     {
-        "git_all_built_commits": list,
-        "git_num_all_built_commits": int,
-        "git_prev_built_commit": Optional[str],
-        "git_prev_commit_resolution_status": str,
-        "tr_prev_build": Optional[str],
+        "git_built_commits": list,
+        "git_built_commits_count": int,
+        "git_prev_commit_sha": Optional[str],
+        "git_prev_commit_status": str,
+        "history_prev_build_id": Optional[str],
     }
 )
 @tag(group="git")
@@ -70,11 +70,11 @@ def git_commit_info(
     """
     if not git_history.is_commit_available:
         return {
-            "git_all_built_commits": [],
-            "git_num_all_built_commits": 0,
-            "git_prev_built_commit": None,
-            "git_prev_commit_resolution_status": "commit_not_found",
-            "tr_prev_build": None,
+            "git_built_commits": [],
+            "git_built_commits_count": 0,
+            "git_prev_commit_sha": None,
+            "git_prev_commit_status": "commit_not_found",
+            "history_prev_build_id": None,
         }
 
     effective_sha = git_history.effective_sha
@@ -82,11 +82,11 @@ def git_commit_info(
 
     if not effective_sha:
         return {
-            "git_all_built_commits": [],
-            "git_num_all_built_commits": 0,
-            "git_prev_built_commit": None,
-            "git_prev_commit_resolution_status": "commit_not_found",
-            "tr_prev_build": None,
+            "git_built_commits": [],
+            "git_built_commits_count": 0,
+            "git_prev_commit_sha": None,
+            "git_prev_commit_status": "commit_not_found",
+            "history_prev_build_id": None,
         }
 
     # Walk history to find previous build
@@ -139,11 +139,11 @@ def git_commit_info(
             break
 
     return {
-        "git_all_built_commits": commits_hex,
-        "git_num_all_built_commits": len(commits_hex),
-        "git_prev_built_commit": last_commit_sha,
-        "git_prev_commit_resolution_status": status,
-        "tr_prev_build": str(prev_build_id) if prev_build_id else None,
+        "git_built_commits": commits_hex,
+        "git_built_commits_count": len(commits_hex),
+        "git_prev_commit_sha": last_commit_sha,
+        "git_prev_commit_status": status,
+        "history_prev_build_id": str(prev_build_id) if prev_build_id else None,
     }
 
 
@@ -151,22 +151,22 @@ def git_commit_info(
     {
         "git_diff_src_churn": int,
         "git_diff_test_churn": int,
-        "gh_diff_files_added": int,
-        "gh_diff_files_deleted": int,
-        "gh_diff_files_modified": int,
-        "gh_diff_tests_added": int,
-        "gh_diff_tests_deleted": int,
-        "gh_diff_src_files": int,
-        "gh_diff_doc_files": int,
-        "gh_diff_other_files": int,
+        "git_diff_files_added": int,
+        "git_diff_files_deleted": int,
+        "git_diff_files_modified": int,
+        "git_diff_tests_added": int,
+        "git_diff_tests_deleted": int,
+        "git_diff_src_files": int,
+        "git_diff_doc_files": int,
+        "git_diff_other_files": int,
     }
 )
 @tag(group="git")
 def git_diff_features(
     git_history: GitHistoryInput,
-    tr_log_lan_all: List[str],
-    git_all_built_commits: List[str],
-    git_prev_built_commit: Optional[str],
+    repo_languages_all: List[str],
+    git_built_commits: List[str],
+    git_prev_commit_sha: Optional[str],
 ) -> Dict[str, Any]:
     """Calculate diff statistics across all built commits."""
     if not git_history.is_commit_available:
@@ -175,19 +175,21 @@ def git_diff_features(
     repo_path = git_history.path
     effective_sha = git_history.effective_sha
 
-    languages = tr_log_lan_all
+    languages = repo_languages_all
 
     stats = _empty_diff_result()
 
     # Cumulative changes across all built commits
-    for sha in git_all_built_commits:
+    for sha in git_built_commits:
         parent = _get_parent_commit(repo_path, sha)
         if not parent:
             continue
 
         # File status changes
         try:
-            name_status_out = _run_git(repo_path, ["diff", "--name-status", parent, sha])
+            name_status_out = _run_git(
+                repo_path, ["diff", "--name-status", parent, sha]
+            )
             for line in name_status_out.splitlines():
                 parts = line.split("\t")
                 if len(parts) < 2:
@@ -197,20 +199,20 @@ def git_diff_features(
                 path = parts[-1]
 
                 if status_code == "A":
-                    stats["gh_diff_files_added"] += 1
+                    stats["git_diff_files_added"] += 1
                 elif status_code == "D":
-                    stats["gh_diff_files_deleted"] += 1
+                    stats["git_diff_files_deleted"] += 1
                 elif status_code == "M":
-                    stats["gh_diff_files_modified"] += 1
+                    stats["git_diff_files_modified"] += 1
 
                 is_test = any(_is_test_file(path, lang) for lang in languages)
 
                 if _is_doc_file(path):
-                    stats["gh_diff_doc_files"] += 1
+                    stats["git_diff_doc_files"] += 1
                 elif _is_source_file(path) or is_test:
-                    stats["gh_diff_src_files"] += 1
+                    stats["git_diff_src_files"] += 1
                 else:
-                    stats["gh_diff_other_files"] += 1
+                    stats["git_diff_other_files"] += 1
         except Exception:
             continue
 
@@ -241,9 +243,11 @@ def git_diff_features(
             continue
 
     # Test case diff (prev built commit vs current)
-    if git_prev_built_commit and effective_sha:
+    if git_prev_commit_sha and effective_sha:
         try:
-            patch_out = _run_git(repo_path, ["diff", git_prev_built_commit, effective_sha])
+            patch_out = _run_git(
+                repo_path, ["diff", git_prev_commit_sha, effective_sha]
+            )
             total_added = 0
             total_deleted = 0
             for lang in languages:
@@ -251,8 +255,8 @@ def git_diff_features(
                 total_added += added
                 total_deleted += deleted
 
-            stats["gh_diff_tests_added"] = total_added
-            stats["gh_diff_tests_deleted"] = total_deleted
+            stats["git_diff_tests_added"] = total_added
+            stats["git_diff_tests_deleted"] = total_deleted
         except Exception:
             pass
 
@@ -263,14 +267,14 @@ def _empty_diff_result() -> Dict[str, int]:
     return {
         "git_diff_src_churn": 0,
         "git_diff_test_churn": 0,
-        "gh_diff_files_added": 0,
-        "gh_diff_files_deleted": 0,
-        "gh_diff_files_modified": 0,
-        "gh_diff_tests_added": 0,
-        "gh_diff_tests_deleted": 0,
-        "gh_diff_src_files": 0,
-        "gh_diff_doc_files": 0,
-        "gh_diff_other_files": 0,
+        "git_diff_files_added": 0,
+        "git_diff_files_deleted": 0,
+        "git_diff_files_modified": 0,
+        "git_diff_tests_added": 0,
+        "git_diff_tests_deleted": 0,
+        "git_diff_src_files": 0,
+        "git_diff_doc_files": 0,
+        "git_diff_other_files": 0,
     }
 
 
@@ -312,17 +316,17 @@ MAX_COMMITS_FOR_HEAVY_OPS = 50  # Skip heavy features for large builds
         "default": 90,
     }
 )
-def gh_num_commits_on_files_touched(
+def git_file_commit_density(
     git_history: GitHistoryInput,
     build_run: BuildRunInput,
     feature_config: FeatureConfigInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
 ) -> int:
     """Count commits that touched files modified in this build (last N days)."""
     if not git_history.is_commit_available:
         return 0
 
-    if not git_all_built_commits:
+    if not git_built_commits:
         return 0
 
     repo_path = git_history.path
@@ -347,7 +351,7 @@ def gh_num_commits_on_files_touched(
 
     # Collect files touched by this build
     files_touched: Set[str] = set()
-    for sha in git_all_built_commits:
+    for sha in git_built_commits:
         parents = get_commit_parents(repo_path, sha)
         if parents:
             diff_files = get_diff_files(repo_path, parents[0], sha)
@@ -363,15 +367,17 @@ def gh_num_commits_on_files_touched(
     # Limit files to process for performance
     paths = list(files_touched)[:MAX_FILES_TO_PROCESS]
     if len(files_touched) > MAX_FILES_TO_PROCESS:
-        logger.info(f"Limiting file count from {len(files_touched)} to {MAX_FILES_TO_PROCESS}")
+        logger.info(
+            f"Limiting file count from {len(files_touched)} to {MAX_FILES_TO_PROCESS}"
+        )
 
     start_iso = start_date.isoformat()
-    trigger_sha = git_all_built_commits[0] if git_all_built_commits else effective_sha
+    trigger_sha = git_built_commits[0] if git_built_commits else effective_sha
 
     try:
         all_shas = git_log_files(repo_path, trigger_sha, start_iso, paths, CHUNK_SIZE)
         # Exclude commits that are part of this build
-        for sha in git_all_built_commits:
+        for sha in git_built_commits:
             all_shas.discard(sha)
         return len(all_shas)
     except Exception as e:
@@ -379,8 +385,8 @@ def gh_num_commits_on_files_touched(
         return 0
 
 
-@tag(group="git")
-def gh_team_size(
+@tag(group="team")
+def team_size(
     git_history: GitHistoryInput,
     build_run: BuildRunInput,
     raw_build_runs: RawBuildRunsCollection,
@@ -420,16 +426,16 @@ def gh_team_size(
     return len(core_team)
 
 
-@tag(group="git")
-def gh_by_core_team_member(
+@tag(group="team")
+def team_is_core_member(
     git_history: GitHistoryInput,
-    gh_team_size: int,
+    team_size: int,
     build_run: BuildRunInput,
     raw_build_runs: RawBuildRunsCollection,
     repo: RepoInput,
 ) -> bool:
     """Whether build author is a core team member."""
-    if not git_history.is_commit_available or gh_team_size == 0:
+    if not git_history.is_commit_available or team_size == 0:
         return False
 
     repo_path = git_history.path
@@ -469,7 +475,9 @@ def gh_by_core_team_member(
     return False
 
 
-def _get_direct_committers(repo_path: Path, start_date: datetime, end_date: datetime) -> Set[str]:
+def _get_direct_committers(
+    repo_path: Path, start_date: datetime, end_date: datetime
+) -> Set[str]:
     """Get names of users who pushed directly (not via PR)."""
     pr_pattern = re.compile(r"\s\(#\d+\)")
 
@@ -483,7 +491,9 @@ def _get_direct_committers(repo_path: Path, start_date: datetime, end_date: date
             f"--until={end_date.isoformat()}",
             "--format=%H|%an|%s",
         ]
-        result = subprocess.run(cmd, cwd=str(repo_path), capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            cmd, cwd=str(repo_path), capture_output=True, text=True, check=True
+        )
         output = result.stdout.strip()
     except subprocess.CalledProcessError:
         return set()
@@ -535,22 +545,22 @@ def _get_pr_mergers(
 
 
 # Cooperation Features
-@tag(group="git")
-def num_of_distinct_authors(
+@tag(group="team")
+def team_distinct_authors(
     git_history: GitHistoryInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
 ) -> int:
     """Count unique authors across all commits in this build."""
     if not git_history.is_commit_available:
         return 0
 
-    if not git_all_built_commits:
+    if not git_built_commits:
         return 0
 
     repo_path = git_history.path
     authors: Set[str] = set()
 
-    for sha in git_all_built_commits:
+    for sha in git_built_commits:
         author = get_author_name(repo_path, sha)
         if author:
             authors.add(author)
@@ -558,10 +568,10 @@ def num_of_distinct_authors(
     return len(authors)
 
 
-@tag(group="git")
-def total_number_of_revisions(
+@tag(group="team")
+def team_total_revisions(
     git_history: GitHistoryInput,
-    git_all_built_commits: List[str],
+    git_built_commits: List[str],
 ) -> int:
     """
     Count total prior revisions on files touched by this build.
@@ -575,14 +585,14 @@ def total_number_of_revisions(
     if not git_history.is_commit_available:
         return 0
 
-    if not git_all_built_commits:
+    if not git_built_commits:
         return 0
 
     # Skip for large builds to prevent timeout
-    if len(git_all_built_commits) > MAX_COMMITS_FOR_HEAVY_OPS:
+    if len(git_built_commits) > MAX_COMMITS_FOR_HEAVY_OPS:
         logger.info(
-            f"Skipping total_number_of_revisions for large build "
-            f"({len(git_all_built_commits)} commits > {MAX_COMMITS_FOR_HEAVY_OPS})"
+            f"Skipping team_total_revisions for large build "
+            f"({len(git_built_commits)} commits > {MAX_COMMITS_FOR_HEAVY_OPS})"
         )
         return 0
 
@@ -591,7 +601,7 @@ def total_number_of_revisions(
     files_processed = 0
 
     # Process each commit separately (no file deduplication across commits)
-    for sha in git_all_built_commits:
+    for sha in git_built_commits:
         parents = get_commit_parents(repo_path, sha)
         if not parents:
             continue
@@ -603,7 +613,9 @@ def total_number_of_revisions(
         for f in diff_files:
             # Check file limit
             if files_processed >= MAX_FILES_TO_PROCESS:
-                logger.info(f"Reached MAX_FILES_TO_PROCESS limit ({MAX_FILES_TO_PROCESS})")
+                logger.info(
+                    f"Reached MAX_FILES_TO_PROCESS limit ({MAX_FILES_TO_PROCESS})"
+                )
                 return total_revisions
 
             # Use b_path (destination path) as primary, fallback to a_path

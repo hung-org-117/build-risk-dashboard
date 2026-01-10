@@ -11,7 +11,7 @@ import { Database, BarChart3, Home, Lock } from "lucide-react";
 import { datasetVersionApi } from "@/lib/api";
 import { ExportVersionModal } from "@/components/datasets/ExportVersionModal";
 import { useToast } from "@/components/ui/use-toast";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 
 interface VersionData {
     id: string;
@@ -53,7 +53,7 @@ export default function VersionLayout({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const datasetId = params.datasetId;
     const versionId = params.versionId;
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
 
     const [version, setVersion] = useState<VersionData | null>(null);
     const [loading, setLoading] = useState(true);

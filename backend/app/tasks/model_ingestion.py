@@ -65,7 +65,6 @@ def start_model_processing(
     ci_provider: str,
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
-    only_with_logs: bool = False,
     sync_until_existing: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -107,7 +106,6 @@ def start_model_processing(
             ci_provider=ci_provider,
             max_builds=max_builds,
             since_days=since_days,
-            only_with_logs=only_with_logs,
             sync_until_existing=sync_until_existing,
             correlation_id=correlation_id,
         )
@@ -149,7 +147,6 @@ def ingest_model_builds(
     ci_provider: str,
     max_builds: Optional[int] = None,
     since_days: Optional[int] = None,
-    only_with_logs: bool = False,
     batch_size: Optional[int] = None,
     sync_until_existing: bool = False,
     correlation_id: str = "",
@@ -162,7 +159,6 @@ def ingest_model_builds(
         ci_provider: CI provider to use (e.g., "github_actions")
         max_builds: Maximum number of builds to fetch (ignored if sync_until_existing=True)
         since_days: Only fetch builds from the last N days (ignored if sync_until_existing=True)
-        only_with_logs: Only fetch builds with logs available
         batch_size: Number of builds per page
         sync_until_existing: If True, fetch sequentially until hitting existing builds
         correlation_id: Optional correlation ID for tracing (generates new if not provided)
@@ -214,7 +210,6 @@ def ingest_model_builds(
             repo_config_id=repo_config_id,
             ci_provider=ci_provider,
             batch_size=batch_size,
-            only_with_logs=only_with_logs,
             correlation_id=correlation_id,
         )
         return {
@@ -239,7 +234,6 @@ def ingest_model_builds(
                 page=page,
                 batch_size=api_limit,
                 since_days=since_days,
-                only_with_logs=only_with_logs,
                 correlation_id=correlation_id,
             )
         )
@@ -287,7 +281,6 @@ def fetch_builds_until_existing(
     repo_config_id: str,
     ci_provider: str,
     batch_size: int,
-    only_with_logs: bool = False,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
@@ -346,7 +339,6 @@ def fetch_builds_until_existing(
             "limit": batch_size,
             "page": page,
             "exclude_bots": True,
-            "only_with_logs": only_with_logs,
             "only_completed": True,
         }
 
@@ -389,8 +381,8 @@ def fetch_builds_until_existing(
                 continue
 
             # Check if RawBuildRun already exists - if so, skip it (already imported)
-            existing_run = build_run_repo.find_by_build_id(
-                ObjectId(raw_repo_id), build.build_id
+            existing_run = build_run_repo.find_by_repo_and_build_id(
+                raw_repo_id, build.build_id
             )
 
             if existing_run:
@@ -411,9 +403,11 @@ def fetch_builds_until_existing(
                 commit_author=build.commit_author,
                 status=build.status,
                 conclusion=build.conclusion,
-                created_at=build.created_at or datetime.now(timezone.utc),
-                started_at=None,
-                completed_at=build.created_at or datetime.now(timezone.utc),
+                run_created_at=build.created_at or datetime.now(timezone.utc),
+                run_started_at=build.started_at,
+                run_completed_at=build.completed_at
+                or build.created_at
+                or datetime.now(timezone.utc),
                 duration_seconds=build.duration_seconds,
                 web_url=build.web_url,
                 logs_url=None,
@@ -489,7 +483,7 @@ def fetch_builds_until_existing(
         f"Preparing resources for {total_new_builds} new builds...",
         stats={
             "builds_fetched": total_new_builds,
-            "builds_processed": 0,
+            "builds_features_extracted": 0,
             "builds_missing_resource": 0,
         },
     )
@@ -517,7 +511,6 @@ def fetch_builds_batch(
     page: int,
     batch_size: int,
     since_days: Optional[int] = None,
-    only_with_logs: bool = False,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
@@ -555,7 +548,6 @@ def fetch_builds_batch(
         "limit": batch_size,
         "page": page,
         "exclude_bots": True,
-        "only_with_logs": only_with_logs,
         "only_completed": True,
     }
 
@@ -618,9 +610,11 @@ def fetch_builds_batch(
             commit_author=build.commit_author,
             status=build.status,
             conclusion=build.conclusion,
-            created_at=build.created_at or datetime.now(timezone.utc),
-            started_at=None,
-            completed_at=build.created_at or datetime.now(timezone.utc),
+            run_created_at=build.created_at or datetime.now(timezone.utc),
+            run_started_at=build.started_at,
+            run_completed_at=build.completed_at
+            or build.created_at
+            or datetime.now(timezone.utc),
             duration_seconds=build.duration_seconds,
             web_url=build.web_url,
             logs_url=None,
@@ -1443,7 +1437,7 @@ def x(
         f"Ingesting new build from webhook: {ci_run_id[:8]}...",
         stats={
             "builds_fetched": 1,  # Single build from webhook
-            "builds_processed": 0,
+            "builds_features_extracted": 0,
             "builds_missing_resource": 0,
         },
     )

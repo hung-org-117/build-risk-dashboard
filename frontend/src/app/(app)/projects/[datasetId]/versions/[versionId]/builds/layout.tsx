@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ReactNode, useState, useEffect, useCallback } from "react";
 import { Lock, Loader2 } from "lucide-react";
 import { datasetVersionApi } from "@/lib/api";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import { cn } from "@/lib/utils";
 
 // Statuses that allow viewing processing/scans tabs
@@ -14,7 +14,7 @@ const PROCESSING_STATUSES = ["processing", "processed", "failed"];
 export default function BuildsLayout({ children }: { children: ReactNode }) {
     const params = useParams<{ datasetId: string; versionId: string }>();
     const pathname = usePathname();
-    const { subscribe } = useWebSocket();
+    const { subscribe } = useSSE();
     const datasetId = params.datasetId;
     const versionId = params.versionId;
 

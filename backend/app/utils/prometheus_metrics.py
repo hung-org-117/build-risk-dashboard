@@ -20,7 +20,7 @@ BUILD_PREDICTIONS = Counter(
 )
 
 BUILDS_PROCESSED = Counter(
-    "builds_processed_total",
+    "builds_features_extracted_total",
     "Total number of builds processed through pipeline",
     ["status", "pipeline"],  # status: success/failed, pipeline: model/enrichment
 )

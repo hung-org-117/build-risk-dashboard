@@ -1166,3 +1166,67 @@ def check_and_notify_enrichment_completed(
         version_repo.mark_enrichment_notified(str(version_id))
 
     return True
+
+
+def check_and_notify_scenario_completed(
+    db: Database,
+    scenario_id: str,
+) -> bool:
+    """
+    Check if ML scenario processing is fully complete and send notification.
+
+    Called from:
+    1. split_scenario_dataset - after scenario completes
+    2. start_trivy_scan_for_version_commit - after each Trivy scan (via PipelineContext)
+    3. export_metrics_from_webhook - after each SonarQube webhook (via PipelineContext)
+
+    Returns True if notification was sent, False if still pending.
+    """
+    from app.repositories.ml_scenario import MLScenarioRepository
+
+    scenario_repo = MLScenarioRepository(db)
+    scenario = scenario_repo.find_by_id(scenario_id)
+
+    if not scenario:
+        logger.warning(f"Scenario {scenario_id} not found for notification check")
+        return False
+
+    # Check 1: Already completed?
+    if scenario.status != "completed":
+        logger.debug(
+            f"Scenario {scenario_id} not in completed status: {scenario.status}"
+        )
+        return False
+
+    # Check 2: Features extraction complete?
+    if not getattr(scenario, "feature_extraction_completed", False):
+        logger.debug(f"Scenario {scenario_id} features not complete yet")
+        return False
+
+    # Check 3: Do we have any scans configured?
+    scans_total = getattr(scenario, "scans_total", 0) or 0
+    scans_completed = getattr(scenario, "scans_completed", 0) or 0
+    scans_failed = getattr(scenario, "scans_failed", 0) or 0
+
+    # If scans are configured, check if all done
+    if scans_total > 0:
+        scans_done = scans_completed + scans_failed
+        if scans_done < scans_total:
+            logger.debug(
+                f"Scenario {scenario_id} scans not complete: "
+                f"{scans_done}/{scans_total}"
+            )
+            return False
+
+        # Mark scan extraction as complete
+        if not getattr(scenario, "scan_extraction_completed", False):
+            scenario_repo.mark_scan_extraction_completed(str(scenario_id))
+
+    # All done! Log completion (no email notification for scenarios yet)
+    logger.info(
+        f"Scenario {scenario_id} fully complete: "
+        f"{scenario.builds_features_extracted}/{scenario.builds_total} builds, "
+        f"{scans_completed}/{scans_total} scans"
+    )
+
+    return True

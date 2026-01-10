@@ -164,7 +164,6 @@ class RepositoryService:
                     status=ModelImportStatus.QUEUED,
                     max_builds_to_ingest=payload.max_builds,
                     since_days=payload.since_days,
-                    only_with_logs=payload.only_with_logs or False,
                     feature_configs=payload.feature_configs or {},
                 )
             )
@@ -183,7 +182,6 @@ class RepositoryService:
                 ci_provider=payload.ci_provider.value,
                 max_builds=payload.max_builds,
                 since_days=payload.since_days,
-                only_with_logs=payload.only_with_logs,
             )
 
             results.append(repo_doc)
@@ -414,7 +412,6 @@ class RepositoryService:
                 else repo_doc.ci_provider
             ),
             sync_until_existing=True,
-            only_with_logs=getattr(repo_doc, "only_with_logs", False),
         )
 
         return {"status": "queued", "phase": "ingestion"}

@@ -151,17 +151,3 @@ require_manage_repos = RequirePermission(Permission.MANAGE_REPOS)
 require_manage_datasets = RequirePermission(Permission.MANAGE_DATASETS)
 require_start_scans = RequirePermission(Permission.START_SCANS)
 require_export = RequirePermission(Permission.EXPORT_DATA)
-
-
-# For backward compatibility - alias to old middleware names
-async def require_admin_legacy(user: dict = Depends(get_current_user)) -> dict:
-    """
-    Legacy dependency that requires admin role.
-    Prefer using RequirePermission(Permission.ADMIN_FULL) instead.
-    """
-    if user.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required.",
-        )
-    return user

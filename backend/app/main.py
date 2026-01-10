@@ -18,17 +18,18 @@ from app.api import (
     health,
     integrations,
     logs,
+    ml_scenarios,
     model_repos,
     monitoring,
     notifications,
     settings,
+    sse,
     statistics,
     templates,
     tokens,
     user_settings,
     users,
     webhook,
-    websocket,
 )
 from app.middleware.exception_handlers import (
     general_exception_handler,
@@ -93,10 +94,11 @@ app.include_router(auth.router, prefix="/api", tags=["Auth"])
 app.include_router(model_repos.router, prefix="/api", tags=["Repositories"])
 app.include_router(users.router, prefix="/api", tags=["Users"])
 app.include_router(webhook.router, prefix="/api", tags=["Webhooks"])
-app.include_router(websocket.router, prefix="/api", tags=["WebSocket"])
+app.include_router(sse.router, prefix="/api", tags=["SSE"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(features.router, prefix="/api", tags=["Feature Definitions"])
 app.include_router(datasets.router, prefix="/api", tags=["Datasets"])
+app.include_router(ml_scenarios.router, prefix="/api", tags=["ML Scenarios"])
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
 app.include_router(
     dataset_validation.router, prefix="/api", tags=["Dataset Validation"]

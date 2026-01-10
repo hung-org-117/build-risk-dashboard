@@ -43,7 +43,9 @@ class BuildData(BaseModel):
 
     # Identifiers
     build_id: str = Field(..., description="Unique build identifier from CI")
-    build_number: Optional[int] = Field(None, description="Sequential build number if available")
+    build_number: Optional[int] = Field(
+        None, description="Sequential build number if available"
+    )
 
     # Repository info
     repo_name: str = Field(..., description="Full repository name (owner/repo)")
@@ -55,13 +57,21 @@ class BuildData(BaseModel):
     commit_author: Optional[str] = None
 
     # Status and Conclusion (separate concepts)
-    status: BuildStatus = BuildStatus.UNKNOWN  # Current state: pending/running/completed
-    conclusion: BuildConclusion = BuildConclusion.NONE  # Final result: success/failure/etc
+    status: BuildStatus = (
+        BuildStatus.UNKNOWN
+    )  # Current state: pending/running/completed
+    conclusion: BuildConclusion = (
+        BuildConclusion.NONE
+    )  # Final result: success/failure/etc
 
     # Timing
-    created_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = (
+        None  # When workflow was queued (maps to run_created_at)
+    )
+    started_at: Optional[datetime] = None  # When run started (maps to run_started_at)
+    completed_at: Optional[datetime] = (
+        None  # When run completed (maps to run_completed_at)
+    )
     duration_seconds: Optional[float] = None
 
     # URLs

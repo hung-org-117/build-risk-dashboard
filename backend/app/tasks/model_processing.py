@@ -251,7 +251,7 @@ def dispatch_build_processing(
             model_repo_config_id=ObjectId(repo_config_id),
             head_sha=raw_build_run.commit_sha,
             build_number=raw_build_run.build_number,
-            build_created_at=raw_build_run.created_at,
+            build_created_at=raw_build_run.run_created_at,
             extraction_status=ExtractionStatus.PENDING,
         )
         model_build_ids.append(model_build.id)

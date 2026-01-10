@@ -90,7 +90,6 @@ class Settings(BaseSettings):
     # --- Git/Log Constraints ---
     GIT_MAX_LOG_SIZE_MB: int = 10  # Skip logs larger than this
     GIT_COMMIT_REPLAY_MAX_DEPTH: int = 100  # Max depth for fork commit replay
-    GIT_LOG_UNAVAILABLE_THRESHOLD: int = 10  # Stop after N consecutive unavailable
 
     # --- Scanning Phase (Trivy, SonarQube) ---
     SCAN_BUILDS_PER_QUERY: int = 200  # Builds fetched per paginated query

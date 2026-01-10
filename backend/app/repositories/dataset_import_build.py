@@ -712,8 +712,8 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
                 }
             },
             {"$unwind": {"path": "$raw_build_run", "preserveNullAndEmptyArrays": True}},
-            # Sort by RawBuildRun.created_at (CI build creation time)
-            {"$sort": {"raw_build_run.created_at": -1}},
+            # Sort by RawBuildRun.run_created_at (CI build creation time)
+            {"$sort": {"raw_build_run.run_created_at": -1}},
             {"$skip": skip},
             {"$limit": limit},
             # Project final shape
@@ -741,8 +741,8 @@ class DatasetImportBuildRepository(BaseRepository[DatasetImportBuild]):
                     "commit_message": "$raw_build_run.commit_message",
                     "commit_author": "$raw_build_run.commit_author",
                     "duration_seconds": "$raw_build_run.duration_seconds",
-                    "started_at": "$raw_build_run.started_at",
-                    "completed_at": "$raw_build_run.completed_at",
+                    "started_at": "$raw_build_run.run_started_at",
+                    "completed_at": "$raw_build_run.run_completed_at",
                     "provider": "$raw_build_run.provider",
                     "logs_available": "$raw_build_run.logs_available",
                     "logs_expired": "$raw_build_run.logs_expired",

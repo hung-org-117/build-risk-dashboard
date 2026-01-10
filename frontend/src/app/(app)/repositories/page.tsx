@@ -26,7 +26,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
-import { useWebSocket } from "@/contexts/websocket-context";
+import { useSSE } from "@/contexts/sse-context";
 import { reposApi } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import type {
@@ -55,7 +55,7 @@ export default function AdminReposPage() {
   const [total, setTotal] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const { subscribe } = useWebSocket();
+  const { subscribe } = useSSE();
 
   const loadRepositories = useCallback(
     async (pageNumber = 1, withSpinner = false) => {

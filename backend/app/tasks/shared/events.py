@@ -95,6 +95,88 @@ def publish_build_status(repo_id: str, build_id: str, status: str) -> bool:
     return publish_event("BUILD_UPDATE", payload)
 
 
+def publish_scenario_update(
+    scenario_id: str,
+    status: str,
+    builds_total: int = 0,
+    builds_ingested: int = 0,
+    builds_features_extracted: int = 0,
+    builds_failed: int = 0,
+    builds_missing_resource: int = 0,
+    train_count: int = 0,
+    val_count: int = 0,
+    test_count: int = 0,
+    scans_total: int = 0,
+    scans_completed: int = 0,
+    scans_failed: int = 0,
+    feature_extraction_completed: bool = False,
+    scan_extraction_completed: bool = False,
+    current_phase: Optional[str] = None,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    Publish ML scenario progress update for real-time UI updates.
+
+    Args:
+        scenario_id: MLScenario ID
+        status: Status value (queued, filtering, ingesting, processing, splitting, completed, failed)
+        builds_total: Total builds matching filter criteria
+        builds_ingested: Builds with ingestion completed
+        builds_features_extracted: Builds with feature extraction completed
+        builds_failed: Builds that failed (retryable)
+        builds_missing_resource: Builds with missing resources (not retryable)
+        train_count: Number of samples in train split
+        val_count: Number of samples in validation split
+        test_count: Number of samples in test split
+        scans_total: Total scans to run (commits × tools)
+        scans_completed: Completed scans
+        scans_failed: Failed scans
+        feature_extraction_completed: All DAG features extracted
+        scan_extraction_completed: All scans done
+        current_phase: Current phase name for display
+        error: Optional error message
+
+    Returns:
+        True if published successfully, False otherwise
+    """
+    # Calculate progress percentages
+    ingestion_progress = (
+        round((builds_ingested / builds_total) * 100, 1) if builds_total > 0 else 0
+    )
+    processing_progress = (
+        round((builds_features_extracted / builds_total) * 100, 1) if builds_total > 0 else 0
+    )
+    scan_progress = (
+        round((scans_completed / scans_total) * 100, 1) if scans_total > 0 else 0
+    )
+
+    payload = {
+        "scenario_id": scenario_id,
+        "status": status,
+        "builds_total": builds_total,
+        "builds_ingested": builds_ingested,
+        "builds_features_extracted": builds_features_extracted,
+        "builds_failed": builds_failed,
+        "builds_missing_resource": builds_missing_resource,
+        "ingestion_progress": ingestion_progress,
+        "processing_progress": processing_progress,
+        "train_count": train_count,
+        "val_count": val_count,
+        "test_count": test_count,
+        "scans_total": scans_total,
+        "scans_completed": scans_completed,
+        "scans_failed": scans_failed,
+        "scan_progress": scan_progress,
+        "feature_extraction_completed": feature_extraction_completed,
+        "scan_extraction_completed": scan_extraction_completed,
+        "current_phase": current_phase or status,
+    }
+    if error:
+        payload["error"] = error
+
+    return publish_event("SCENARIO_UPDATE", payload)
+
+
 def publish_enrichment_update(
     version_id: str,
     status: str,
