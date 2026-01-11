@@ -157,6 +157,50 @@ export interface TrainingEnrichmentBuildRecord {
     enriched_at?: string;
 }
 
+export interface NodeExecutionDetail {
+    node_name: string;
+    status: string;
+    duration_ms: number;
+    features_extracted: string[];
+    resources_used: string[];
+    error?: string;
+    warning?: string;
+    skip_reason?: string;
+    retry_count: number;
+}
+
+export interface FeatureAuditLogDetail {
+    id: string;
+    duration_ms: number;
+    nodes_succeeded: number;
+    nodes_failed: number;
+    nodes_skipped: number;
+    errors: string[];
+    warnings: string[];
+    node_results: NodeExecutionDetail[];
+}
+
+export interface TrainingEnrichmentBuildDetail {
+    enrichment_build: TrainingEnrichmentBuildRecord & {
+        features: Record<string, any>;
+        missing_resources: string[];
+        skipped_features: string[];
+        expected_feature_count: number;
+    };
+    raw_build_run: {
+        id: string;
+        repo_name: string;
+        branch: string;
+        commit_sha: string;
+        ci_run_id: string;
+        provider: string;
+        web_url?: string;
+        conclusion: string;
+        run_started_at?: string;
+    };
+    audit_log?: FeatureAuditLogDetail;
+}
+
 // Paginated response
 export interface PaginatedResponse<T> {
     items: T[];
@@ -334,6 +378,19 @@ export const trainingScenariosApi = {
         const response = await api.get<PaginatedResponse<TrainingEnrichmentBuildRecord>>(
             `/training-scenarios/${scenarioId}/enrichment-builds`,
             { params }
+        );
+        return response.data;
+    },
+
+    /**
+     * Get enrichment build detail
+     */
+    getEnrichmentBuildDetail: async (
+        scenarioId: string,
+        buildId: string
+    ): Promise<TrainingEnrichmentBuildDetail> => {
+        const response = await api.get<TrainingEnrichmentBuildDetail>(
+            `/training-scenarios/${scenarioId}/enrichment-builds/${buildId}`
         );
         return response.data;
     },

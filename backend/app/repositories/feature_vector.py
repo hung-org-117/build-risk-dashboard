@@ -259,3 +259,18 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
     def get_collection(self) -> Collection:
         """Get the underlying MongoDB collection (for Hamilton DAG inputs)."""
         return self.collection
+
+    def delete_by_scenario(self, scenario_id: str, session=None) -> int:
+        """
+        Delete all feature vectors scoped to a specific ML scenario.
+        """
+        from app.entities.enums import FeatureVectorScope
+
+        result = self.collection.delete_many(
+            {
+                "scope": FeatureVectorScope.DATASET.value,
+                "config_id": self._to_object_id(scenario_id),
+            },
+            session=session,
+        )
+        return result.deleted_count

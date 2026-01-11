@@ -33,10 +33,6 @@ class TrivyCommitScan(BaseEntity):
     Allows retry functionality with updated config.
     """
 
-    # Version and commit reference
-    dataset_version_id: Optional[PyObjectId] = Field(
-        None, description="DatasetVersion ID (legacy)"
-    )
     scenario_id: Optional[PyObjectId] = Field(
         None, description="TrainingScenario ID (new flow)"
     )

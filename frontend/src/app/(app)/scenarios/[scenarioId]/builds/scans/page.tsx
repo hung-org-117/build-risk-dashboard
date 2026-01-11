@@ -161,13 +161,12 @@ export default function ScansPage() {
     useEffect(() => {
         const handleScanUpdate = (event: CustomEvent<{
             scenario_id?: string;
-            version_id?: string;
             scan_id: string;
             commit_sha: string;
             tool_type: string;
             status: string;
         }>) => {
-            if (event.detail.scenario_id === scenarioId || event.detail.version_id === scenarioId) {
+            if (event.detail.scenario_id === scenarioId) {
                 fetchScans(true);
             }
         };
@@ -197,14 +196,49 @@ export default function ScansPage() {
     useEffect(() => {
         const handleScanError = (event: CustomEvent<{
             scenario_id?: string;
-            version_id?: string;
             scan_id: string;
             commit_sha: string;
             tool_type: string;
             error: string;
             retry_count: number;
         }>) => {
-            if (event.detail.scenario_id === scenarioId || event.detail.version_id === scenarioId) {
+            if (event.detail.scenario_id === scenarioId) {
+                fetchScans(true);
+            }
+        };
+
+        window.addEventListener("SCAN_ERROR", handleScanError as EventListener);
+        return () => {
+            window.removeEventListener("SCAN_ERROR", handleScanError as EventListener);
+        };
+    }, [scenarioId, fetchScans]);
+
+    // Subscribe to SSE for scenario scan progress updates
+    useEffect(() => {
+        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: any) => {
+            if (data.scenario_id === scenarioId) {
+                setScanProgress({
+                    scans_total: data.scans_total ?? 0,
+                    scans_completed: data.scans_completed ?? 0,
+                    scans_failed: data.scans_failed ?? 0,
+                    scan_extraction_completed: data.scan_extraction_completed ?? false,
+                });
+            }
+        });
+        return () => unsubscribe();
+    }, [subscribe, scenarioId]);
+
+    // Listen for SCAN_ERROR events
+    useEffect(() => {
+        const handleScanError = (event: CustomEvent<{
+            scenario_id?: string;
+            scan_id: string;
+            commit_sha: string;
+            tool_type: string;
+            error: string;
+            retry_count: number;
+        }>) => {
+            if (event.detail.scenario_id === scenarioId) {
                 fetchScans(true);
             }
         };

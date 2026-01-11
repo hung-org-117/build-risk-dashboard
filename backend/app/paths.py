@@ -86,43 +86,43 @@ def get_build_logs_path(github_repo_id: int, build_id: str) -> Path:
     return LOGS_DIR / str(github_repo_id) / build_id
 
 
-def get_sonarqube_config_dir(version_id: str, github_repo_id: int) -> Path:
+def get_sonarqube_config_dir(scenario_id: str, github_repo_id: int) -> Path:
     """
-    Get SonarQube config directory for a version/repo.
+    Get SonarQube config directory for a scenario/repo.
 
-    Structure: scan-config/sonarqube/{version_id}/{github_repo_id}/
+    Structure: scan-config/sonarqube/{scenario_id}/{github_repo_id}/
     """
-    return SCAN_CONFIG_DIR / "sonarqube" / version_id / str(github_repo_id)
+    return SCAN_CONFIG_DIR / "sonarqube" / scenario_id / str(github_repo_id)
 
 
-def get_sonarqube_config_path(version_id: str, github_repo_id: int) -> Path:
+def get_sonarqube_config_path(scenario_id: str, github_repo_id: int) -> Path:
     """
-    Get sonar-project.properties file path for a version/repo.
+    Get sonar-project.properties file path for a scenario/repo.
 
-    Structure: scan-config/sonarqube/{version_id}/{github_repo_id}/sonar-project.properties
+    Structure: scan-config/sonarqube/{scenario_id}/{github_repo_id}/sonar-project.properties
     """
     return (
-        get_sonarqube_config_dir(version_id, github_repo_id)
+        get_sonarqube_config_dir(scenario_id, github_repo_id)
         / "sonar-project.properties"
     )
 
 
-def get_trivy_config_dir(version_id: str, github_repo_id: int) -> Path:
+def get_trivy_config_dir(scenario_id: str, github_repo_id: int) -> Path:
     """
-    Get Trivy config directory for a version/repo.
+    Get Trivy config directory for a scenario/repo.
 
-    Structure: scan-config/trivy/{version_id}/{github_repo_id}/
+    Structure: scan-config/trivy/{scenario_id}/{github_repo_id}/
     """
-    return SCAN_CONFIG_DIR / "trivy" / version_id / str(github_repo_id)
+    return SCAN_CONFIG_DIR / "trivy" / scenario_id / str(github_repo_id)
 
 
-def get_trivy_config_path(version_id: str, github_repo_id: int) -> Path:
+def get_trivy_config_path(scenario_id: str, github_repo_id: int) -> Path:
     """
-    Get trivy.yaml file path for a version/repo.
+    Get trivy.yaml file path for a scenario/repo.
 
-    Structure: scan-config/trivy/{version_id}/{github_repo_id}/trivy.yaml
+    Structure: scan-config/trivy/{scenario_id}/{github_repo_id}/trivy.yaml
     """
-    return get_trivy_config_dir(version_id, github_repo_id) / "trivy.yaml"
+    return get_trivy_config_dir(scenario_id, github_repo_id) / "trivy.yaml"
 
 
 # =============================================================================
@@ -181,17 +181,17 @@ def cleanup_training_scenario_files(scenario_id: str) -> None:
         logger.info(f"Cleaned up training datasets for {scenario_id}")
 
 
-def cleanup_version_scan_configs(version_id: str) -> None:
+def cleanup_scenario_scan_configs(scenario_id: str) -> None:
     """
-    Delete all scan config files for a version (cleanup on version delete).
+    Delete all scan config files for a scenario (cleanup on scenario delete).
     """
     import shutil
 
     for tool in ["sonarqube", "trivy"]:
-        version_config_dir = SCAN_CONFIG_DIR / tool / version_id
-        if version_config_dir.exists():
-            shutil.rmtree(version_config_dir, ignore_errors=True)
-            logger.info(f"Cleaned up {tool} configs for version {version_id}")
+        scenario_config_dir = SCAN_CONFIG_DIR / tool / scenario_id
+        if scenario_config_dir.exists():
+            shutil.rmtree(scenario_config_dir, ignore_errors=True)
+            logger.info(f"Cleaned up {tool} configs for scenario {scenario_id}")
 
 
 # Auto-create directories on import

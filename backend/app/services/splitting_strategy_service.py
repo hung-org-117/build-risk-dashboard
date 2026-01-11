@@ -23,9 +23,9 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedShuffleSplit
 
-from app.entities.ml_scenario import (
-    SplitStrategy,
+from app.entities.training_scenario import (
     GroupByDimension,
+    SplitStrategy,
     SplittingConfig,
 )
 

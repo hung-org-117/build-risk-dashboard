@@ -37,11 +37,11 @@ from app.entities.training_scenario import (
     SplittingConfig,
     TrainingScenario,
 )
+from app.repositories.raw_build_run import RawBuildRunRepository
+from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
 from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
-from app.repositories.raw_build_run import RawBuildRunRepository
-from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
 
 logger = logging.getLogger(__name__)
@@ -144,11 +144,11 @@ class TrainingScenarioService:
         created = self.scenario_repo.insert_one(scenario)
 
         # Create scenario directory
-        scenario_dir = paths.get_ml_scenario_dir(str(created.id))
+        scenario_dir = paths.get_training_scenario_dir(str(created.id))
         scenario_dir.mkdir(parents=True, exist_ok=True)
 
         # Save YAML config file
-        config_path = paths.get_ml_scenario_config_path(str(created.id))
+        config_path = paths.get_training_scenario_config_path(str(created.id))
         config_path.write_text(data.yaml_config)
 
         logger.info(f"Created TrainingScenario: {created.id} - {data.name}")
@@ -214,7 +214,7 @@ class TrainingScenarioService:
             ).model_dump()
 
             # Update saved config file
-            config_path = paths.get_ml_scenario_config_path(scenario_id)
+            config_path = paths.get_training_scenario_config_path(scenario_id)
             config_path.write_text(data.yaml_config)
 
             # Reset status to QUEUED if config changed
@@ -245,13 +245,35 @@ class TrainingScenarioService:
         self.enrichment_build_repo.delete_by_scenario(scenario_id)
         self.split_repo.delete_by_scenario(scenario_id)
 
+        # Delete Scans
+        from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
+        trivy_repo = TrivyCommitScanRepository(self.db)
+        sonar_repo = SonarCommitScanRepository(self.db)
+
+        trivy_repo.delete_by_scenario(scenario_id)
+        sonar_repo.delete_by_scenario(scenario_id)
+
+        # Delete Audit Logs
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
+
+        audit_repo = FeatureAuditLogRepository(self.db)
+        audit_repo.delete_by_scenario(scenario_id)
+
+        # Delete Feature Vectors
+        from app.repositories.feature_vector import FeatureVectorRepository
+
+        fv_repo = FeatureVectorRepository(self.db)
+        fv_repo.delete_by_scenario(scenario_id)
+
         # Delete files
-        paths.cleanup_ml_scenario_files(scenario_id)
+        paths.cleanup_training_scenario_files(scenario_id)
 
         # Delete scenario
         self.scenario_repo.delete_one(scenario_id)
 
-        logger.info(f"Deleted TrainingScenario: {scenario_id}")
+        logger.info(f"Deleted TrainingScenario: {scenario_id} and all related entities")
         return True
 
     # =========================================================================
@@ -297,7 +319,9 @@ class TrainingScenarioService:
         ]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Scenario must be INGESTED to start processing (current: {scenario.status})",
+                detail=(
+                    f"Scenario must be INGESTED to start processing (current: {scenario.status})"
+                ),
             )
 
         res = start_scenario_processing.delay(scenario_id)
@@ -318,7 +342,9 @@ class TrainingScenarioService:
         ]:
             raise HTTPException(
                 status_code=400,
-                detail=f"Scenario must be PROCESSED to generate dataset (current: {scenario.status})",
+                detail=(
+                    f"Scenario must be PROCESSED to generate dataset (current: {scenario.status})"
+                ),
             )
 
         res = generate_scenario_dataset.delay(scenario_id)
@@ -385,7 +411,7 @@ class TrainingScenarioService:
         except yaml.YAMLError as e:
             raise HTTPException(
                 status_code=400, detail=f"Invalid YAML syntax: {str(e)}"
-            )
+            ) from e
 
     def _parse_data_source_config(self, config: Dict[str, Any]) -> DataSourceConfig:
         """Parse data_source section."""
@@ -435,7 +461,7 @@ class TrainingScenarioService:
             return None
         try:
             return datetime.fromisoformat(str(date_str))
-        except:
+        except ValueError:
             return None
 
     # =========================================================================
@@ -540,6 +566,118 @@ class TrainingScenarioService:
             "total": total,
             "page": (skip // limit) + 1 if limit > 0 else 1,
             "size": limit,
+        }
+
+    def get_enrichment_build_detail(
+        self,
+        scenario_id: str,
+        build_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get detailed view of an enrichment build.
+
+        Returns:
+            - raw_build_run
+            - enrichment_build
+            - audit_log (if available)
+        """
+        from app.repositories.feature_audit_log import FeatureAuditLogRepository
+
+        # Permission check
+        self.get_scenario(scenario_id, user_id)
+
+        build = self.enrichment_build_repo.find_by_id(build_id)
+        if not build:
+            raise HTTPException(status_code=404, detail="Enrichment build not found")
+
+        # Get raw build
+        raw_build = None
+        if build.raw_build_run_id:
+            raw_build = self.raw_build_run_repo.find_by_id(build.raw_build_run_id)
+
+        # Get audit log
+        audit_repo = FeatureAuditLogRepository(self.db)
+        audit_log = audit_repo.find_by_enrichment_build(build_id)
+
+        return {
+            "enrichment_build": {
+                "id": str(build.id),
+                "raw_build_run_id": (
+                    str(build.raw_build_run_id) if build.raw_build_run_id else ""
+                ),
+                "ci_run_id": build.ci_run_id or "",
+                "commit_sha": build.commit_sha or "",
+                "repo_full_name": build.repo_full_name or "",
+                "extraction_status": (
+                    build.extraction_status.value
+                    if hasattr(build.extraction_status, "value")
+                    else build.extraction_status
+                ),
+                "extraction_error": build.extraction_error,
+                "feature_count": build.feature_count or 0,
+                "expected_feature_count": build.expected_feature_count or 0,
+                "split_assignment": build.split_assignment,
+                "created_at": (
+                    build.created_at.isoformat() if build.created_at else None
+                ),
+                "enriched_at": (
+                    build.enriched_at.isoformat() if build.enriched_at else None
+                ),
+                "features": build.features or {},
+                "missing_resources": build.missing_resources or [],
+                "skipped_features": build.skipped_features or [],
+            },
+            "raw_build_run": (
+                {
+                    "id": str(raw_build.id),
+                    "repo_name": raw_build.repo_name,
+                    "branch": raw_build.branch,
+                    "commit_sha": raw_build.commit_sha,
+                    "ci_run_id": raw_build.ci_run_id,
+                    "provider": raw_build.provider,
+                    "web_url": raw_build.web_url,
+                    "conclusion": (
+                        raw_build.conclusion.value
+                        if hasattr(raw_build.conclusion, "value")
+                        else raw_build.conclusion
+                    ),
+                    "run_started_at": (
+                        raw_build.run_started_at.isoformat()
+                        if raw_build.run_started_at
+                        else None
+                    ),
+                }
+                if raw_build
+                else {}
+            ),
+            "audit_log": (
+                {
+                    "id": str(audit_log.id),
+                    "duration_ms": audit_log.duration_ms,
+                    "nodes_succeeded": audit_log.nodes_succeeded,
+                    "nodes_failed": audit_log.nodes_failed,
+                    "nodes_skipped": audit_log.nodes_skipped,
+                    "errors": audit_log.errors,
+                    "warnings": audit_log.warnings,
+                    "node_results": [
+                        {
+                            "node_name": n.node_name,
+                            "status": n.status,
+                            "duration_ms": n.duration_ms,
+                            "features_extracted": n.features_extracted,
+                            "resources_used": n.resources_used,
+                            "error": n.error,
+                            "warning": n.warning,
+                            "skip_reason": n.skip_reason,
+                            "retry_count": n.retry_count,
+                        }
+                        for n in audit_log.node_results
+                    ],
+                }
+                if audit_log
+                else None
+            ),
         }
 
     def get_enrichment_builds(

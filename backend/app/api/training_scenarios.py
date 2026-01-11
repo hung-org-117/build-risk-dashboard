@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -321,6 +321,24 @@ def get_enrichment_builds(
         skip=skip,
         limit=limit,
         extraction_status=extraction_status,
+    )
+
+
+@router.get("/{scenario_id}/enrichment-builds/{build_id}")
+def get_enrichment_build_detail(
+    scenario_id: str,
+    build_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """
+    Get detailed view of an enrichment build.
+    """
+    service = TrainingScenarioService(db)
+    return service.get_enrichment_build_detail(
+        scenario_id=scenario_id,
+        build_id=build_id,
+        user_id=str(current_user["_id"]),
     )
 
 

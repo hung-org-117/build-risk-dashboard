@@ -509,7 +509,7 @@ def notify_dataset_enrichment_completed(
         message=f"Enrichment for '{dataset_name}' completed. {builds_features_extracted}/{builds_total} builds processed.",
         link=f"/scenarios/{scenario_id}",
         metadata={
-            "dataset_id": scenario_id,
+            "scenario_id": scenario_id,
             "builds_features_extracted": builds_features_extracted,
             "builds_total": builds_total,
         },
@@ -1025,7 +1025,7 @@ def notify_dataset_enrichment_failed(
         link=f"/scenarios/{scenario_id}",
         metadata={
             "dataset_name": scenario.name,
-            "dataset_id": scenario_id,
+            "scenario_id": scenario_id,
             "completed_count": completed_count,
             "failed_count": failed_count,
             "error": error_message,

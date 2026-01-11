@@ -145,9 +145,8 @@ def dispatch_scan_for_scenario_commit(
 
             from app.tasks.trivy import start_trivy_scan_for_version_commit
 
-            # Note: We reuse start_trivy_scan_for_version_commit but pass scenario_id as version_id
             start_trivy_scan_for_version_commit.delay(
-                version_id=scenario_id,
+                scenario_id=scenario_id,
                 commit_sha=commit_sha,
                 repo_full_name=repo_full_name,
                 raw_repo_id=raw_repo_id,
@@ -196,9 +195,8 @@ def dispatch_scan_for_scenario_commit(
 
             from app.tasks.sonar import start_sonar_scan_for_version_commit
 
-            # Note: We reuse start_sonar_scan_for_version_commit but pass scenario_id as version_id
             start_sonar_scan_for_version_commit.delay(
-                version_id=scenario_id,
+                scenario_id=scenario_id,
                 commit_sha=commit_sha,
                 repo_full_name=repo_full_name,
                 raw_repo_id=raw_repo_id,

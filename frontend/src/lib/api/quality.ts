@@ -28,8 +28,7 @@ export interface QualityMetric {
 
 export interface QualityReport {
     id: string;
-    dataset_id: string;
-    version_id: string;
+    scenario_id: string;
     status: "pending" | "running" | "completed" | "failed";
     error_message?: string;
     quality_score: number;
@@ -63,6 +62,7 @@ export interface UserSettingsResponse {
     browser_notifications: boolean;
     created_at: string;
     updated_at: string;
+    last_login?: string;
 }
 
 export interface UpdateUserSettingsRequest {
@@ -71,22 +71,20 @@ export interface UpdateUserSettingsRequest {
 
 export const qualityApi = {
     evaluate: async (
-        datasetId: string,
-        versionId: string
+        scenarioId: string
     ): Promise<EvaluateQualityResponse> => {
         const response = await api.post<EvaluateQualityResponse>(
-            `/datasets/${datasetId}/versions/${versionId}/evaluate`
+            `/scenarios/${scenarioId}/evaluate`
         );
         return response.data;
     },
 
     getReport: async (
-        datasetId: string,
-        versionId: string
+        scenarioId: string
     ): Promise<QualityReport | { available: false; message: string }> => {
         const response = await api.get<
             QualityReport | { available: false; message: string }
-        >(`/datasets/${datasetId}/versions/${versionId}/quality-report`);
+        >(`/scenarios/${scenarioId}/quality-report`);
         return response.data;
     },
 };

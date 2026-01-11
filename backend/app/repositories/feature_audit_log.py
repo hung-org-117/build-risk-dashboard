@@ -23,10 +23,10 @@ class FeatureAuditLogRepository(BaseRepository[FeatureAuditLog]):
         )
         return result.deleted_count
 
-    def delete_by_version_id(self, version_id: str, session=None) -> int:
-        """Delete all audit logs for a specific version (scenario)."""
+    def delete_by_scenario(self, scenario_id: str, session=None) -> int:
+        """Delete all audit logs for a specific scenario."""
         result = self.collection.delete_many(
-            {"scenario_id": self._to_object_id(version_id)},
+            {"scenario_id": self._to_object_id(scenario_id)},
             session=session,
         )
         return result.deleted_count

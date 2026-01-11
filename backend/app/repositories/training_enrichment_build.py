@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from pymongo.database import Database
 
-from app.entities.training_enrichment_build import TrainingEnrichmentBuild
 from app.entities.enums import ExtractionStatus
+from app.entities.training_enrichment_build import TrainingEnrichmentBuild
 
 from .base import BaseRepository
 
@@ -348,7 +348,7 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
             {"$unwind": "$fv"},
             {
                 "$match": {
-                    "fv.scope": FeatureVectorScope.ML_SCENARIO.value,
+                    "fv.scope": FeatureVectorScope.DATASET.value,
                     "fv.config_id": scenario_id,
                 }
             },

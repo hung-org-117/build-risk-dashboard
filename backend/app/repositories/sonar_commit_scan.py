@@ -115,12 +115,6 @@ class SonarCommitScanRepository(BaseRepository[SonarCommitScan]):
         )
         return result.deleted_count
 
-    def delete_by_version(self, version_id: ObjectId | str, session=None) -> int:
-        """Delete all scans for a version (legacy cleanup)."""
-        if isinstance(version_id, str):
-            version_id = ObjectId(version_id)
-        return self.delete_many({"dataset_version_id": version_id}, session=session)
-
     # ========================================================================
     # Scenario-based methods (Training Scenario flow)
     # ========================================================================

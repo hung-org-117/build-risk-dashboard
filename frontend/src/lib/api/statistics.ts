@@ -34,9 +34,8 @@ export interface FeatureCompleteness {
 }
 
 export interface VersionStatisticsResponse {
-    version_id: string;
-    dataset_id: string;
-    version_name: string;
+    scenario_id: string;
+    scenario_name: string;
     status: string;
     statistics: VersionStatistics;
     build_status_breakdown: BuildStatusBreakdown[];
@@ -90,7 +89,7 @@ export interface CategoricalDistribution {
 }
 
 export interface FeatureDistributionResponse {
-    version_id: string;
+    scenario_id: string;
     distributions: Record<string, NumericDistribution | CategoricalDistribution>;
 }
 
@@ -102,54 +101,10 @@ export interface CorrelationPair {
 }
 
 export interface CorrelationMatrixResponse {
-    version_id: string;
+    scenario_id: string;
     features: string[];
     matrix: (number | null)[][];
     significant_pairs: CorrelationPair[];
-}
-
-export interface NodeExecutionResult {
-    node_name: string;
-    status: string;
-    started_at?: string;
-    completed_at?: string;
-    duration_ms: number;
-    features_extracted: string[];
-    feature_values: Record<string, unknown>;
-    resources_used: string[];
-    error?: string;
-    warning?: string;
-    skip_reason?: string;
-}
-
-export interface FeatureAuditLogDto {
-    id: string;
-    correlation_id?: string;
-    category: string;
-    raw_repo_id: string;
-    raw_build_run_id: string;
-    enrichment_build_id?: string;
-    status: string;
-    started_at?: string;
-    completed_at?: string;
-    duration_ms?: number;
-    node_results: NodeExecutionResult[];
-    feature_count: number;
-    features_extracted: string[];
-    errors: string[];
-    warnings: string[];
-    nodes_executed: number;
-    nodes_succeeded: number;
-    nodes_failed: number;
-    nodes_skipped: number;
-    total_retries: number;
-}
-
-export interface AuditLogListResponse {
-    items: FeatureAuditLogDto[];
-    total: number;
-    skip: number;
-    limit: number;
 }
 
 // Scan Metrics Types
@@ -206,8 +161,7 @@ export interface ScanSummary {
 }
 
 export interface ScanMetricsStatisticsResponse {
-    version_id: string;
-    dataset_id: string;
+    scenario_id: string;
     scan_summary: ScanSummary;
     trivy_summary: TrivySummary;
     sonar_summary: SonarSummary;
@@ -215,18 +169,16 @@ export interface ScanMetricsStatisticsResponse {
 
 export const statisticsApi = {
     getVersionStatistics: async (
-        datasetId: string,
-        versionId: string
+        scenarioId: string
     ): Promise<VersionStatisticsResponse> => {
         const response = await api.get<VersionStatisticsResponse>(
-            `/datasets/${datasetId}/versions/${versionId}/statistics`
+            `/scenarios/${scenarioId}/statistics`
         );
         return response.data;
     },
 
     getDistributions: async (
-        datasetId: string,
-        versionId: string,
+        scenarioId: string,
         options?: {
             features?: string[];
             bins?: number;
@@ -234,7 +186,7 @@ export const statisticsApi = {
         }
     ): Promise<FeatureDistributionResponse> => {
         const response = await api.get<FeatureDistributionResponse>(
-            `/datasets/${datasetId}/versions/${versionId}/statistics/distributions`,
+            `/scenarios/${scenarioId}/statistics/distributions`,
             {
                 params: {
                     features: options?.features?.join(","),
@@ -247,12 +199,11 @@ export const statisticsApi = {
     },
 
     getCorrelation: async (
-        datasetId: string,
-        versionId: string,
+        scenarioId: string,
         features?: string[]
     ): Promise<CorrelationMatrixResponse> => {
         const response = await api.get<CorrelationMatrixResponse>(
-            `/datasets/${datasetId}/versions/${versionId}/statistics/correlation`,
+            `/scenarios/${scenarioId}/statistics/correlation`,
             {
                 params: features ? { features: features.join(",") } : undefined,
             }
@@ -261,42 +212,10 @@ export const statisticsApi = {
     },
 
     getScanMetrics: async (
-        datasetId: string,
-        versionId: string
+        scenarioId: string
     ): Promise<ScanMetricsStatisticsResponse> => {
         const response = await api.get<ScanMetricsStatisticsResponse>(
-            `/datasets/${datasetId}/versions/${versionId}/statistics/scans`
-        );
-        return response.data;
-    },
-};
-
-export const enrichmentLogsApi = {
-    getAuditLogs: async (
-        datasetId: string,
-        versionId: string,
-        options?: { skip?: number; limit?: number; status?: string }
-    ): Promise<AuditLogListResponse> => {
-        const response = await api.get<AuditLogListResponse>(
-            `/datasets/${datasetId}/versions/${versionId}/audit-logs`,
-            {
-                params: {
-                    skip: options?.skip,
-                    limit: options?.limit,
-                    status: options?.status,
-                },
-            }
-        );
-        return response.data;
-    },
-
-    getBuildAuditLog: async (
-        datasetId: string,
-        versionId: string,
-        buildId: string
-    ): Promise<FeatureAuditLogDto> => {
-        const response = await api.get<FeatureAuditLogDto>(
-            `/datasets/${datasetId}/versions/${versionId}/builds/${buildId}/audit-log`
+            `/scenarios/${scenarioId}/statistics/scans`
         );
         return response.data;
     },

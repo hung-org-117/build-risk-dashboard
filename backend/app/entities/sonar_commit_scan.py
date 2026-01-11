@@ -47,7 +47,7 @@ class SonarCommitScan(BaseEntity):
     # SonarQube identifiers
     component_key: str = Field(
         ...,
-        description="SonarQube project/component key (format: {version_id}_{repo}_{commit})",
+        description="SonarQube project/component key (format: {scenario_id}_{repo}_{commit})",
     )
 
     # Scan configuration (for retry with updated config)

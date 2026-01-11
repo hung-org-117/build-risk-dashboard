@@ -4,22 +4,6 @@ Tracing Context - Thread-safe context management for distributed tracing.
 This module provides a centralized way to manage tracing context across
 Celery tasks and API requests. It uses Python's contextvars for thread-safety.
 
-Usage:
-    # Set context at the start of a task
-    TracingContext.set(
-        correlation_id="abc-123",
-        dataset_id="dataset-456",
-        pipeline_type="dataset_enrichment"
-    )
-
-    # Get context (automatically added to JSONFormatter logs)
-    ctx = TracingContext.get()
-
-    # Generate correlation_id prefix for manual logging
-    prefix = TracingContext.get_log_prefix()  # "[corr=abc-123]"
-
-    # Clear context at the end
-    TracingContext.clear()
 """
 
 import uuid
@@ -28,8 +12,8 @@ from typing import Dict
 
 # Thread-safe context variables
 _correlation_id: ContextVar[str] = ContextVar("correlation_id", default="")
-_dataset_id: ContextVar[str] = ContextVar("dataset_id", default="")
-_version_id: ContextVar[str] = ContextVar("version_id", default="")
+_scenario_id: ContextVar[str] = ContextVar("scenario_id", default="")
+_source_id: ContextVar[str] = ContextVar("source_id", default="")
 _repo_id: ContextVar[str] = ContextVar("repo_id", default="")
 _pipeline_type: ContextVar[str] = ContextVar("pipeline_type", default="")
 _task_name: ContextVar[str] = ContextVar("task_name", default="")
@@ -41,8 +25,8 @@ class TracingContext:
     @staticmethod
     def set(
         correlation_id: str = "",
-        dataset_id: str = "",
-        version_id: str = "",
+        scenario_id: str = "",
+        source_id: str = "",
         repo_id: str = "",
         pipeline_type: str = "",
         task_name: str = "",
@@ -50,10 +34,10 @@ class TracingContext:
         """Set tracing context for current execution."""
         if correlation_id:
             _correlation_id.set(correlation_id)
-        if dataset_id:
-            _dataset_id.set(dataset_id)
-        if version_id:
-            _version_id.set(version_id)
+        if scenario_id:
+            _scenario_id.set(scenario_id)
+        if source_id:
+            _source_id.set(source_id)
         if repo_id:
             _repo_id.set(repo_id)
         if pipeline_type:
@@ -66,8 +50,8 @@ class TracingContext:
         """Get current tracing context as dict."""
         return {
             "correlation_id": _correlation_id.get(),
-            "dataset_id": _dataset_id.get(),
-            "version_id": _version_id.get(),
+            "scenario_id": _scenario_id.get(),
+            "source_id": _source_id.get(),
             "repo_id": _repo_id.get(),
             "pipeline_type": _pipeline_type.get(),
             "task_name": _task_name.get(),
@@ -99,8 +83,8 @@ class TracingContext:
     def clear() -> None:
         """Clear all tracing context."""
         _correlation_id.set("")
-        _dataset_id.set("")
-        _version_id.set("")
+        _scenario_id.set("")
+        _source_id.set("")
         _repo_id.set("")
         _pipeline_type.set("")
         _task_name.set("")
@@ -110,8 +94,8 @@ class TracingContext:
         """Copy current context for passing to child tasks."""
         return {
             "correlation_id": _correlation_id.get(),
-            "dataset_id": _dataset_id.get(),
-            "version_id": _version_id.get(),
+            "scenario_id": _scenario_id.get(),
+            "source_id": _source_id.get(),
             "repo_id": _repo_id.get(),
             "pipeline_type": _pipeline_type.get(),
         }
@@ -129,16 +113,16 @@ def get_or_create_correlation_id() -> str:
 
 def set_tracing_context(
     correlation_id: str = "",
-    dataset_id: str = "",
-    version_id: str = "",
+    scenario_id: str = "",
+    source_id: str = "",
     repo_id: str = "",
     pipeline_type: str = "",
 ) -> None:
     """Convenience function to set tracing context."""
     TracingContext.set(
         correlation_id=correlation_id,
-        dataset_id=dataset_id,
-        version_id=version_id,
+        scenario_id=scenario_id,
+        source_id=source_id,
         repo_id=repo_id,
         pipeline_type=pipeline_type,
     )

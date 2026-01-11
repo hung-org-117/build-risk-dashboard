@@ -140,20 +140,14 @@ class ModelImportBuildUpdater:
         )
 
 
-class DatasetImportBuildUpdater:
-    """Wrapper for TrainingIngestionBuildRepository implementing ProgressiveUpdaterProtocol.
-
-    Adapts the new TrainingIngestionBuild flow (scenario_id) to the progressive updater interface.
-    """
-
-    def __init__(self, db: "Database", version_id: str, raw_repo_id: str):
-        # version_id here corresponds to scenario_id in the new flow
+class TrainingIngestionBuildUpdater:
+    def __init__(self, db: "Database", scenario_id: str, raw_repo_id: str):
         from app.repositories.training_ingestion_build import (
             TrainingIngestionBuildRepository,
         )
 
         self.repo = TrainingIngestionBuildRepository(db)
-        self.scenario_id = version_id
+        self.scenario_id = scenario_id
         self.raw_repo_id = raw_repo_id
 
     def update_resource_batch(
@@ -228,6 +222,6 @@ def get_progressive_updater(
     elif pipeline_type == "dataset":
         if not raw_repo_id:
             raise ValueError("raw_repo_id is required for dataset pipeline")
-        return DatasetImportBuildUpdater(db, pipeline_id, raw_repo_id)
+        return TrainingIngestionBuildUpdater(db, pipeline_id, raw_repo_id)
     else:
         raise ValueError(f"Unknown pipeline_type: {pipeline_type}")

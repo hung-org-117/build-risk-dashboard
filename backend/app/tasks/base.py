@@ -148,7 +148,9 @@ class PipelineTask(Task):
         except GithubAllRateLimitError as exc:
             countdown = self._calculate_countdown(exc)
             if countdown:
-                logger.warning(f"All tokens exhausted for {self.name}, retrying in {countdown}s")
+                logger.warning(
+                    f"All tokens exhausted for {self.name}, retrying in {countdown}s"
+                )
                 raise self.retry(exc=exc, countdown=countdown) from exc
             else:
                 raise self.retry(exc=exc, countdown=self.default_retry_delay) from exc
@@ -169,16 +171,16 @@ class PipelineTask(Task):
     def before_start(self, task_id: str, args: tuple, kwargs: dict):
         """Restore TracingContext from kwargs."""
         correlation_id = kwargs.get("correlation_id", "")
-        dataset_id = kwargs.get("dataset_id", "")
-        version_id = kwargs.get("version_id", "")
+        scenario_id = kwargs.get("scenario_id", "")
+        source_id = kwargs.get("source_id", "")
         repo_id = kwargs.get("repo_id", "") or kwargs.get("repo_config_id", "")
         task_short_name = self.name.split(".")[-1] if self.name else ""
 
         if correlation_id:
             TracingContext.set(
                 correlation_id=correlation_id,
-                dataset_id=dataset_id,
-                version_id=version_id,
+                scenario_id=scenario_id,
+                source_id=source_id,
                 repo_id=repo_id,
                 task_name=task_short_name,
             )
@@ -206,7 +208,9 @@ class PipelineTask(Task):
             self._redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
         return self._redis
 
-    def on_failure(self, exc: Exception, task_id: str, args: tuple, kwargs: dict, einfo):
+    def on_failure(
+        self, exc: Exception, task_id: str, args: tuple, kwargs: dict, einfo
+    ):
         """Log failure and notify for rate limit exhaustion."""
         logger.error("Task %s failed: %s", self.name, exc, exc_info=exc)
         if isinstance(exc, GithubAllRateLimitError):
@@ -321,7 +325,9 @@ class SafeTask(PipelineTask):
 
         except SoftTimeLimitExceeded as e:
             # Timeout - checkpoint, cleanup, retry
-            logger.warning(f"{log_prefix} Soft time limit exceeded, phase={state.phase}")
+            logger.warning(
+                f"{log_prefix} Soft time limit exceeded, phase={state.phase}"
+            )
             if save_state_fn:
                 save_state_fn(state)
             if cleanup_fn:
@@ -334,7 +340,9 @@ class SafeTask(PipelineTask):
             delay = compute_backoff(
                 attempt, base=self.transient_retry_base, cap=self.transient_retry_cap
             )
-            logger.info(f"{log_prefix} TransientError, phase={state.phase}, retry in {delay}s: {e}")
+            logger.info(
+                f"{log_prefix} TransientError, phase={state.phase}, retry in {delay}s: {e}"
+            )
             if save_state_fn:
                 save_state_fn(state)
             if cleanup_fn:
@@ -347,7 +355,9 @@ class SafeTask(PipelineTask):
 
         except MissingResourceError as e:
             # Expected missing - mark MISSING_RESOURCE, no retry
-            logger.warning(f"{log_prefix} MissingResourceError, phase={state.phase}: {e}")
+            logger.warning(
+                f"{log_prefix} MissingResourceError, phase={state.phase}: {e}"
+            )
             if mark_missing_fn:
                 try:
                     mark_missing_fn(e)
@@ -378,7 +388,9 @@ class SafeTask(PipelineTask):
                     try:
                         mark_failed_fn(e)
                     except Exception as mark_exc:
-                        logger.warning(f"{log_prefix} Failed to mark failed: {mark_exc}")
+                        logger.warning(
+                            f"{log_prefix} Failed to mark failed: {mark_exc}"
+                        )
                 if cleanup_fn:
                     self._safe_cleanup(cleanup_fn, state, log_prefix)
                 raise
@@ -386,7 +398,9 @@ class SafeTask(PipelineTask):
                 # Treat as transient - retry
                 attempt = getattr(self.request, "retries", 0)
                 delay = compute_backoff(
-                    attempt, base=self.transient_retry_base, cap=self.transient_retry_cap
+                    attempt,
+                    base=self.transient_retry_base,
+                    cap=self.transient_retry_cap,
                 )
                 if save_state_fn:
                     save_state_fn(state)

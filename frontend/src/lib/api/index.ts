@@ -1,13 +1,3 @@
-/**
- * Unified API module - Re-exports all API clients from their respective modules.
- * 
- * Usage:
- *   import { buildApi, reposApi, ... } from '@/lib/api';
- * 
- * Or import specific modules:
- *   import { buildApi } from '@/lib/api/builds';
- */
-
 // Core client and utilities
 export { api, ApiError, getApiErrorMessage, getValidationErrors } from './client';
 
@@ -19,13 +9,13 @@ export { reposApi } from './repos';
 export { tokensApi } from './tokens';
 export { featuresApi, sonarApi } from './features';
 export { adminUsersApi, adminReposApi } from './admin';
-export { enrichmentApi } from './enrichment';
+
 export { exportApi } from './export';
-export { datasetValidationApi } from './validation';
+
 export { settingsApi, notificationsApi } from './settings';
-export { datasetScanApi, datasetVersionApi } from './versions';
+
 export { qualityApi, userSettingsApi } from './quality';
-export { statisticsApi, enrichmentLogsApi } from './statistics';
+export { statisticsApi } from './statistics';
 export { trainingScenariosApi } from './training-scenarios';
 export { buildSourcesApi } from './build-sources';
 export { templatesApi } from './templates';
@@ -71,19 +61,7 @@ export type {
     ExportJobListItem,
 } from './export';
 
-export type {
-    ScanResultItem,
-    ScanResultsResponse,
-    ScanSummaryResponse,
-    EnrichedBuildData,
-    ImportBuildItem,
-    VersionDataResponse,
-    NodeExecutionDetail,
-    AuditLogDetail,
-    RawBuildRunDetail,
-    EnrichmentBuildDetail,
-    EnrichmentBuildDetailResponse,
-} from './versions';
+
 
 
 export type {
@@ -108,9 +86,6 @@ export type {
     FeatureDistributionResponse,
     CorrelationPair,
     CorrelationMatrixResponse,
-    NodeExecutionResult,
-    FeatureAuditLogDto,
-    AuditLogListResponse,
     MetricSummary,
     TrivySummary,
     SonarSummary,

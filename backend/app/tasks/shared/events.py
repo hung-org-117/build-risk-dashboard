@@ -179,76 +179,6 @@ def publish_scenario_update(
     return publish_event("SCENARIO_UPDATE", payload)
 
 
-def publish_enrichment_update(
-    version_id: str,
-    status: str,
-    builds_features_extracted: int = 0,
-    builds_total: int = 0,
-    builds_ingested: int = 0,
-    builds_missing_resource: int = 0,
-    builds_ingestion_failed: int = 0,
-    scans_completed: int = 0,
-    scans_total: int = 0,
-    scans_failed: int = 0,
-    feature_extraction_completed: bool = False,
-    scan_extraction_completed: bool = False,
-    error: Optional[str] = None,
-) -> bool:
-    """
-    Publish enrichment progress update for real-time UI updates.
-
-    Args:
-        version_id: DatasetVersion ID
-        status: Status value (ingesting, processing, completed, failed)
-        builds_features_extracted: Number of builds with features extracted
-        builds_total: Total number of builds in version
-        builds_ingested: Number of builds ingested
-        builds_missing_resource: Number of builds with missing resources
-        builds_ingestion_failed: Number of builds that failed ingestion (retryable)
-        scans_completed: Number of scans completed
-        scans_total: Total number of scans to run
-        scans_failed: Number of scans failed
-        feature_extraction_completed: Whether feature extraction is done
-        scan_extraction_completed: Whether all scans are done
-        error: Optional error message
-
-    Returns:
-        True if published successfully, False otherwise
-    """
-    feature_extraction_progress = (
-        round((builds_features_extracted / builds_total) * 100, 1)
-        if builds_total > 0
-        else 0
-    )
-    scan_progress = (
-        round(((scans_completed + scans_failed) / scans_total) * 100, 1)
-        if scans_total > 0
-        else 0
-    )
-    payload = {
-        "version_id": version_id,
-        "status": status,
-        # Feature extraction tracking
-        "builds_features_extracted": builds_features_extracted,
-        "builds_total": builds_total,
-        "builds_ingested": builds_ingested,
-        "builds_missing_resource": builds_missing_resource,
-        "builds_ingestion_failed": builds_ingestion_failed,
-        "feature_extraction_progress": feature_extraction_progress,
-        "feature_extraction_completed": feature_extraction_completed,
-        # Scan tracking (parallel with feature extraction)
-        "scans_completed": scans_completed,
-        "scans_total": scans_total,
-        "scans_failed": scans_failed,
-        "scan_progress": scan_progress,
-        "scan_extraction_completed": scan_extraction_completed,
-    }
-    if error:
-        payload["error"] = error
-
-    return publish_event("ENRICHMENT_UPDATE", payload)
-
-
 def publish_scan_update(
     scenario_id: str,
     scan_id: str,
@@ -381,7 +311,7 @@ def publish_ingestion_error(
 
 
 def publish_scan_error(
-    version_id: str,
+    scenario_id: str,
     scan_id: str,
     commit_sha: str,
     tool_type: str,
@@ -392,7 +322,7 @@ def publish_scan_error(
     Publish scan error event for real-time UI notifications.
 
     Args:
-        version_id: DatasetVersion ID
+        scenario_id: TrainingScenario ID
         scan_id: TrivyCommitScan or SonarCommitScan ID
         commit_sha: The commit SHA that failed scanning
         tool_type: "trivy" or "sonarqube"
@@ -403,7 +333,7 @@ def publish_scan_error(
         True if published successfully, False otherwise
     """
     payload = {
-        "version_id": version_id,
+        "scenario_id": scenario_id,
         "scan_id": scan_id,
         "commit_sha": commit_sha,
         "tool_type": tool_type,
