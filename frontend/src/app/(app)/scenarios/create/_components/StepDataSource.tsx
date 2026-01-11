@@ -60,7 +60,7 @@ function getConclusionBadge(conclusion: string) {
 }
 
 export function StepDataSource() {
-    const { state, updateDataSource, setPreviewStats, setIsPreviewLoading, setStep } = useWizard();
+    const { state, updateDataSource, setPreviewStats, setPreviewRepos, setIsPreviewLoading, setStep } = useWizard();
     const { dataSource, previewStats, isPreviewLoading } = state;
 
     const [previewBuilds, setPreviewBuilds] = useState<PreviewBuild[]>([]);
@@ -97,6 +97,10 @@ export function StepDataSource() {
             const response = await trainingScenariosApi.previewBuilds(params);
             setPreviewBuilds(response.builds);
             setPreviewStats(response.stats);
+            // Save repos from preview for per-repo configuration in Step 2
+            if (response.stats.repos) {
+                setPreviewRepos(response.stats.repos);
+            }
             setPage(pageNum);
             setHasApplied(true);
         } catch (error) {
@@ -104,7 +108,7 @@ export function StepDataSource() {
         } finally {
             setIsPreviewLoading(false);
         }
-    }, [dataSource, setIsPreviewLoading, setPreviewStats]);
+    }, [dataSource, setIsPreviewLoading, setPreviewStats, setPreviewRepos]);
 
     // Auto-load on mount
     useEffect(() => {

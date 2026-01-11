@@ -283,15 +283,6 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
                     "failure_count": {
                         "$sum": {"$cond": [{"$eq": ["$conclusion", "failure"]}, 1, 0]}
                     },
-                    "other_count": {
-                        "$sum": {
-                            "$cond": [
-                                {"$nin": ["$conclusion", ["success", "failure"]]},
-                                1,
-                                0,
-                            ]
-                        }
-                    },
                 }
             },
             {
@@ -302,7 +293,6 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
                     "outcome_distribution": {
                         "success": "$success_count",
                         "failure": "$failure_count",
-                        "other": "$other_count",
                     },
                 }
             },
@@ -315,7 +305,7 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
             else {
                 "total_builds": 0,
                 "total_repos": 0,
-                "outcome_distribution": {"success": 0, "failure": 0, "other": 0},
+                "outcome_distribution": {"success": 0, "failure": 0},
             }
         )
 

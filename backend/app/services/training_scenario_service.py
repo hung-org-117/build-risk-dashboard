@@ -474,3 +474,255 @@ class TrainingScenarioService:
             ),
             "generation_duration_seconds": split.generation_duration_seconds,
         }
+
+    # =========================================================================
+    # Build Listing Endpoints
+    # =========================================================================
+
+    def get_ingestion_builds(
+        self,
+        scenario_id: str,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 20,
+        status_filter: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        List ingestion builds for a scenario (Phase 1).
+
+        Returns TrainingIngestionBuild records with resource status.
+        """
+        # Permission check
+        self.get_scenario(scenario_id, user_id)
+
+        from app.entities.training_ingestion_build import IngestionStatus
+
+        # Convert status filter to enum
+        status_enum = None
+        if status_filter:
+            try:
+                status_enum = IngestionStatus(status_filter)
+            except ValueError:
+                pass
+
+        builds, total = self.ingestion_build_repo.find_by_scenario(
+            scenario_id=scenario_id,
+            status_filter=status_enum,
+            skip=skip,
+            limit=limit,
+        )
+
+        items = []
+        for build in builds:
+            items.append(
+                {
+                    "id": str(build.id),
+                    "ci_run_id": build.ci_run_id or "",
+                    "commit_sha": build.commit_sha or "",
+                    "repo_full_name": build.repo_full_name or "",
+                    "status": (
+                        build.status.value
+                        if hasattr(build.status, "value")
+                        else build.status
+                    ),
+                    "resource_status": build.resource_status or {},
+                    "required_resources": build.required_resources or [],
+                    "ingestion_error": build.ingestion_error,
+                    "created_at": (
+                        build.created_at.isoformat() if build.created_at else None
+                    ),
+                    "ingested_at": (
+                        build.ingested_at.isoformat() if build.ingested_at else None
+                    ),
+                }
+            )
+
+        return {
+            "items": items,
+            "total": total,
+            "page": (skip // limit) + 1 if limit > 0 else 1,
+            "size": limit,
+        }
+
+    def get_enrichment_builds(
+        self,
+        scenario_id: str,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 20,
+        extraction_status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        List enrichment builds for a scenario (Phase 2).
+
+        Returns TrainingEnrichmentBuild records with extraction status.
+        """
+        from app.entities.enums import ExtractionStatus
+
+        # Permission check
+        scenario = self.get_scenario(scenario_id, user_id)
+
+        # Convert status filter
+        status_enum = None
+        if extraction_status:
+            try:
+                status_enum = ExtractionStatus(extraction_status)
+            except ValueError:
+                pass
+
+        builds, total = self.enrichment_build_repo.find_by_scenario(
+            scenario_id=scenario_id,
+            extraction_status=status_enum,
+            skip=skip,
+            limit=limit,
+        )
+
+        # Get expected feature count from scenario
+        expected_features = (
+            len(scenario.feature_config.dag_features) if scenario.feature_config else 0
+        )
+
+        items = []
+        for build in builds:
+            items.append(
+                {
+                    "id": str(build.id),
+                    "raw_build_run_id": (
+                        str(build.raw_build_run_id) if build.raw_build_run_id else ""
+                    ),
+                    "ci_run_id": build.ci_run_id or "",
+                    "commit_sha": build.commit_sha or "",
+                    "repo_full_name": build.repo_full_name or "",
+                    "extraction_status": (
+                        build.extraction_status.value
+                        if hasattr(build.extraction_status, "value")
+                        else build.extraction_status
+                    ),
+                    "extraction_error": build.extraction_error,
+                    "feature_count": build.feature_count or 0,
+                    "expected_feature_count": expected_features,
+                    "split_assignment": build.split_assignment,
+                    "created_at": (
+                        build.created_at.isoformat() if build.created_at else None
+                    ),
+                    "enriched_at": (
+                        build.enriched_at.isoformat() if build.enriched_at else None
+                    ),
+                }
+            )
+
+        return {
+            "items": items,
+            "total": total,
+            "page": (skip // limit) + 1 if limit > 0 else 1,
+            "size": limit,
+        }
+
+    def get_scan_status(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get scan status summary for a scenario.
+
+        Returns counts of scans completed/pending/failed.
+        """
+        # Permission check
+        scenario = self.get_scenario(scenario_id, user_id)
+
+        return {
+            "scans_total": scenario.scans_total or 0,
+            "scans_completed": scenario.scans_completed or 0,
+            "scans_failed": scenario.scans_failed or 0,
+            "scans_pending": max(
+                0,
+                (scenario.scans_total or 0)
+                - (scenario.scans_completed or 0)
+                - (scenario.scans_failed or 0),
+            ),
+        }
+
+    # =========================================================================
+    # Retry Actions
+    # =========================================================================
+
+    def retry_ingestion(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Retry failed ingestion builds.
+
+        Requeues builds with status FAILED or MISSING_RESOURCE.
+        """
+        from app.entities.training_ingestion_build import IngestionStatus
+        from app.tasks.training_ingestion import reingest_failed_builds
+
+        scenario = self.get_scenario(scenario_id, user_id)
+
+        if scenario.status not in [
+            ScenarioStatus.INGESTED,
+            ScenarioStatus.PROCESSING,
+            ScenarioStatus.PROCESSED,
+        ]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot retry ingestion: scenario not in correct state",
+            )
+
+        # Count failed builds
+        status_counts = self.ingestion_build_repo.count_by_status(scenario_id)
+        failed_count = status_counts.get(IngestionStatus.FAILED.value, 0)
+        missing_count = status_counts.get(IngestionStatus.MISSING_RESOURCE.value, 0)
+        total_retryable = failed_count + missing_count
+
+        if total_retryable == 0:
+            return {"message": "No failed builds to retry", "retry_count": 0}
+
+        # Dispatch retry task
+        reingest_failed_builds.delay(scenario_id)
+
+        return {
+            "message": f"Retrying {total_retryable} failed builds",
+            "retry_count": total_retryable,
+        }
+
+    def retry_processing(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Retry failed processing builds.
+
+        Requeues enrichment builds with status FAILED.
+        """
+        from app.entities.enums import ExtractionStatus
+        from app.tasks.training_processing import reprocess_failed_builds
+
+        scenario = self.get_scenario(scenario_id, user_id)
+
+        if scenario.status not in [ScenarioStatus.PROCESSED, ScenarioStatus.GENERATING]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot retry processing: scenario not in correct state",
+            )
+
+        # Count failed builds
+        status_counts = self.enrichment_build_repo.count_by_extraction_status(
+            scenario_id
+        )
+        failed_count = status_counts.get(ExtractionStatus.FAILED.value, 0)
+
+        if failed_count == 0:
+            return {"message": "No failed builds to retry", "retry_count": 0}
+
+        # Dispatch retry task
+        reprocess_failed_builds.delay(scenario_id)
+
+        return {
+            "message": f"Retrying {failed_count} failed builds",
+            "retry_count": failed_count,
+        }

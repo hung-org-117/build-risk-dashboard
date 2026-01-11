@@ -86,8 +86,8 @@ export interface PreviewBuildStats {
     outcome_distribution: {
         success: number;
         failure: number;
-        other: number;
     };
+    repos?: { id: string; full_name: string }[];
 }
 
 export interface PreviewBuildsResponse {
@@ -125,6 +125,52 @@ export interface TrainingDatasetSplitRecord {
     file_format: string;
     generated_at?: string;
     generation_duration_seconds: number;
+}
+
+// Ingestion build types
+export interface TrainingIngestionBuildRecord {
+    id: string;
+    ci_run_id: string;
+    commit_sha: string;
+    repo_full_name: string;
+    status: "pending" | "ingesting" | "ingested" | "missing_resource" | "failed";
+    resource_status: Record<string, { status: string; error?: string }>;
+    required_resources: string[];
+    ingestion_error?: string;
+    created_at?: string;
+    ingested_at?: string;
+}
+
+// Enrichment build types
+export interface TrainingEnrichmentBuildRecord {
+    id: string;
+    raw_build_run_id: string;
+    ci_run_id: string;
+    commit_sha: string;
+    repo_full_name: string;
+    extraction_status: "pending" | "completed" | "failed" | "partial";
+    extraction_error?: string;
+    feature_count: number;
+    expected_feature_count: number;
+    split_assignment?: string;
+    created_at?: string;
+    enriched_at?: string;
+}
+
+// Paginated response
+export interface PaginatedResponse<T> {
+    items: T[];
+    total: number;
+    page: number;
+    size: number;
+}
+
+// Scan status types
+export interface ScanStatusResponse {
+    scans_total: number;
+    scans_completed: number;
+    scans_failed: number;
+    scans_pending: number;
 }
 
 // Create scenario payload
@@ -256,6 +302,72 @@ export const trainingScenariosApi = {
     getSplits: async (scenarioId: string): Promise<TrainingDatasetSplitRecord[]> => {
         const response = await api.get<TrainingDatasetSplitRecord[]>(
             `/training-scenarios/${scenarioId}/splits`
+        );
+        return response.data;
+    },
+
+    // =========================================================================
+    // Build Listing
+    // =========================================================================
+
+    /**
+     * Get ingestion builds for a scenario (Phase 1)
+     */
+    getIngestionBuilds: async (
+        scenarioId: string,
+        params?: { skip?: number; limit?: number; status?: string }
+    ): Promise<PaginatedResponse<TrainingIngestionBuildRecord>> => {
+        const response = await api.get<PaginatedResponse<TrainingIngestionBuildRecord>>(
+            `/training-scenarios/${scenarioId}/ingestion-builds`,
+            { params }
+        );
+        return response.data;
+    },
+
+    /**
+     * Get enrichment builds for a scenario (Phase 2)
+     */
+    getEnrichmentBuilds: async (
+        scenarioId: string,
+        params?: { skip?: number; limit?: number; extraction_status?: string }
+    ): Promise<PaginatedResponse<TrainingEnrichmentBuildRecord>> => {
+        const response = await api.get<PaginatedResponse<TrainingEnrichmentBuildRecord>>(
+            `/training-scenarios/${scenarioId}/enrichment-builds`,
+            { params }
+        );
+        return response.data;
+    },
+
+    /**
+     * Get scan status summary for a scenario
+     */
+    getScanStatus: async (scenarioId: string): Promise<ScanStatusResponse> => {
+        const response = await api.get<ScanStatusResponse>(
+            `/training-scenarios/${scenarioId}/scan-status`
+        );
+        return response.data;
+    },
+
+    // =========================================================================
+    // Retry Actions
+    // =========================================================================
+
+    /**
+     * Retry failed ingestion builds
+     */
+    retryIngestion: async (scenarioId: string): Promise<{ message: string; retry_count: number }> => {
+        const response = await api.post<{ message: string; retry_count: number }>(
+            `/training-scenarios/${scenarioId}/retry-ingestion`
+        );
+        return response.data;
+    },
+
+    /**
+     * Retry failed processing builds
+     */
+    retryProcessing: async (scenarioId: string): Promise<{ message: string; retry_count: number }> => {
+        const response = await api.post<{ message: string; retry_count: number }>(
+            `/training-scenarios/${scenarioId}/retry-processing`
         );
         return response.data;
     },

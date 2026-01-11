@@ -69,7 +69,7 @@ def preview_builds(
                 "stats": {
                     "total_builds": 0,
                     "total_repos": 0,
-                    "outcome_distribution": {"success": 0, "failure": 0, "other": 0},
+                    "outcome_distribution": {"success": 0, "failure": 0},
                 },
                 "pagination": {"skip": skip, "limit": limit, "total": 0},
             }
@@ -88,11 +88,20 @@ def preview_builds(
 
     # Serialize builds
     builds_data = []
+    unique_repos: dict = {}  # repo_id -> repo_info
     for build in builds:
+        # Collect unique repos
+        repo_id_str = str(build.raw_repo_id)
+        if repo_id_str not in unique_repos:
+            unique_repos[repo_id_str] = {
+                "id": repo_id_str,
+                "full_name": build.repo_name or "",
+            }
+
         builds_data.append(
             {
                 "id": str(build.id),
-                "raw_repo_id": str(build.raw_repo_id),
+                "raw_repo_id": repo_id_str,
                 "repo_name": build.repo_name,
                 "branch": build.branch,
                 "commit_sha": build.commit_sha[:8] if build.commit_sha else "",
@@ -107,6 +116,9 @@ def preview_builds(
                 "duration_seconds": build.duration_seconds,
             }
         )
+
+    # Add repos to stats
+    stats["repos"] = list(unique_repos.values())
 
     return {
         "builds": builds_data,
@@ -247,3 +259,107 @@ def get_scenario_splits(
     """Get generated split files."""
     service = TrainingScenarioService(db)
     return service.get_scenario_splits(scenario_id, str(current_user.id))
+
+
+# ============================================================================
+# Build Listing
+# ============================================================================
+
+
+@router.get("/{scenario_id}/ingestion-builds")
+def get_ingestion_builds(
+    scenario_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status: pending, ingesting, ingested, missing_resource",
+    ),
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    List ingestion builds for a scenario (Phase 1).
+
+    Shows TrainingIngestionBuild data with resource status breakdown.
+    """
+    service = TrainingScenarioService(db)
+    return service.get_ingestion_builds(
+        scenario_id=scenario_id,
+        user_id=str(current_user.id),
+        skip=skip,
+        limit=limit,
+        status_filter=status,
+    )
+
+
+@router.get("/{scenario_id}/enrichment-builds")
+def get_enrichment_builds(
+    scenario_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    extraction_status: Optional[str] = Query(
+        None,
+        description="Filter by status: pending, completed, failed, partial",
+    ),
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    List enrichment builds for a scenario (Phase 2).
+
+    Shows TrainingEnrichmentBuild data with extraction status and features.
+    """
+    service = TrainingScenarioService(db)
+    return service.get_enrichment_builds(
+        scenario_id=scenario_id,
+        user_id=str(current_user.id),
+        skip=skip,
+        limit=limit,
+        extraction_status=extraction_status,
+    )
+
+
+@router.get("/{scenario_id}/scan-status")
+def get_scan_status(
+    scenario_id: str,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Get scan status summary for a scenario.
+
+    Returns counts of scans completed/pending/failed.
+    """
+    service = TrainingScenarioService(db)
+    return service.get_scan_status(
+        scenario_id=scenario_id,
+        user_id=str(current_user.id),
+    )
+
+
+# ============================================================================
+# Retry Actions
+# ============================================================================
+
+
+@router.post("/{scenario_id}/retry-ingestion")
+def retry_ingestion(
+    scenario_id: str,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Retry failed ingestion builds."""
+    service = TrainingScenarioService(db)
+    return service.retry_ingestion(scenario_id, str(current_user.id))
+
+
+@router.post("/{scenario_id}/retry-processing")
+def retry_processing(
+    scenario_id: str,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Retry failed processing builds."""
+    service = TrainingScenarioService(db)
+    return service.retry_processing(scenario_id, str(current_user.id))

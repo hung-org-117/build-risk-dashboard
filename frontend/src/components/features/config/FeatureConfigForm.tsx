@@ -31,7 +31,7 @@ interface ConfigFieldSpec {
 interface RepoInfo {
     id: string; // github_repo_id
     full_name: string;
-    validation_status: string;
+    validation_status?: string; // Optional - not available in Training Scenario wizard
 }
 
 // Dynamic config: field name -> array of selected values

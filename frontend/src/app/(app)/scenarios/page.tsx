@@ -1,7 +1,7 @@
 "use client";
 
 import {
-    CloudUpload,
+    UploadCloud,
     Database,
     GitBranch,
     Loader2,
@@ -9,7 +9,6 @@ import {
     RefreshCw,
     Settings2,
     Trash2,
-    Clock,
     CheckCircle2,
     TrendingUp,
 } from "lucide-react";
@@ -74,7 +73,6 @@ export default function ScenariosPage() {
         totalBuilds: 0,
         totalRepos: 0,
         successRate: 0,
-        lastImport: null as string | null,
     });
 
     // Search and pagination
@@ -122,7 +120,6 @@ export default function ScenariosPage() {
                 successRate: response.stats.total_builds > 0
                     ? Math.round((response.stats.outcome_distribution.success / response.stats.total_builds) * 1000) / 10
                     : 0,
-                lastImport: null, // TODO: Get from API
             });
         } catch (err) {
             console.error("Failed to load stats:", err);
@@ -229,7 +226,7 @@ export default function ScenariosPage() {
                 <Card className="border-2 border-dashed hover:border-blue-500/50 transition-colors">
                     <CardContent className="flex flex-col items-center justify-center py-8 text-center">
                         <div className="mb-4 rounded-full bg-blue-900/30 p-4">
-                            <CloudUpload className="h-8 w-8 text-blue-400" />
+                            <UploadCloud className="h-8 w-8 text-blue-400" />
                         </div>
                         <h3 className="text-lg font-semibold mb-2">Upload CSV</h3>
                         <p className="text-sm text-muted-foreground mb-4 max-w-xs">
@@ -273,7 +270,7 @@ export default function ScenariosPage() {
             </div>
 
             {/* Statistics Bar */}
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-3">
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center gap-3">
@@ -303,19 +300,6 @@ export default function ScenariosPage() {
                             <div>
                                 <div className="text-2xl font-bold">{stats.successRate}%</div>
                                 <p className="text-xs text-muted-foreground">Success Rate</p>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                            <Clock className="h-5 w-5 text-muted-foreground" />
-                            <div>
-                                <div className="text-2xl font-bold">
-                                    {stats.lastImport || "—"}
-                                </div>
-                                <p className="text-xs text-muted-foreground">Last Import</p>
                             </div>
                         </div>
                     </CardContent>

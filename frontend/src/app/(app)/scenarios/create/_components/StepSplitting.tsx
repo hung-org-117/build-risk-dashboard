@@ -318,7 +318,7 @@ export function StepSplitting() {
                     Back
                 </Button>
                 <Button onClick={() => setStep(4)}>
-                    Next: Review
+                    Next: Preprocessing
                     <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
             </div>

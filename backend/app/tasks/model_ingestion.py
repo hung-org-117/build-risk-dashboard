@@ -369,11 +369,9 @@ def fetch_builds_until_existing(
             if build.status != BuildStatus.COMPLETED:
                 continue
 
-            if build.conclusion in (
-                BuildConclusion.SKIPPED,
-                BuildConclusion.ACTION_REQUIRED,
-                BuildConclusion.STALE,
-                BuildConclusion.CANCELLED,
+            if build.conclusion not in (
+                BuildConclusion.SUCCESS,
+                BuildConclusion.FAILURE,
             ):
                 continue
 

@@ -77,6 +77,23 @@ export interface SplittingConfig {
         test: number;
     };
     stratify_by: string;
+    // Advanced options
+    temporal_ordering: boolean;
+    test_groups: string[];
+    val_groups: string[];
+    train_groups: string[];
+}
+
+export interface PreprocessingConfig {
+    missing_values_strategy: "drop_row" | "fill" | "skip_feature";
+    fill_value: number | string;
+    normalization_method: "z_score" | "min_max" | "robust" | "none";
+    strict_mode: boolean;
+}
+
+export interface OutputConfig {
+    format: "parquet" | "csv" | "pickle";
+    include_metadata: boolean;
 }
 
 export interface PreviewStats {
@@ -85,12 +102,12 @@ export interface PreviewStats {
     outcome_distribution: {
         success: number;
         failure: number;
-        other: number;
     };
+    repos?: { id: string; full_name: string }[];
 }
 
 export interface WizardState {
-    // Current step (1-4)
+    // Current step (1-5)
     step: number;
 
     // Scenario metadata
@@ -100,6 +117,7 @@ export interface WizardState {
     // Step 1: Data Source
     dataSource: DataSourceConfig;
     previewStats: PreviewStats | null;
+    previewRepos: { id: string; full_name: string }[];
 
     // Step 2: Features
     features: FeatureConfig;
@@ -108,6 +126,10 @@ export interface WizardState {
 
     // Step 3: Splitting
     splitting: SplittingConfig;
+
+    // Step 4: Preprocessing & Output
+    preprocessing: PreprocessingConfig;
+    output: OutputConfig;
 
     // Loading states
     isPreviewLoading: boolean;
@@ -121,10 +143,13 @@ interface WizardContextValue {
     setDescription: (description: string) => void;
     updateDataSource: (updates: Partial<DataSourceConfig>) => void;
     setPreviewStats: (stats: PreviewStats | null) => void;
+    setPreviewRepos: (repos: { id: string; full_name: string }[]) => void;
     updateFeatures: (updates: Partial<FeatureConfig>) => void;
     setFeatureConfigs: (configs: Record<string, any>) => void;
     setScanConfigs: (configs: Record<string, any>) => void;
     updateSplitting: (updates: Partial<SplittingConfig>) => void;
+    updatePreprocessing: (updates: Partial<PreprocessingConfig>) => void;
+    updateOutput: (updates: Partial<OutputConfig>) => void;
     setIsPreviewLoading: (loading: boolean) => void;
     setIsSubmitting: (submitting: boolean) => void;
     resetState: () => void;
@@ -159,6 +184,22 @@ const initialSplitting: SplittingConfig = {
     groups: ["backend", "fullstack", "scripting", "other"],
     ratios: { train: 0.7, val: 0.15, test: 0.15 },
     stratify_by: "outcome",
+    temporal_ordering: true,
+    test_groups: [],
+    val_groups: [],
+    train_groups: [],
+};
+
+const initialPreprocessing: PreprocessingConfig = {
+    missing_values_strategy: "drop_row",
+    fill_value: 0,
+    normalization_method: "z_score",
+    strict_mode: false,
+};
+
+const initialOutput: OutputConfig = {
+    format: "parquet",
+    include_metadata: true,
 };
 
 const initialState: WizardState = {
@@ -167,10 +208,13 @@ const initialState: WizardState = {
     description: "",
     dataSource: initialDataSource,
     previewStats: null,
+    previewRepos: [],
     features: initialFeatures,
     featureConfigs: {},
     scanConfigs: {},
     splitting: initialSplitting,
+    preprocessing: initialPreprocessing,
+    output: initialOutput,
     isPreviewLoading: false,
     isSubmitting: false,
 };
@@ -194,6 +238,9 @@ export function WizardProvider({ children }: { children: ReactNode }) {
     const setPreviewStats = (stats: PreviewStats | null) =>
         setState((s) => ({ ...s, previewStats: stats }));
 
+    const setPreviewRepos = (repos: { id: string; full_name: string }[]) =>
+        setState((s) => ({ ...s, previewRepos: repos }));
+
     const updateFeatures = (updates: Partial<FeatureConfig>) =>
         setState((s) => ({ ...s, features: { ...s.features, ...updates } }));
 
@@ -205,6 +252,12 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
     const updateSplitting = (updates: Partial<SplittingConfig>) =>
         setState((s) => ({ ...s, splitting: { ...s.splitting, ...updates } }));
+
+    const updatePreprocessing = (updates: Partial<PreprocessingConfig>) =>
+        setState((s) => ({ ...s, preprocessing: { ...s.preprocessing, ...updates } }));
+
+    const updateOutput = (updates: Partial<OutputConfig>) =>
+        setState((s) => ({ ...s, output: { ...s.output, ...updates } }));
 
     const setIsPreviewLoading = (loading: boolean) =>
         setState((s) => ({ ...s, isPreviewLoading: loading }));
@@ -223,10 +276,13 @@ export function WizardProvider({ children }: { children: ReactNode }) {
                 setDescription,
                 updateDataSource,
                 setPreviewStats,
+                setPreviewRepos,
                 updateFeatures,
                 setFeatureConfigs,
                 setScanConfigs,
                 updateSplitting,
+                updatePreprocessing,
+                updateOutput,
                 setIsPreviewLoading,
                 setIsSubmitting,
                 resetState,

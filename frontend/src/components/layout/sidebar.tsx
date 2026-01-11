@@ -42,13 +42,6 @@ const navigation = [
     userOnly: false,
   },
   {
-    label: "ML Scenarios",
-    href: "/ml-scenarios",
-    icon: Beaker,
-    adminOnly: true, // Admin only
-    userOnly: false,
-  },
-  {
     label: "Monitoring",
     href: "/admin/monitoring",
     icon: Activity,

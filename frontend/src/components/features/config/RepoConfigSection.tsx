@@ -44,7 +44,7 @@ import { reposApi } from "@/lib/api";
 interface RepoInfo {
     id: string;
     full_name: string;
-    validation_status: string;
+    validation_status?: string;
 }
 
 // Dynamic config: field name -> array of selected values

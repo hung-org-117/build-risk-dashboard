@@ -27,7 +27,6 @@ export { settingsApi, notificationsApi } from './settings';
 export { datasetScanApi, datasetVersionApi } from './versions';
 export { qualityApi, userSettingsApi } from './quality';
 export { statisticsApi, enrichmentLogsApi } from './statistics';
-export { mlScenariosApi } from './ml-scenarios';
 export { trainingScenariosApi } from './training-scenarios';
 export { buildSourcesApi } from './build-sources';
 
@@ -41,18 +40,6 @@ export type {
     SourceMapping,
 } from './build-sources';
 
-export type {
-    MLScenarioRecord,
-    MLScenarioStatus,
-    MLScenarioListResponse,
-    MLDatasetSplitRecord,
-    CreateScenarioPayload,
-    UpdateScenarioPayload,
-    MLScenarioImportBuildRecord,
-    MLScenarioEnrichmentBuildRecord,
-    MLScenarioBuildsListResponse,
-    MLScenarioBuildStats,
-} from './ml-scenarios';
 
 export type {
     TrainingScenarioRecord,

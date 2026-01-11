@@ -597,11 +597,9 @@ def validate_source_builds_chunk(
 
         # Filter conclusions matching model_ingestion.py
         conclusion = build_data.conclusion
-        if conclusion in (
-            BuildConclusion.SKIPPED,
-            BuildConclusion.ACTION_REQUIRED,
-            BuildConclusion.STALE,
-            BuildConclusion.CANCELLED,
+        if conclusion not in (
+            BuildConclusion.SUCCESS,
+            BuildConclusion.FAILURE,
         ):
             conclusion_str = (
                 conclusion.value if hasattr(conclusion, "value") else conclusion

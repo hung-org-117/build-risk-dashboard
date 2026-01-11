@@ -31,15 +31,10 @@ import {
 } from "@/components/features/selection";
 
 import { ScanSelectionPanel, type EnabledTools } from "@/components/sonar/scan-selection-panel";
-import { ScanPropertiesPanel, DEFAULT_SCAN_CONFIG, type ScanConfig } from "@/components/sonar/scan-properties-panel";
+import { ScanPropertiesPanel } from "@/components/sonar/scan-properties-panel";
+import { DEFAULT_SCAN_CONFIG, type ScanConfig } from "@/components/sonar/scan-config-panel";
 
 import { useWizard } from "./WizardContext";
-
-// Simple local hook for scan config (since we don't need repo-level fetch logic here yet or we assume global)
-function useScanConfig() {
-    const [scanConfig, setScanConfig] = useState<ScanConfig>(DEFAULT_SCAN_CONFIG);
-    return { scanConfig, setScanConfig };
-}
 
 const DEFAULT_ENABLED_TOOLS: EnabledTools = {
     sonarqube: false,
@@ -54,7 +49,7 @@ export function StepFeatures() {
         setFeatureConfigs: setFeatureConfigsContext,
         setScanConfigs: setScanConfigsContext
     } = useWizard();
-    const { features, previewStats } = state;
+    const { features, previewStats, previewRepos } = state;
     const { toast } = useToast();
 
     // Local state for UI
@@ -73,12 +68,6 @@ export function StepFeatures() {
     // Initialize feature selector with state from wizard context
     const {
         extractorNodes,
-        // ...
-
-        // Ignore lines 64-107 (unchanged)
-
-        // Feature configs local state
-
         dagData,
         allFeatures,
         loading,
@@ -109,36 +98,12 @@ export function StepFeatures() {
         [selectedFeatures, toggleFeature]
     );
 
-    // Sync selected features to wizard state when leaving step or on change?
-    // We should sync on Next or periodically.
-    // Let's sync on unmount or Next action. But user might switch tabs.
-    // Better to sync on change using useEffect?
-    // Be careful with infinite loops if updateFeatures causes re-render that resets useFeatureSelector.
-    // useFeatureSelector initializes from prop ONLY on mount (useState(initial)).
-    // So updates to wizard state won't reset useFeatureSelector, which is good.
-
-    // Sync scan metrics state
+    // Scan metrics state
     const [scanMetrics, setScanMetrics] = useState({
         sonarqube: state.features.scan_metrics.sonarqube,
         trivy: state.features.scan_metrics.trivy,
     });
 
-    // Feature configs local state (not yet in WizardContext? FeatureConfig interface in context doesn't have details)
-    // Detailed feature config is usually stored in FeatureConfigForm state.
-    // We might need to add `feature_configs` and `scan_config` to WizardContext if we want to persist them.
-    // For now, let's assume we just select features and scan metrics in this step,
-    // and maybe detailed config is handled/stored locally until Submit?
-    // Or add `feature_configs` to WizardContext.
-    // Let's check WizardContext types.
-    // FeatureConfig interface has `dag_features`, `scan_metrics`, `exclude`. Config details missing.
-    // Ideally we add them. But strict to task "change api with corresponding table", maybe we just need selection for now?
-    // However, `CreateVersionPage` expects config.
-    // Let's add local state for config and just log it for now or assume we'll update context later.
-    // Actually, `FeatureConfigForm` manages its own state for configs.
-
-
-
-
     // Feature configs local state
     const [featureConfigs, setFeatureConfigs] = useState<FeatureConfigsData>(
         Object.keys(state.featureConfigs).length > 0
@@ -146,16 +111,7 @@ export function StepFeatures() {
             : { global: {}, repos: {} }
     );
 
-    // Feature configs local state
-    const [featureConfigs, setFeatureConfigs] = useState<FeatureConfigsData>(
-        Object.keys(state.featureConfigs).length > 0
-            ? state.featureConfigs as FeatureConfigsData
-            : { global: {}, repos: {} }
-    );
-
-    // We should probably update wizard state when moving to next step
     const handleNext = () => {
-        // Validation???
         if (selectedFeatures.size === 0 && !enabledTools.sonarqube && !enabledTools.trivy) {
             toast({
                 title: "No selection",
@@ -390,9 +346,7 @@ export function StepFeatures() {
                                             selectedFeatures={selectedFeatures}
                                             value={featureConfigs}
                                             onChange={setFeatureConfigs}
-                                            // Passing empty repos for now as we don't have list of all repos
-                                            // TODO: Fetch repos from preview endpoint if needed
-                                            repos={[]}
+                                            repos={previewRepos}
                                             showValidationStatusColumn={false}
                                         />
                                     </TabsContent>
@@ -402,7 +356,7 @@ export function StepFeatures() {
                                             scanConfig={scanConfig}
                                             onScanConfigChange={setScanConfig}
                                             enabledTools={enabledTools}
-                                            repos={[]} // Only global configuration is supported in the wizard for now
+                                            repos={previewRepos}
                                         />
                                     </TabsContent>
                                 </div>
