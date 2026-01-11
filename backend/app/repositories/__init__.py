@@ -1,19 +1,10 @@
 """Repository layer for database operations"""
 
 from .base import BaseRepository
-from .data_quality_repository import DataQualityRepository
 
-# === NEW REPOSITORIES (Architecture Merge) ===
 # Build Source repositories
 from .build_source import BuildSourceRepository
-from .source_build import SourceBuildRepository
-from .source_repo_stats import SourceRepoStatsRepository
-
-# Training Pipeline repositories
-from .training_scenario import TrainingScenarioRepository
-from .training_ingestion_build import TrainingIngestionBuildRepository
-from .training_enrichment_build import TrainingEnrichmentBuildRepository
-from .training_dataset_split import TrainingDatasetSplitRepository
+from .data_quality_repository import DataQualityRepository
 
 # Dataset template (kept for upload presets)
 from .dataset_template_repository import DatasetTemplateRepository
@@ -30,6 +21,14 @@ from .raw_build_run import RawBuildRunRepository
 
 # Raw data repositories (shared across flows)
 from .raw_repository import RawRepositoryRepository
+from .source_build import SourceBuildRepository
+from .source_repo_stats import SourceRepoStatsRepository
+from .training_dataset_split import TrainingDatasetSplitRepository
+from .training_enrichment_build import TrainingEnrichmentBuildRepository
+from .training_ingestion_build import TrainingIngestionBuildRepository
+
+# Training Pipeline repositories
+from .training_scenario import TrainingScenarioRepository
 from .user import UserRepository
 
 __all__ = [

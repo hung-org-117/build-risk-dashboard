@@ -45,7 +45,7 @@ from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import PipelineTask, SafeTask, TransientError
 from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
-from app.tasks.shared import build_workflow_with_context, ModelPipelineContext
+from app.tasks.shared import ModelPipelineContext, build_workflow_with_context
 from app.tasks.shared.events import publish_ingestion_build_update
 
 logger = logging.getLogger(__name__)
