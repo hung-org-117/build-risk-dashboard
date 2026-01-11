@@ -213,58 +213,50 @@ export default function ScenariosPage() {
             <div className="flex items-center gap-3">
                 <Database className="h-8 w-8 text-blue-500" />
                 <div>
-                    <h1 className="text-2xl font-bold">Training Scenarios</h1>
+                    <h1 className="text-2xl font-bold">Dataset Enrichments</h1>
                     <p className="text-sm text-muted-foreground">
                         Build and manage training datasets from your build data
                     </p>
                 </div>
             </div>
 
-            {/* Action Cards - Dual Mode */}
-            <div className="grid gap-6 md:grid-cols-2">
+            {/* Action Cards - Compact */}
+            <div className="grid gap-4 md:grid-cols-2">
                 {/* Upload CSV Card */}
-                <Card className="border-2 border-dashed hover:border-blue-500/50 transition-colors">
-                    <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-                        <div className="mb-4 rounded-full bg-blue-900/30 p-4">
-                            <UploadCloud className="h-8 w-8 text-blue-400" />
+                <Card className="hover:border-blue-500/50 transition-colors">
+                    <CardContent className="flex items-center justify-between py-4">
+                        <div>
+                            <h3 className="font-semibold">Upload CSV</h3>
+                            <p className="text-xs text-muted-foreground">
+                                Import build data from CSV file
+                            </p>
                         </div>
-                        <h3 className="text-lg font-semibold mb-2">Upload CSV</h3>
-                        <p className="text-sm text-muted-foreground mb-4 max-w-xs">
-                            Import build data from CSV file to expand your raw build database
-                        </p>
                         <Button
                             variant="outline"
+                            size="sm"
                             onClick={() => router.push("/scenarios/upload")}
-                            className="w-48"
                         >
-                            Upload File
+                            Upload
                         </Button>
                     </CardContent>
                 </Card>
 
-                {/* Create Scenario Card */}
-                <Card className="border-2 border-dashed hover:border-emerald-500/50 transition-colors">
-                    <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-                        <div className="mb-4 rounded-full bg-emerald-900/30 p-4">
-                            <Settings2 className="h-8 w-8 text-emerald-400" />
+                {/* Create Dataset Version Card */}
+                <Card className="hover:border-emerald-500/50 transition-colors">
+                    <CardContent className="flex items-center justify-between py-4">
+                        <div>
+                            <h3 className="font-semibold">Create Dataset Version</h3>
+                            <p className="text-xs text-muted-foreground">
+                                Configure filters, features, and splitting
+                            </p>
                         </div>
-                        <h3 className="text-lg font-semibold mb-2">Create Scenario</h3>
-                        <p className="text-sm text-muted-foreground mb-4 max-w-xs">
-                            Configure filters, features, and splitting to generate training datasets
-                        </p>
                         <Button
+                            size="sm"
                             onClick={() => router.push("/scenarios/create")}
-                            className="w-48 bg-emerald-600 hover:bg-emerald-700"
+                            className="bg-emerald-600 hover:bg-emerald-700"
                         >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Start Wizard
+                            New Version
                         </Button>
-                        <button
-                            onClick={() => router.push("/scenarios/create?mode=yaml")}
-                            className="mt-3 text-sm text-blue-400 hover:text-blue-300 underline"
-                        >
-                            Import YAML config
-                        </button>
                     </CardContent>
                 </Card>
             </div>
@@ -306,20 +298,20 @@ export default function ScenariosPage() {
                 </Card>
             </div>
 
-            {/* Scenarios Table */}
+            {/* Dataset Versions Table */}
             <Card>
                 <CardHeader>
                     <div className="flex items-center justify-between">
                         <div>
-                            <CardTitle>Your Scenarios</CardTitle>
+                            <CardTitle>Dataset Versions</CardTitle>
                             <CardDescription>
-                                Training dataset configurations and their status
+                                Created dataset versions and their processing status
                             </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="relative w-64">
                                 <Input
-                                    placeholder="Search scenarios..."
+                                    placeholder="Search versions..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="h-9"
@@ -369,8 +361,8 @@ export default function ScenariosPage() {
                                         >
                                             <div className="flex flex-col items-center gap-3">
                                                 <CheckCircle2 className="h-12 w-12 text-slate-300" />
-                                                <p>No training scenarios yet.</p>
-                                                <p className="text-sm">Create your first scenario using the wizard above.</p>
+                                                <p>No dataset versions yet.</p>
+                                                <p className="text-sm">Create your first version using the button above.</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -428,7 +420,7 @@ export default function ScenariosPage() {
                 {total > 0 && (
                     <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4 text-sm text-muted-foreground dark:border-slate-800">
                         <div>
-                            Showing {pageStart}-{pageEnd} of {total} scenarios
+                            Showing {pageStart}-{pageEnd} of {total} versions
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
                             {tableLoading && (

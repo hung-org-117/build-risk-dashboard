@@ -41,9 +41,19 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
             eventSourceRef.current.close();
         }
 
-        const sseUrl = process.env.NEXT_PUBLIC_API_URL
+        // Get token from cookie for SSE auth (EventSource can't send headers)
+        const getToken = () => {
+            const match = document.cookie.match(/(?:^|; )access_token=([^;]*)/);
+            return match ? decodeURIComponent(match[1]) : null;
+        };
+        const token = getToken();
+
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL
             ? `${process.env.NEXT_PUBLIC_API_URL}/sse/events`
             : "http://localhost:8000/api/sse/events";
+
+        // Append token as query param for SSE auth
+        const sseUrl = token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl;
 
         const eventSource = new EventSource(sseUrl, { withCredentials: true });
 

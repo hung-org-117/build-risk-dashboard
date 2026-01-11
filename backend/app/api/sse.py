@@ -10,23 +10,73 @@ This module replaces WebSocket with SSE for one-way server-to-client streaming:
 import asyncio
 import json
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, Request
+from bson import ObjectId
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pymongo.database import Database
 
 from app.config import settings
 from app.database.mongo import get_db
-from app.middleware.auth import get_current_user
 from app.repositories.model_repo_config import ModelRepoConfigRepository
+from app.services.auth_service import decode_access_token
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["SSE"])
 
 REDIS_CHANNEL_PREFIX = "enrichment:progress:"
+
+
+async def get_sse_user(request: Request, db: Database = Depends(get_db)) -> dict:
+    """
+    Custom auth for SSE that reads cookie directly from Request.
+    EventSource doesn't work well with FastAPI's Cookie() dependency.
+    """
+    # Debug logging
+    logger.info(
+        f"SSE auth - cookies: {list(request.cookies.keys())}, query: {dict(request.query_params)}"
+    )
+
+    # Try to get token from cookie
+    token: Optional[str] = request.cookies.get("access_token")
+
+    # Fallback to query param
+    if not token:
+        token = request.query_params.get("token")
+
+    if not token:
+        logger.warning("SSE auth failed - no token in cookie or query param")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Auth error: {str(e)}",
+        )
 
 
 async def get_async_redis():
@@ -140,13 +190,12 @@ async def sse_events_generator(
                         except json.JSONDecodeError:
                             logger.warning(f"Failed to parse event: {data}")
 
-                else:
-                    # Send heartbeat to keep connection alive
-                    yield format_sse({"type": "heartbeat"})
+                # No else here - only send heartbeat on timeout, not on every empty message
 
             except asyncio.TimeoutError:
-                # Send heartbeat on timeout
+                # Send heartbeat on timeout (every 30s)
                 yield format_sse({"type": "heartbeat"})
+
 
     except asyncio.CancelledError:
         logger.info(f"SSE stream cancelled for user {user_id}")
@@ -279,7 +328,7 @@ async def sse_logs_generator(request: Request) -> AsyncGenerator[str, None]:
 @router.get("/sse/events")
 async def sse_events(
     request: Request,
-    user: dict = Depends(get_current_user),  # noqa: B008
+    user: dict = Depends(get_sse_user),  # noqa: B008
     db: Database = Depends(get_db),  # noqa: B008
 ):
     """

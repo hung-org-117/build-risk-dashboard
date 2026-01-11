@@ -67,15 +67,13 @@ class TrainingScenarioService:
 
     def list_scenarios(
         self,
-        user_id: str,
         skip: int = 0,
         limit: int = 20,
         status_filter: Optional[ScenarioStatus] = None,
         q: Optional[str] = None,
     ) -> Tuple[List[TrainingScenarioResponse], int]:
-        """List scenarios for a user."""
-        scenarios, total = self.scenario_repo.list_by_user(
-            user_id=user_id,
+        """List all scenarios (shared among all admins)."""
+        scenarios, total = self.scenario_repo.list_all(
             skip=skip,
             limit=limit,
             status_filter=status_filter,

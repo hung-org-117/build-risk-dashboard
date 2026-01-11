@@ -15,17 +15,14 @@ class BuildSourceRepository(BaseRepository[BuildSource]):
     def __init__(self, db: Database):
         super().__init__(db, "build_sources", BuildSource)
 
-    def list_by_user(
+    def list_all(
         self,
-        user_id: str,
         skip: int = 0,
         limit: int = 0,
         q: Optional[str] = None,
     ) -> tuple[list[BuildSource], int]:
-        """List build sources for a user with optional search."""
+        """List all build sources (shared among admins)."""
         query: Dict[str, Any] = {}
-        if user_id:
-            query["user_id"] = self._to_object_id(user_id)
 
         if q:
             query["$or"] = [
@@ -40,9 +37,6 @@ class BuildSourceRepository(BaseRepository[BuildSource]):
             limit=limit,
         )
 
-    def count_by_filter(self, user_id: Optional[str] = None) -> int:
-        """Count build sources with optional user filter."""
-        query: Dict[str, Any] = {}
-        if user_id:
-            query["user_id"] = self._to_object_id(user_id)
-        return self.collection.count_documents(query)
+    def count_all(self) -> int:
+        """Count all build sources."""
+        return self.collection.count_documents({})

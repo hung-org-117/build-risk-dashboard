@@ -152,7 +152,6 @@ def list_scenarios(
             pass  # Ignore invalid status or handle error
 
     scenarios, _ = service.list_scenarios(
-        user_id=str(current_user.id),
         skip=skip,
         limit=limit,
         status_filter=status_enum,
@@ -169,7 +168,7 @@ def create_scenario(
 ) -> TrainingScenarioResponse:
     """Create a new training scenario."""
     service = TrainingScenarioService(db)
-    return service.create_scenario(str(current_user.id), data)
+    return service.create_scenario(str(current_user["_id"]), data)
 
 
 @router.get("/{scenario_id}", response_model=TrainingScenarioResponse)
@@ -180,7 +179,7 @@ def get_scenario(
 ) -> TrainingScenarioResponse:
     """Get training scenario details."""
     service = TrainingScenarioService(db)
-    return service.get_scenario(scenario_id, str(current_user.id))
+    return service.get_scenario(scenario_id, str(current_user["_id"]))
 
 
 @router.put("/{scenario_id}", response_model=TrainingScenarioResponse)
@@ -192,7 +191,7 @@ def update_scenario(
 ) -> TrainingScenarioResponse:
     """Update training scenario."""
     service = TrainingScenarioService(db)
-    return service.update_scenario(scenario_id, str(current_user.id), data)
+    return service.update_scenario(scenario_id, str(current_user["_id"]), data)
 
 
 @router.delete("/{scenario_id}")
@@ -203,7 +202,7 @@ def delete_scenario(
 ) -> Dict[str, bool]:
     """Delete training scenario."""
     service = TrainingScenarioService(db)
-    service.delete_scenario(scenario_id, str(current_user.id))
+    service.delete_scenario(scenario_id, str(current_user["_id"]))
     return {"deleted": True}
 
 
@@ -220,7 +219,7 @@ def start_ingestion(
 ) -> Dict[str, Any]:
     """Start ingestion phase (Phase 1)."""
     service = TrainingScenarioService(db)
-    return service.start_ingestion(scenario_id, str(current_user.id))
+    return service.start_ingestion(scenario_id, str(current_user["_id"]))
 
 
 @router.post("/{scenario_id}/process")
@@ -231,7 +230,7 @@ def start_processing(
 ) -> Dict[str, Any]:
     """Start processing phase (Phase 2)."""
     service = TrainingScenarioService(db)
-    return service.start_processing(scenario_id, str(current_user.id))
+    return service.start_processing(scenario_id, str(current_user["_id"]))
 
 
 @router.post("/{scenario_id}/generate")
@@ -242,7 +241,7 @@ def generate_dataset(
 ) -> Dict[str, Any]:
     """Generate dataset (Phase 3 - Split & Export)."""
     service = TrainingScenarioService(db)
-    return service.generate_dataset(scenario_id, str(current_user.id))
+    return service.generate_dataset(scenario_id, str(current_user["_id"]))
 
 
 # ============================================================================
@@ -258,7 +257,7 @@ def get_scenario_splits(
 ):
     """Get generated split files."""
     service = TrainingScenarioService(db)
-    return service.get_scenario_splits(scenario_id, str(current_user.id))
+    return service.get_scenario_splits(scenario_id, str(current_user["_id"]))
 
 
 # ============================================================================
@@ -286,7 +285,7 @@ def get_ingestion_builds(
     service = TrainingScenarioService(db)
     return service.get_ingestion_builds(
         scenario_id=scenario_id,
-        user_id=str(current_user.id),
+        user_id=str(current_user["_id"]),
         skip=skip,
         limit=limit,
         status_filter=status,
@@ -313,7 +312,7 @@ def get_enrichment_builds(
     service = TrainingScenarioService(db)
     return service.get_enrichment_builds(
         scenario_id=scenario_id,
-        user_id=str(current_user.id),
+        user_id=str(current_user["_id"]),
         skip=skip,
         limit=limit,
         extraction_status=extraction_status,
@@ -334,7 +333,7 @@ def get_scan_status(
     service = TrainingScenarioService(db)
     return service.get_scan_status(
         scenario_id=scenario_id,
-        user_id=str(current_user.id),
+        user_id=str(current_user["_id"]),
     )
 
 
@@ -351,7 +350,7 @@ def retry_ingestion(
 ):
     """Retry failed ingestion builds."""
     service = TrainingScenarioService(db)
-    return service.retry_ingestion(scenario_id, str(current_user.id))
+    return service.retry_ingestion(scenario_id, str(current_user["_id"]))
 
 
 @router.post("/{scenario_id}/retry-processing")
@@ -362,7 +361,7 @@ def retry_processing(
 ):
     """Retry failed processing builds."""
     service = TrainingScenarioService(db)
-    return service.retry_processing(scenario_id, str(current_user.id))
+    return service.retry_processing(scenario_id, str(current_user["_id"]))
 
 
 # ============================================================================
@@ -387,12 +386,13 @@ def get_commit_scans(
     Returns paginated list of scans for Trivy and/or SonarQube.
     """
     from bson import ObjectId
-    from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
     from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+    from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
     # Verify scenario access
     service = TrainingScenarioService(db)
-    service.get_scenario(scenario_id, str(current_user.id))
+    service.get_scenario(scenario_id, str(current_user["_id"]))
 
     scenario_oid = ObjectId(scenario_id)
     result = {}
@@ -485,7 +485,7 @@ def retry_commit_scan(
 
     # Verify scenario access
     service = TrainingScenarioService(db)
-    service.get_scenario(scenario_id, str(current_user.id))
+    service.get_scenario(scenario_id, str(current_user["_id"]))
 
     scenario_oid = ObjectId(scenario_id)
 

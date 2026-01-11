@@ -96,7 +96,7 @@ function StepReview() {
             // Usually we start it.
             await trainingScenariosApi.startIngestion(scenario.id);
 
-            router.push(`/training-scenarios/${scenario.id}`);
+            router.push(`/scenarios/${scenario.id}`);
         } catch (error) {
             console.error("Failed to create scenario", error);
             toast({
@@ -113,7 +113,7 @@ function StepReview() {
         <Card>
             <CardHeader>
                 <CardTitle>Review & Start</CardTitle>
-                <CardDescription>Review your configuration and start the scenario</CardDescription>
+                <CardDescription>Review your configuration and start processing</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="rounded-lg border p-4">
@@ -261,14 +261,14 @@ function WizardContent() {
                     className="gap-2"
                 >
                     <ChevronLeft className="h-4 w-4" />
-                    Back to Scenarios
+                    Back to Datasets
                 </Button>
             </div>
 
             <div>
-                <h1 className="text-2xl font-bold">Create Training Scenario</h1>
+                <h1 className="text-2xl font-bold">Create Dataset Version</h1>
                 <p className="text-muted-foreground">
-                    Configure a new training dataset scenario with filters, features, and splitting strategy.
+                    Configure filters, features, and splitting strategy for your dataset.
                 </p>
             </div>
 

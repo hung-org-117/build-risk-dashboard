@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from bson import ObjectId
-from fastapi import Cookie, Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, Query, status
 from pymongo.database import Database
 
 from app.database.mongo import get_db
@@ -15,17 +15,23 @@ from app.services.auth_service import decode_access_token
 async def get_current_user_id(
     access_token: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(
+        None, description="Token for SSE auth"
+    ),  # Query param for EventSource
 ) -> str:
-    token = None
+    auth_token = None
 
     # Try to get token from cookie first
     if access_token:
-        token = access_token
+        auth_token = access_token
     # Then try Authorization header
     elif authorization and authorization.startswith("Bearer "):
-        token = authorization.replace("Bearer ", "", 1)
+        auth_token = authorization.replace("Bearer ", "", 1)
+    # Finally try query param (for SSE/EventSource)
+    elif token:
+        auth_token = token
 
-    if not token:
+    if not auth_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated. Please login.",
@@ -34,7 +40,7 @@ async def get_current_user_id(
 
     # Decode and validate token
     try:
-        payload = decode_access_token(token)
+        payload = decode_access_token(auth_token)
         user_id: str = payload.get("sub")
         if not user_id:
             raise HTTPException(

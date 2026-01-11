@@ -90,16 +90,14 @@ class BuildSourceService:
         """Get a build source by ID."""
         return self.build_source_repo.find_by_id(source_id)
 
-    def list_by_user(
+    def list_all(
         self,
-        user_id: str,
         skip: int = 0,
         limit: int = 20,
         q: Optional[str] = None,
     ) -> Tuple[List[BuildSource], int]:
-        """List build sources for a user."""
-        return self.build_source_repo.list_by_user(
-            user_id=user_id,
+        """List all build sources (shared among admins)."""
+        return self.build_source_repo.list_all(
             skip=skip,
             limit=limit,
             q=q,

@@ -19,20 +19,36 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { Download, FileDown, Loader2 } from "lucide-react";
+import { Download, FileDown, Loader2, Play, RefreshCw } from "lucide-react";
 import {
     trainingScenariosApi,
     TrainingDatasetSplitRecord,
+    TrainingScenarioRecord,
 } from "@/lib/api/training-scenarios";
 import { formatBytes } from "@/lib/utils";
-
+import { toast } from "@/components/ui/use-toast";
+import { useSSE } from "@/contexts/sse-context";
 
 export default function ScenarioExportPage() {
     const params = useParams<{ scenarioId: string }>();
     const scenarioId = params.scenarioId;
+    const { subscribe } = useSSE();
 
+    const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [splits, setSplits] = useState<TrainingDatasetSplitRecord[]>([]);
     const [loading, setLoading] = useState(true);
+    const [generating, setGenerating] = useState(false);
+
+    const fetchScenario = useCallback(async () => {
+        try {
+            const data = await trainingScenariosApi.get(scenarioId);
+            setScenario(data);
+            return data;
+        } catch (err) {
+            console.error("Failed to fetch scenario:", err);
+            return null;
+        }
+    }, [scenarioId]);
 
     const fetchSplits = useCallback(async () => {
         try {
@@ -40,14 +56,55 @@ export default function ScenarioExportPage() {
             setSplits(data);
         } catch (err) {
             console.error("Failed to fetch splits:", err);
-        } finally {
-            setLoading(false);
         }
     }, [scenarioId]);
 
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        await Promise.all([fetchScenario(), fetchSplits()]);
+        setLoading(false);
+    }, [fetchScenario, fetchSplits]);
+
     useEffect(() => {
-        fetchSplits();
-    }, [fetchSplits]);
+        loadData();
+    }, [loadData]);
+
+    // Subscribe to SSE for real-time updates
+    useEffect(() => {
+        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: { scenario_id?: string }) => {
+            if (data.scenario_id === scenarioId) {
+                fetchScenario();
+                fetchSplits();
+            }
+        });
+        return () => unsubscribe();
+    }, [subscribe, scenarioId, fetchScenario, fetchSplits]);
+
+    // Poll while generating
+    useEffect(() => {
+        if (!scenario || scenario.status !== "splitting") return;
+
+        const interval = setInterval(() => {
+            fetchScenario();
+            fetchSplits();
+        }, 3000);
+
+        return () => clearInterval(interval);
+    }, [scenario?.status, fetchScenario, fetchSplits]);
+
+    const handleGenerateDataset = async () => {
+        setGenerating(true);
+        try {
+            await trainingScenariosApi.generateDataset(scenarioId);
+            toast({ title: "Dataset generation started" });
+            await fetchScenario();
+        } catch (err) {
+            console.error("Failed to generate dataset:", err);
+            toast({ variant: "destructive", title: "Failed to generate dataset" });
+        } finally {
+            setGenerating(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -57,19 +114,67 @@ export default function ScenarioExportPage() {
         );
     }
 
-    if (splits.length === 0) {
+    // Can generate if status is "processed"
+    const canGenerate = scenario?.status === "processed";
+    const isGenerating = scenario?.status === "splitting" || generating;
+    const isCompleted = scenario?.status === "completed";
+
+    // Show generate button if no splits and can generate
+    if (splits.length === 0 && !isCompleted) {
         return (
             <Card>
                 <CardHeader>
                     <CardTitle>Export Dataset</CardTitle>
-                    <CardDescription>No splits generated yet</CardDescription>
+                    <CardDescription>
+                        {canGenerate
+                            ? "Generate train/val/test splits from processed builds"
+                            : isGenerating
+                                ? "Generating dataset..."
+                                : "Complete processing phase first to generate dataset"}
+                    </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="p-8 border rounded-lg bg-muted/50 flex flex-col items-center justify-center gap-4">
-                        <FileDown className="h-12 w-12 text-muted-foreground" />
-                        <p className="text-muted-foreground text-center">
-                            Dataset splits will be available here after the Generate Dataset phase completes.
-                        </p>
+                        {isGenerating ? (
+                            <>
+                                <Loader2 className="h-12 w-12 animate-spin text-purple-500" />
+                                <p className="text-muted-foreground text-center">
+                                    Generating train/val/test splits...
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    This may take a few minutes depending on the number of builds.
+                                </p>
+                            </>
+                        ) : canGenerate ? (
+                            <>
+                                <FileDown className="h-12 w-12 text-muted-foreground" />
+                                <p className="text-muted-foreground text-center">
+                                    Click the button below to generate your train/val/test dataset splits.
+                                </p>
+                                <Button
+                                    size="lg"
+                                    onClick={handleGenerateDataset}
+                                    disabled={generating}
+                                >
+                                    {generating ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Play className="mr-2 h-4 w-4" />
+                                    )}
+                                    Generate Dataset
+                                </Button>
+                            </>
+                        ) : (
+                            <>
+                                <FileDown className="h-12 w-12 text-muted-foreground" />
+                                <p className="text-muted-foreground text-center">
+                                    Dataset generation requires the processing phase to be completed.
+                                </p>
+                                <Badge variant="outline" className="text-sm">
+                                    Current status: {scenario?.status}
+                                </Badge>
+                            </>
+                        )}
                     </div>
                 </CardContent>
             </Card>
@@ -84,11 +189,22 @@ export default function ScenarioExportPage() {
         <div className="space-y-6">
             {/* Summary Card */}
             <Card>
-                <CardHeader>
-                    <CardTitle>Dataset Summary</CardTitle>
-                    <CardDescription>
-                        Generated splits ready for download
-                    </CardDescription>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle>Dataset Summary</CardTitle>
+                        <CardDescription>
+                            Generated splits ready for download
+                        </CardDescription>
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleGenerateDataset}
+                        disabled={!canGenerate && !isCompleted}
+                    >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Regenerate
+                    </Button>
                 </CardHeader>
                 <CardContent>
                     <div className="grid gap-4 md:grid-cols-4">

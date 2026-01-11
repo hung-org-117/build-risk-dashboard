@@ -67,12 +67,19 @@ class TrainingScenarioRepository(BaseRepository[TrainingScenario]):
         skip: int = 0,
         limit: int = 0,
         status_filter: Optional[ScenarioStatus] = None,
+        q: Optional[str] = None,
     ) -> tuple[list[TrainingScenario], int]:
-        """List all scenarios (admin view)."""
+        """List all scenarios (shared among all admins)."""
         query: Dict[str, Any] = {}
 
         if status_filter:
             query["status"] = status_filter.value
+
+        if q:
+            query["$or"] = [
+                {"name": {"$regex": q, "$options": "i"}},
+                {"description": {"$regex": q, "$options": "i"}},
+            ]
 
         return self.paginate(
             query,

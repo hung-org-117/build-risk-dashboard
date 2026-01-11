@@ -89,9 +89,8 @@ def list_build_sources(
     user: dict = Depends(get_current_user),
     service: BuildSourceService = Depends(get_build_source_service),
 ):
-    """List build sources for the current user."""
-    sources, total = service.list_by_user(
-        user_id=user.get("sub", ""),
+    """List all build sources (shared among admins)."""
+    sources, total = service.list_all(
         skip=skip,
         limit=limit,
         q=q,

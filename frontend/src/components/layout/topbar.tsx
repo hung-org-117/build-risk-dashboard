@@ -54,15 +54,16 @@ export function Topbar({ onToggleSidebar }: TopbarProps) {
   const displayRole = user?.role === 'admin' ? 'admin' : 'user'
 
   const pageTitle = useMemo(() => {
+    if (pathname?.startsWith('/scenarios')) return 'Dataset Enrichments'
     if (pathname?.startsWith('/projects')) return 'Projects'
-    if (pathname?.startsWith('/repositories')) return 'Repositories'
+    if (pathname?.startsWith('/repositories')) return 'Build Risk Evaluation'
     if (pathname?.startsWith('/my-repos')) return 'My Repositories'
     if (pathname?.startsWith('/admin/users')) return 'User Management'
     if (pathname?.startsWith('/overview')) return 'Overview'
     if (pathname?.startsWith('/admin/monitoring')) return 'Monitoring'
     if (pathname?.startsWith('/settings')) return 'Settings'
     if (pathname?.startsWith('/admin/settings')) return 'Settings'
-    return 'Workspace'
+    return 'Overview'
   }, [pathname])
 
   const handleLogout = async () => {
