@@ -1,4 +1,4 @@
-# Scenario YAML Configuration Guide
+# ML Scenario YAML Configuration Guide
 
 Hướng dẫn viết file YAML để cấu hình ML Dataset Scenario.
 

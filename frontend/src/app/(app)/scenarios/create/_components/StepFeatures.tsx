@@ -158,28 +158,15 @@ export function StepFeatures() {
     })) || [], [previewRepos]);
     const { repoLanguages } = useRepoLanguages(repoLangInput);
 
-    const handleNext = () => {
-        if (selectedFeatures.size === 0 && !enabledTools.sonarqube && !enabledTools.trivy) {
-            toast({
-                title: "No selection",
-                description: "Please select at least one feature or enable a scanner.",
-                variant: "destructive",
-            });
-            return;
-        }
-
-        // Update context
+    // Sync state to context continuously
+    useEffect(() => {
         updateFeatures({
             dag_features: Array.from(selectedFeatures),
             scan_metrics: scanMetrics,
         });
-
-        // Save detailed configs
         setFeatureConfigsContext(featureConfigs);
         setScanConfigsContext(scanConfig);
-
-        setStep(3);
-    };
+    }, [selectedFeatures, scanMetrics, featureConfigs, scanConfig, updateFeatures, setFeatureConfigsContext, setScanConfigsContext]);
 
     const handleClearScanMetrics = () => {
         setScanMetrics({ sonarqube: [], trivy: [] });
@@ -193,7 +180,7 @@ export function StepFeatures() {
         scanMetrics.trivy.length > 0;
 
     return (
-        <div className="space-y-6 h-[calc(100vh-250px)] min-h-[600px] flex flex-col">
+        <div className="space-y-6 h-full min-h-[500px] flex flex-col">
             {/* Toolbar / Tabs */}
             <div className="flex items-center justify-between gap-4 flex-shrink-0">
                 <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-[400px]">
@@ -208,17 +195,6 @@ export function StepFeatures() {
                         </TabsTrigger>
                     </TabsList>
                 </Tabs>
-
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => setStep(1)}>
-                        <ArrowLeft className="h-4 w-4 mr-2" />
-                        Back
-                    </Button>
-                    <Button onClick={handleNext} disabled={!hasSelection}>
-                        Next: Splitting
-                        <ArrowRight className="h-4 w-4 ml-2" />
-                    </Button>
-                </div>
             </div>
 
             {/* Content Area */}

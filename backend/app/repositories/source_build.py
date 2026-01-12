@@ -54,7 +54,7 @@ class SourceBuildRepository(BaseRepository[SourceBuild]):
         """Bulk insert builds."""
         if not builds:
             return 0
-        docs = [b.model_dump(by_alias=True) for b in builds]
+        docs = [b.to_mongo() for b in builds]
         result = self.collection.insert_many(docs, session=session)
         return len(result.inserted_ids)
 

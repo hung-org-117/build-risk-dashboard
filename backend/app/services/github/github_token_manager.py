@@ -112,6 +112,8 @@ async def get_token_rate_limit(access_token: str) -> Optional[dict]:
                 headers={
                     "Accept": "application/vnd.github+json",
                     "Authorization": f"Bearer {access_token}",
+                    "User-Agent": "BuildGuard-Dashboard/1.0",
+                    "X-GitHub-Api-Version": "2022-11-28",
                 },
             )
 
@@ -120,19 +122,23 @@ async def get_token_rate_limit(access_token: str) -> Optional[dict]:
 
                 raise GithubInvalidTokenError("Token is invalid or revoked")
 
-            if response.status_code == 200:
-                data = response.json()
-                core = data.get("resources", {}).get("core", {})
-                return {
-                    "remaining": core.get("remaining", 0),
-                    "limit": core.get("limit", 5000),
-                    "reset_at": datetime.fromtimestamp(
-                        core.get("reset", 0), tz=timezone.utc
-                    ),
-                }
+            if response.status_code != 200:
+                raise Exception(
+                    f"GitHub API Error: {response.status_code} - {response.text}"
+                )
+
+            data = response.json()
+            core = data.get("resources", {}).get("core", {})
+            return {
+                "remaining": core.get("remaining", 0),
+                "limit": core.get("limit", 5000),
+                "reset_at": datetime.fromtimestamp(
+                    core.get("reset", 0), tz=timezone.utc
+                ),
+            }
     except Exception as e:
         logger.warning(f"Failed to get token rate limit: {e}")
-    return None
+        raise e
 
 
 # ============================================================================

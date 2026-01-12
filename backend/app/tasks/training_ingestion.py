@@ -30,22 +30,49 @@ from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
-from app.tasks.base import PipelineTask
+from app.tasks.base import PipelineTask, SafeTask, TaskState
 from app.tasks.shared.events import publish_scenario_update
 
 logger = logging.getLogger(__name__)
 
 
+def _create_scenario_failure_handler(scenario_id: str, db):
+    """
+    Create a failure handler for TrainingScenario tasks.
+    Updates status to FAILED on unhandled errors.
+    """
+
+    def handler(status: str, error_message: str) -> None:
+        try:
+            scenario_repo = TrainingScenarioRepository(db)
+            scenario_repo.update_one(
+                scenario_id,
+                {
+                    "status": ScenarioStatus.FAILED.value,
+                    "error_message": error_message,
+                },
+            )
+            publish_scenario_update(
+                scenario_id=scenario_id,
+                status=ScenarioStatus.FAILED.value,
+                error=error_message,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update scenario {scenario_id}: {e}")
+
+    return handler
+
+
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_ingestion.start_scenario_ingestion",
     queue="scenario_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
 def start_scenario_ingestion(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
 ) -> Dict[str, Any]:
     """
@@ -62,25 +89,32 @@ def start_scenario_ingestion(
     After ingestion completes, scenario is marked as INGESTED.
     User triggers processing (Phase 2) manually via start_scenario_processing.
     """
-    from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
-    from app.tasks.shared import TrainingPipelineContext, build_workflow_with_context
 
-    correlation_id = str(uuid.uuid4())
-    logger.info(
-        f"[start_scenario_ingestion] Starting scenario {scenario_id}, corr={correlation_id[:8]}"
-    )
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
-    raw_build_run_repo = RawBuildRunRepository(self.db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
+        from app.tasks.shared import (
+            TrainingPipelineContext,
+            build_workflow_with_context,
+        )
 
-    # Load scenario
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        logger.error(f"Scenario {scenario_id} not found")
-        return {"status": "error", "error": "Scenario not found"}
+        correlation_id = str(uuid.uuid4())
+        logger.info(
+            f"[start_scenario_ingestion] Starting scenario {scenario_id}, corr={correlation_id[:8]}"
+        )
 
-    try:
+        scenario_repo = TrainingScenarioRepository(self.db)
+        raw_repo_repo = RawRepositoryRepository(self.db)
+
+        # Load scenario
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            logger.error(f"Scenario {scenario_id} not found")
+            return {"status": "error", "error": "Scenario not found"}
+
         # Step 1: Filter builds from RawRepository + RawBuildRun
         filter_result = _filter_builds_for_scenario(
             db=self.db,
@@ -263,17 +297,11 @@ def start_scenario_ingestion(
             "repo_metadata": repo_metadata,
         }
 
-    except Exception as exc:
-        error_msg = str(exc)
-        logger.error(f"Scenario ingestion start failed: {error_msg}")
-        scenario_repo.update_one(
-            scenario_id,
-            {
-                "status": ScenarioStatus.FAILED.value,
-                "error_message": error_msg,
-            },
-        )
-        raise
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 def _filter_builds_for_scenario(
@@ -446,14 +474,14 @@ def _filter_builds_for_scenario(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_ingestion.aggregate_scenario_ingestion",
     queue="scenario_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
 def aggregate_scenario_ingestion(
-    self: PipelineTask,
+    self: SafeTask,
     results: List[Dict[str, Any]],
     scenario_id: str,
     correlation_id: str = "",
@@ -464,144 +492,150 @@ def aggregate_scenario_ingestion(
     After all repo ingestion chains complete, marks builds as INGESTED/FAILED.
     Does NOT auto-dispatch processing - user triggers Phase 2 manually.
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(
-        f"{corr_prefix} [aggregate_ingestion] Processing results for {scenario_id}"
-    )
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    now = datetime.utcnow()
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(
+            f"{corr_prefix} [aggregate_ingestion] Processing results for {scenario_id}"
+        )
 
-    # Determine per-build final status from resource_status in DB
-    # FAILED: Any required resource has status = "failed" (actual error - RETRYABLE)
-    # MISSING_RESOURCE: Logs expired (expected - NOT RETRYABLE)
-    # INGESTED: All required resources completed
+        scenario_repo = TrainingScenarioRepository(self.db)
+        ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
 
-    # 1. Check if git_history failed (affects ALL builds)
-    git_history_failed = ingestion_build_repo.collection.count_documents(
-        {
-            "scenario_id": ObjectId(scenario_id),
-            "status": IngestionStatus.INGESTING.value,
-            "resource_status.git_history.status": "failed",
-        }
-    )
+        now = datetime.utcnow()
 
-    if git_history_failed > 0:
-        # Clone failed - mark all as FAILED
-        ingestion_build_repo.collection.update_many(
+        # Determine per-build final status from resource_status in DB
+        # 1. Check if git_history failed (affects ALL builds)
+        git_history_failed = ingestion_build_repo.collection.count_documents(
             {
                 "scenario_id": ObjectId(scenario_id),
                 "status": IngestionStatus.INGESTING.value,
-            },
-            {
-                "$set": {
-                    "status": IngestionStatus.FAILED.value,
-                    "ingestion_error": "Clone failed",
-                    "ingested_at": now,
-                }
-            },
+                "resource_status.git_history.status": "failed",
+            }
         )
-    else:
-        # 2. Mark builds with failed git_worktree as FAILED
-        ingestion_build_repo.collection.update_many(
+
+        if git_history_failed > 0:
+            # Clone failed - mark all as FAILED
+            ingestion_build_repo.collection.update_many(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "status": IngestionStatus.INGESTING.value,
+                },
+                {
+                    "$set": {
+                        "status": IngestionStatus.FAILED.value,
+                        "ingestion_error": "Clone failed",
+                        "ingested_at": now,
+                    }
+                },
+            )
+        else:
+            # 2. Mark builds with failed git_worktree as FAILED
+            ingestion_build_repo.collection.update_many(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "status": IngestionStatus.INGESTING.value,
+                    "resource_status.git_worktree.status": "failed",
+                },
+                {
+                    "$set": {
+                        "status": IngestionStatus.FAILED.value,
+                        "ingestion_error": "Worktree creation failed",
+                        "ingested_at": now,
+                    }
+                },
+            )
+
+            # 3. Mark builds with failed build_logs as MISSING_RESOURCE
+            ingestion_build_repo.collection.update_many(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "status": IngestionStatus.INGESTING.value,
+                    "resource_status.build_logs.status": "failed",
+                },
+                {
+                    "$set": {
+                        "status": IngestionStatus.MISSING_RESOURCE.value,
+                        "ingestion_error": "Log download failed or expired",
+                        "ingested_at": now,
+                    }
+                },
+            )
+
+            # 4. Mark remaining INGESTING builds as INGESTED
+            ingestion_build_repo.collection.update_many(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "status": IngestionStatus.INGESTING.value,
+                },
+                {
+                    "$set": {
+                        "status": IngestionStatus.INGESTED.value,
+                        "ingested_at": now,
+                    }
+                },
+            )
+
+        # Count by status
+        status_counts = ingestion_build_repo.count_by_status(scenario_id)
+        ingested = status_counts.get(IngestionStatus.INGESTED.value, 0)
+        missing_resource = status_counts.get(IngestionStatus.MISSING_RESOURCE.value, 0)
+        failed = status_counts.get(IngestionStatus.FAILED.value, 0)
+        total_builds = ingested + missing_resource + failed
+
+        # Update scenario
+        scenario_repo.update_one(
+            scenario_id,
             {
-                "scenario_id": ObjectId(scenario_id),
-                "status": IngestionStatus.INGESTING.value,
-                "resource_status.git_worktree.status": "failed",
-            },
-            {
-                "$set": {
-                    "status": IngestionStatus.FAILED.value,
-                    "ingestion_error": "Worktree creation failed",
-                    "ingested_at": now,
-                }
+                "status": ScenarioStatus.INGESTED.value,
+                "builds_ingested": ingested,
+                "builds_missing_resource": missing_resource,
+                "builds_failed": failed,
+                "ingestion_completed_at": now,
             },
         )
 
-        # 3. Mark builds with failed build_logs as MISSING_RESOURCE
-        ingestion_build_repo.collection.update_many(
-            {
-                "scenario_id": ObjectId(scenario_id),
-                "status": IngestionStatus.INGESTING.value,
-                "resource_status.build_logs.status": "failed",
-            },
-            {
-                "$set": {
-                    "status": IngestionStatus.MISSING_RESOURCE.value,
-                    "ingestion_error": "Log download failed or expired",
-                    "ingested_at": now,
-                }
-            },
+        # Build status message
+        if failed > 0 or missing_resource > 0:
+            parts = [f"{ingested} ready"]
+            if failed > 0:
+                parts.append(f"{failed} failed (retryable)")
+            if missing_resource > 0:
+                parts.append(f"{missing_resource} missing resources")
+            msg = f"Ingestion done: {', '.join(parts)}. Start processing when ready."
+        else:
+            msg = f"Ingestion complete: {ingested} builds ready. Start processing when ready."
+
+        logger.info(f"{corr_prefix} [aggregate_ingestion] {msg}")
+
+        # Publish event for frontend
+        publish_scenario_update(
+            scenario_id=scenario_id,
+            status=ScenarioStatus.INGESTED.value,
+            builds_total=total_builds,
+            builds_ingested=ingested,
+            builds_missing_resource=missing_resource,
+            builds_failed=failed,
+            current_phase=msg,
         )
 
-        # 4. Mark remaining INGESTING builds as INGESTED
-        ingestion_build_repo.collection.update_many(
-            {
-                "scenario_id": ObjectId(scenario_id),
-                "status": IngestionStatus.INGESTING.value,
-            },
-            {
-                "$set": {
-                    "status": IngestionStatus.INGESTED.value,
-                    "ingested_at": now,
-                }
-            },
-        )
-
-    # Count by status
-    status_counts = ingestion_build_repo.count_by_status(scenario_id)
-    ingested = status_counts.get(IngestionStatus.INGESTED.value, 0)
-    missing_resource = status_counts.get(IngestionStatus.MISSING_RESOURCE.value, 0)
-    failed = status_counts.get(IngestionStatus.FAILED.value, 0)
-    total_builds = ingested + missing_resource + failed
-
-    # Update scenario
-    scenario_repo.update_one(
-        scenario_id,
-        {
-            "status": ScenarioStatus.INGESTED.value,
+        return {
+            "status": "completed",
+            "final_status": ScenarioStatus.INGESTED.value,
             "builds_ingested": ingested,
             "builds_missing_resource": missing_resource,
             "builds_failed": failed,
-            "ingestion_completed_at": now,
-        },
+        }
+
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Build status message
-    if failed > 0 or missing_resource > 0:
-        parts = [f"{ingested} ready"]
-        if failed > 0:
-            parts.append(f"{failed} failed (retryable)")
-        if missing_resource > 0:
-            parts.append(f"{missing_resource} missing resources")
-        msg = f"Ingestion done: {', '.join(parts)}. Start processing when ready."
-    else:
-        msg = (
-            f"Ingestion complete: {ingested} builds ready. Start processing when ready."
-        )
-
-    logger.info(f"{corr_prefix} [aggregate_ingestion] {msg}")
-
-    # Publish event for frontend
-    publish_scenario_update(
-        scenario_id=scenario_id,
-        status=ScenarioStatus.INGESTED.value,
-        builds_total=total_builds,
-        builds_ingested=ingested,
-        builds_missing_resource=missing_resource,
-        builds_failed=failed,
-        current_phase=msg,
-    )
-
-    return {
-        "status": "completed",
-        "final_status": ScenarioStatus.INGESTED.value,
-        "builds_ingested": ingested,
-        "builds_missing_resource": missing_resource,
-        "builds_failed": failed,
-    }
 
 
 @celery_app.task(
@@ -710,14 +744,14 @@ def handle_scenario_chord_error(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_ingestion.reingest_failed_builds",
     queue="scenario_ingestion",
     soft_time_limit=300,
     time_limit=360,
 )
 def reingest_failed_builds(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
 ) -> Dict[str, Any]:
     """
@@ -731,181 +765,198 @@ def reingest_failed_builds(
     2. Builds ingestion chains directly from those PENDING builds
     3. Dispatches the ingestion workflow (without re-creating TrainingIngestionBuild records)
     """
-    from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
-    from app.tasks.shared import TrainingPipelineContext, build_workflow_with_context
 
-    correlation_id = str(uuid.uuid4())
-    corr_prefix = f"[corr={correlation_id[:8]}]"
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
+        from app.tasks.shared import (
+            TrainingPipelineContext,
+            build_workflow_with_context,
+        )
 
-    # Validate scenario exists
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        return {"status": "error", "message": "Scenario not found"}
+        correlation_id = str(uuid.uuid4())
+        corr_prefix = f"[corr={correlation_id[:8]}]"
 
-    # Find FAILED builds (not MISSING_RESOURCE)
-    failed_count = ingestion_build_repo.collection.count_documents(
-        {
-            "scenario_id": ObjectId(scenario_id),
-            "status": IngestionStatus.FAILED.value,
-        }
-    )
+        scenario_repo = TrainingScenarioRepository(self.db)
+        ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+        raw_repo_repo = RawRepositoryRepository(self.db)
 
-    missing_count = ingestion_build_repo.collection.count_documents(
-        {
-            "scenario_id": ObjectId(scenario_id),
-            "status": IngestionStatus.MISSING_RESOURCE.value,
-        }
-    )
+        # Validate scenario exists
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return {"status": "error", "message": "Scenario not found"}
 
-    if failed_count == 0:
-        msg = "No failed builds to retry"
-        if missing_count > 0:
-            msg += f" ({missing_count} builds have missing resources - not retryable)"
-        return {
-            "status": "no_failed_builds",
-            "failed_count": 0,
-            "missing_resource_count": missing_count,
-            "message": msg,
-        }
-
-    # Reset FAILED builds to PENDING
-    reset_result = ingestion_build_repo.collection.update_many(
-        {
-            "scenario_id": ObjectId(scenario_id),
-            "status": IngestionStatus.FAILED.value,
-        },
-        {
-            "$set": {
-                "status": IngestionStatus.PENDING.value,
-                "ingestion_error": None,
-                "ingested_at": None,
-                "resource_status": {},
-            }
-        },
-    )
-
-    if reset_result.modified_count == 0:
-        return {"status": "error", "message": "Failed to reset any builds"}
-
-    logger.info(
-        f"{corr_prefix} Reset {reset_result.modified_count} failed builds to PENDING"
-    )
-
-    # Update scenario status to INGESTING
-    scenario_repo.update_one(
-        scenario_id,
-        {
-            "status": ScenarioStatus.INGESTING.value,
-            "ingestion_started_at": datetime.utcnow(),
-            "error_message": None,
-        },
-    )
-
-    # Query the PENDING builds we just reset
-    pending_builds = list(
-        ingestion_build_repo.collection.find(
+        # Find FAILED builds (not MISSING_RESOURCE)
+        failed_count = ingestion_build_repo.collection.count_documents(
             {
                 "scenario_id": ObjectId(scenario_id),
-                "status": IngestionStatus.PENDING.value,
+                "status": IngestionStatus.FAILED.value,
             }
         )
-    )
 
-    if not pending_builds:
-        logger.warning(f"{corr_prefix} No PENDING builds found after reset")
-        return {"status": "error", "message": "No PENDING builds found after reset"}
-
-    # Group pending builds by repo
-    builds_by_repo: Dict[str, List[Dict[str, Any]]] = {}
-    for build_doc in pending_builds:
-        repo_id = str(build_doc["raw_repo_id"])
-        build_info = {
-            "ingestion_build_id": str(build_doc["_id"]),
-            "ci_run_id": build_doc.get("ci_run_id", ""),
-            "commit_sha": build_doc.get("commit_sha", ""),
-        }
-        if repo_id not in builds_by_repo:
-            builds_by_repo[repo_id] = []
-        builds_by_repo[repo_id].append(build_info)
-
-    # Build ingestion chains (same logic as start_scenario_ingestion)
-    required_resources = ["git_history", "git_worktree", "build_logs"]
-    tasks_by_level = get_ingestion_tasks_by_level(required_resources)
-
-    ingestion_chains = []
-    for raw_repo_id, repo_builds in builds_by_repo.items():
-        raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
-        if not raw_repo:
-            logger.warning(f"{corr_prefix} Repo {raw_repo_id} not found, skipping")
-            continue
-
-        build_ids = [b["ci_run_id"] for b in repo_builds if b.get("ci_run_id")]
-        commit_shas = list(
-            {b["commit_sha"] for b in repo_builds if b.get("commit_sha")}
+        missing_count = ingestion_build_repo.collection.count_documents(
+            {
+                "scenario_id": ObjectId(scenario_id),
+                "status": IngestionStatus.MISSING_RESOURCE.value,
+            }
         )
 
-        if not build_ids:
-            continue
+        if failed_count == 0:
+            msg = "No failed builds to retry"
+            if missing_count > 0:
+                msg += (
+                    f" ({missing_count} builds have missing resources - not retryable)"
+                )
+            return {
+                "status": "no_failed_builds",
+                "failed_count": 0,
+                "missing_resource_count": missing_count,
+                "message": msg,
+            }
 
-        ctx = TrainingPipelineContext(
-            scenario_id=scenario_id,
-            correlation_id=correlation_id,
-            _raw_repo_id=raw_repo_id,
-            _github_repo_id=raw_repo.github_repo_id,
-            _full_name=raw_repo.full_name,
+        # Reset FAILED builds to PENDING
+        reset_result = ingestion_build_repo.collection.update_many(
+            {
+                "scenario_id": ObjectId(scenario_id),
+                "status": IngestionStatus.FAILED.value,
+            },
+            {
+                "$set": {
+                    "status": IngestionStatus.PENDING.value,
+                    "ingestion_error": None,
+                    "ingested_at": None,
+                    "resource_status": {},
+                }
+            },
         )
 
-        repo_chain = build_workflow_with_context(
-            tasks_by_level=tasks_by_level,
-            ctx=ctx,
-            raw_repo_id=raw_repo_id,
-            github_repo_id=raw_repo.github_repo_id,
-            full_name=raw_repo.full_name,
-            build_ids=build_ids,
-            commit_shas=commit_shas,
-            ci_provider="github_actions",
+        if reset_result.modified_count == 0:
+            return {"status": "error", "message": "Failed to reset any builds"}
+
+        logger.info(
+            f"{corr_prefix} Reset {reset_result.modified_count} failed builds to PENDING"
         )
 
-        if repo_chain:
-            ingestion_chains.append(repo_chain)
-
-    if not ingestion_chains:
-        logger.warning(f"{corr_prefix} No ingestion chains created")
+        # Update scenario status to INGESTING
         scenario_repo.update_one(
             scenario_id,
-            {"status": ScenarioStatus.INGESTED.value},
+            {
+                "status": ScenarioStatus.INGESTING.value,
+                "ingestion_started_at": datetime.utcnow(),
+                "error_message": None,
+            },
         )
-        return {"status": "completed", "message": "No ingestion work needed"}
 
-    # Dispatch chord: group of ingestion chains -> aggregate callback
-    workflow = chord(
-        group(*ingestion_chains),
-        aggregate_scenario_ingestion.s(
+        # Query the PENDING builds we just reset
+        pending_builds = list(
+            ingestion_build_repo.collection.find(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "status": IngestionStatus.PENDING.value,
+                }
+            )
+        )
+
+        if not pending_builds:
+            logger.warning(f"{corr_prefix} No PENDING builds found after reset")
+            return {"status": "error", "message": "No PENDING builds found after reset"}
+
+        # Group pending builds by repo
+        builds_by_repo: Dict[str, List[Dict[str, Any]]] = {}
+        for build_doc in pending_builds:
+            repo_id = str(build_doc["raw_repo_id"])
+            build_info = {
+                "ingestion_build_id": str(build_doc["_id"]),
+                "ci_run_id": build_doc.get("ci_run_id", ""),
+                "commit_sha": build_doc.get("commit_sha", ""),
+            }
+            if repo_id not in builds_by_repo:
+                builds_by_repo[repo_id] = []
+            builds_by_repo[repo_id].append(build_info)
+
+        # Build ingestion chains (same logic as start_scenario_ingestion)
+        required_resources = ["git_history", "git_worktree", "build_logs"]
+        tasks_by_level = get_ingestion_tasks_by_level(required_resources)
+
+        ingestion_chains = []
+        for raw_repo_id, repo_builds in builds_by_repo.items():
+            raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+            if not raw_repo:
+                logger.warning(f"{corr_prefix} Repo {raw_repo_id} not found, skipping")
+                continue
+
+            build_ids = [b["ci_run_id"] for b in repo_builds if b.get("ci_run_id")]
+            commit_shas = list(
+                {b["commit_sha"] for b in repo_builds if b.get("commit_sha")}
+            )
+
+            if not build_ids:
+                continue
+
+            ctx = TrainingPipelineContext(
+                scenario_id=scenario_id,
+                correlation_id=correlation_id,
+                _raw_repo_id=raw_repo_id,
+                _github_repo_id=raw_repo.github_repo_id,
+                _full_name=raw_repo.full_name,
+            )
+
+            repo_chain = build_workflow_with_context(
+                tasks_by_level=tasks_by_level,
+                ctx=ctx,
+                raw_repo_id=raw_repo_id,
+                github_repo_id=raw_repo.github_repo_id,
+                full_name=raw_repo.full_name,
+                build_ids=build_ids,
+                commit_shas=commit_shas,
+                ci_provider="github_actions",
+            )
+
+            if repo_chain:
+                ingestion_chains.append(repo_chain)
+
+        if not ingestion_chains:
+            logger.warning(f"{corr_prefix} No ingestion chains created")
+            scenario_repo.update_one(
+                scenario_id,
+                {"status": ScenarioStatus.INGESTED.value},
+            )
+            return {"status": "completed", "message": "No ingestion work needed"}
+
+        # Dispatch chord: group of ingestion chains -> aggregate callback
+        workflow = chord(
+            group(*ingestion_chains),
+            aggregate_scenario_ingestion.s(
+                scenario_id=scenario_id,
+                correlation_id=correlation_id,
+            ),
+        )
+        workflow.apply_async()
+
+        logger.info(
+            f"{corr_prefix} Dispatched re-ingestion for {len(pending_builds)} builds "
+            f"across {len(ingestion_chains)} repos"
+        )
+
+        publish_scenario_update(
             scenario_id=scenario_id,
-            correlation_id=correlation_id,
-        ),
-    )
-    workflow.apply_async()
+            status=ScenarioStatus.INGESTING.value,
+            current_phase=f"Re-ingesting {len(pending_builds)} failed builds...",
+        )
 
-    logger.info(
-        f"{corr_prefix} Dispatched re-ingestion for {len(pending_builds)} builds "
-        f"across {len(ingestion_chains)} repos"
-    )
+        return {
+            "status": "queued",
+            "builds_reset": reset_result.modified_count,
+            "total_failed": failed_count,
+            "repos_to_process": len(ingestion_chains),
+            "correlation_id": correlation_id,
+        }
 
-    publish_scenario_update(
-        scenario_id=scenario_id,
-        status=ScenarioStatus.INGESTING.value,
-        current_phase=f"Re-ingesting {len(pending_builds)} failed builds...",
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    return {
-        "status": "queued",
-        "builds_reset": reset_result.modified_count,
-        "total_failed": failed_count,
-        "repos_to_process": len(ingestion_chains),
-        "correlation_id": correlation_id,
-    }

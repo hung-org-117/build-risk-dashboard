@@ -279,6 +279,27 @@ class SafeTask(PipelineTask):
     transient_retry_base = 5
     transient_retry_cap = 300
 
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """
+        Override in subclasses to provide entity-specific failure handling.
+
+        Should return a callable(status: str, error_message: str) -> None
+        that updates the relevant entity to FAILED status.
+
+        Returns None if no entity failure handling is needed.
+        """
+        return None
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        """Handle task failure by calling entity failure handler if defined."""
+        super().on_failure(exc, task_id, args, kwargs, einfo)
+
+        handler = self.get_entity_failure_handler(kwargs)
+        if handler:
+            handler("failed", str(exc))
+
     def run_safe(
         self,
         job_id: str,

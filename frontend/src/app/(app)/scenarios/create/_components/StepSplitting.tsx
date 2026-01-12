@@ -413,18 +413,6 @@ export function StepSplitting() {
                     </div>
                 </CardContent>
             </Card>
-
-            {/* Navigation */}
-            <div className="flex justify-between">
-                <Button variant="outline" onClick={() => setStep(2)}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back
-                </Button>
-                <Button onClick={() => setStep(4)}>
-                    Next: Preprocessing
-                    <ArrowRight className="h-4 w-4 ml-2" />
-                </Button>
-            </div>
         </div>
     );
 }

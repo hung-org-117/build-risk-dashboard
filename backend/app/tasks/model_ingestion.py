@@ -42,7 +42,7 @@ from app.repositories.model_import_build import ModelImportBuildRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
-from app.tasks.base import PipelineTask, SafeTask, TransientError
+from app.tasks.base import PipelineTask, SafeTask, TaskState, TransientError
 from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.shared import ModelPipelineContext, build_workflow_with_context
@@ -51,16 +51,41 @@ from app.tasks.shared.events import publish_ingestion_build_update
 logger = logging.getLogger(__name__)
 
 
+def _create_repo_config_failure_handler(redis_client, repo_config_id: str, db):
+    """
+    Create a failure handler for ModelRepoConfig tasks.
+    Updates status to FAILED on unhandled errors.
+    """
+    from app.entities.model_repo_config import ModelImportStatus
+    from app.repositories.model_repo_config import ModelRepoConfigRepository
+
+    def handler(status: str, error_message: str) -> None:
+        try:
+            repo_config_repo = ModelRepoConfigRepository(db)
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {
+                    "status": ModelImportStatus.FAILED.value,
+                    "error_message": error_message,
+                },
+            )
+            publish_status(repo_config_id, "failed", error_message)
+        except Exception as e:
+            logger.warning(f"Failed to update repo config {repo_config_id}: {e}")
+
+    return handler
+
+
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_ingestion.start_model_processing",
     queue="model_processing",
     soft_time_limit=120,
     time_limit=180,
 )
 def start_model_processing(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
@@ -72,7 +97,14 @@ def start_model_processing(
 
     Flow: start_model_processing -> ingest_model_builds -> dispatch_build_processing
     """
-    try:
+
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
+        handler("failed", str(e))
+
+    def _work(state: TaskState) -> Dict[str, Any]:
         from app.entities.model_repo_config import ModelImportStatus
         from app.repositories.model_repo_config import ModelRepoConfigRepository
 
@@ -119,30 +151,23 @@ def start_model_processing(
             "correlation_id": correlation_id,
         }
 
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Model processing start failed: {error_msg}")
-        model_repo_config_repo.update_repository(
-            repo_config_id,
-            {
-                "status": ModelImportStatus.FAILED.value,
-                "error_message": error_msg,
-            },
-        )
-        publish_status(repo_config_id, "failed", error_msg)
-        raise
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_ingestion.ingest_model_builds",
     queue="model_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
 def ingest_model_builds(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
     ci_provider: str,
     max_builds: Optional[int] = None,
@@ -170,101 +195,122 @@ def ingest_model_builds(
                     aggregate_fetch_results
                 )
     """
-    # Use provided correlation_id or generate new one
-    if not correlation_id:
-        correlation_id = str(uuid.uuid4())
-    corr_prefix = f"[corr={correlation_id[:8]}]"
 
-    batch_size = batch_size or settings.INGESTION_BUILDS_PER_PAGE
-
-    # Set tracing context
-    TracingContext.set(
-        correlation_id=correlation_id,
-        repo_id=repo_config_id,
-        pipeline_type="model_ingestion",
-    )
-
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-
-    repo_config = repo_config_repo.find_by_id(repo_config_id)
-    if not repo_config:
-        raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
-
-    logger.info(f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}")
-
-    # Update repo_config status
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {
-            "status": ModelImportStatus.FETCHING.value,
-        },
-    )
-
-    publish_status(repo_config_id, "fetching", "Fetching builds from CI...")
-
-    # Route to appropriate fetch strategy
-    if sync_until_existing:
-        # Sequential fetch that stops when hitting existing builds
-        logger.info(f"{corr_prefix} Using sync_until_existing mode")
-        fetch_builds_until_existing.delay(
-            repo_config_id=repo_config_id,
-            ci_provider=ci_provider,
-            batch_size=batch_size,
-            correlation_id=correlation_id,
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
         )
+        handler("failed", str(e))
+
+    def _work(state: TaskState) -> Dict[str, Any]:
+        nonlocal correlation_id
+        # Use provided correlation_id or generate new one
+        if not correlation_id:
+            correlation_id = str(uuid.uuid4())
+        corr_prefix = f"[corr={correlation_id[:8]}]"
+
+        effective_batch_size = batch_size or settings.INGESTION_BUILDS_PER_PAGE
+
+        # Set tracing context
+        TracingContext.set(
+            correlation_id=correlation_id,
+            repo_id=repo_config_id,
+            pipeline_type="model_ingestion",
+        )
+
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
+        if not repo_config:
+            raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
+
+        logger.info(
+            f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}"
+        )
+
+        # Update repo_config status
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {
+                "status": ModelImportStatus.FETCHING.value,
+            },
+        )
+
+        publish_status(repo_config_id, "fetching", "Fetching builds from CI...")
+
+        # Route to appropriate fetch strategy
+        if sync_until_existing:
+            # Sequential fetch that stops when hitting existing builds
+            logger.info(f"{corr_prefix} Using sync_until_existing mode")
+            fetch_builds_until_existing.delay(
+                repo_config_id=repo_config_id,
+                ci_provider=ci_provider,
+                batch_size=effective_batch_size,
+                correlation_id=correlation_id,
+            )
+            return {
+                "status": "dispatched",
+                "repo_config_id": repo_config_id,
+                "correlation_id": correlation_id,
+                "mode": "sync_until_existing",
+            }
+
+        # Original parallel fetch mode
+        estimated_pages = (max_builds // effective_batch_size + 1) if max_builds else 10
+
+        # Build fetch tasks for each page
+        fetch_tasks = []
+        remaining = max_builds
+        for page in range(1, estimated_pages + 1):
+            api_limit = (
+                min(effective_batch_size, remaining)
+                if remaining
+                else effective_batch_size
+            )
+            fetch_tasks.append(
+                fetch_builds_batch.si(
+                    repo_config_id=repo_config_id,
+                    ci_provider=ci_provider,
+                    page=page,
+                    batch_size=api_limit,
+                    since_days=since_days,
+                    correlation_id=correlation_id,
+                )
+            )
+            if remaining:
+                remaining = max(0, remaining - api_limit)
+                if remaining == 0:
+                    break
+
+        # Dispatch chord: fetch all pages → aggregate results
+        # Use on_error on callback to handle chord failures
+        callback = aggregate_fetch_results.s(
+            repo_config_id=repo_config_id,
+            correlation_id=correlation_id,
+        ).on_error(
+            handle_fetch_chord_error.s(
+                repo_config_id=repo_config_id,
+                correlation_id=correlation_id,
+            )
+        )
+
+        workflow = chord(group(fetch_tasks), callback)
+        workflow.apply_async()
+
+        logger.info(f"{corr_prefix} Dispatched {len(fetch_tasks)} fetch tasks")
+
         return {
             "status": "dispatched",
             "repo_config_id": repo_config_id,
             "correlation_id": correlation_id,
-            "mode": "sync_until_existing",
+            "fetch_tasks": len(fetch_tasks),
         }
 
-    # Original parallel fetch mode
-    estimated_pages = (max_builds // batch_size + 1) if max_builds else 10
-
-    # Build fetch tasks for each page
-    fetch_tasks = []
-    remaining = max_builds
-    for page in range(1, estimated_pages + 1):
-        api_limit = min(batch_size, remaining) if remaining else batch_size
-        fetch_tasks.append(
-            fetch_builds_batch.si(
-                repo_config_id=repo_config_id,
-                ci_provider=ci_provider,
-                page=page,
-                batch_size=api_limit,
-                since_days=since_days,
-                correlation_id=correlation_id,
-            )
-        )
-        if remaining:
-            remaining = max(0, remaining - api_limit)
-            if remaining == 0:
-                break
-
-    # Dispatch chord: fetch all pages → aggregate results
-    # Use on_error on callback to handle chord failures
-    callback = aggregate_fetch_results.s(
-        repo_config_id=repo_config_id,
-        correlation_id=correlation_id,
-    ).on_error(
-        handle_fetch_chord_error.s(
-            repo_config_id=repo_config_id,
-            correlation_id=correlation_id,
-        )
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    workflow = chord(group(fetch_tasks), callback)
-    workflow.apply_async()
-
-    logger.info(f"{corr_prefix} Dispatched {len(fetch_tasks)} fetch tasks")
-
-    return {
-        "status": "dispatched",
-        "repo_config_id": repo_config_id,
-        "correlation_id": correlation_id,
-        "fetch_tasks": len(fetch_tasks),
-    }
 
 
 @celery_app.task(
@@ -576,11 +622,9 @@ def fetch_builds_batch(
             continue
 
         # Filter out builds that were skipped/cancelled/stale
-        if build.conclusion in (
-            BuildConclusion.SKIPPED,
-            BuildConclusion.ACTION_REQUIRED,
-            BuildConclusion.STALE,
-            BuildConclusion.CANCELLED,
+        if build.conclusion not in (
+            BuildConclusion.SUCCESS,
+            BuildConclusion.FAILED,
         ):
             continue
 
@@ -657,14 +701,14 @@ def fetch_builds_batch(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_ingestion.aggregate_fetch_results",
     queue="model_ingestion",
     soft_time_limit=60,
     time_limit=120,
 )
 def aggregate_fetch_results(
-    self: PipelineTask,
+    self: SafeTask,
     results: List[Dict[str, Any]],
     repo_config_id: str,
     correlation_id: str = "",
@@ -675,86 +719,100 @@ def aggregate_fetch_results(
     Uses chord results (guaranteed complete) to count fetched builds,
     then queries DB for actual records.
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    log_ctx = f"{corr_prefix}[aggregate_fetch]"
 
-    import_build_repo = ModelImportBuildRepository(self.db)
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
+        handler("failed", str(e))
 
-    # Sum up builds from chord results (these are guaranteed complete)
-    total_from_results = sum(r.get("builds", 0) for r in results if r)
-    logger.info(
-        f"{log_ctx} Chord results: {total_from_results} builds from {len(results)} tasks"
-    )
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        log_ctx = f"{corr_prefix}[aggregate_fetch]"
 
-    # If chord says 0 builds, mark as processed
-    if total_from_results == 0:
+        import_build_repo = ModelImportBuildRepository(self.db)
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+        raw_repo_repo = RawRepositoryRepository(self.db)
+
+        # Sum up builds from chord results (these are guaranteed complete)
+        total_from_results = sum(r.get("builds", 0) for r in results if r)
+        logger.info(
+            f"{log_ctx} Chord results: {total_from_results} builds from {len(results)} tasks"
+        )
+
+        # If chord says 0 builds, mark as processed
+        if total_from_results == 0:
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {
+                    "status": ModelImportStatus.PROCESSED.value,
+                    "builds_fetched": 0,
+                },
+            )
+            publish_status(repo_config_id, "processed", "No builds found")
+            return {"status": "completed", "builds": 0}
+
+        # Query DB for actual records (should match chord results)
+        fetched_builds = import_build_repo.find_fetched_builds(repo_config_id)
+        total_fetched = len(fetched_builds)
+
+        # Log discrepancy if any (shouldn't happen with chord)
+        if total_fetched != total_from_results:
+            logger.warning(
+                f"{log_ctx} Discrepancy: chord={total_from_results}, db={total_fetched}"
+            )
+
+        logger.info(f"{log_ctx} Found {total_fetched} fetched builds in DB")
+
+        # Update repo config
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
         repo_config_repo.update_repository(
             repo_config_id,
-            {
-                "status": ModelImportStatus.PROCESSED.value,
-                "builds_fetched": 0,
+            {"builds_fetched": total_fetched},
+        )
+
+        # Get commit SHAs and CI run IDs from fetched builds
+        commit_shas = import_build_repo.get_commit_shas(repo_config_id)
+        ci_run_ids = import_build_repo.get_ci_run_ids(repo_config_id)
+
+        # Get RawRepository
+        raw_repo = raw_repo_repo.find_by_id(repo_config.raw_repo_id)
+        if not raw_repo:
+            raise ValueError(f"RawRepository {repo_config.raw_repo_id} not found")
+
+        # Dispatch ingestion
+        dispatch_ingestion.delay(
+            repo_config_id=repo_config_id,
+            raw_repo_id=str(repo_config.raw_repo_id),
+            github_repo_id=raw_repo.github_repo_id,
+            full_name=repo_config.full_name,
+            ci_provider=repo_config.ci_provider,
+            commit_shas=commit_shas,
+            ci_run_ids=ci_run_ids,
+            correlation_id=correlation_id,
+        )
+
+        publish_status(
+            repo_config_id,
+            "ingesting",
+            f"Preparing resources for {total_fetched} builds...",
+            stats={
+                "builds_fetched": total_fetched,
+                "builds_ingested": 0,
             },
         )
-        publish_status(repo_config_id, "processed", "No builds found")
-        return {"status": "completed", "builds": 0}
 
-    # Query DB for actual records (should match chord results)
-    fetched_builds = import_build_repo.find_fetched_builds(repo_config_id)
-    total_fetched = len(fetched_builds)
+        return {
+            "status": "dispatched",
+            "builds": total_fetched,
+            "commits": len(commit_shas),
+        }
 
-    # Log discrepancy if any (shouldn't happen with chord)
-    if total_fetched != total_from_results:
-        logger.warning(
-            f"{log_ctx} Discrepancy: chord={total_from_results}, db={total_fetched}"
-        )
-
-    logger.info(f"{log_ctx} Found {total_fetched} fetched builds in DB")
-
-    # Update repo config
-    repo_config = repo_config_repo.find_by_id(repo_config_id)
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {"builds_fetched": total_fetched},
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Get commit SHAs and CI run IDs from fetched builds
-    commit_shas = import_build_repo.get_commit_shas(repo_config_id)
-    ci_run_ids = import_build_repo.get_ci_run_ids(repo_config_id)
-
-    # Get RawRepository
-    raw_repo = raw_repo_repo.find_by_id(repo_config.raw_repo_id)
-    if not raw_repo:
-        raise ValueError(f"RawRepository {repo_config.raw_repo_id} not found")
-
-    # Dispatch ingestion
-    dispatch_ingestion.delay(
-        repo_config_id=repo_config_id,
-        raw_repo_id=str(repo_config.raw_repo_id),
-        github_repo_id=raw_repo.github_repo_id,
-        full_name=repo_config.full_name,
-        ci_provider=repo_config.ci_provider,
-        commit_shas=commit_shas,
-        ci_run_ids=ci_run_ids,
-        correlation_id=correlation_id,
-    )
-
-    publish_status(
-        repo_config_id,
-        "ingesting",
-        f"Preparing resources for {total_fetched} builds...",
-        stats={
-            "builds_fetched": total_fetched,
-            "builds_ingested": 0,
-        },
-    )
-
-    return {
-        "status": "dispatched",
-        "builds": total_fetched,
-        "commits": len(commit_shas),
-    }
 
 
 @celery_app.task(
@@ -819,14 +877,14 @@ def handle_fetch_chord_error(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_ingestion.dispatch_ingestion",
     queue="model_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
 def dispatch_ingestion(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
     raw_repo_id: str,
     github_repo_id: int,
@@ -841,111 +899,125 @@ def dispatch_ingestion(
 
     After ingestion completes, dispatches processing.
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    log_ctx = f"{corr_prefix}[dispatch_ingestion]"
 
-    # Mark all FETCHED builds as INGESTING
-    import_build_repo = ModelImportBuildRepository(self.db)
-    import_build_repo.update_many_by_status(
-        repo_config_id,
-        from_status=ModelImportBuildStatus.FETCHED.value,
-        updates={
-            "status": ModelImportBuildStatus.INGESTING.value,
-            "ingestion_started_at": datetime.utcnow(),
-        },
-    )
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
+        handler("failed", str(e))
 
-    required_resources = ["git_history", "git_worktree", "build_logs"]
-    tasks_by_level = get_ingestion_tasks_by_level(required_resources)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        log_ctx = f"{corr_prefix}[dispatch_ingestion]"
 
-    import_build_repo.init_resource_status(repo_config_id, list(required_resources))
-
-    # Update DB and publish SSE for IN_PROGRESS status
-    from app.entities.model_import_build import ResourceStatus
-    from app.tasks.pipeline.shared.resources import (
-        get_ingestion_only_resources,
-    )
-
-    ingestion_resources = get_ingestion_only_resources(set(required_resources))
-
-    total_builds = len(commit_shas)
-    for resource in ingestion_resources:
-        # Persist IN_PROGRESS status to DB
-        import_build_repo.update_resource_status_batch(
+        # Mark all FETCHED builds as INGESTING
+        import_build_repo = ModelImportBuildRepository(self.db)
+        import_build_repo.update_many_by_status(
             repo_config_id,
-            resource,
-            ResourceStatus.IN_PROGRESS,
+            from_status=ModelImportBuildStatus.FETCHED.value,
+            updates={
+                "status": ModelImportBuildStatus.INGESTING.value,
+                "ingestion_started_at": datetime.utcnow(),
+            },
         )
 
-        publish_ingestion_build_update(
-            repo_id=repo_config_id,
-            resource=resource,
-            status="in_progress",
-            builds_affected=total_builds,
-            pipeline_type="model",
+        required_resources = ["git_history", "git_worktree", "build_logs"]
+        tasks_by_level = get_ingestion_tasks_by_level(required_resources)
+
+        import_build_repo.init_resource_status(repo_config_id, list(required_resources))
+
+        # Update DB and publish SSE for IN_PROGRESS status
+        from app.entities.model_import_build import ResourceStatus
+        from app.tasks.pipeline.shared.resources import (
+            get_ingestion_only_resources,
         )
 
-    logger.info(
-        f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}"
-    )
+        ingestion_resources = get_ingestion_only_resources(set(required_resources))
 
-    # Create context for this repo
-    ctx = ModelPipelineContext(
-        repo_config_id=repo_config_id,
-        correlation_id=correlation_id,
-        _raw_repo_id=raw_repo_id,
-        _github_repo_id=github_repo_id,
-        _full_name=full_name,
-    )
+        total_builds = len(commit_shas)
+        for resource in ingestion_resources:
+            # Persist IN_PROGRESS status to DB
+            import_build_repo.update_resource_status_batch(
+                repo_config_id,
+                resource,
+                ResourceStatus.IN_PROGRESS,
+            )
 
-    # Build ingestion workflow
-    ingestion_workflow = build_workflow_with_context(
-        tasks_by_level=tasks_by_level,
-        ctx=ctx,
-        raw_repo_id=raw_repo_id,
-        github_repo_id=github_repo_id,
-        full_name=full_name,
-        build_ids=ci_run_ids,
-        commit_shas=commit_shas,
-        ci_provider=ci_provider,
-    )
+            publish_ingestion_build_update(
+                repo_id=repo_config_id,
+                resource=resource,
+                status="in_progress",
+                builds_affected=total_builds,
+                pipeline_type="model",
+            )
 
-    # Callback only marks builds as INGESTED and sets final ingestion status
-    callback = aggregate_model_ingestion_results.s(
-        repo_config_id=repo_config_id,
-        correlation_id=correlation_id,
-    )
+        logger.info(
+            f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}"
+        )
 
-    if ingestion_workflow:
-        logger.info(f"{log_ctx} Dispatching ingestion chord")
-        # Use on_error on callback to handle chord failures gracefully
-        error_callback = handle_ingestion_chord_error.s(
+        # Create context for this repo
+        ctx = ModelPipelineContext(
+            repo_config_id=repo_config_id,
+            correlation_id=correlation_id,
+            _raw_repo_id=raw_repo_id,
+            _github_repo_id=github_repo_id,
+            _full_name=full_name,
+        )
+
+        # Build ingestion workflow
+        ingestion_workflow = build_workflow_with_context(
+            tasks_by_level=tasks_by_level,
+            ctx=ctx,
+            raw_repo_id=raw_repo_id,
+            github_repo_id=github_repo_id,
+            full_name=full_name,
+            build_ids=ci_run_ids,
+            commit_shas=commit_shas,
+            ci_provider=ci_provider,
+        )
+
+        # Callback only marks builds as INGESTED and sets final ingestion status
+        callback = aggregate_model_ingestion_results.s(
             repo_config_id=repo_config_id,
             correlation_id=correlation_id,
         )
-        chord(ingestion_workflow, callback.on_error(error_callback)).apply_async()
-    else:
-        logger.info(f"{log_ctx} No ingestion needed, marking as complete")
-        # No ingestion tasks needed - directly mark as complete
-        aggregate_model_ingestion_results.delay(
-            results=[],
-            repo_config_id=repo_config_id,
-            correlation_id=correlation_id,
-        )
 
-    return {"status": "dispatched", "resources": list(required_resources)}
+        if ingestion_workflow:
+            logger.info(f"{log_ctx} Dispatching ingestion chord")
+            # Use on_error on callback to handle chord failures gracefully
+            error_callback = handle_ingestion_chord_error.s(
+                repo_config_id=repo_config_id,
+                correlation_id=correlation_id,
+            )
+            chord(ingestion_workflow, callback.on_error(error_callback)).apply_async()
+        else:
+            logger.info(f"{log_ctx} No ingestion needed, marking as complete")
+            # No ingestion tasks needed - directly mark as complete
+            aggregate_model_ingestion_results.delay(
+                results=[],
+                repo_config_id=repo_config_id,
+                correlation_id=correlation_id,
+            )
+
+        return {"status": "dispatched", "resources": list(required_resources)}
+
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_ingestion.aggregate_model_ingestion_results",
     queue="model_ingestion",
     soft_time_limit=30,
     time_limit=60,
 )
 def aggregate_model_ingestion_results(
-    self: PipelineTask,
+    self: SafeTask,
     results: Any,
     repo_config_id: str,
     correlation_id: str = "",
@@ -956,149 +1028,157 @@ def aggregate_model_ingestion_results(
     Parses results to update per-resource status, then marks builds as INGESTED.
     """
 
-    from bson import ObjectId
-
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-
-    import_build_repo = ModelImportBuildRepository(self.db)
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-
-    now = datetime.utcnow()
-
-    # === Determine per-build final status from resource_status in DB ===
-    # FAILED: Any required resource has status = "failed" (actual error - RETRYABLE)
-    # MISSING_RESOURCE: Logs expired (expected - NOT RETRYABLE)
-    # INGESTED: All required resources completed
-
-    # 1. Check if git_history failed (affects ALL builds)
-    git_history_failed = import_build_repo.collection.count_documents(
-        {
-            "model_repo_config_id": ObjectId(repo_config_id),
-            "status": ModelImportBuildStatus.INGESTING.value,
-            "resource_status.git_history.status": "failed",
-        }
-    )
-
-    if git_history_failed > 0:
-        # Clone failed - mark all as FAILED
-        import_build_repo.update_many_by_status(
-            repo_config_id,
-            from_status=ModelImportBuildStatus.INGESTING.value,
-            updates={
-                "status": ModelImportBuildStatus.FAILED.value,
-                "ingestion_error": "Clone failed",
-                "ingested_at": now,
-            },
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
         )
-    else:
-        # 2. Mark builds with failed git_worktree as FAILED
-        import_build_repo.collection.update_many(
+        handler("failed", str(e))
+
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from bson import ObjectId
+
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+
+        import_build_repo = ModelImportBuildRepository(self.db)
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+
+        now = datetime.utcnow()
+
+        # === Determine per-build final status from resource_status in DB ===
+        # FAILED: Any required resource has status = "failed" (actual error - RETRYABLE)
+        # MISSING_RESOURCE: Logs expired (expected - NOT RETRYABLE)
+        # INGESTED: All required resources completed
+
+        # 1. Check if git_history failed (affects ALL builds)
+        git_history_failed = import_build_repo.collection.count_documents(
             {
                 "model_repo_config_id": ObjectId(repo_config_id),
                 "status": ModelImportBuildStatus.INGESTING.value,
-                "resource_status.git_worktree.status": "failed",
-            },
-            {
-                "$set": {
+                "resource_status.git_history.status": "failed",
+            }
+        )
+
+        if git_history_failed > 0:
+            # Clone failed - mark all as FAILED
+            import_build_repo.update_many_by_status(
+                repo_config_id,
+                from_status=ModelImportBuildStatus.INGESTING.value,
+                updates={
                     "status": ModelImportBuildStatus.FAILED.value,
-                    "ingestion_error": "Worktree creation failed",
+                    "ingestion_error": "Clone failed",
                     "ingested_at": now,
-                }
-            },
-        )
+                },
+            )
+        else:
+            # 2. Mark builds with failed git_worktree as FAILED
+            import_build_repo.collection.update_many(
+                {
+                    "model_repo_config_id": ObjectId(repo_config_id),
+                    "status": ModelImportBuildStatus.INGESTING.value,
+                    "resource_status.git_worktree.status": "failed",
+                },
+                {
+                    "$set": {
+                        "status": ModelImportBuildStatus.FAILED.value,
+                        "ingestion_error": "Worktree creation failed",
+                        "ingested_at": now,
+                    }
+                },
+            )
 
-        # 3. Mark builds with failed build_logs as MISSING_RESOURCE (not retryable)
-        # Set both ingested_at (ingestion completed with partial resources)
-        # (when the resource failure occurred) so UI can display both timestamps
-        import_build_repo.collection.update_many(
-            {
-                "model_repo_config_id": ObjectId(repo_config_id),
-                "status": ModelImportBuildStatus.INGESTING.value,
-                "resource_status.build_logs.status": "failed",
-            },
-            {
-                "$set": {
-                    "status": ModelImportBuildStatus.MISSING_RESOURCE.value,
-                    "ingestion_error": "Log download failed or expired",
-                    "ingested_at": now,  # Ingestion completed (with partial resources)
-                }
-            },
-        )
+            # 3. Mark builds with failed build_logs as MISSING_RESOURCE (not retryable)
+            import_build_repo.collection.update_many(
+                {
+                    "model_repo_config_id": ObjectId(repo_config_id),
+                    "status": ModelImportBuildStatus.INGESTING.value,
+                    "resource_status.build_logs.status": "failed",
+                },
+                {
+                    "$set": {
+                        "status": ModelImportBuildStatus.MISSING_RESOURCE.value,
+                        "ingestion_error": "Log download failed or expired",
+                        "ingested_at": now,
+                    }
+                },
+            )
 
-        # 4. Mark remaining INGESTING builds as INGESTED
-        import_build_repo.update_many_by_status(
+            # 4. Mark remaining INGESTING builds as INGESTED
+            import_build_repo.update_many_by_status(
+                repo_config_id,
+                from_status=ModelImportBuildStatus.INGESTING.value,
+                updates={
+                    "status": ModelImportBuildStatus.INGESTED.value,
+                    "ingested_at": now,
+                },
+            )
+
+        # Count by status to determine final state
+        status_counts = import_build_repo.count_by_status(repo_config_id)
+        ingested = status_counts.get(ModelImportBuildStatus.INGESTED.value, 0)
+        missing_resource = status_counts.get(
+            ModelImportBuildStatus.MISSING_RESOURCE.value, 0
+        )
+        failed = status_counts.get(ModelImportBuildStatus.FAILED.value, 0)
+
+        # Determine final ingestion status - always INGESTED
+        final_status = ModelImportStatus.INGESTED
+        if failed > 0 or missing_resource > 0:
+            parts = [f"{ingested} ready"]
+            if failed > 0:
+                parts.append(f"{failed} failed (retryable)")
+            if missing_resource > 0:
+                parts.append(f"{missing_resource} missing resources")
+            msg = f"Ingestion done: {', '.join(parts)}. Review or start processing."
+        else:
+            msg = f"Ingestion complete: {ingested} builds ready. Start processing when ready."
+
+        # Update repo config with final status and timestamps
+        total_builds = ingested + missing_resource + failed
+        repo_config_repo.update_repository(
             repo_config_id,
-            from_status=ModelImportBuildStatus.INGESTING.value,
-            updates={
-                "status": ModelImportBuildStatus.INGESTED.value,
-                "ingested_at": now,
+            {
+                "status": final_status.value,
+                "last_synced_at": now,
+                "builds_fetched": total_builds,
+                "builds_ingested": ingested,
+                "builds_missing_resource": missing_resource,
+                "builds_ingestion_failed": failed,
             },
         )
 
-    # Count by status to determine final state
-    status_counts = import_build_repo.count_by_status(repo_config_id)
-    ingested = status_counts.get(ModelImportBuildStatus.INGESTED.value, 0)
-    missing_resource = status_counts.get(
-        ModelImportBuildStatus.MISSING_RESOURCE.value, 0
-    )
-    failed = status_counts.get(ModelImportBuildStatus.FAILED.value, 0)
+        logger.info(f"{corr_prefix}[aggregate_ingestion] {msg}")
 
-    # Determine final ingestion status - always INGESTED
-    # User accepts current state (with or without failures) when starting processing
-    final_status = ModelImportStatus.INGESTED
-    if failed > 0 or missing_resource > 0:
-        parts = [f"{ingested} ready"]
-        if failed > 0:
-            parts.append(f"{failed} failed (retryable)")
-        if missing_resource > 0:
-            parts.append(f"{missing_resource} missing resources")
-        msg = f"Ingestion done: {', '.join(parts)}. Review or start processing."
-    else:
-        msg = (
-            f"Ingestion complete: {ingested} builds ready. Start processing when ready."
+        # Get resource status summary for stats
+        resource_summary = import_build_repo.get_resource_status_summary(repo_config_id)
+
+        publish_status(
+            repo_config_id,
+            final_status.value,
+            msg,
+            stats={
+                "builds_fetched": total_builds,
+                "builds_ingested": ingested,
+                "builds_missing_resource": missing_resource,
+                "builds_ingestion_failed": failed,
+                "last_synced_at": now.isoformat(),
+                "resource_status": resource_summary,
+            },
         )
 
-    # Update repo config with final status and timestamps
-    total_builds = ingested + missing_resource + failed
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {
-            "status": final_status.value,
-            "last_synced_at": now,
-            "builds_fetched": total_builds,
+        return {
+            "status": "completed",
+            "final_status": final_status.value,
             "builds_ingested": ingested,
             "builds_missing_resource": missing_resource,
             "builds_ingestion_failed": failed,
-        },
-    )
-
-    logger.info(f"{corr_prefix}[aggregate_ingestion] {msg}")
-
-    # Get resource status summary for stats
-    resource_summary = import_build_repo.get_resource_status_summary(repo_config_id)
-
-    publish_status(
-        repo_config_id,
-        final_status.value,
-        msg,
-        stats={
-            "builds_fetched": total_builds,
-            "builds_ingested": ingested,
-            "builds_missing_resource": missing_resource,
-            "builds_ingestion_failed": failed,
-            "last_synced_at": now.isoformat(),
             "resource_status": resource_summary,
-        },
-    )
+        }
 
-    return {
-        "status": "completed",
-        "final_status": final_status.value,
-        "builds_ingested": ingested,
-        "builds_missing_resource": missing_resource,
-        "builds_ingestion_failed": failed,
-        "resource_status": resource_summary,
-    }
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 @celery_app.task(
@@ -1213,14 +1293,14 @@ def handle_ingestion_chord_error(
 # REINGEST FAILED BUILDS
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_ingestion.reingest_failed_builds",
     queue="model_ingestion",
     soft_time_limit=600,
     time_limit=900,
 )
 def reingest_failed_builds(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
 ) -> Dict[str, Any]:
     """
@@ -1231,109 +1311,127 @@ def reingest_failed_builds(
 
     Also respects checkpoint: only retries builds with _id > last_processed_import_build_id.
     """
-    import_build_repo = ModelImportBuildRepository(self.db)
-    repo_config_repo = ModelRepoConfigRepository(self.db)
 
-    # Get repo config for checkpoint
-    repo_config = repo_config_repo.find_by_id(repo_config_id)
-    if not repo_config:
-        logger.error(f"Repo config not found: {repo_config_id}")
-        return {"status": "error", "message": "Repo config not found"}
-
-    # Find FAILED builds after checkpoint (not MISSING_RESOURCE - those are not retryable)
-    checkpoint_id = repo_config.last_processed_import_build_id
-    failed_builds = import_build_repo.find_failed_builds(
-        repo_config_id, after_id=checkpoint_id
-    )
-
-    if not failed_builds:
-        # Also count missing_resource for user feedback
-        missing_count = import_build_repo.count_missing_resource_after_checkpoint(
-            repo_config_id, checkpoint_id
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
         )
-        msg = "No failed builds to retry"
-        if missing_count > 0:
-            msg += f" ({missing_count} builds have missing resources - not retryable)"
-        logger.info(f"{msg} for {repo_config_id}")
+        handler("failed", str(e))
+
+    def _work(state: TaskState) -> Dict[str, Any]:
+        import_build_repo = ModelImportBuildRepository(self.db)
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+
+        # Get repo config for checkpoint
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
+        if not repo_config:
+            logger.error(f"Repo config not found: {repo_config_id}")
+            return {"status": "error", "message": "Repo config not found"}
+
+        # Find FAILED builds after checkpoint (not MISSING_RESOURCE - those are not retryable)
+        checkpoint_id = repo_config.last_processed_import_build_id
+        failed_builds = import_build_repo.find_failed_builds(
+            repo_config_id, after_id=checkpoint_id
+        )
+
+        if not failed_builds:
+            # Also count missing_resource for user feedback
+            missing_count = import_build_repo.count_missing_resource_after_checkpoint(
+                repo_config_id, checkpoint_id
+            )
+            msg = "No failed builds to retry"
+            if missing_count > 0:
+                msg += (
+                    f" ({missing_count} builds have missing resources - not retryable)"
+                )
+            logger.info(f"{msg} for {repo_config_id}")
+            return {
+                "status": "no_failed_builds",
+                "failed_count": 0,
+                "missing_resource_count": missing_count,
+                "checkpoint": str(checkpoint_id) if checkpoint_id else None,
+            }
+
+        correlation_id = str(uuid.uuid4())[:8]
+        logger.info(
+            f"[corr={correlation_id}] Found {len(failed_builds)} failed builds "
+            f"after checkpoint {checkpoint_id} for {repo_config_id}"
+        )
+
+        # Collect commit SHAs and CI run IDs from failed builds
+        commit_shas = []
+        ci_run_ids = []
+
+        # Reset status to FETCHED for retry, clear error fields
+        reset_count = 0
+        for import_build in failed_builds:
+            try:
+                import_build_repo.update_one(
+                    str(import_build.id),
+                    {
+                        "status": ModelImportBuildStatus.FETCHED.value,
+                        "ingestion_error": None,
+                        "ingested_at": None,
+                    },
+                )
+                reset_count += 1
+
+                # Collect data for dispatch_ingestion
+                if import_build.commit_sha:
+                    commit_shas.append(import_build.commit_sha)
+                ci_run_ids.append(import_build.ci_run_id)
+
+            except Exception as e:
+                logger.warning(f"Failed to reset import build {import_build.id}: {e}")
+
+        if not ci_run_ids:
+            logger.warning(f"No CI run IDs to reingest for {repo_config_id}")
+            return {"status": "no_runs_to_reingest", "count": 0}
+
+        # Update repo status
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.INGESTING.value},
+        )
+
+        # Get raw repo info
+        raw_repo = RawRepositoryRepository(self.db).find_by_id(
+            str(repo_config.raw_repo_id)
+        )
+        if not raw_repo:
+            logger.error(f"Raw repo not found: {repo_config.raw_repo_id}")
+            return {"status": "error", "message": "Raw repo not found"}
+
+        # Trigger ingestion with all required parameters
+        dispatch_ingestion.delay(
+            repo_config_id=repo_config_id,
+            raw_repo_id=str(repo_config.raw_repo_id),
+            github_repo_id=raw_repo.github_repo_id,
+            full_name=raw_repo.full_name,
+            ci_provider=repo_config.ci_provider or CIProvider.GITHUB_ACTIONS.value,
+            commit_shas=commit_shas,
+            ci_run_ids=ci_run_ids,
+            correlation_id=correlation_id,
+        )
+
+        publish_status(
+            repo_config_id,
+            "ingesting",
+            f"Retrying {reset_count} failed imports...",
+        )
+
         return {
-            "status": "no_failed_builds",
-            "failed_count": 0,
-            "missing_resource_count": missing_count,
-            "checkpoint": str(checkpoint_id) if checkpoint_id else None,
+            "status": "queued",
+            "imports_reset": reset_count,
+            "total_failed": len(failed_builds),
+            "correlation_id": correlation_id,
         }
 
-    correlation_id = str(uuid.uuid4())[:8]
-    logger.info(
-        f"[corr={correlation_id}] Found {len(failed_builds)} failed builds "
-        f"after checkpoint {checkpoint_id} for {repo_config_id}"
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Collect commit SHAs and CI run IDs from failed builds
-    commit_shas = []
-    ci_run_ids = []
-
-    # Reset status to FETCHED for retry, clear error fields
-    reset_count = 0
-    for import_build in failed_builds:
-        try:
-            import_build_repo.update_one(
-                str(import_build.id),
-                {
-                    "status": ModelImportBuildStatus.FETCHED.value,
-                    "ingestion_error": None,
-                    "ingested_at": None,
-                },
-            )
-            reset_count += 1
-
-            # Collect data for dispatch_ingestion
-            if import_build.commit_sha:
-                commit_shas.append(import_build.commit_sha)
-            ci_run_ids.append(import_build.ci_run_id)
-
-        except Exception as e:
-            logger.warning(f"Failed to reset import build {import_build.id}: {e}")
-
-    if not ci_run_ids:
-        logger.warning(f"No CI run IDs to reingest for {repo_config_id}")
-        return {"status": "no_runs_to_reingest", "count": 0}
-
-    # Update repo status
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {"status": ModelImportStatus.INGESTING.value},
-    )
-
-    # Get raw repo info
-    raw_repo = RawRepositoryRepository(self.db).find_by_id(str(repo_config.raw_repo_id))
-    if not raw_repo:
-        logger.error(f"Raw repo not found: {repo_config.raw_repo_id}")
-        return {"status": "error", "message": "Raw repo not found"}
-
-    # Trigger ingestion with all required parameters
-    dispatch_ingestion.delay(
-        repo_config_id=repo_config_id,
-        raw_repo_id=str(repo_config.raw_repo_id),
-        github_repo_id=raw_repo.github_repo_id,
-        full_name=raw_repo.full_name,
-        ci_provider=repo_config.ci_provider or CIProvider.GITHUB_ACTIONS.value,
-        commit_shas=commit_shas,
-        ci_run_ids=ci_run_ids,
-        correlation_id=correlation_id,
-    )
-
-    publish_status(
-        repo_config_id,
-        "ingesting",
-        f"Retrying {reset_count} failed imports...",
-    )
-
-    return {
-        "status": "queued",
-        "imports_reset": reset_count,
-        "total_failed": len(failed_builds),
-        "correlation_id": correlation_id,
-    }
 
 
 # WEBHOOK INGESTION TASK

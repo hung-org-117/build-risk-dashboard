@@ -57,11 +57,9 @@ export default function UploadBuildDataPage() {
             <div className="w-[500px] flex-shrink-0 border-r bg-background flex flex-col z-10 shadow-xl shadow-slate-200/50 dark:shadow-none">
                 {/* Header */}
                 <div className="flex items-center gap-3 px-6 py-4 border-b">
-                    {step === 1 && (
-                        <Button variant="ghost" size="icon" className="-ml-2" onClick={handleBack}>
-                            <ArrowLeft className="h-5 w-5" />
-                        </Button>
-                    )}
+                    <Button variant="ghost" size="icon" className="-ml-2" onClick={handleBack}>
+                        <ArrowLeft className="h-5 w-5" />
+                    </Button>
                     <div>
                         <h1 className="text-lg font-semibold leading-none">Upload Build Data</h1>
                         <p className="text-xs text-muted-foreground mt-1">Import CSV to add raw build records</p>

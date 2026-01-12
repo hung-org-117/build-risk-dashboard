@@ -144,14 +144,7 @@ export function ValidationView({ wizard }: ValidationViewProps) {
                 </div>
             )}
 
-            {/* Error Message */}
-            {validationError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
-                    <p className="text-sm text-red-700 dark:text-red-300">
-                        {validationError}
-                    </p>
-                </div>
-            )}
+
 
             {/* Stats Summary Cards */}
             {validationStats && (

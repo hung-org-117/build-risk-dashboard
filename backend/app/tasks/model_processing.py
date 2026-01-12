@@ -25,16 +25,39 @@ from app.tasks.shared.events import publish_repo_status as publish_status
 logger = logging.getLogger(__name__)
 
 
+def _create_repo_config_failure_handler(redis_client, repo_config_id: str, db):
+    """
+    Create a failure handler for ModelRepoConfig tasks.
+    Updates status to FAILED on unhandled errors.
+    """
+
+    def handler(status: str, error_message: str) -> None:
+        try:
+            repo_config_repo = ModelRepoConfigRepository(db)
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {
+                    "status": ModelImportStatus.FAILED.value,
+                    "error_message": error_message,
+                },
+            )
+            publish_status(repo_config_id, "failed", error_message)
+        except Exception as e:
+            logger.warning(f"Failed to update repo config {repo_config_id}: {e}")
+
+    return handler
+
+
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_processing.start_processing_phase",
     queue="model_processing",
     soft_time_limit=60,
     time_limit=120,
 )
 def start_processing_phase(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
 ) -> Dict[str, Any]:
     """
@@ -46,121 +69,135 @@ def start_processing_phase(
 
     After processing dispatched, updates checkpoint to the last build ID.
     """
-    correlation_id = TracingContext.get_correlation_id() or str(uuid.uuid4())
-    log_ctx = f"[corr={correlation_id[:8]}]"
 
-    import_build_repo = ModelImportBuildRepository(self.db)
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-
-    # Validate status
-    repo_config = repo_config_repo.find_by_id(repo_config_id)
-    if not repo_config:
-        logger.error(f"{log_ctx} Repository config {repo_config_id} not found")
-        return {"status": "error", "message": "Repository config not found"}
-
-    # Allow processing when status is INGESTED (ready for processing)
-    # or PROCESSED (re-processing after sync)
-    valid_statuses = [
-        ModelImportStatus.INGESTED.value,
-        ModelImportStatus.PROCESSED.value,
-    ]
-    if repo_config.status not in valid_statuses:
-        msg = (
-            f"Cannot start processing: status is {repo_config.status}. "
-            f"Expected: {valid_statuses}"
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
         )
-        logger.warning(f"{log_ctx} {msg}")
-        return {"status": "error", "message": msg}
+        handler("failed", str(e))
 
-    # === DETERMINE WHICH BUILDS TO PROCESS ===
-    # Use ObjectId checkpoint to find only NEW builds since last processing
-    # Include both INGESTED and FAILED builds (graceful failure handling)
-    last_checkpoint_id = repo_config.last_processed_import_build_id
+    def _work(state: TaskState) -> Dict[str, Any]:
+        correlation_id = TracingContext.get_correlation_id() or str(uuid.uuid4())
+        log_ctx = f"[corr={correlation_id[:8]}]"
 
-    if last_checkpoint_id:
+        import_build_repo = ModelImportBuildRepository(self.db)
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+
+        # Validate status
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
+        if not repo_config:
+            logger.error(f"{log_ctx} Repository config {repo_config_id} not found")
+            return {"status": "error", "message": "Repository config not found"}
+
+        # Allow processing when status is INGESTED (ready for processing)
+        # or PROCESSED (re-processing after sync)
+        valid_statuses = [
+            ModelImportStatus.INGESTED.value,
+            ModelImportStatus.PROCESSED.value,
+        ]
+        if repo_config.status not in valid_statuses:
+            msg = (
+                f"Cannot start processing: status is {repo_config.status}. "
+                f"Expected: {valid_statuses}"
+            )
+            logger.warning(f"{log_ctx} {msg}")
+            return {"status": "error", "message": msg}
+
+        # === DETERMINE WHICH BUILDS TO PROCESS ===
+        last_checkpoint_id = repo_config.last_processed_import_build_id
+
+        if last_checkpoint_id:
+            logger.info(
+                f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds"
+            )
+        else:
+            logger.info(f"{log_ctx} No checkpoint, processing all builds")
+
+        # Get unprocessed builds (both INGESTED and FAILED, sorted by _id ascending)
+        pending_builds = import_build_repo.find_unprocessed_builds(
+            repo_config_id, after_id=last_checkpoint_id, include_failed=True
+        )
+
+        if not pending_builds:
+            logger.info(f"{log_ctx} No new builds to process for {repo_config_id}")
+            return {
+                "status": "completed",
+                "builds": 0,
+                "message": "No new builds to process",
+            }
+
+        # Get the last build ID for checkpoint update (will be set AFTER processing)
+        last_build_id = pending_builds[-1].id
+
+        # Count statuses
+        ingested_count = sum(1 for b in pending_builds if b.status == "ingested")
+        failed_count = sum(1 for b in pending_builds if b.status == "failed")
+
         logger.info(
-            f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds"
+            f"{log_ctx} Processing {len(pending_builds)} builds "
+            f"({ingested_count} ingested, {failed_count} failed), "
+            f"checkpoint will be set to {last_build_id} after completion"
         )
-    else:
-        logger.info(f"{log_ctx} No checkpoint, processing all builds")
 
-    # Get unprocessed builds (both INGESTED and FAILED, sorted by _id ascending)
-    pending_builds = import_build_repo.find_unprocessed_builds(
-        repo_config_id, after_id=last_checkpoint_id, include_failed=True
-    )
+        # Extract raw_build_run_ids
+        raw_build_run_ids = [str(b.raw_build_run_id) for b in pending_builds]
 
-    if not pending_builds:
-        logger.info(f"{log_ctx} No new builds to process for {repo_config_id}")
+        # Update status to PROCESSING only (checkpoint set AFTER processing completes)
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.PROCESSING.value},
+        )
+
+        # Dispatch processing with last_build_id for checkpoint update after completion
+        dispatch_build_processing.delay(
+            repo_config_id=repo_config_id,
+            raw_repo_id=str(repo_config.raw_repo_id),
+            raw_build_run_ids=raw_build_run_ids,
+            correlation_id=correlation_id,
+            last_import_build_id=str(last_build_id),
+        )
+
+        logger.info(
+            f"{log_ctx} Dispatched processing for {len(raw_build_run_ids)} builds"
+        )
+
+        publish_status(
+            repo_config_id,
+            "processing",
+            f"Processing {len(raw_build_run_ids)} builds...",
+        )
+
         return {
-            "status": "completed",
-            "builds": 0,
-            "message": "No new builds to process",
+            "status": "dispatched",
+            "builds": len(raw_build_run_ids),
+            "ingested": ingested_count,
+            "failed": failed_count,
+            "pending_checkpoint_id": str(last_build_id),
         }
 
-    # Get the last build ID for checkpoint update (will be set AFTER processing)
-    last_build_id = pending_builds[-1].id
-
-    # Count statuses
-    ingested_count = sum(1 for b in pending_builds if b.status == "ingested")
-    failed_count = sum(1 for b in pending_builds if b.status == "failed")
-
-    logger.info(
-        f"{log_ctx} Processing {len(pending_builds)} builds "
-        f"({ingested_count} ingested, {failed_count} failed), "
-        f"checkpoint will be set to {last_build_id} after completion"
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Extract raw_build_run_ids
-    raw_build_run_ids = [str(b.raw_build_run_id) for b in pending_builds]
-
-    # Update status to PROCESSING only (checkpoint set AFTER processing completes)
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {"status": ModelImportStatus.PROCESSING.value},
-    )
-
-    # Dispatch processing with last_build_id for checkpoint update after completion
-    dispatch_build_processing.delay(
-        repo_config_id=repo_config_id,
-        raw_repo_id=str(repo_config.raw_repo_id),
-        raw_build_run_ids=raw_build_run_ids,
-        correlation_id=correlation_id,
-        last_import_build_id=str(last_build_id),  # NEW: for checkpoint update
-    )
-
-    logger.info(f"{log_ctx} Dispatched processing for {len(raw_build_run_ids)} builds")
-
-    publish_status(
-        repo_config_id,
-        "processing",
-        f"Processing {len(raw_build_run_ids)} builds...",
-    )
-
-    return {
-        "status": "dispatched",
-        "builds": len(raw_build_run_ids),
-        "ingested": ingested_count,
-        "failed": failed_count,
-        "pending_checkpoint_id": str(last_build_id),
-    }
 
 
 # Task 2: Dispatch processing for all pending builds
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_processing.dispatch_build_processing",
     queue="model_processing",
     soft_time_limit=300,
     time_limit=360,
 )
 def dispatch_build_processing(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
     raw_repo_id: str,
     raw_build_run_ids: List[str],
     correlation_id: str = "",
-    last_import_build_id: str = "",  # NEW: for checkpoint update after completion
+    last_import_build_id: str = "",
 ) -> Dict[str, Any]:
     """
     Create ModelTrainingBuild docs and dispatch feature extraction tasks.
@@ -172,188 +209,202 @@ def dispatch_build_processing(
     1. Create ModelTrainingBuild for each raw_build_run (with PENDING status)
     2. Dispatch process_workflow_run tasks in batches
     """
-    from celery import chain
 
-    from app.entities.enums import ExtractionStatus
-    from app.entities.model_repo_config import ModelImportStatus
-    from app.repositories.model_repo_config import ModelRepoConfigRepository
-    from app.repositories.model_training_build import ModelTrainingBuildRepository
-    from app.repositories.raw_build_run import RawBuildRunRepository
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
+        handler("failed", str(e))
 
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from celery import chain
 
-    model_build_repo = ModelTrainingBuildRepository(self.db)
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-    raw_build_run_repo = RawBuildRunRepository(self.db)
-    import_build_repo = ModelImportBuildRepository(self.db)
+        from app.entities.enums import ExtractionStatus
+        from app.entities.model_repo_config import ModelImportStatus
+        from app.repositories.model_repo_config import ModelRepoConfigRepository
+        from app.repositories.model_training_build import ModelTrainingBuildRepository
+        from app.repositories.raw_build_run import RawBuildRunRepository
 
-    if not raw_build_run_ids:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+
+        model_build_repo = ModelTrainingBuildRepository(self.db)
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+        raw_build_run_repo = RawBuildRunRepository(self.db)
+        import_build_repo = ModelImportBuildRepository(self.db)
+
+        if not raw_build_run_ids:
+            logger.info(
+                f"{corr_prefix} No builds to process for repo config {repo_config_id}"
+            )
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {"status": ModelImportStatus.PROCESSED.value},
+            )
+            publish_status(repo_config_id, "processed", "No new builds to process")
+            return {"repo_config_id": repo_config_id, "dispatched": 0}
+
+        raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
+        build_run_map = {str(r.id): r for r in raw_build_runs}
+
+        ingested_builds = import_build_repo.find_by_raw_build_run_ids(
+            repo_config_id, raw_build_run_ids
+        )
+
+        # Sort by created_at ascending (oldest first) for temporal features
+        ingested_builds.sort(
+            key=lambda ib: build_run_map.get(str(ib.raw_build_run_id), ib).created_at
+            or ib.created_at
+        )
+
+        run_oids = [
+            ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)
+        ]
+        existing_builds_map = model_build_repo.find_existing_by_raw_build_run_ids(
+            ObjectId(raw_repo_id), run_oids
+        )
+
+        # Step 1: Create ModelTrainingBuild for INGESTED builds only (in order)
+        created_count = 0
+        skipped_existing = 0
+        model_build_ids = []
+
+        # Process in temporal order: oldest → newest
+        for import_build in ingested_builds:
+            run_id_str = str(import_build.raw_build_run_id)
+
+            # O(1) lookup from maps
+            raw_build_run = build_run_map.get(run_id_str)
+            if not raw_build_run:
+                logger.warning(
+                    f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping"
+                )
+                continue
+
+            # Check if already exists and processed
+            existing = existing_builds_map.get(run_id_str)
+            if existing and existing.extraction_status != ExtractionStatus.PENDING:
+                logger.debug(
+                    f"ModelTrainingBuild already processed ({existing.extraction_status}), "
+                    f"skipping: {run_id_str}"
+                )
+                skipped_existing += 1
+                continue
+
+            # Atomic upsert - creates if not exists, returns existing if it does
+            model_build, was_created = model_build_repo.upsert_or_get(
+                raw_repo_id=ObjectId(raw_repo_id),
+                raw_build_run_id=ObjectId(run_id_str),
+                model_import_build_id=import_build.id,
+                model_repo_config_id=ObjectId(repo_config_id),
+                head_sha=raw_build_run.commit_sha,
+                build_number=raw_build_run.build_number,
+                build_created_at=raw_build_run.run_created_at,
+                extraction_status=ExtractionStatus.PENDING,
+            )
+            model_build_ids.append(model_build.id)
+            if was_created:
+                created_count += 1
+
         logger.info(
-            f"{corr_prefix} No builds to process for repo config {repo_config_id}"
+            f"{corr_prefix} Created {created_count} new builds, "
+            f"skipped {skipped_existing} already processed, "
+            f"dispatching {len(model_build_ids)} for processing (temporal order)"
         )
+
+        # Update status to PROCESSING - feature extraction begins
         repo_config_repo.update_repository(
             repo_config_id,
-            {"status": ModelImportStatus.PROCESSED.value},
+            {"status": ModelImportStatus.PROCESSING.value},
         )
-        publish_status(repo_config_id, "processed", "No new builds to process")
-        return {"repo_config_id": repo_config_id, "dispatched": 0}
-
-    raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
-    build_run_map = {str(r.id): r for r in raw_build_runs}
-
-    ingested_builds = import_build_repo.find_by_raw_build_run_ids(
-        repo_config_id, raw_build_run_ids
-    )
-
-    # Sort by created_at ascending (oldest first) for temporal features
-    ingested_builds.sort(
-        key=lambda ib: build_run_map.get(str(ib.raw_build_run_id), ib).created_at
-        or ib.created_at
-    )
-
-    run_oids = [ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)]
-    existing_builds_map = model_build_repo.find_existing_by_raw_build_run_ids(
-        ObjectId(raw_repo_id), run_oids
-    )
-
-    # Step 1: Create ModelTrainingBuild for INGESTED builds only (in order)
-    created_count = 0
-    skipped_existing = 0
-    model_build_ids = []
-
-    # Process in temporal order: oldest → newest
-    for import_build in ingested_builds:
-        run_id_str = str(import_build.raw_build_run_id)
-
-        # O(1) lookup from maps
-        raw_build_run = build_run_map.get(run_id_str)
-        if not raw_build_run:
-            logger.warning(
-                f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping"
-            )
-            continue
-
-        # Check if already exists and processed
-        existing = existing_builds_map.get(run_id_str)
-        if existing and existing.extraction_status != ExtractionStatus.PENDING:
-            logger.debug(
-                f"ModelTrainingBuild already processed ({existing.extraction_status}), "
-                f"skipping: {run_id_str}"
-            )
-            skipped_existing += 1
-            continue
-
-        # Atomic upsert - creates if not exists, returns existing if it does
-        model_build, was_created = model_build_repo.upsert_or_get(
-            raw_repo_id=ObjectId(raw_repo_id),
-            raw_build_run_id=ObjectId(run_id_str),
-            model_import_build_id=import_build.id,
-            model_repo_config_id=ObjectId(repo_config_id),
-            head_sha=raw_build_run.commit_sha,
-            build_number=raw_build_run.build_number,
-            build_created_at=raw_build_run.run_created_at,
-            extraction_status=ExtractionStatus.PENDING,
-        )
-        model_build_ids.append(model_build.id)
-        if was_created:
-            created_count += 1
-
-    logger.info(
-        f"{corr_prefix} Created {created_count} new builds, "
-        f"skipped {skipped_existing} already processed, "
-        f"dispatching {len(model_build_ids)} for processing (temporal order)"
-    )
-
-    # Update status to PROCESSING - feature extraction begins
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {"status": ModelImportStatus.PROCESSING.value},
-    )
-    publish_status(
-        repo_config_id,
-        "processing",
-        f"Scheduling {len(model_build_ids)} builds for sequential processing...",
-        stats={
-            "builds_ingested": len(raw_build_run_ids),
-            "builds_created": created_count,
-            "builds_skipped": skipped_existing,
-        },
-    )
-
-    # Step 2: Sequential processing using chain (oldest → newest)
-    # This ensures tr_prev_build is populated correctly for temporal features
-    model_build_id_strs = [str(bid) for bid in model_build_ids]
-    total_builds = len(model_build_id_strs)
-
-    if total_builds == 0:
-        # No builds to process
-        repo_config_repo.update_repository(
+        publish_status(
             repo_config_id,
-            {"status": ModelImportStatus.PROCESSED.value},
+            "processing",
+            f"Scheduling {len(model_build_ids)} builds for sequential processing...",
+            stats={
+                "builds_ingested": len(raw_build_run_ids),
+                "builds_created": created_count,
+                "builds_skipped": skipped_existing,
+            },
         )
-        publish_status(repo_config_id, "processed", "No pending builds to process")
-        return {"repo_config_id": repo_config_id, "dispatched": 0}
 
-    # Create sequential tasks - process builds one by one
-    sequential_tasks = [
-        process_workflow_run.si(
+        # Step 2: Sequential processing using chain (oldest → newest)
+        model_build_id_strs = [str(bid) for bid in model_build_ids]
+        total_builds = len(model_build_id_strs)
+
+        if total_builds == 0:
+            # No builds to process
+            repo_config_repo.update_repository(
+                repo_config_id,
+                {"status": ModelImportStatus.PROCESSED.value},
+            )
+            publish_status(repo_config_id, "processed", "No pending builds to process")
+            return {"repo_config_id": repo_config_id, "dispatched": 0}
+
+        # Create sequential tasks - process builds one by one
+        sequential_tasks = [
+            process_workflow_run.si(
+                repo_config_id=repo_config_id,
+                model_build_id=build_id,
+                is_reprocess=False,
+                correlation_id=correlation_id,
+            )
+            for build_id in model_build_id_strs
+        ]
+
+        logger.info(
+            f"{corr_prefix} Dispatching {total_builds} builds for sequential processing"
+        )
+
+        # Chain: B1 → B2 → B3 → ... → finalize
+        workflow = chain(
+            *sequential_tasks,
+            finalize_model_processing.si(
+                repo_config_id=repo_config_id,
+                created_count=created_count,
+                correlation_id=correlation_id,
+                last_import_build_id=last_import_build_id,
+            ),
+        )
+
+        # Add error callback to handle unexpected chain failures
+        error_callback = handle_processing_chain_error.s(
             repo_config_id=repo_config_id,
-            model_build_id=build_id,
-            is_reprocess=False,
             correlation_id=correlation_id,
         )
-        for build_id in model_build_id_strs
-    ]
+        workflow.on_error(error_callback).apply_async()
 
-    logger.info(
-        f"{corr_prefix} Dispatching {total_builds} builds for sequential processing"
+        publish_status(
+            repo_config_id,
+            "processing",
+            f"Processing {total_builds} builds sequentially (oldest → newest)...",
+        )
+
+        return {
+            "repo_config_id": repo_config_id,
+            "dispatched": total_builds,
+        }
+
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Chain: B1 → B2 → B3 → ... → finalize
-    # Each build processes after the previous one completes
-    workflow = chain(
-        *sequential_tasks,
-        finalize_model_processing.si(
-            repo_config_id=repo_config_id,
-            created_count=created_count,
-            correlation_id=correlation_id,
-            last_import_build_id=last_import_build_id,  # NEW: for checkpoint
-        ),
-    )
-
-    # Add error callback to handle unexpected chain failures (worker crash, OOM, etc.)
-    error_callback = handle_processing_chain_error.s(
-        repo_config_id=repo_config_id,
-        correlation_id=correlation_id,
-    )
-    workflow.on_error(error_callback).apply_async()
-
-    publish_status(
-        repo_config_id,
-        "processing",
-        f"Processing {total_builds} builds sequentially (oldest → newest)...",
-    )
-
-    return {
-        "repo_config_id": repo_config_id,
-        "dispatched": total_builds,
-    }
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_processing.finalize_model_processing",
     queue="model_processing",
     soft_time_limit=60,
     time_limit=120,
 )
 def finalize_model_processing(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
     created_count: int,
     correlation_id: str = "",
-    last_import_build_id: str = "",  # NEW: to set checkpoint after completion
+    last_import_build_id: str = "",
 ) -> Dict[str, Any]:
     """
     Finalize model processing after all builds are processed.
@@ -368,112 +419,131 @@ def finalize_model_processing(
         last_import_build_id: The last ModelImportBuild ID to set as checkpoint
     """
 
-    from app.entities.model_repo_config import ModelImportStatus
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
+        handler("failed", str(e))
 
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(f"{corr_prefix} Finalizing model processing for {repo_config_id}")
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from app.entities.model_repo_config import ModelImportStatus
 
-    # Get results from database (not Redis tracker)
-    model_build_repo = ModelTrainingBuildRepository(self.db)
-    aggregated_stats = model_build_repo.aggregate_stats_by_repo_config(
-        ObjectId(repo_config_id)
-    )
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(f"{corr_prefix} Finalizing model processing for {repo_config_id}")
 
-    # Get counts from aggregated stats
-    success_count = aggregated_stats.get("completed", 0) + aggregated_stats.get(
-        "partial", 0
-    )
-    failed_count = aggregated_stats.get("failed", 0)
-    total_count = aggregated_stats.get("total", 0)
+        # Get results from database (not Redis tracker)
+        model_build_repo = ModelTrainingBuildRepository(self.db)
+        aggregated_stats = model_build_repo.aggregate_stats_by_repo_config(
+            ObjectId(repo_config_id)
+        )
 
-    logger.info(
-        f"{corr_prefix} Processing results from DB: "
-        f"success={success_count}, failed={failed_count}, total={total_count}"
-    )
-
-    # Log warning if all builds failed (but don't set FAILED status)
-    if failed_count > 0 and success_count == 0:
-        logger.warning(f"{corr_prefix} All builds failed processing ({failed_count})")
-
-    # Get builds ready for prediction from database
-    builds_ready = model_build_repo.find_builds_for_prediction(ObjectId(repo_config_id))
-    builds_for_prediction = [str(b.id) for b in builds_ready]
-
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-    update_data = {
-        "last_synced_at": datetime.utcnow(),
-        "builds_processing_failed": aggregated_stats["builds_processing_failed"],
-    }
-
-    # Set checkpoint after extraction completes (before prediction)
-    if last_import_build_id:
-        update_data["last_processed_import_build_id"] = ObjectId(last_import_build_id)
-        logger.info(f"{corr_prefix} Setting checkpoint to {last_import_build_id}")
-
-    repo_config_repo.update_repository(repo_config_id, update_data)
-
-    publish_status(
-        repo_config_id,
-        "processing",
-        f"Extracted features from {success_count}/{total_count} builds, starting prediction...",
-        stats={
-            "builds_processing_failed": failed_count,
-        },
-    )
-
-    # Dispatch batch prediction using chord (wait for all to complete)
-    if builds_for_prediction:
-        from celery import chord
-
-        batch_size = settings.PREDICTION_BUILDS_PER_BATCH
-        batches = [
-            builds_for_prediction[i : i + batch_size]
-            for i in range(0, len(builds_for_prediction), batch_size)
-        ]
+        # Get counts from aggregated stats
+        success_count = aggregated_stats.get("completed", 0) + aggregated_stats.get(
+            "partial", 0
+        )
+        failed_count = aggregated_stats.get("failed", 0)
+        total_count = aggregated_stats.get("total", 0)
 
         logger.info(
-            f"{corr_prefix} Dispatching {len(batches)} prediction batches "
-            f"({len(builds_for_prediction)} builds, batch_size={batch_size})"
+            f"{corr_prefix} Processing results from DB: "
+            f"success={success_count}, failed={failed_count}, total={total_count}"
         )
 
-        # Use chord: run all predictions in parallel, then call finalize_prediction
-        prediction_tasks = [
-            predict_builds_batch.si(repo_config_id, batch) for batch in batches
-        ]
-        callback = finalize_prediction.si(
-            repo_config_id=repo_config_id,
-            total_builds=len(builds_for_prediction),
-            correlation_id=correlation_id,
-        )
-        chord(prediction_tasks)(callback)
-    else:
-        # No predictions needed - set status to PROCESSED immediately
-        repo_config_repo.update_repository(
-            repo_config_id, {"status": ModelImportStatus.PROCESSED.value}
-        )
-        publish_status(repo_config_id, "processed", "No builds to predict")
+        # Log warning if all builds failed (but don't set FAILED status)
+        if failed_count > 0 and success_count == 0:
+            logger.warning(
+                f"{corr_prefix} All builds failed processing ({failed_count})"
+            )
 
-    return {
-        "repo_config_id": repo_config_id,
-        "created": created_count,
-        "processed": total_count,
-        "success": success_count,
-        "failed": failed_count,
-        "status": "predicting",
-        "aggregated_stats": aggregated_stats,
-    }
+        # Get builds ready for prediction from database
+        builds_ready = model_build_repo.find_builds_for_prediction(
+            ObjectId(repo_config_id)
+        )
+        builds_for_prediction = [str(b.id) for b in builds_ready]
+
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+        update_data = {
+            "last_synced_at": datetime.utcnow(),
+            "builds_processing_failed": aggregated_stats["builds_processing_failed"],
+        }
+
+        # Set checkpoint after extraction completes (before prediction)
+        if last_import_build_id:
+            update_data["last_processed_import_build_id"] = ObjectId(
+                last_import_build_id
+            )
+            logger.info(f"{corr_prefix} Setting checkpoint to {last_import_build_id}")
+
+        repo_config_repo.update_repository(repo_config_id, update_data)
+
+        publish_status(
+            repo_config_id,
+            "processing",
+            f"Extracted features from {success_count}/{total_count} builds, starting prediction...",
+            stats={
+                "builds_processing_failed": failed_count,
+            },
+        )
+
+        # Dispatch batch prediction using chord (wait for all to complete)
+        if builds_for_prediction:
+            from celery import chord
+
+            batch_size = settings.PREDICTION_BUILDS_PER_BATCH
+            batches = [
+                builds_for_prediction[i : i + batch_size]
+                for i in range(0, len(builds_for_prediction), batch_size)
+            ]
+
+            logger.info(
+                f"{corr_prefix} Dispatching {len(batches)} prediction batches "
+                f"({len(builds_for_prediction)} builds, batch_size={batch_size})"
+            )
+
+            # Use chord: run all predictions in parallel, then call finalize_prediction
+            prediction_tasks = [
+                predict_builds_batch.si(repo_config_id, batch) for batch in batches
+            ]
+            callback = finalize_prediction.si(
+                repo_config_id=repo_config_id,
+                total_builds=len(builds_for_prediction),
+                correlation_id=correlation_id,
+            )
+            chord(prediction_tasks)(callback)
+        else:
+            # No predictions needed - set status to PROCESSED immediately
+            repo_config_repo.update_repository(
+                repo_config_id, {"status": ModelImportStatus.PROCESSED.value}
+            )
+            publish_status(repo_config_id, "processed", "No builds to predict")
+
+        return {
+            "repo_config_id": repo_config_id,
+            "created": created_count,
+            "processed": total_count,
+            "success": success_count,
+            "failed": failed_count,
+            "status": "predicting",
+            "aggregated_stats": aggregated_stats,
+        }
+
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_processing.finalize_prediction",
     queue="model_prediction",
     soft_time_limit=60,
     time_limit=120,
 )
 def finalize_prediction(
-    self: PipelineTask,
+    self: SafeTask,
     repo_config_id: str,
     total_builds: int,
     correlation_id: str = "",
@@ -489,108 +559,122 @@ def finalize_prediction(
         total_builds: Total number of builds that were predicted
         correlation_id: Correlation ID for tracing
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(f"{corr_prefix} Finalizing prediction for {repo_config_id}")
 
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-    model_build_repo = ModelTrainingBuildRepository(self.db)
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
+        handler("failed", str(e))
 
-    # Count prediction results
-    prediction_stats = model_build_repo.aggregate_prediction_stats(
-        ObjectId(repo_config_id)
-    )
-    predicted_count = prediction_stats.get("predicted", 0)
-    prediction_failed = prediction_stats.get("failed", 0)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(f"{corr_prefix} Finalizing prediction for {repo_config_id}")
 
-    # Set final status to PROCESSED
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {"status": ModelImportStatus.PROCESSED.value},
-    )
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+        model_build_repo = ModelTrainingBuildRepository(self.db)
 
-    logger.info(
-        f"{corr_prefix} Prediction complete: {predicted_count} predicted, "
-        f"{prediction_failed} failed out of {total_builds} total"
-    )
+        # Count prediction results
+        prediction_stats = model_build_repo.aggregate_prediction_stats(
+            ObjectId(repo_config_id)
+        )
+        predicted_count = prediction_stats.get("predicted", 0)
+        prediction_failed = prediction_stats.get("failed", 0)
 
-    publish_status(
-        repo_config_id,
-        "processed",
-        f"Processing complete: {predicted_count}/{total_builds} builds predicted",
-        stats={
-            "predicted": predicted_count,
-            "prediction_failed": prediction_failed,
-        },
-    )
+        # Set final status to PROCESSED
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.PROCESSED.value},
+        )
 
-    # =========================================================================
-    # NOTIFY USERS WITH REPO ACCESS
-    # =========================================================================
-    try:
-        from app.services.notification_service import notify_users_for_repo
+        logger.info(
+            f"{corr_prefix} Prediction complete: {predicted_count} predicted, "
+            f"{prediction_failed} failed out of {total_builds} total"
+        )
 
-        # Get repo details for notification
-        repo_config = repo_config_repo.find_by_id(repo_config_id)
-        if repo_config and repo_config.raw_repo_id:
-            # Count predictions by risk level
-            risk_counts = model_build_repo.aggregate_risk_counts(
-                ObjectId(repo_config_id)
-            )
-            high_count = risk_counts.get("HIGH", 0)
-            medium_count = risk_counts.get("MEDIUM", 0)
-            low_count = risk_counts.get("LOW", 0)
+        publish_status(
+            repo_config_id,
+            "processed",
+            f"Processing complete: {predicted_count}/{total_builds} builds predicted",
+            stats={
+                "predicted": predicted_count,
+                "prediction_failed": prediction_failed,
+            },
+        )
 
-            # Get HIGH risk builds for individual alerts (limit 3)
-            high_risk_builds = []
-            if high_count > 0:
-                high_risk_builds = model_build_repo.find_high_risk_builds(
-                    ObjectId(repo_config_id), limit=3
+        # =========================================================================
+        # NOTIFY USERS WITH REPO ACCESS
+        # =========================================================================
+        try:
+            from app.services.notification_service import notify_users_for_repo
+
+            # Get repo details for notification
+            repo_config = repo_config_repo.find_by_id(repo_config_id)
+            if repo_config and repo_config.raw_repo_id:
+                # Count predictions by risk level
+                risk_counts = model_build_repo.aggregate_risk_counts(
+                    ObjectId(repo_config_id)
+                )
+                high_count = risk_counts.get("HIGH", 0)
+                medium_count = risk_counts.get("MEDIUM", 0)
+                low_count = risk_counts.get("LOW", 0)
+
+                # Get HIGH risk builds for individual alerts (limit 3)
+                high_risk_builds = []
+                if high_count > 0:
+                    high_risk_builds = model_build_repo.find_high_risk_builds(
+                        ObjectId(repo_config_id), limit=3
+                    )
+
+                # Send notifications to all users with access
+                notify_users_for_repo(
+                    db=self.db,
+                    raw_repo_id=repo_config.raw_repo_id,
+                    repo_name=repo_config.full_name,
+                    repo_id=repo_config_id,
+                    high_risk_builds=[
+                        {"build_number": b.build_number} for b in high_risk_builds
+                    ],
+                    prediction_summary={
+                        "high": high_count,
+                        "medium": medium_count,
+                        "low": low_count,
+                    },
+                )
+                logger.info(
+                    f"{corr_prefix} Sent notifications: {high_count} HIGH, "
+                    f"{medium_count} MEDIUM, {low_count} LOW"
                 )
 
-            # Send notifications to all users with access
-            notify_users_for_repo(
-                db=self.db,
-                raw_repo_id=repo_config.raw_repo_id,
-                repo_name=repo_config.full_name,
-                repo_id=repo_config_id,
-                high_risk_builds=[
-                    {"build_number": b.build_number} for b in high_risk_builds
-                ],
-                prediction_summary={
-                    "high": high_count,
-                    "medium": medium_count,
-                    "low": low_count,
-                },
-            )
-            logger.info(
-                f"{corr_prefix} Sent notifications: {high_count} HIGH, "
-                f"{medium_count} MEDIUM, {low_count} LOW"
-            )
+                from app.services.notification_service import (
+                    notify_pipeline_completed_to_admins,
+                )
 
-            from app.services.notification_service import (
-                notify_pipeline_completed_to_admins,
-            )
+                notify_pipeline_completed_to_admins(
+                    db=self.db,
+                    repo_name=repo_config.full_name,
+                    predicted_count=predicted_count,
+                    failed_count=prediction_failed,
+                    high_count=high_count,
+                    medium_count=medium_count,
+                    low_count=low_count,
+                )
+        except Exception as e:
+            # Don't fail the task if notifications fail
+            logger.warning(f"{corr_prefix} Failed to send user notifications: {e}")
 
-            notify_pipeline_completed_to_admins(
-                db=self.db,
-                repo_name=repo_config.full_name,
-                predicted_count=predicted_count,
-                failed_count=prediction_failed,
-                high_count=high_count,
-                medium_count=medium_count,
-                low_count=low_count,
-            )
-    except Exception as e:
-        # Don't fail the task if notifications fail
-        logger.warning(f"{corr_prefix} Failed to send user notifications: {e}")
+        return {
+            "repo_config_id": repo_config_id,
+            "status": "processed",
+            "predicted": predicted_count,
+            "failed": prediction_failed,
+            "total": total_builds,
+        }
 
-    return {
-        "repo_config_id": repo_config_id,
-        "status": "processed",
-        "predicted": predicted_count,
-        "failed": prediction_failed,
-        "total": total_builds,
-    }
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 # Task 4: Process a single build
@@ -754,13 +838,13 @@ def process_workflow_run(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.model_processing.retry_failed_builds",
     queue="model_processing",
     soft_time_limit=300,
     time_limit=360,
 )
-def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, Any]:
+def retry_failed_builds(self: SafeTask, repo_config_id: str) -> Dict[str, Any]:
     """
     Retry for failed builds - handles both extraction and prediction failures.
 
@@ -770,154 +854,168 @@ def retry_failed_builds(self: PipelineTask, repo_config_id: str) -> Dict[str, An
 
     This is efficient because it doesn't re-extract features that are already available.
     """
-    from celery import chain, group
 
-    correlation_id = str(uuid.uuid4())
-    TracingContext.set(
-        correlation_id=correlation_id,
-        repo_id=repo_config_id,
-        pipeline_type="retry_failed",
-    )
-
-    corr_prefix = f"[corr={correlation_id[:8]}]"
-    model_build_repo = ModelTrainingBuildRepository(self.db)
-    repo_config_repo = ModelRepoConfigRepository(self.db)
-
-    # Validate repository exists
-    repo_config = repo_config_repo.find_by_id(repo_config_id)
-    if not repo_config:
-        logger.error(f"{corr_prefix} Repository Config {repo_config_id} not found")
-        return {"status": "error", "message": "Repository Config not found"}
-
-    # === GROUP 1: Extraction failed → need full pipeline ===
-    extraction_failed_builds = model_build_repo.find_failed_builds(
-        ObjectId(repo_config_id)
-    )
-    extraction_failed_builds.sort(key=lambda b: b.build_created_at or b.created_at)
-
-    # === GROUP 2: Extraction OK but prediction failed → predict only ===
-    prediction_failed_builds = model_build_repo.find_builds_with_failed_predictions(
-        ObjectId(repo_config_id)
-    )
-
-    extraction_count = len(extraction_failed_builds)
-    prediction_count = len(prediction_failed_builds)
-
-    if extraction_count == 0 and prediction_count == 0:
-        logger.info(
-            f"{corr_prefix} No failed builds found for repository {repo_config_id}"
+    def mark_failed(e: Exception):
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
         )
+        handler("failed", str(e))
+
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from celery import chain, group
+
+        correlation_id = str(uuid.uuid4())
+        TracingContext.set(
+            correlation_id=correlation_id,
+            repo_id=repo_config_id,
+            pipeline_type="retry_failed",
+        )
+
+        corr_prefix = f"[corr={correlation_id[:8]}]"
+        model_build_repo = ModelTrainingBuildRepository(self.db)
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+
+        # Validate repository exists
+        repo_config = repo_config_repo.find_by_id(repo_config_id)
+        if not repo_config:
+            logger.error(f"{corr_prefix} Repository Config {repo_config_id} not found")
+            return {"status": "error", "message": "Repository Config not found"}
+
+        # === GROUP 1: Extraction failed → need full pipeline ===
+        extraction_failed_builds = model_build_repo.find_failed_builds(
+            ObjectId(repo_config_id)
+        )
+        extraction_failed_builds.sort(key=lambda b: b.build_created_at or b.created_at)
+
+        # === GROUP 2: Extraction OK but prediction failed → predict only ===
+        prediction_failed_builds = model_build_repo.find_builds_with_failed_predictions(
+            ObjectId(repo_config_id)
+        )
+
+        extraction_count = len(extraction_failed_builds)
+        prediction_count = len(prediction_failed_builds)
+
+        if extraction_count == 0 and prediction_count == 0:
+            logger.info(
+                f"{corr_prefix} No failed builds found for repository {repo_config_id}"
+            )
+            return {
+                "status": "completed",
+                "extraction_failed": 0,
+                "prediction_failed": 0,
+                "message": "No failed builds to retry",
+            }
+
+        logger.info(
+            f"{corr_prefix} Found {extraction_count} extraction failures, "
+            f"{prediction_count} prediction failures"
+        )
+
+        # Update repo status
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.PROCESSING.value},
+        )
+        publish_status(
+            repo_config_id,
+            "processing",
+            f"Retrying: {extraction_count} extraction + {prediction_count} prediction failures...",
+        )
+
+        # === PROCESS GROUP 1: Reset and re-extract ===
+        extraction_build_ids = []
+        for build in extraction_failed_builds:
+            try:
+                model_build_repo.update_one(
+                    str(build.id),
+                    {
+                        "extraction_status": ExtractionStatus.PENDING.value,
+                        "extraction_error": None,
+                    },
+                )
+                extraction_build_ids.append(str(build.id))
+            except Exception as e:
+                logger.warning(f"{corr_prefix} Failed to reset build {build.id}: {e}")
+
+        # === PROCESS GROUP 2: Reset prediction only ===
+        prediction_only_ids = []
+        for build in prediction_failed_builds:
+            try:
+                model_build_repo.update_one(
+                    str(build.id),
+                    {
+                        "prediction_status": ExtractionStatus.PENDING.value,
+                        "prediction_error": None,
+                        "predicted_label": None,
+                    },
+                )
+                prediction_only_ids.append(str(build.id))
+            except Exception as e:
+                logger.warning(
+                    f"{corr_prefix} Failed to reset prediction for {build.id}: {e}"
+                )
+
+        # === DISPATCH TASKS ===
+        tasks_dispatched = 0
+
+        # Dispatch extraction chain (sequential for temporal features)
+        if extraction_build_ids:
+            processing_tasks = [
+                process_workflow_run.si(
+                    repo_config_id=repo_config_id,
+                    model_build_id=build_id,
+                    is_reprocess=True,
+                    correlation_id=correlation_id,
+                )
+                for build_id in extraction_build_ids
+            ]
+
+            # Chain: B1 → B2 → ... → finalize
+            workflow = chain(
+                *processing_tasks,
+                finalize_model_processing.si(
+                    repo_config_id=repo_config_id,
+                    created_count=len(extraction_build_ids),
+                    correlation_id=correlation_id,
+                ),
+            )
+            workflow.apply_async()
+            tasks_dispatched += len(extraction_build_ids)
+            logger.info(
+                f"{corr_prefix} Dispatched {len(extraction_build_ids)} extraction tasks"
+            )
+
+        # Dispatch prediction batch (parallel - no temporal dependency)
+        if prediction_only_ids:
+            # Dispatch prediction in batches
+            batch_size = settings.PREDICTION_BUILDS_PER_BATCH
+            batches = [
+                prediction_only_ids[i : i + batch_size]
+                for i in range(0, len(prediction_only_ids), batch_size)
+            ]
+            prediction_tasks = [
+                predict_builds_batch.si(repo_config_id, batch) for batch in batches
+            ]
+            group(prediction_tasks).apply_async()
+            tasks_dispatched += len(prediction_only_ids)
+            logger.info(
+                f"{corr_prefix} Dispatched {len(prediction_only_ids)} prediction-only builds "
+                f"in {len(batches)} batches"
+            )
+
         return {
-            "status": "completed",
-            "extraction_failed": 0,
-            "prediction_failed": 0,
-            "message": "No failed builds to retry",
+            "status": "queued",
+            "extraction_retries": len(extraction_build_ids),
+            "prediction_retries": len(prediction_only_ids),
+            "total_dispatched": tasks_dispatched,
+            "correlation_id": correlation_id,
         }
 
-    logger.info(
-        f"{corr_prefix} Found {extraction_count} extraction failures, "
-        f"{prediction_count} prediction failures"
+    return self.run_safe(
+        job_id=repo_config_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Update repo status
-    repo_config_repo.update_repository(
-        repo_config_id,
-        {"status": ModelImportStatus.PROCESSING.value},
-    )
-    publish_status(
-        repo_config_id,
-        "processing",
-        f"Retrying: {extraction_count} extraction + {prediction_count} prediction failures...",
-    )
-
-    # === PROCESS GROUP 1: Reset and re-extract ===
-    extraction_build_ids = []
-    for build in extraction_failed_builds:
-        try:
-            model_build_repo.update_one(
-                str(build.id),
-                {
-                    "extraction_status": ExtractionStatus.PENDING.value,
-                    "extraction_error": None,
-                },
-            )
-            extraction_build_ids.append(str(build.id))
-        except Exception as e:
-            logger.warning(f"{corr_prefix} Failed to reset build {build.id}: {e}")
-
-    # === PROCESS GROUP 2: Reset prediction only ===
-    prediction_only_ids = []
-    for build in prediction_failed_builds:
-        try:
-            model_build_repo.update_one(
-                str(build.id),
-                {
-                    "prediction_status": ExtractionStatus.PENDING.value,
-                    "prediction_error": None,
-                    "predicted_label": None,
-                },
-            )
-            prediction_only_ids.append(str(build.id))
-        except Exception as e:
-            logger.warning(
-                f"{corr_prefix} Failed to reset prediction for {build.id}: {e}"
-            )
-
-    # === DISPATCH TASKS ===
-    tasks_dispatched = 0
-
-    # Dispatch extraction chain (sequential for temporal features)
-    if extraction_build_ids:
-        processing_tasks = [
-            process_workflow_run.si(
-                repo_config_id=repo_config_id,
-                model_build_id=build_id,
-                is_reprocess=True,
-                correlation_id=correlation_id,
-            )
-            for build_id in extraction_build_ids
-        ]
-
-        # Chain: B1 → B2 → ... → finalize
-        workflow = chain(
-            *processing_tasks,
-            finalize_model_processing.si(
-                repo_config_id=repo_config_id,
-                created_count=len(extraction_build_ids),
-                correlation_id=correlation_id,
-            ),
-        )
-        workflow.apply_async()
-        tasks_dispatched += len(extraction_build_ids)
-        logger.info(
-            f"{corr_prefix} Dispatched {len(extraction_build_ids)} extraction tasks"
-        )
-
-    # Dispatch prediction batch (parallel - no temporal dependency)
-    if prediction_only_ids:
-        # Dispatch prediction in batches
-        batch_size = settings.PREDICTION_BUILDS_PER_BATCH
-        batches = [
-            prediction_only_ids[i : i + batch_size]
-            for i in range(0, len(prediction_only_ids), batch_size)
-        ]
-        prediction_tasks = [
-            predict_builds_batch.si(repo_config_id, batch) for batch in batches
-        ]
-        group(prediction_tasks).apply_async()
-        tasks_dispatched += len(prediction_only_ids)
-        logger.info(
-            f"{corr_prefix} Dispatched {len(prediction_only_ids)} prediction-only builds "
-            f"in {len(batches)} batches"
-        )
-
-    return {
-        "status": "queued",
-        "extraction_retries": len(extraction_build_ids),
-        "prediction_retries": len(prediction_only_ids),
-        "total_dispatched": tasks_dispatched,
-        "correlation_id": correlation_id,
-    }
 
 
 # PROCESSING CHAIN ERROR HANDLER

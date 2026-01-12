@@ -42,7 +42,7 @@ from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.source_build import SourceBuildRepository
 from app.repositories.source_repo_stats import SourceRepoStatsRepository
 from app.services.github.github_client import get_public_github_client
-from app.tasks.base import SafeTask
+from app.tasks.base import SafeTask, TaskState
 from app.tasks.validation_helpers import (
     calculate_progress,
     chunk_dict,
@@ -59,46 +59,36 @@ from app.utils.datetime import utc_now
 logger = logging.getLogger(__name__)
 
 
-class SourceValidationTask(SafeTask):
+def _create_source_failure_handler(
+    redis_client: redis.Redis, source_id: str
+) -> Callable[[str, str], None]:
     """
-    Custom task class for source validation with entity failure handling.
+    Create a failure handler for BuildSource validation tasks.
 
-    Inherits from SafeTask for automatic retry with exponential backoff.
-    When a task fails (timeout, unhandled error), automatically updates
-    BuildSource.validation_status to FAILED and publishes event.
+    This is used by run_safe's mark_failed_fn to update the source status.
     """
 
-    def get_entity_failure_handler(
-        self, kwargs: dict
-    ) -> Optional[Callable[[str, str], None]]:
-        """Update BuildSource status to FAILED when task fails."""
-        source_id = kwargs.get("source_id")
-        if not source_id:
-            return None
+    def update_source_failed(status: str, error_message: str) -> None:
+        try:
+            db = get_database()
+            source_repo = BuildSourceRepository(db)
+            source_repo.update_one(
+                source_id,
+                {
+                    "validation_status": ValidationStatus.FAILED.value,
+                    "validation_error": error_message,
+                    "validation_completed_at": utc_now(),
+                },
+            )
+            # Publish event for frontend
+            publish_source_update(
+                redis_client, source_id, "failed", error=error_message
+            )
+            cleanup_validation_stats(redis_client, source_id)
+        except Exception as e:
+            logger.warning(f"Failed to update source {source_id} status: {e}")
 
-        redis_client = self.redis
-
-        def update_source_failed(status: str, error_message: str) -> None:
-            try:
-                db = get_database()
-                source_repo = BuildSourceRepository(db)
-                source_repo.update_one(
-                    source_id,
-                    {
-                        "validation_status": ValidationStatus.FAILED.value,
-                        "validation_error": error_message,
-                        "validation_completed_at": utc_now(),
-                    },
-                )
-                # Publish event for frontend
-                publish_source_update(
-                    redis_client, source_id, "failed", error=error_message
-                )
-                cleanup_validation_stats(redis_client, source_id)
-            except Exception as e:
-                logger.warning(f"Failed to update source {source_id} status: {e}")
-
-        return update_source_failed
+    return update_source_failed
 
 
 def publish_source_update(
@@ -138,7 +128,7 @@ def publish_source_update(
 
 @celery_app.task(
     bind=True,
-    base=SourceValidationTask,
+    base=SafeTask,
     name="app.tasks.source_validation.validate_build_source_task",
     queue="source_validation",
     soft_time_limit=3600,
@@ -157,21 +147,22 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
     Returns:
         Dict with dispatch status
     """
-    # Generate correlation_id for entire validation run
-    correlation_id = str(uuid.uuid4())
-    corr_prefix = f"[corr={correlation_id[:8]}]"
 
-    # Set tracing context for structured logging
-    TracingContext.set(
-        correlation_id=correlation_id,
-        source_id=source_id,
-        pipeline_type="source_validation",
-    )
+    def _work(state: TaskState) -> Dict[str, Any]:
+        # Generate correlation_id for entire validation run
+        correlation_id = str(uuid.uuid4())
+        corr_prefix = f"[corr={correlation_id[:8]}]"
 
-    db = get_database()
-    source_repo = BuildSourceRepository(db)
+        # Set tracing context for structured logging
+        TracingContext.set(
+            correlation_id=correlation_id,
+            source_id=source_id,
+            pipeline_type="source_validation",
+        )
 
-    try:
+        db = get_database()
+        source_repo = BuildSourceRepository(db)
+
         logger.info(f"{corr_prefix}[source_validation] Starting for source {source_id}")
 
         # Load source
@@ -332,18 +323,15 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
             "correlation_id": correlation_id,
         }
 
-    except Exception as e:
-        logger.exception(f"{corr_prefix}[source_validation] Orchestrator failed: {e}")
-        source_repo.update_one(
-            source_id,
-            {
-                "validation_status": ValidationStatus.FAILED.value,
-                "validation_completed_at": utc_now(),
-                "validation_error": str(e),
-            },
-        )
-        publish_source_update(self.redis, source_id, "failed", error=str(e))
-        raise
+    def mark_failed(e: Exception):
+        handler = _create_source_failure_handler(self.redis, source_id)
+        handler("failed", str(e))
+
+    return self.run_safe(
+        job_id=source_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 # =============================================================================
@@ -353,7 +341,7 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
 
 @celery_app.task(
     bind=True,
-    base=SourceValidationTask,
+    base=SafeTask,
     name="app.tasks.source_validation.validate_source_repo_chunk",
     queue="source_validation",
     soft_time_limit=600,
@@ -379,95 +367,110 @@ def validate_source_repo_chunk(
     Returns:
         Dict with validation results for this chunk
     """
-    db = get_database()
-    raw_repo_repo = RawRepositoryRepository(db)
-    source_repo_stats_repo = SourceRepoStatsRepository(db)
 
-    repos_valid = 0
-    repos_not_found = 0
-    repos_private = 0
-    valid_repos_data: List[Dict[str, Any]] = []
+    def mark_failed(e: Exception):
+        handler = _create_source_failure_handler(self.redis, source_id)
+        handler("failed", str(e))
 
-    with get_public_github_client() as client:
-        for repo_name, builds in repo_builds_chunk.items():
-            try:
-                # Check repo exists using shared client
-                repo_data = client.get_repository(repo_name)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        db = get_database()
+        raw_repo_repo = RawRepositoryRepository(db)
+        source_repo_stats_repo = SourceRepoStatsRepository(db)
 
-                # Check if private
-                if repo_data.get("private"):
-                    repos_private += 1
-                    increment_validation_stat(self.redis, source_id, "repos_private")
+        repos_valid = 0
+        repos_not_found = 0
+        repos_private = 0
+        valid_repos_data: List[Dict[str, Any]] = []
+
+        with get_public_github_client() as client:
+            for repo_name, builds in repo_builds_chunk.items():
+                try:
+                    # Check repo exists using shared client
+                    repo_data = client.get_repository(repo_name)
+
+                    # Check if private
+                    if repo_data.get("private"):
+                        repos_private += 1
+                        increment_validation_stat(
+                            self.redis, source_id, "repos_private"
+                        )
+                        increment_validation_stat(
+                            self.redis, source_id, "builds_not_found", len(builds)
+                        )
+                        continue
+
+                    # Create/update RawRepository
+                    raw_repo = raw_repo_repo.upsert_by_full_name(
+                        full_name=repo_name,
+                        github_repo_id=repo_data.get("id"),
+                        default_branch=repo_data.get("default_branch", "main"),
+                        is_private=False,
+                        main_lang=repo_data.get("language"),
+                        github_metadata=repo_data,
+                    )
+
+                    repos_valid += 1
+                    increment_validation_stat(self.redis, source_id, "repos_valid")
+
+                    # Extract CI provider from first build
+                    # All builds for same repo have same ci_provider
+                    ci_provider = builds[0].get("ci_provider") if builds else None
+
+                    source_repo_stats_repo.upsert_by_source_and_repo(
+                        source_id=source_id,
+                        raw_repo_id=str(raw_repo.id),
+                        full_name=repo_name,
+                        ci_provider=ci_provider or "github_actions",
+                    )
+
+                    valid_repos_data.append(
+                        {
+                            "repo_name": repo_name,
+                            "raw_repo_id": str(raw_repo.id),
+                            "builds": builds,
+                        }
+                    )
+
+                except Exception as e:
+                    # Handle status errors (404 etc wrapped in exceptions) or other failures
+                    # Determine if it's a 404 (Not Found)
+                    is_not_found = "404" in str(e) or "Not Found" in str(e)
+
+                    if is_not_found:
+                        logger.warning(f"Repo not found {repo_name}: {e}")
+                    else:
+                        logger.error(f"Failed to validate repo {repo_name}: {e}")
+
+                    repos_not_found += 1
+                    increment_validation_stat(self.redis, source_id, "repos_not_found")
                     increment_validation_stat(
                         self.redis, source_id, "builds_not_found", len(builds)
                     )
-                    continue
 
-                # Create/update RawRepository
-                raw_repo = raw_repo_repo.upsert_by_full_name(
-                    full_name=repo_name,
-                    github_repo_id=repo_data.get("id"),
-                    default_branch=repo_data.get("default_branch", "main"),
-                    is_private=False,
-                    main_lang=repo_data.get("language"),
-                    github_metadata=repo_data,
-                )
+        # Update chunk completion
+        increment_validation_stat(self.redis, source_id, "chunks_completed")
 
-                repos_valid += 1
-                increment_validation_stat(self.redis, source_id, "repos_valid")
+        # Publish progress update
+        stats = get_validation_stats(self.redis, source_id)
+        progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
+        publish_source_update(
+            self.redis, source_id, "validating", progress=progress, stats=stats
+        )
 
-                # Extract CI provider from first build
-                # All builds for same repo have same ci_provider
-                ci_provider = builds[0].get("ci_provider") if builds else None
+        return {
+            "chunk_index": chunk_index,
+            "repos_valid": repos_valid,
+            "repos_not_found": repos_not_found,
+            "repos_private": repos_private,
+            "correlation_id": correlation_id,
+        }
 
-                source_repo_stats_repo.upsert_by_source_and_repo(
-                    source_id=source_id,
-                    raw_repo_id=str(raw_repo.id),
-                    full_name=repo_name,
-                    ci_provider=ci_provider or "github_actions",
-                )
-
-                valid_repos_data.append(
-                    {
-                        "repo_name": repo_name,
-                        "raw_repo_id": str(raw_repo.id),
-                        "builds": builds,
-                    }
-                )
-
-            except Exception as e:
-                # Handle status errors (404 etc wrapped in exceptions) or other failures
-                # Determine if it's a 404 (Not Found)
-                is_not_found = "404" in str(e) or "Not Found" in str(e)
-
-                if is_not_found:
-                    logger.warning(f"Repo not found {repo_name}: {e}")
-                else:
-                    logger.error(f"Failed to validate repo {repo_name}: {e}")
-
-                repos_not_found += 1
-                increment_validation_stat(self.redis, source_id, "repos_not_found")
-                increment_validation_stat(
-                    self.redis, source_id, "builds_not_found", len(builds)
-                )
-
-    # Update chunk completion
-    increment_validation_stat(self.redis, source_id, "chunks_completed")
-
-    # Publish progress update
-    stats = get_validation_stats(self.redis, source_id)
-    progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
-    publish_source_update(
-        self.redis, source_id, "validating", progress=progress, stats=stats
+    job_id = f"{source_id}:repo_chunk:{chunk_index}"
+    return self.run_safe(
+        job_id=job_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    return {
-        "chunk_index": chunk_index,
-        "repos_valid": repos_valid,
-        "repos_not_found": repos_not_found,
-        "repos_private": repos_private,
-        "correlation_id": correlation_id,
-    }
 
 
 # =============================================================================
@@ -477,7 +480,7 @@ def validate_source_repo_chunk(
 
 @celery_app.task(
     bind=True,
-    base=SourceValidationTask,
+    base=SafeTask,
     name="app.tasks.source_validation.validate_source_builds_chunk",
     queue="source_validation",
     soft_time_limit=300,
@@ -507,231 +510,265 @@ def validate_source_builds_chunk(
     Returns:
         Dict with validation results
     """
-    import asyncio
 
-    from app.ci_providers.models import BuildConclusion, BuildStatus
+    def mark_failed(e: Exception):
+        handler = _create_source_failure_handler(self.redis, source_id)
+        handler("failed", str(e))
 
-    db = get_database()
-    source_build_repo = SourceBuildRepository(db)
-    raw_build_run_repo = RawBuildRunRepository(db)
-    raw_repo_repo = RawRepositoryRepository(db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        import asyncio
 
-    # Lookup raw_repo_id if not provided (dispatched from orchestrator)
-    if raw_repo_id is None:
-        raw_repo = raw_repo_repo.find_by_full_name(repo_name)
-        if raw_repo:
-            raw_repo_id = str(raw_repo.id)
-        else:
-            # Repo not validated yet or not found - skip builds
-            logger.warning(
-                f"RawRepository not found for {repo_name}, skipping build validation"
-            )
-            return {
-                "repo_name": repo_name,
-                "builds_found": 0,
-                "builds_not_found": len(builds),
-                "skipped": True,
-                "correlation_id": correlation_id,
-            }
+        from app.ci_providers.models import BuildConclusion, BuildStatus
 
-    builds_found = 0
-    builds_not_found = 0
-    builds_filtered = 0
-    builds_to_insert: List[SourceBuild] = []
+        db = get_database()
+        source_build_repo = SourceBuildRepository(db)
+        raw_build_run_repo = RawBuildRunRepository(db)
+        raw_repo_repo = RawRepositoryRepository(db)
 
-    # Determine CI provider from first build
-    ci_provider_str = (
-        builds[0].get("ci_provider", "github_actions") if builds else "github_actions"
-    )
-    ci_provider = CIProvider(ci_provider_str)
+        # Lookup raw_repo_id if not provided (dispatched from orchestrator)
+        nonlocal raw_repo_id  # Needed because we assign to it? No, we read it. If we assign, we need nonlocal.
+        # But we assign to `raw_repo_id` inside _work, which is a local variable there if not careful.
+        # Wait, raw_repo_id is argument. In _work it shadows it if we assign.
+        # Actually in _work we can just use a local var or access via closure.
+        # Original code:
+        # if raw_repo_id is None: ... raw_repo_id = str(raw_repo.id)
+        # So yes, we need to handle this. Since it's an arg, we can just use a local variable `effective_repo_id`.
+        effective_repo_id = raw_repo_id
 
-    # Get CI provider client with config from settings (includes token)
-    ci_config = get_provider_config(ci_provider, db=db)
-    ci_client = get_ci_provider(ci_provider, config=ci_config, db=db)
-
-    # Hardcoded filters (matching model_ingestion.py behavior)
-    exclude_bots = True
-    only_completed = True
-
-    build_ids = [b["build_id"] for b in builds]
-    existing_builds = source_build_repo.find_many(
-        {
-            "source_id": ObjectId(source_id),
-            "build_id_from_source": {"$in": build_ids},
-        }
-    )
-    existing_map = {b.build_id_from_source: b for b in existing_builds}
-
-    # Filter out already validated builds
-    builds_to_validate = []
-    for build_info in builds:
-        build_id = build_info["build_id"]
-        existing = existing_map.get(build_id)
-        if existing:
-            if existing.status == SourceBuildStatus.FOUND:
-                builds_found += 1
+        if effective_repo_id is None:
+            raw_repo = raw_repo_repo.find_by_full_name(repo_name)
+            if raw_repo:
+                effective_repo_id = str(raw_repo.id)
             else:
-                builds_not_found += 1
-        else:
-            builds_to_validate.append(build_info)
-
-    # Fetch all build details concurrently
-    async def fetch_build_details_batch() -> List[Any]:
-        """Fetch all build data concurrently using fetch_build_details."""
-        tasks = []
-        for build_info in builds_to_validate:
-            build_id = build_info["build_id"]
-            formatted_build_id = f"{repo_name}:{build_id}"
-            tasks.append(ci_client.fetch_build_details(formatted_build_id))
-        return await asyncio.gather(*tasks, return_exceptions=True)
-
-    # Run async fetching
-    try:
-        build_results = asyncio.run(fetch_build_details_batch())
-    except Exception as e:
-        logger.error(f"Failed to fetch build details for {repo_name}: {e}")
-        build_results = [e] * len(builds_to_validate)
-
-    # Helper to check if build should be filtered (matching model_ingestion.py logic)
-    def should_filter_build(build_data: BuildData) -> tuple[bool, str]:
-        """Check if build should be filtered based on hardcoded filters."""
-        # Check only_completed filter
-        if only_completed and build_data.status != BuildStatus.COMPLETED:
-            return True, "Build not completed"
-
-        # Check exclude_bots filter
-        if exclude_bots and getattr(build_data, "is_bot_commit", False):
-            return True, "Bot commit"
-
-        # Filter conclusions matching model_ingestion.py
-        conclusion = build_data.conclusion
-        if conclusion not in (
-            BuildConclusion.SUCCESS,
-            BuildConclusion.FAILURE,
-        ):
-            conclusion_str = (
-                conclusion.value if hasattr(conclusion, "value") else conclusion
-            )
-            return True, f"Conclusion '{conclusion_str}' filtered"
-
-        return False, ""
-
-    # Process results
-    for build_info, build_data in zip(builds_to_validate, build_results, strict=False):
-        build_id = build_info["build_id"]
-
-        try:
-            # Handle fetch errors
-            if isinstance(build_data, Exception):
-                raise build_data
-
-            if build_data:
-                raw_build_run = raw_build_run_repo.upsert_by_business_key(
-                    raw_repo_id=ObjectId(raw_repo_id),
-                    build_id=build_id,
-                    provider=ci_provider,
-                    repo_name=build_data.repo_name or repo_name,
-                    build_number=build_data.build_number,
-                    status=(
-                        build_data.status.value
-                        if hasattr(build_data.status, "value")
-                        else build_data.status
-                    ),
-                    conclusion=(
-                        build_data.conclusion.value
-                        if hasattr(build_data.conclusion, "value")
-                        else build_data.conclusion
-                    ),
-                    commit_sha=build_data.commit_sha,
-                    commit_message=build_data.commit_message,
-                    commit_author=build_data.commit_author,
-                    branch=build_data.branch,
-                    started_at=build_data.started_at,
-                    completed_at=build_data.completed_at,
-                    duration_seconds=build_data.duration_seconds,
-                    web_url=build_data.web_url,
-                    raw_data=build_data.raw_data,
-                    is_bot_commit=build_data.is_bot_commit or False,
+                # Repo not validated yet or not found - skip builds
+                logger.warning(
+                    f"RawRepository not found for {repo_name}, skipping build validation"
                 )
+                return {
+                    "repo_name": repo_name,
+                    "builds_found": 0,
+                    "builds_not_found": len(builds),
+                    "skipped": True,
+                    "correlation_id": correlation_id,
+                }
 
-                # Check if build should be filtered
-                should_filter, filter_reason = should_filter_build(build_data)
-                if should_filter:
-                    builds_filtered += 1
-                    builds_to_insert.append(
-                        SourceBuild(
-                            source_id=ObjectId(source_id),
-                            build_id_from_source=build_id,
-                            repo_name_from_source=repo_name,
-                            raw_repo_id=ObjectId(raw_repo_id),
-                            status=SourceBuildStatus.FILTERED,
-                            raw_run_id=raw_build_run.id,
-                            validation_error=f"Filtered: {filter_reason}",
-                            validated_at=utc_now(),
-                        )
-                    )
-                else:
-                    # Build passed filters
-                    builds_to_insert.append(
-                        SourceBuild(
-                            source_id=ObjectId(source_id),
-                            build_id_from_source=build_id,
-                            repo_name_from_source=repo_name,
-                            raw_repo_id=ObjectId(raw_repo_id),
-                            status=SourceBuildStatus.FOUND,
-                            raw_run_id=raw_build_run.id,
-                            validated_at=utc_now(),
-                        )
-                    )
+        builds_found = 0
+        builds_not_found = 0
+        builds_filtered = 0
+        builds_to_insert: List[SourceBuild] = []
+
+        # Determine CI provider from first build
+        ci_provider_str = (
+            builds[0].get("ci_provider", "github_actions")
+            if builds
+            else "github_actions"
+        )
+        ci_provider = CIProvider(ci_provider_str)
+
+        # Get CI provider client with config from settings (includes token)
+        ci_config = get_provider_config(ci_provider, db=db)
+        ci_client = get_ci_provider(ci_provider, config=ci_config, db=db)
+
+        # Hardcoded filters (matching model_ingestion.py behavior)
+        exclude_bots = True
+        only_completed = True
+
+        build_ids = [b["build_id"] for b in builds]
+        existing_builds = source_build_repo.find_many(
+            {
+                "source_id": ObjectId(source_id),
+                "build_id_from_source": {"$in": build_ids},
+            }
+        )
+        existing_map = {b.build_id_from_source: b for b in existing_builds}
+
+        # Filter out already validated builds
+        builds_to_validate = []
+        for build_info in builds:
+            build_id_from_info = build_info["build_id"]
+            existing = existing_map.get(build_id_from_info)
+            if existing:
+                if existing.status == SourceBuildStatus.FOUND:
                     builds_found += 1
-
+                else:
+                    builds_not_found += 1
             else:
+                builds_to_validate.append(build_info)
+
+        # Fetch all build details concurrently
+        async def fetch_build_details_batch() -> List[Any]:
+            """Fetch all build data concurrently using fetch_build_details."""
+            tasks = []
+            for build_info in builds_to_validate:
+                build_id = build_info["build_id"]
+                formatted_build_id = f"{repo_name}:{build_id}"
+                tasks.append(ci_client.fetch_build_details(formatted_build_id))
+            return await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Run async fetching
+        try:
+            build_results = asyncio.run(fetch_build_details_batch())
+        except Exception as e:
+            logger.error(f"Failed to fetch build details for {repo_name}: {e}")
+            build_results = [e] * len(builds_to_validate)
+
+        # Helper to check if build should be filtered (matching model_ingestion.py logic)
+        def should_filter_build(build_data: BuildData) -> tuple[bool, str]:
+            """Check if build should be filtered based on hardcoded filters."""
+            # Check only_completed filter
+            if only_completed and build_data.status != BuildStatus.COMPLETED:
+                return True, "Build not completed"
+
+            # Check exclude_bots filter
+            if exclude_bots and getattr(build_data, "is_bot_commit", False):
+                return True, "Bot commit"
+
+            # Filter conclusions matching model_ingestion.py
+            conclusion = build_data.conclusion
+            if conclusion not in (
+                BuildConclusion.SUCCESS,
+                BuildConclusion.FAILURE,
+            ):
+                conclusion_str = (
+                    conclusion.value if hasattr(conclusion, "value") else conclusion
+                )
+                return True, f"Conclusion '{conclusion_str}' filtered"
+
+            return False, ""
+
+        # Process results
+        for build_info, build_data in zip(
+            builds_to_validate, build_results, strict=False
+        ):
+            build_id = build_info["build_id"]
+
+            try:
+                # Handle fetch errors
+                if isinstance(build_data, Exception):
+                    raise build_data
+
+                if build_data:
+                    raw_build_run = raw_build_run_repo.upsert_by_business_key(
+                        raw_repo_id=ObjectId(effective_repo_id),
+                        build_id=build_id,
+                        provider=ci_provider,
+                        repo_name=build_data.repo_name or repo_name,
+                        build_number=build_data.build_number,
+                        status=(
+                            build_data.status.value
+                            if hasattr(build_data.status, "value")
+                            else build_data.status
+                        ),
+                        conclusion=(
+                            build_data.conclusion.value
+                            if hasattr(build_data.conclusion, "value")
+                            else build_data.conclusion
+                        ),
+                        commit_sha=build_data.commit_sha,
+                        commit_message=build_data.commit_message,
+                        commit_author=build_data.commit_author,
+                        branch=build_data.branch,
+                        run_started_at=build_data.started_at,
+                        run_completed_at=build_data.completed_at,
+                        duration_seconds=build_data.duration_seconds,
+                        web_url=build_data.web_url,
+                        raw_data=build_data.raw_data,
+                        is_bot_commit=build_data.is_bot_commit or False,
+                    )
+
+                    # Check if build should be filtered
+                    should_filter, filter_reason = should_filter_build(build_data)
+                    if should_filter:
+                        builds_filtered += 1
+                        builds_to_insert.append(
+                            SourceBuild(
+                                source_id=ObjectId(source_id),
+                                build_id_from_source=build_id,
+                                repo_name_from_source=repo_name,
+                                raw_repo_id=ObjectId(effective_repo_id),
+                                status=SourceBuildStatus.FILTERED,
+                                raw_run_id=raw_build_run.id,
+                                validation_error=f"Filtered: {filter_reason}",
+                                validated_at=utc_now(),
+                            )
+                        )
+                    else:
+                        # Build passed filters
+                        builds_to_insert.append(
+                            SourceBuild(
+                                source_id=ObjectId(source_id),
+                                build_id_from_source=build_id,
+                                repo_name_from_source=repo_name,
+                                raw_repo_id=ObjectId(effective_repo_id),
+                                status=SourceBuildStatus.FOUND,
+                                raw_run_id=raw_build_run.id,
+                                validated_at=utc_now(),
+                            )
+                        )
+                        builds_found += 1
+
+                else:
+                    builds_to_insert.append(
+                        SourceBuild(
+                            source_id=ObjectId(source_id),
+                            build_id_from_source=build_id,
+                            repo_name_from_source=repo_name,
+                            raw_repo_id=(
+                                ObjectId(effective_repo_id)
+                                if effective_repo_id
+                                else None
+                            ),
+                            status=SourceBuildStatus.NOT_FOUND,
+                            validation_error="Build not found or incomplete",
+                            validated_at=utc_now(),
+                        )
+                    )
+                    builds_not_found += 1
+
+            except Exception as e:
+                logger.warning(f"Error validating build {build_id}: {e}")
                 builds_to_insert.append(
                     SourceBuild(
                         source_id=ObjectId(source_id),
                         build_id_from_source=build_id,
                         repo_name_from_source=repo_name,
-                        raw_repo_id=ObjectId(raw_repo_id) if raw_repo_id else None,
-                        status=SourceBuildStatus.NOT_FOUND,
-                        validation_error="Build not found or incomplete",
+                        raw_repo_id=(
+                            ObjectId(effective_repo_id) if effective_repo_id else None
+                        ),
+                        status=SourceBuildStatus.ERROR,
+                        validation_error=str(e)[:500],
                         validated_at=utc_now(),
                     )
                 )
                 builds_not_found += 1
 
-        except Exception as e:
-            logger.warning(f"Error validating build {build_id}: {e}")
-            builds_to_insert.append(
-                SourceBuild(
-                    source_id=ObjectId(source_id),
-                    build_id_from_source=build_id,
-                    repo_name_from_source=repo_name,
-                    raw_repo_id=ObjectId(raw_repo_id) if raw_repo_id else None,
-                    status=SourceBuildStatus.ERROR,
-                    validation_error=str(e)[:500],
-                    validated_at=utc_now(),
-                )
-            )
-            builds_not_found += 1
+        # Bulk insert builds
+        if builds_to_insert:
+            source_build_repo.bulk_create(builds_to_insert)
 
-    # Bulk insert builds
-    if builds_to_insert:
-        source_build_repo.bulk_create(builds_to_insert)
+        # Update Redis counters
+        increment_validation_stat(self.redis, source_id, "builds_found", builds_found)
+        increment_validation_stat(
+            self.redis, source_id, "builds_not_found", builds_not_found
+        )
+        increment_validation_stat(
+            self.redis, source_id, "builds_filtered", builds_filtered
+        )
 
-    # Update Redis counters
-    increment_validation_stat(self.redis, source_id, "builds_found", builds_found)
-    increment_validation_stat(
-        self.redis, source_id, "builds_not_found", builds_not_found
+        return {
+            "repo_name": repo_name,
+            "builds_found": builds_found,
+            "builds_not_found": builds_not_found,
+            "builds_filtered": builds_filtered,
+            "correlation_id": correlation_id,
+        }
+
+    job_id = f"{source_id}:{repo_name}:builds"
+    return self.run_safe(
+        job_id=job_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-    increment_validation_stat(self.redis, source_id, "builds_filtered", builds_filtered)
-
-    return {
-        "repo_name": repo_name,
-        "builds_found": builds_found,
-        "builds_not_found": builds_not_found,
-        "builds_filtered": builds_filtered,
-        "correlation_id": correlation_id,
-    }
 
 
 # =============================================================================
@@ -741,7 +778,7 @@ def validate_source_builds_chunk(
 
 @celery_app.task(
     bind=True,
-    base=SourceValidationTask,
+    base=SafeTask,
     name="app.tasks.source_validation.aggregate_source_validation_results",
     queue="source_validation",
     soft_time_limit=300,
@@ -764,11 +801,16 @@ def aggregate_source_validation_results(
     Returns:
         Dict with final validation stats
     """
-    db = get_database()
-    source_repo = BuildSourceRepository(db)
-    source_build_repo = SourceBuildRepository(db)
 
-    try:
+    def mark_failed(e: Exception):
+        handler = _create_source_failure_handler(self.redis, source_id)
+        handler("failed", str(e))
+
+    def _work(state: TaskState) -> Dict[str, Any]:
+        db = get_database()
+        source_repo = BuildSourceRepository(db)
+        source_build_repo = SourceBuildRepository(db)
+
         # Get final counts from database
         status_counts = source_build_repo.count_by_status(source_id)
 
@@ -820,13 +862,8 @@ def aggregate_source_validation_results(
             "correlation_id": correlation_id,
         }
 
-    except Exception as e:
-        logger.exception(f"Failed to aggregate source validation: {e}")
-        source_repo.update(
-            source_id,
-            validation_status=ValidationStatus.FAILED,
-            validation_error=str(e),
-            validation_completed_at=utc_now(),
-        )
-        publish_source_update(self.redis, source_id, "failed", error=str(e))
-        raise
+    return self.run_safe(
+        job_id=source_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )

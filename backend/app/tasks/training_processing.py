@@ -45,6 +45,33 @@ from app.tasks.shared.events import publish_scenario_update
 logger = logging.getLogger(__name__)
 
 
+def _create_scenario_failure_handler(scenario_id: str, db):
+    """
+    Create a failure handler for TrainingScenario tasks.
+    Updates status to FAILED on unhandled errors.
+    """
+
+    def handler(status: str, error_message: str) -> None:
+        try:
+            scenario_repo = TrainingScenarioRepository(db)
+            scenario_repo.update_one(
+                scenario_id,
+                {
+                    "status": ScenarioStatus.FAILED.value,
+                    "error_message": error_message,
+                },
+            )
+            publish_scenario_update(
+                scenario_id=scenario_id,
+                status=ScenarioStatus.FAILED.value,
+                error=error_message,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update scenario {scenario_id}: {e}")
+
+    return handler
+
+
 # ============================================================================
 # PHASE 2: PROCESSING (User-Triggered)
 # ============================================================================
@@ -52,14 +79,14 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.start_scenario_processing",
     queue="scenario_processing",
     soft_time_limit=60,
     time_limit=120,
 )
 def start_scenario_processing(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
 ) -> Dict[str, Any]:
     """
@@ -68,63 +95,75 @@ def start_scenario_processing(
     Validates that ingestion is complete before starting feature extraction.
     Only proceeds if status is INGESTED.
     """
-    import uuid
 
-    correlation_id = str(uuid.uuid4())
-    logger.info(f"[start_scenario_processing] Starting for scenario {scenario_id}")
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    scenario_repo = TrainingScenarioRepository(self.db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        import uuid
 
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        return {"status": "error", "error": "Scenario not found"}
+        correlation_id = str(uuid.uuid4())
+        logger.info(f"[start_scenario_processing] Starting for scenario {scenario_id}")
 
-    # Validate status
-    if scenario.status != ScenarioStatus.INGESTED.value:
+        scenario_repo = TrainingScenarioRepository(self.db)
+
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return {"status": "error", "error": "Scenario not found"}
+
+        # Validate status
+        if scenario.status != ScenarioStatus.INGESTED.value:
+            return {
+                "status": "error",
+                "error": f"Cannot start processing: status is {scenario.status}, expected INGESTED",
+            }
+
+        # Update status to PROCESSING
+        scenario_repo.update_one(
+            scenario_id,
+            {
+                "status": ScenarioStatus.PROCESSING.value,
+                "processing_started_at": datetime.utcnow(),
+                "current_task_id": self.request.id,
+            },
+        )
+
+        publish_scenario_update(
+            scenario_id=scenario_id,
+            status=ScenarioStatus.PROCESSING.value,
+            current_phase="Starting feature extraction...",
+        )
+
+        # Dispatch scans and processing
+        dispatch_scans_and_processing.delay(
+            scenario_id=scenario_id,
+            correlation_id=correlation_id,
+        )
+
         return {
-            "status": "error",
-            "error": f"Cannot start processing: status is {scenario.status}, expected INGESTED",
+            "status": "dispatched",
+            "scenario_id": scenario_id,
+            "correlation_id": correlation_id,
         }
 
-    # Update status to PROCESSING
-    scenario_repo.update_one(
-        scenario_id,
-        {
-            "status": ScenarioStatus.PROCESSING.value,
-            "processing_started_at": datetime.utcnow(),
-            "current_task_id": self.request.id,
-        },
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    publish_scenario_update(
-        scenario_id=scenario_id,
-        status=ScenarioStatus.PROCESSING.value,
-        current_phase="Starting feature extraction...",
-    )
-
-    # Dispatch scans and processing
-    dispatch_scans_and_processing.delay(
-        scenario_id=scenario_id,
-        correlation_id=correlation_id,
-    )
-
-    return {
-        "status": "dispatched",
-        "scenario_id": scenario_id,
-        "correlation_id": correlation_id,
-    }
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.dispatch_scans_and_processing",
     queue="scenario_processing",
     soft_time_limit=120,
     time_limit=180,
 )
 def dispatch_scans_and_processing(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
@@ -134,58 +173,70 @@ def dispatch_scans_and_processing(
     Scans run independently without blocking feature extraction.
     Scan results are backfilled to FeatureVector.scan_metrics later.
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(
-        f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}"
-    )
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    scenario = scenario_repo.find_by_id(scenario_id)
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    if not scenario:
-        return {"status": "error", "error": "Scenario not found"}
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(
+            f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}"
+        )
 
-    # Get scan_metrics config from feature_config
-    feature_config = scenario.feature_config
-    if isinstance(feature_config, dict):
-        scan_metrics_config = feature_config.get("scan_metrics", {})
-    else:
-        scan_metrics_config = getattr(feature_config, "scan_metrics", {}) or {}
+        scenario_repo = TrainingScenarioRepository(self.db)
+        scenario = scenario_repo.find_by_id(scenario_id)
 
-    has_scans = bool(scan_metrics_config.get("sonarqube")) or bool(
-        scan_metrics_config.get("trivy")
-    )
+        if not scenario:
+            return {"status": "error", "error": "Scenario not found"}
 
-    # Dispatch scans (fire-and-forget, parallel to processing)
-    if has_scans:
-        logger.info(f"{corr_prefix} Dispatching scans in parallel")
-        dispatch_scenario_scans.delay(
+        # Get scan_metrics config from feature_config
+        feature_config = scenario.feature_config
+        if isinstance(feature_config, dict):
+            scan_metrics_config = feature_config.get("scan_metrics", {})
+        else:
+            scan_metrics_config = getattr(feature_config, "scan_metrics", {}) or {}
+
+        has_scans = bool(scan_metrics_config.get("sonarqube")) or bool(
+            scan_metrics_config.get("trivy")
+        )
+
+        # Dispatch scans (fire-and-forget, parallel to processing)
+        if has_scans:
+            logger.info(f"{corr_prefix} Dispatching scans in parallel")
+            dispatch_scenario_scans.delay(
+                scenario_id=scenario_id,
+                correlation_id=correlation_id,
+            )
+
+        # Dispatch enrichment batches for feature extraction
+        dispatch_enrichment_batches.delay(
             scenario_id=scenario_id,
             correlation_id=correlation_id,
         )
 
-    # Dispatch enrichment batches for feature extraction
-    dispatch_enrichment_batches.delay(
-        scenario_id=scenario_id,
-        correlation_id=correlation_id,
-    )
+        return {
+            "status": "dispatched",
+            "scans_dispatched": has_scans,
+        }
 
-    return {
-        "status": "dispatched",
-        "scans_dispatched": has_scans,
-    }
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.dispatch_enrichment_batches",
     queue="scenario_processing",
     soft_time_limit=180,
     time_limit=240,
 )
 def dispatch_enrichment_batches(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
@@ -197,21 +248,36 @@ def dispatch_enrichment_batches(
     2. Create EnrichmentBuild for each (if not exists)
     3. Dispatch sequential chain for temporal feature support
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(
-        f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}"
-    )
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
-    enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
-    raw_build_run_repo = RawBuildRunRepository(self.db)
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
+        # Notify failure
+        from app.services.notification_service import notify_dataset_enrichment_failed
 
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        return {"status": "error", "error": "Scenario not found"}
+        notify_dataset_enrichment_failed(
+            db=self.db,
+            scenario_id=scenario_id,
+            error_message=str(e),
+            completed_count=0,
+            failed_count=0,
+        )
 
-    try:
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(
+            f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}"
+        )
+
+        scenario_repo = TrainingScenarioRepository(self.db)
+        ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+        enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
+        raw_build_run_repo = RawBuildRunRepository(self.db)
+
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return {"status": "error", "error": "Scenario not found"}
+
         # Get INGESTED + MISSING_RESOURCE builds (both can be processed)
         ingested_builds, _ = ingestion_build_repo.find_by_scenario(
             scenario_id, status_filter=IngestionStatus.INGESTED
@@ -341,28 +407,11 @@ def dispatch_enrichment_batches(
             "total_builds": len(processing_tasks),
         }
 
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"{corr_prefix} Error: {error_msg}")
-        scenario_repo.update_one(
-            scenario_id,
-            {
-                "status": ScenarioStatus.FAILED.value,
-                "error_message": f"Processing dispatch failed: {error_msg}",
-            },
-        )
-
-        # Notify failure
-        from app.services.notification_service import notify_dataset_enrichment_failed
-
-        notify_dataset_enrichment_failed(
-            db=self.db,
-            scenario_id=scenario_id,
-            error_message=error_msg,
-            completed_count=0,
-            failed_count=0,
-        )
-        raise
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 @celery_app.task(
@@ -597,14 +646,14 @@ def process_single_enrichment(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.finalize_scenario_processing",
     queue="scenario_processing",
     soft_time_limit=60,
     time_limit=120,
 )
 def finalize_scenario_processing(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
     created_count: int = 0,
     correlation_id: str = "",
@@ -615,73 +664,85 @@ def finalize_scenario_processing(
     Marks scenario as PROCESSED. User can trigger split/download when ready.
     Does NOT auto-dispatch split - user decides when to generate dataset.
     """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(f"{corr_prefix} [finalize_processing] Finalizing for {scenario_id}")
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    # Get stats
-    stats = enrichment_build_repo.aggregate_stats_by_scenario(scenario_id)
-    completed = stats.get("completed", 0)
-    partial = stats.get("partial", 0)
-    failed = stats.get("failed", 0)
-    total = completed + partial + failed
+    def _work(state: TaskState) -> Dict[str, Any]:
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(f"{corr_prefix} [finalize_processing] Finalizing for {scenario_id}")
 
-    # Update scenario - mark as PROCESSED (user triggers split manually)
-    scenario_repo.update_one(
-        scenario_id,
-        {
-            "status": ScenarioStatus.PROCESSED.value,
+        scenario_repo = TrainingScenarioRepository(self.db)
+        enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
+
+        # Get stats
+        stats = enrichment_build_repo.aggregate_stats_by_scenario(scenario_id)
+        completed = stats.get("completed", 0)
+        partial = stats.get("partial", 0)
+        failed = stats.get("failed", 0)
+        total = completed + partial + failed
+
+        # Update scenario - mark as PROCESSED (user triggers split manually)
+        scenario_repo.update_one(
+            scenario_id,
+            {
+                "status": ScenarioStatus.PROCESSED.value,
+                "builds_features_extracted": completed + partial,
+                "builds_failed": failed,
+                "processing_completed_at": datetime.utcnow(),
+                "feature_extraction_completed": True,
+            },
+        )
+
+        scenario = scenario_repo.find_by_id(scenario_id)
+        publish_scenario_update(
+            scenario_id=scenario_id,
+            status=ScenarioStatus.PROCESSED.value,
+            builds_total=scenario.builds_total if scenario else total,
+            builds_ingested=scenario.builds_ingested if scenario else total,
+            builds_features_extracted=completed + partial,
+            builds_failed=failed,
+            current_phase="Feature extraction complete. Click 'Generate Dataset' when ready.",
+        )
+
+        logger.info(
+            f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
+            f"Waiting for user to trigger dataset generation."
+        )
+
+        # Check if enrichment is fully complete (features + scans) and send notification
+        from app.services.notification_service import (
+            check_and_notify_enrichment_completed,
+        )
+
+        check_and_notify_enrichment_completed(self.db, scenario_id)
+
+        return {
+            "status": "completed",
             "builds_features_extracted": completed + partial,
             "builds_failed": failed,
-            "processing_completed_at": datetime.utcnow(),
-            "feature_extraction_completed": True,
-        },
+            "total": total,
+            "next_step": "User can now generate dataset via 'Generate Dataset' button",
+        }
+
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    scenario = scenario_repo.find_by_id(scenario_id)
-    publish_scenario_update(
-        scenario_id=scenario_id,
-        status=ScenarioStatus.PROCESSED.value,
-        builds_total=scenario.builds_total if scenario else total,
-        builds_ingested=scenario.builds_ingested if scenario else total,
-        builds_features_extracted=completed + partial,
-        builds_failed=failed,
-        current_phase="Feature extraction complete. Click 'Generate Dataset' when ready.",
-    )
-
-    logger.info(
-        f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
-        f"Waiting for user to trigger dataset generation."
-    )
-
-    # Check if enrichment is fully complete (features + scans) and send notification
-    from app.services.notification_service import check_and_notify_enrichment_completed
-
-    check_and_notify_enrichment_completed(self.db, scenario_id)
-
-    # NOTE: Split is NOT auto-dispatched. User triggers via generate_scenario_dataset.
-
-    return {
-        "status": "completed",
-        "builds_features_extracted": completed + partial,
-        "builds_failed": failed,
-        "total": total,
-        "next_step": "User can now generate dataset via 'Generate Dataset' button",
-    }
 
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.reprocess_failed_builds",
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=360,
 )
 def reprocess_failed_builds(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
 ) -> Dict[str, Any]:
     """
@@ -689,74 +750,89 @@ def reprocess_failed_builds(
 
     Uses sequential chain to ensure temporal features work correctly.
     """
-    import uuid
 
-    correlation_id = str(uuid.uuid4())
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        import uuid
 
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        return {"status": "error", "message": "Scenario not found"}
+        correlation_id = str(uuid.uuid4())
 
-    # Find FAILED enrichment builds
-    failed_builds, _ = enrichment_build_repo.find_by_scenario(
-        scenario_id, extraction_status=ExtractionStatus.FAILED
-    )
+        scenario_repo = TrainingScenarioRepository(self.db)
+        enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
 
-    if not failed_builds:
-        return {"status": "no_failed_builds", "message": "No failed builds to retry"}
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return {"status": "error", "message": "Scenario not found"}
 
-    # Reset FAILED builds to PENDING
-    reset_count = 0
-    for build in failed_builds:
-        enrichment_build_repo.update_one(
-            str(build.id),
-            {
-                "extraction_status": ExtractionStatus.PENDING.value,
-                "extraction_error": None,
-                "feature_vector_id": None,
-            },
+        # Find FAILED enrichment builds
+        failed_builds, _ = enrichment_build_repo.find_by_scenario(
+            scenario_id, extraction_status=ExtractionStatus.FAILED
         )
-        reset_count += 1
 
-    # Get selected features from scenario
-    feature_config = scenario.feature_config
-    if isinstance(feature_config, dict):
-        dag_features = feature_config.get("dag_features", [])
-    else:
-        dag_features = getattr(feature_config, "dag_features", []) or []
-    selected_features = _expand_feature_patterns(dag_features)
+        if not failed_builds:
+            return {
+                "status": "no_failed_builds",
+                "message": "No failed builds to retry",
+            }
 
-    # Build reprocessing chain
-    processing_tasks = [
-        process_single_enrichment.si(
-            scenario_id=scenario_id,
-            enrichment_build_id=str(build.id),
-            selected_features=selected_features,
-            correlation_id=correlation_id,
+        # Reset FAILED builds to PENDING
+        reset_count = 0
+        for build in failed_builds:
+            enrichment_build_repo.update_one(
+                str(build.id),
+                {
+                    "extraction_status": ExtractionStatus.PENDING.value,
+                    "extraction_error": None,
+                    "feature_vector_id": None,
+                },
+            )
+            reset_count += 1
+
+        # Get selected features from scenario
+        feature_config = scenario.feature_config
+        if isinstance(feature_config, dict):
+            dag_features = feature_config.get("dag_features", [])
+        else:
+            dag_features = getattr(feature_config, "dag_features", []) or []
+        selected_features = _expand_feature_patterns(dag_features)
+
+        # Build reprocessing chain
+        processing_tasks = [
+            process_single_enrichment.si(
+                scenario_id=scenario_id,
+                enrichment_build_id=str(build.id),
+                selected_features=selected_features,
+                correlation_id=correlation_id,
+            )
+            for build in failed_builds
+        ]
+
+        workflow = chain(
+            *processing_tasks,
+            finalize_scenario_processing.si(
+                scenario_id=scenario_id,
+                created_count=0,
+                correlation_id=correlation_id,
+            ),
         )
-        for build in failed_builds
-    ]
+        workflow.apply_async()
 
-    workflow = chain(
-        *processing_tasks,
-        finalize_scenario_processing.si(
-            scenario_id=scenario_id,
-            created_count=0,
-            correlation_id=correlation_id,
-        ),
+        logger.info(f"Dispatched reprocessing for {reset_count} failed builds")
+
+        return {
+            "status": "queued",
+            "builds_reset": reset_count,
+            "correlation_id": correlation_id,
+        }
+
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-    workflow.apply_async()
-
-    logger.info(f"Dispatched reprocessing for {reset_count} failed builds")
-
-    return {
-        "status": "queued",
-        "builds_reset": reset_count,
-        "correlation_id": correlation_id,
-    }
 
 
 # ============================================================================
@@ -766,14 +842,14 @@ def reprocess_failed_builds(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.generate_scenario_dataset",
     queue="scenario_processing",
     soft_time_limit=600,
     time_limit=720,
 )
 def generate_scenario_dataset(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
@@ -791,48 +867,67 @@ def generate_scenario_dataset(
     - Applies splitting strategy (train/val/test)
     - Exports to parquet/csv files
     """
-    import uuid
 
-    if not correlation_id:
-        correlation_id = str(uuid.uuid4())
+    def mark_failed(e: Exception):
+        handler = _create_scenario_failure_handler(scenario_id, self.db)
+        handler("failed", str(e))
+        # Notify failure
+        from app.services.notification_service import notify_dataset_enrichment_failed
 
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-    logger.info(f"{corr_prefix} [generate_dataset] Starting for scenario {scenario_id}")
+        notify_dataset_enrichment_failed(
+            db=self.db,
+            scenario_id=scenario_id,
+            error_message=str(e),
+            completed_count=0,
+            failed_count=0,
+        )
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
-    split_repo = TrainingDatasetSplitRepository(self.db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        import uuid
 
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        return {"status": "error", "error": "Scenario not found"}
+        nonlocal correlation_id
 
-    # Validate status - must be PROCESSED (feature extraction complete)
-    if scenario.status not in [
-        ScenarioStatus.PROCESSED.value,
-        ScenarioStatus.COMPLETED.value,
-    ]:
-        return {
-            "status": "error",
-            "error": f"Cannot generate dataset: status is {scenario.status}, expected PROCESSED",
-        }
+        if not correlation_id:
+            correlation_id = str(uuid.uuid4())
 
-    # Update status to SPLITTING
-    scenario_repo.update_one(
-        scenario_id,
-        {
-            "status": ScenarioStatus.SPLITTING.value,
-            "splitting_started_at": datetime.utcnow(),
-        },
-    )
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+        logger.info(
+            f"{corr_prefix} [generate_dataset] Starting for scenario {scenario_id}"
+        )
 
-    publish_scenario_update(
-        scenario_id=scenario_id,
-        status=ScenarioStatus.SPLITTING.value,
-        current_phase="Generating dataset (splitting and exporting)...",
-    )
+        scenario_repo = TrainingScenarioRepository(self.db)
+        enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
+        split_repo = TrainingDatasetSplitRepository(self.db)
 
-    try:
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return {"status": "error", "error": "Scenario not found"}
+
+        # Validate status - must be PROCESSED (feature extraction complete)
+        if scenario.status not in [
+            ScenarioStatus.PROCESSED.value,
+            ScenarioStatus.COMPLETED.value,
+        ]:
+            return {
+                "status": "error",
+                "error": f"Cannot generate dataset: status is {scenario.status}, expected PROCESSED",
+            }
+
+        # Update status to SPLITTING
+        scenario_repo.update_one(
+            scenario_id,
+            {
+                "status": ScenarioStatus.SPLITTING.value,
+                "splitting_started_at": datetime.utcnow(),
+            },
+        )
+
+        publish_scenario_update(
+            scenario_id=scenario_id,
+            status=ScenarioStatus.SPLITTING.value,
+            current_phase="Generating dataset (splitting and exporting)...",
+        )
+
         from app.services.splitting_strategy_service import SplittingStrategyService
 
         # Get completed enrichment builds
@@ -987,28 +1082,11 @@ def generate_scenario_dataset(
             "split_stats": split_stats,
         }
 
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"{corr_prefix} [split] Error: {error_msg}")
-        scenario_repo.update_one(
-            scenario_id,
-            {
-                "status": ScenarioStatus.FAILED.value,
-                "error_message": f"Splitting failed: {error_msg}",
-            },
-        )
-
-        # Notify failure
-        from app.services.notification_service import notify_dataset_enrichment_failed
-
-        notify_dataset_enrichment_failed(
-            db=self.db,
-            scenario_id=scenario_id,
-            error_message=error_msg,
-            completed_count=0,
-            failed_count=0,
-        )
-        raise
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
+    )
 
 
 # ============================================================================
@@ -1018,14 +1096,14 @@ def generate_scenario_dataset(
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=SafeTask,
     name="app.tasks.training_processing.dispatch_scenario_scans",
     queue="scenario_scanning",
     soft_time_limit=300,
     time_limit=600,
 )
 def dispatch_scenario_scans(
-    self: PipelineTask,
+    self: SafeTask,
     scenario_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
@@ -1034,137 +1112,149 @@ def dispatch_scenario_scans(
 
     Fire-and-forget: runs parallel to feature extraction.
     """
-    from app.config import settings
 
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+    def mark_failed(e: Exception):
+        # For scan dispatch, we don't fail the scenario - just log the error
+        logger.error(f"Scan dispatch failed for {scenario_id}: {e}")
 
-    scenario_repo = TrainingScenarioRepository(self.db)
-    ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
-    raw_build_run_repo = RawBuildRunRepository(self.db)
-    raw_repo_repo = RawRepositoryRepository(self.db)
+    def _work(state: TaskState) -> Dict[str, Any]:
+        from app.config import settings
 
-    scenario = scenario_repo.find_by_id(scenario_id)
-    if not scenario:
-        return {"status": "error", "error": "Scenario not found"}
+        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
-    # Get scan_metrics config
-    feature_config = scenario.feature_config
-    if isinstance(feature_config, dict):
-        scan_metrics_config = feature_config.get("scan_metrics", {})
-    else:
-        scan_metrics_config = getattr(feature_config, "scan_metrics", {}) or {}
+        scenario_repo = TrainingScenarioRepository(self.db)
+        ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+        raw_build_run_repo = RawBuildRunRepository(self.db)
+        raw_repo_repo = RawRepositoryRepository(self.db)
 
-    has_sonar = bool(scan_metrics_config.get("sonarqube"))
-    has_trivy = bool(scan_metrics_config.get("trivy"))
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return {"status": "error", "error": "Scenario not found"}
 
-    if not has_sonar and not has_trivy:
-        logger.info(f"{corr_prefix} No scan metrics configured, skipping")
-        return {"status": "skipped", "reason": "No scan metrics configured"}
+        # Get scan_metrics config
+        feature_config = scenario.feature_config
+        if isinstance(feature_config, dict):
+            scan_metrics_config = feature_config.get("scan_metrics", {})
+        else:
+            scan_metrics_config = getattr(feature_config, "scan_metrics", {}) or {}
 
-    # Collect unique commits
-    commits_to_scan: Dict[tuple, Dict[str, Any]] = {}
-    repo_cache: Dict[str, Any] = {}
+        has_sonar = bool(scan_metrics_config.get("sonarqube"))
+        has_trivy = bool(scan_metrics_config.get("trivy"))
 
-    ingested_builds, _ = ingestion_build_repo.find_by_scenario(
-        scenario_id=scenario_id,
-        status_filter=IngestionStatus.INGESTED,
-    )
+        if not has_sonar and not has_trivy:
+            logger.info(f"{corr_prefix} No scan metrics configured, skipping")
+            return {"status": "skipped", "reason": "No scan metrics configured"}
 
-    raw_build_run_ids = [
-        b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id
-    ]
-    raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
-    build_run_map = {str(r.id): r for r in raw_build_runs}
+        # Collect unique commits
+        commits_to_scan: Dict[tuple, Dict[str, Any]] = {}
+        repo_cache: Dict[str, Any] = {}
 
-    for build in ingested_builds:
-        raw_run = build_run_map.get(str(build.raw_build_run_id))
-        if not raw_run or not raw_run.commit_sha:
-            continue
+        ingested_builds, _ = ingestion_build_repo.find_by_scenario(
+            scenario_id=scenario_id,
+            status_filter=IngestionStatus.INGESTED,
+        )
 
-        commit_key = (str(build.raw_repo_id), raw_run.commit_sha)
-        if commit_key in commits_to_scan:
-            continue
+        raw_build_run_ids = [
+            b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id
+        ]
+        raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
+        build_run_map = {str(r.id): r for r in raw_build_runs}
 
-        if str(build.raw_repo_id) not in repo_cache:
-            raw_repo = raw_repo_repo.find_by_id(str(build.raw_repo_id))
-            if raw_repo:
-                repo_cache[str(build.raw_repo_id)] = raw_repo
+        for build in ingested_builds:
+            raw_run = build_run_map.get(str(build.raw_build_run_id))
+            if not raw_run or not raw_run.commit_sha:
+                continue
 
-        raw_repo = repo_cache.get(str(build.raw_repo_id))
-        if not raw_repo:
-            continue
+            commit_key = (str(build.raw_repo_id), raw_run.commit_sha)
+            if commit_key in commits_to_scan:
+                continue
 
-        commits_to_scan[commit_key] = {
-            "raw_repo_id": str(build.raw_repo_id),
-            "github_repo_id": raw_repo.github_id,
-            "commit_sha": raw_run.commit_sha,
-            "repo_full_name": raw_repo.full_name,
+            if str(build.raw_repo_id) not in repo_cache:
+                raw_repo = raw_repo_repo.find_by_id(str(build.raw_repo_id))
+                if raw_repo:
+                    repo_cache[str(build.raw_repo_id)] = raw_repo
+
+            raw_repo = repo_cache.get(str(build.raw_repo_id))
+            if not raw_repo:
+                continue
+
+            commits_to_scan[commit_key] = {
+                "raw_repo_id": str(build.raw_repo_id),
+                "github_repo_id": raw_repo.github_id,
+                "commit_sha": raw_run.commit_sha,
+                "repo_full_name": raw_repo.full_name,
+            }
+
+        if not commits_to_scan:
+            logger.info(f"{corr_prefix} No commits to scan")
+            scenario_repo.update_one(
+                scenario_id, {"scans_total": 0, "scan_extraction_completed": True}
+            )
+            return {"status": "skipped", "reason": "No commits found"}
+
+        # Calculate scans_total
+        enabled_tools = (1 if has_sonar else 0) + (1 if has_trivy else 0)
+        scans_total = len(commits_to_scan) * enabled_tools
+
+        scenario_repo.set_scans_total(scenario_id, scans_total)
+
+        # Split into batches
+        commits_list = list(commits_to_scan.values())
+        batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
+        batches = [
+            commits_list[i : i + batch_size]
+            for i in range(0, len(commits_list), batch_size)
+        ]
+
+        logger.info(
+            f"{corr_prefix} Dispatching {len(commits_list)} commits in {len(batches)} batches"
+        )
+
+        # Chain batches
+        batch_tasks = [
+            process_scan_batch.s(
+                scenario_id=scenario_id,
+                commits_batch=batch,
+                batch_index=i,
+                total_batches=len(batches),
+                scan_metrics_config=scan_metrics_config,
+                correlation_id=correlation_id,
+            )
+            for i, batch in enumerate(batches)
+        ]
+
+        if batch_tasks:
+            workflow = chain(
+                *batch_tasks,
+                finalize_scan_dispatch.si(
+                    scenario_id=scenario_id,
+                    total_commits=len(commits_list),
+                    total_batches=len(batches),
+                    has_sonar=has_sonar,
+                    has_trivy=has_trivy,
+                    correlation_id=correlation_id,
+                ),
+            )
+            workflow.apply_async()
+
+        publish_scenario_update(
+            scenario_id=scenario_id,
+            status=scenario.status if hasattr(scenario, "status") else "processing",
+            scans_total=scans_total,
+            scans_completed=0,
+        )
+
+        return {
+            "status": "dispatched",
+            "total_commits": len(commits_list),
+            "scans_total": scans_total,
         }
 
-    if not commits_to_scan:
-        logger.info(f"{corr_prefix} No commits to scan")
-        scenario_repo.update_one(
-            scenario_id, {"scans_total": 0, "scan_extraction_completed": True}
-        )
-        return {"status": "skipped", "reason": "No commits found"}
-
-    # Calculate scans_total
-    enabled_tools = (1 if has_sonar else 0) + (1 if has_trivy else 0)
-    scans_total = len(commits_to_scan) * enabled_tools
-
-    scenario_repo.set_scans_total(scenario_id, scans_total)
-
-    # Split into batches
-    commits_list = list(commits_to_scan.values())
-    batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
-    batches = [
-        commits_list[i : i + batch_size]
-        for i in range(0, len(commits_list), batch_size)
-    ]
-
-    logger.info(
-        f"{corr_prefix} Dispatching {len(commits_list)} commits in {len(batches)} batches"
+    return self.run_safe(
+        job_id=scenario_id,
+        work=_work,
+        mark_failed_fn=mark_failed,
     )
-
-    # Chain batches
-    batch_tasks = [
-        process_scan_batch.s(
-            scenario_id=scenario_id,
-            commits_batch=batch,
-            batch_index=i,
-            total_batches=len(batches),
-            scan_metrics_config=scan_metrics_config,
-            correlation_id=correlation_id,
-        )
-        for i, batch in enumerate(batches)
-    ]
-
-    if batch_tasks:
-        workflow = chain(
-            *batch_tasks,
-            finalize_scan_dispatch.si(
-                scenario_id=scenario_id,
-                total_commits=len(commits_list),
-                total_batches=len(batches),
-                has_sonar=has_sonar,
-                has_trivy=has_trivy,
-                correlation_id=correlation_id,
-            ),
-        )
-        workflow.apply_async()
-
-    publish_scenario_update(
-        scenario_id=scenario_id,
-        status=scenario.status if hasattr(scenario, "status") else "processing",
-        scans_total=scans_total,
-        scans_completed=0,
-    )
-
-    return {
-        "status": "dispatched",
-        "total_commits": len(commits_list),
-        "scans_total": scans_total,
-    }
 
 
 @celery_app.task(

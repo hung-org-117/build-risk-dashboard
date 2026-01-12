@@ -4,11 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
     Calendar,
     Check,
-    FileCode,
     Filter,
     Loader2,
     Search,
-    Upload,
+    X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,8 +29,17 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { trainingScenariosApi } from "@/lib/api";
-import type { PreviewBuild } from "@/lib/api";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import { trainingScenariosApi } from "@/lib/api/training-scenarios";
+import type { PreviewBuild } from "@/lib/api/training-scenarios";
 import { formatDateTime } from "@/lib/utils";
 import {
     useWizard,
@@ -68,6 +76,7 @@ export function StepDataSource() {
     const [previewBuilds, setPreviewBuilds] = useState<PreviewBuild[]>([]);
     const [page, setPage] = useState(1);
     const [hasApplied, setHasApplied] = useState(false);
+    const [isFilterOpen, setIsFilterOpen] = useState(false);
 
     const PAGE_SIZE = 20;
 
@@ -104,6 +113,7 @@ export function StepDataSource() {
             }
             setPage(pageNum);
             setHasApplied(true);
+            setIsFilterOpen(false);
         } catch (error) {
             console.error("Failed to preview builds:", error);
         } finally {
@@ -135,350 +145,224 @@ export function StepDataSource() {
             updateDataSource({ conclusions: [...current, conclusion] });
         }
     };
-
-    const totalBuilds = previewStats?.total_builds ?? 0;
-    const totalPages = Math.max(1, Math.ceil(totalBuilds / PAGE_SIZE));
-
-    // YAML Import state
-    const [yamlFile, setYamlFile] = useState<File | null>(null);
-    const [yamlError, setYamlError] = useState<string | null>(null);
-    const [yamlLoaded, setYamlLoaded] = useState(false);
-
-    // Get loadFromYaml from context
-    const { loadFromYaml } = useWizard();
-
-    const handleYamlUploadReal = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        setYamlFile(file);
-        setYamlError(null);
-        setYamlLoaded(false);
-
-        try {
-            const yaml = await import("js-yaml");
-            const text = await file.text();
-            const parsed = yaml.load(text) as any;
-
-            // Validate required fields
-            if (!parsed.scenario?.name) {
-                setYamlError("Missing required field: scenario.name");
-                return;
-            }
-
-            // Load into wizard state
-            loadFromYaml(parsed);
-            setYamlLoaded(true);
-
-            // Trigger preview with loaded filters
-            setTimeout(() => applyFilters(1), 100);
-        } catch (err) {
-            setYamlError(`YAML parse error: ${(err as Error).message}`);
-        }
-    };
-
-    const handleSkipToReview = () => {
-        setStep(5);
-    };
-
     return (
-        <div className="space-y-6">
-            {/* YAML Import Card */}
-            <Card className="border-dashed border-purple-500/50">
-                <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                        <FileCode className="h-5 w-5 text-purple-500" />
-                        Import from YAML
-                    </CardTitle>
-                    <CardDescription>
-                        Upload a YAML config file to auto-fill all settings
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="flex items-center gap-4">
-                        <label className="flex-1">
-                            <input
-                                type="file"
-                                accept=".yaml,.yml"
-                                onChange={handleYamlUploadReal}
-                                className="hidden"
-                            />
-                            <div className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer hover:border-purple-500 hover:bg-purple-500/5 transition-colors">
-                                <Upload className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-sm text-muted-foreground">
-                                    {yamlFile ? yamlFile.name : "Choose YAML file..."}
-                                </span>
-                            </div>
-                        </label>
-                        {yamlLoaded && (
-                            <Button
-                                onClick={handleSkipToReview}
-                                className="bg-purple-600 hover:bg-purple-700"
-                            >
-                                Skip to Review
-                            </Button>
-                        )}
-                    </div>
-                    {yamlError && (
-                        <p className="mt-2 text-sm text-red-500">{yamlError}</p>
-                    )}
-                    {yamlLoaded && (
-                        <p className="mt-2 text-sm text-green-500">
-                            ✓ YAML loaded successfully! Review preview below or skip to review.
-                        </p>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Filters Panel */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Filter className="h-5 w-5" />
-                        Data Source Filters
-                    </CardTitle>
-                    <CardDescription>
-                        Configure filters to select builds from the database for your scenario
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    {/* Date Range */}
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label className="flex items-center gap-2">
-                                <Calendar className="h-4 w-4" />
-                                Start Date
-                            </Label>
-                            <Input
-                                type="date"
-                                value={dataSource.date_start}
-                                onChange={(e) => updateDataSource({ date_start: e.target.value })}
-                            />
+        <div className="flex flex-col h-full gap-4">
+            {/* Stats Banner & Filter Trigger */}
+            <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between flex-shrink-0">
+                {previewStats ? (
+                    <div className="flex flex-wrap gap-4 flex-1">
+                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                            <span className="text-xl font-bold">{formatNumber(previewStats.total_builds)}</span>
+                            <span className="text-xs text-muted-foreground uppercase tracking-wide">Total Builds</span>
                         </div>
-                        <div className="space-y-2">
-                            <Label className="flex items-center gap-2">
-                                <Calendar className="h-4 w-4" />
-                                End Date
-                            </Label>
-                            <Input
-                                type="date"
-                                value={dataSource.date_end}
-                                onChange={(e) => updateDataSource({ date_end: e.target.value })}
-                            />
+                        <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                            <span className="text-xl font-bold">{formatNumber(previewStats.total_repos)}</span>
+                            <span className="text-xs text-muted-foreground uppercase tracking-wide">Repos</span>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                            <span className="text-xl font-bold text-green-700 dark:text-green-400">
+                                {formatNumber(previewStats.outcome_distribution.success)}
+                            </span>
+                            <span className="text-xs text-green-700/70 dark:text-green-400/70 uppercase tracking-wide">Success</span>
+                        </div>
+                        <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                            <span className="text-xl font-bold text-red-700 dark:text-red-400">
+                                {formatNumber(previewStats.outcome_distribution.failure)}
+                            </span>
+                            <span className="text-xs text-red-700/70 dark:text-red-400/70 uppercase tracking-wide">Failure</span>
                         </div>
                     </div>
+                ) : (
+                    <div className="flex-1"></div>
+                )}
 
-                    {/* Languages */}
-                    <div className="space-y-2">
-                        <Label>Languages</Label>
-                        <div className="flex flex-wrap gap-3">
-                            {SUPPORTED_LANGUAGES.map((lang) => (
-                                <div key={lang.value} className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id={`lang-${lang.value}`}
-                                        checked={dataSource.languages.includes(lang.value)}
-                                        onCheckedChange={() => handleLanguageToggle(lang.value)}
-                                    />
-                                    <label
-                                        htmlFor={`lang-${lang.value}`}
-                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                    >
-                                        {lang.label}
-                                    </label>
-                                </div>
-                            ))}
-                        </div>
-                        {dataSource.languages.length === 0 && (
-                            <p className="text-xs text-muted-foreground">All languages selected</p>
-                        )}
-                    </div>
-
-                    {/* Conclusions */}
-                    <div className="space-y-2">
-                        <Label>Build Conclusions</Label>
-                        <div className="flex flex-wrap gap-4">
-                            {BUILD_CONCLUSIONS.map((c) => (
-                                <div key={c.value} className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id={`conclusion-${c.value}`}
-                                        checked={dataSource.conclusions.includes(c.value)}
-                                        onCheckedChange={() => handleConclusionToggle(c.value)}
-                                    />
-                                    <label
-                                        htmlFor={`conclusion-${c.value}`}
-                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                    >
-                                        {c.label}
-                                    </label>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* CI Provider */}
-                    <div className="space-y-2">
-                        <Label>CI Provider</Label>
-                        <Select
-                            value={dataSource.ci_provider}
-                            onValueChange={(value) => updateDataSource({ ci_provider: value as CIProviderKey | "all" })}
-                        >
-                            <SelectTrigger className="w-[250px]">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Providers</SelectItem>
-                                {CI_PROVIDERS.map((provider) => (
-                                    <SelectItem key={provider.value} value={provider.value}>
-                                        {provider.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    {/* Apply Button */}
-                    <div className="flex justify-end">
-                        <Button
-                            onClick={() => applyFilters(1)}
-                            disabled={isPreviewLoading}
-                            className="gap-2"
-                        >
-                            {isPreviewLoading ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                                <Search className="h-4 w-4" />
-                            )}
-                            Apply Filters
+                <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="outline" className="gap-2 shrink-0">
+                            <Filter className="h-4 w-4" />
+                            Filters
+                            {/* Badge for active filters count?? functionality not implemented but nice to have visually if complex */}
                         </Button>
-                    </div>
-                </CardContent>
-            </Card>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-2xl">
+                        <DialogHeader>
+                            <DialogTitle>Filter Builds</DialogTitle>
+                        </DialogHeader>
 
-            {/* Preview Table for DB */}
-            {previewStats && (
-                <>
-                    <div className="grid gap-4 md:grid-cols-4">
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="text-2xl font-bold">{formatNumber(previewStats.total_builds)}</div>
-                                <p className="text-xs text-muted-foreground">Total Builds</p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="text-2xl font-bold">{formatNumber(previewStats.total_repos)}</div>
-                                <p className="text-xs text-muted-foreground">Repositories</p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="text-2xl font-bold text-green-600">
-                                    {formatNumber(previewStats.outcome_distribution.success)}
-                                </div>
-                                <p className="text-xs text-muted-foreground">Success</p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="text-2xl font-bold text-red-600">
-                                    {formatNumber(previewStats.outcome_distribution.failure)}
-                                </div>
-                                <p className="text-xs text-muted-foreground">Failure</p>
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Build Preview</CardTitle>
-                            <CardDescription>
-                                Sample of builds matching your filters
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="p-0">
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                                    <thead className="bg-slate-50 dark:bg-slate-900/40">
-                                        <tr>
-                                            <th className="px-4 py-3 text-left font-semibold text-slate-500">Repository</th>
-                                            <th className="px-4 py-3 text-left font-semibold text-slate-500">Branch</th>
-                                            <th className="px-4 py-3 text-left font-semibold text-slate-500">Commit</th>
-                                            <th className="px-4 py-3 text-left font-semibold text-slate-500">Conclusion</th>
-                                            <th className="px-4 py-3 text-left font-semibold text-slate-500">Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                        {isPreviewLoading ? (
-                                            <tr>
-                                                <td colSpan={5} className="px-4 py-8 text-center">
-                                                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                                                </td>
-                                            </tr>
-                                        ) : previewBuilds.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                                                    No builds match your filters
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            previewBuilds.map((build) => (
-                                                <tr key={build.id}>
-                                                    <td className="px-4 py-3 font-medium">{build.repo_name}</td>
-                                                    <td className="px-4 py-3 text-muted-foreground">{build.branch}</td>
-                                                    <td className="px-4 py-3 font-mono text-xs">{build.commit_sha}</td>
-                                                    <td className="px-4 py-3">{getConclusionBadge(build.conclusion)}</td>
-                                                    <td className="px-4 py-3 text-muted-foreground">
-                                                        {formatDateTime(build.run_started_at)}
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {totalBuilds > PAGE_SIZE && (
-                                <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 dark:border-slate-800">
-                                    <span className="text-sm text-muted-foreground">
-                                        Page {page} of {totalPages}
-                                    </span>
-                                    <div className="flex gap-2">
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => applyFilters(page - 1)}
-                                            disabled={page === 1 || isPreviewLoading}
-                                        >
-                                            Previous
-                                        </Button>
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => applyFilters(page + 1)}
-                                            disabled={page >= totalPages || isPreviewLoading}
-                                        >
-                                            Next
-                                        </Button>
+                        <div className="grid gap-6 py-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Date Range */}
+                                <div className="space-y-2">
+                                    <Label>Date Range</Label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                            <Label className="text-[10px] uppercase text-muted-foreground">From</Label>
+                                            <Input
+                                                type="date"
+                                                value={dataSource.date_start}
+                                                onChange={(e) => updateDataSource({ date_start: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-[10px] uppercase text-muted-foreground">To</Label>
+                                            <Input
+                                                type="date"
+                                                value={dataSource.date_end}
+                                                onChange={(e) => updateDataSource({ date_end: e.target.value })}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            )}
-                        </CardContent>
-                    </Card>
-                </>
-            )}
 
-            {/* Navigation */}
-            <div className="flex justify-end">
-                <Button
-                    onClick={() => setStep(2)}
-                    disabled={
-                        !previewStats || previewStats.total_builds === 0 || isPreviewLoading
-                    }
-                    className="gap-2"
-                >
-                    Next: Feature Config
-                    <Check className="h-4 w-4" />
-                </Button>
+                                {/* CI Provider */}
+                                <div className="space-y-2">
+                                    <Label>Provider</Label>
+                                    <Select
+                                        value={dataSource.ci_provider}
+                                        onValueChange={(value) => updateDataSource({ ci_provider: value as CIProviderKey | "all" })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All Providers</SelectItem>
+                                            {CI_PROVIDERS.map((provider) => (
+                                                <SelectItem key={provider.value} value={provider.value}>
+                                                    {provider.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Languages */}
+                                <div className="space-y-2">
+                                    <Label>Languages</Label>
+                                    <div className="grid grid-cols-2 gap-2 p-2 border rounded-md min-h-[100px] max-h-[150px] overflow-y-auto">
+                                        {SUPPORTED_LANGUAGES.map((lang) => (
+                                            <div key={lang.value} className="flex items-center space-x-2">
+                                                <Checkbox
+                                                    id={`lang-${lang.value}`}
+                                                    checked={dataSource.languages.includes(lang.value)}
+                                                    onCheckedChange={() => handleLanguageToggle(lang.value)}
+                                                />
+                                                <label
+                                                    htmlFor={`lang-${lang.value}`}
+                                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                                >
+                                                    {lang.label}
+                                                </label>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Status */}
+                                <div className="space-y-2">
+                                    <Label>Build Status</Label>
+                                    <div className="flex flex-col gap-2 p-2 border rounded-md">
+                                        {BUILD_CONCLUSIONS.map((c) => (
+                                            <div key={c.value} className="flex items-center space-x-2">
+                                                <Checkbox
+                                                    id={`conclusion-${c.value}`}
+                                                    checked={dataSource.conclusions.includes(c.value)}
+                                                    onCheckedChange={() => handleConclusionToggle(c.value)}
+                                                />
+                                                <label
+                                                    htmlFor={`conclusion-${c.value}`}
+                                                    className="text-sm font-medium leading-none cursor-pointer"
+                                                >
+                                                    {c.label}
+                                                </label>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsFilterOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button onClick={() => applyFilters(1)} disabled={isPreviewLoading}>
+                                {isPreviewLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Apply Filters
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
+
+            {/* Main Table Area */}
+            <Card className="flex-1 overflow-hidden flex flex-col">
+                <CardHeader className="py-4 border-b bg-slate-50/50 dark:bg-slate-900/50 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <CardTitle className="text-base">Build Preview</CardTitle>
+                            <CardDescription className="text-xs mt-1">
+                                {previewBuilds.length > 0
+                                    ? `Showing ${formatNumber(previewBuilds.length)} of ${formatNumber(previewStats?.total_builds || 0)} matched builds`
+                                    : "No builds loaded"}
+                            </CardDescription>
+                        </div>
+                        {/* Maybe pagination here later? */}
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 overflow-hidden">
+                    <div className="h-full overflow-y-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+                            <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10 shadow-sm border-b">
+                                <tr>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Repository</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Branch</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Commit</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Conclusion</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
+                                {isPreviewLoading ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-4 py-20 text-center">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                                <p className="text-sm text-muted-foreground">Loading builds...</p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : previewBuilds.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-4 py-20 text-center text-muted-foreground">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <Search className="h-8 w-8 opacity-20" />
+                                                <p>No builds found matching your filters.</p>
+                                                <Button variant="link" onClick={() => setIsFilterOpen(true)}>
+                                                    Adjust Filters
+                                                </Button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    previewBuilds.map((build) => (
+                                        <tr key={build.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                                            <td className="px-4 py-3 font-medium">{build.repo_name}</td>
+                                            <td className="px-4 py-3 text-muted-foreground">{build.branch}</td>
+                                            <td className="px-4 py-3 font-mono text-xs opacity-70">{build.commit_sha.substring(0, 7)}</td>
+                                            <td className="px-4 py-3">{getConclusionBadge(build.conclusion)}</td>
+                                            <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                                {formatDateTime(build.run_started_at)}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     );
 }

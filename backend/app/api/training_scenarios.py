@@ -34,7 +34,6 @@ def preview_builds(
         None, description="Comma-separated conclusions (success,failure)"
     ),
     ci_provider: Optional[str] = Query(None, description="CI provider filter"),
-    exclude_bots: bool = Query(True, description="Exclude bot commits"),
     skip: int = 0,
     limit: int = 20,
     current_user: User = Depends(get_current_user),  # noqa: B008
@@ -56,10 +55,13 @@ def preview_builds(
     # Get repo IDs filtered by language
     repo_ids = None
     if languages_list:
-        # Find repos matching the languages
-        language_query = {
-            "main_lang": {"$in": [lang.lower() for lang in languages_list]}
-        }
+        import re
+
+        # Find repos matching the languages (case-insensitive)
+        regex_list = [
+            re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages_list
+        ]
+        language_query = {"main_lang": {"$in": regex_list}}
         matching_repos = list(raw_repo_repo.collection.find(language_query, {"_id": 1}))
         repo_ids = [r["_id"] for r in matching_repos]
 

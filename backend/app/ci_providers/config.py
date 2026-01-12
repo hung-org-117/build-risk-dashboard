@@ -28,7 +28,7 @@ def get_provider_config(
     base_url = None
 
     # Try to get token from database if db is provided
-    if db:
+    if db is not None:
         try:
             from app.services.settings_service import SettingsService
 

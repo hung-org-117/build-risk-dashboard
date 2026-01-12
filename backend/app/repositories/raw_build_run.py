@@ -219,7 +219,6 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         self,
         date_start: Optional[datetime] = None,
         date_end: Optional[datetime] = None,
-        languages: Optional[List[str]] = None,
         conclusions: Optional[List[str]] = None,
         ci_provider: Optional[str] = None,
         repo_ids: Optional[List[ObjectId]] = None,
