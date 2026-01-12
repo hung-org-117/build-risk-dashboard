@@ -17,7 +17,6 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
 
 splitting:
   strategy: "stratified_within_group"
@@ -28,7 +27,3 @@ splitting:
       val: 0.15
       test: 0.15
     stratify_by: "outcome"
-
-output:
-  format: "parquet"
-  include_metadata: true

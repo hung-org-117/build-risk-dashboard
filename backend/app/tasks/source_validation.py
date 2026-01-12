@@ -82,11 +82,13 @@ class SourceValidationTask(SafeTask):
             try:
                 db = get_database()
                 source_repo = BuildSourceRepository(db)
-                source_repo.update(
+                source_repo.update_one(
                     source_id,
-                    validation_status=ValidationStatus.FAILED,
-                    validation_error=error_message,
-                    validation_completed_at=utc_now(),
+                    {
+                        "validation_status": ValidationStatus.FAILED.value,
+                        "validation_error": error_message,
+                        "validation_completed_at": utc_now(),
+                    },
                 )
                 # Publish event for frontend
                 publish_source_update(
@@ -138,7 +140,7 @@ def publish_source_update(
     bind=True,
     base=SourceValidationTask,
     name="app.tasks.source_validation.validate_build_source_task",
-    queue="dataset_validation",  # Share queue with dataset validation
+    queue="source_validation",
     soft_time_limit=3600,
     time_limit=3660,
 )
@@ -178,13 +180,15 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
             raise ValueError(f"BuildSource {source_id} not found")
 
         # Mark validation started
-        source_repo.update(
+        source_repo.update_one(
             source_id,
-            validation_status=ValidationStatus.VALIDATING,
-            validation_started_at=utc_now(),
-            validation_task_id=self.request.id,
-            validation_progress=0,
-            validation_error=None,
+            {
+                "validation_status": ValidationStatus.VALIDATING.value,
+                "validation_started_at": utc_now(),
+                "validation_task_id": self.request.id,
+                "validation_progress": 0,
+                "validation_error": None,
+            },
         )
         publish_source_update(self.redis, source_id, "validating", progress=0)
 
@@ -252,12 +256,14 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
         logger.info(f"Found {total_repos} repos, {total_builds} builds to validate")
 
         if total_repos == 0:
-            source_repo.update(
+            source_repo.update_one(
                 source_id,
-                validation_status=ValidationStatus.COMPLETED,
-                validation_completed_at=utc_now(),
-                validation_progress=100,
-                setup_step=2,
+                {
+                    "validation_status": ValidationStatus.COMPLETED.value,
+                    "validation_completed_at": utc_now(),
+                    "validation_progress": 100,
+                    "setup_step": 2,
+                },
             )
             publish_source_update(self.redis, source_id, "completed", progress=100)
             return {"status": "completed", "message": "No valid repos found"}
@@ -328,11 +334,13 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"{corr_prefix}[source_validation] Orchestrator failed: {e}")
-        source_repo.update(
+        source_repo.update_one(
             source_id,
-            validation_status=ValidationStatus.FAILED,
-            validation_completed_at=utc_now(),
-            validation_error=str(e),
+            {
+                "validation_status": ValidationStatus.FAILED.value,
+                "validation_completed_at": utc_now(),
+                "validation_error": str(e),
+            },
         )
         publish_source_update(self.redis, source_id, "failed", error=str(e))
         raise
@@ -347,7 +355,7 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
     bind=True,
     base=SourceValidationTask,
     name="app.tasks.source_validation.validate_source_repo_chunk",
-    queue="dataset_validation",
+    queue="source_validation",
     soft_time_limit=600,
     time_limit=660,
     max_retries=3,
@@ -471,7 +479,7 @@ def validate_source_repo_chunk(
     bind=True,
     base=SourceValidationTask,
     name="app.tasks.source_validation.validate_source_builds_chunk",
-    queue="dataset_validation",
+    queue="source_validation",
     soft_time_limit=300,
     time_limit=360,
     max_retries=3,
@@ -735,7 +743,7 @@ def validate_source_builds_chunk(
     bind=True,
     base=SourceValidationTask,
     name="app.tasks.source_validation.aggregate_source_validation_results",
-    queue="dataset_validation",
+    queue="source_validation",
     soft_time_limit=300,
     time_limit=360,
 )
@@ -778,13 +786,15 @@ def aggregate_source_validation_results(
         )
 
         # Update source
-        source_repo.update(
+        source_repo.update_one(
             source_id,
-            validation_status=ValidationStatus.COMPLETED,
-            validation_completed_at=utc_now(),
-            validation_progress=100,
-            validation_stats=stats,
-            setup_step=2,
+            {
+                "validation_status": ValidationStatus.COMPLETED.value,
+                "validation_completed_at": utc_now(),
+                "validation_progress": 100,
+                "validation_stats": stats.model_dump(),
+                "setup_step": 2,
+            },
         )
 
         # Publish completion event

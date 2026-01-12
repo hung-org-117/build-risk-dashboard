@@ -480,25 +480,6 @@ class SplittingStrategyService:
     - Generating split statistics
     """
 
-    LANGUAGE_GROUPS = {
-        "python": "backend",
-        "java": "backend",
-        "go": "backend",
-        "rust": "backend",
-        "c": "backend",
-        "cpp": "backend",
-        "csharp": "backend",
-        "javascript": "fullstack",
-        "typescript": "fullstack",
-        "ruby": "fullstack",
-        "php": "fullstack",
-        "bash": "scripting",
-        "shell": "scripting",
-        "powershell": "scripting",
-        "perl": "scripting",
-        "lua": "scripting",
-    }
-
     def __init__(self):
         pass
 
@@ -558,11 +539,8 @@ class SplittingStrategyService:
         """
         group_by_str = str(group_by) if not isinstance(group_by, str) else group_by
 
-        if (
-            group_by_str == "language_group"
-            or group_by == GroupByDimension.LANGUAGE_GROUP
-        ):
-            return self._create_language_group_column(df)
+        if group_by_str == "language" or group_by == GroupByDimension.LANGUAGE:
+            return self._prepare_language_column(df)
 
         elif (
             group_by_str == "percentage_of_builds_before"
@@ -585,22 +563,14 @@ class SplittingStrategyService:
                 return group_by_str
             raise ValueError(f"Unknown grouping dimension: {group_by}")
 
-    def _create_language_group_column(self, df: pd.DataFrame) -> str:
-        """Map primary_language to language_group (backend/fullstack/scripting/other)."""
-        column_name = "_language_group"
+    def _prepare_language_column(self, df: pd.DataFrame) -> str:
+        """Use primary_language column directly for grouping."""
+        column_name = "_language"
 
         if "primary_language" in df.columns:
-            df[column_name] = (
-                df["primary_language"]
-                .str.lower()
-                .map(lambda x: self.LANGUAGE_GROUPS.get(x, "other"))
-            )
+            df[column_name] = df["primary_language"].str.lower().fillna("other")
         elif "language" in df.columns:
-            df[column_name] = (
-                df["language"]
-                .str.lower()
-                .map(lambda x: self.LANGUAGE_GROUPS.get(x, "other"))
-            )
+            df[column_name] = df["language"].str.lower().fillna("other")
         else:
             # Default to "other" if no language column
             df[column_name] = "other"

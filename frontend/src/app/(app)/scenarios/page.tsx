@@ -1,13 +1,11 @@
 "use client";
 
 import {
-    UploadCloud,
     Database,
     GitBranch,
     Loader2,
     Plus,
     RefreshCw,
-    Settings2,
     Trash2,
     CheckCircle2,
     TrendingUp,
@@ -24,6 +22,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/use-toast";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -167,20 +166,6 @@ export default function ScenariosPage() {
         return () => unsubscribe();
     }, [subscribe, loadScenarios, page]);
 
-    const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
-    const pageStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-    const pageEnd = total === 0 ? 0 : Math.min(page * PAGE_SIZE, total);
-
-    const handlePageChange = (direction: "prev" | "next") => {
-        const targetPage =
-            direction === "prev"
-                ? Math.max(1, page - 1)
-                : Math.min(totalPages, page + 1);
-        if (targetPage !== page) {
-            void loadScenarios(targetPage, true);
-        }
-    };
-
     const handleDelete = async (scenario: TrainingScenarioRecord) => {
         if (!confirm(`Delete scenario "${scenario.name}"? This cannot be undone.`)) {
             return;
@@ -198,6 +183,57 @@ export default function ScenariosPage() {
             });
         }
     };
+
+    // Column definitions for DataTable
+    const columns: DataTableColumn<TrainingScenarioRecord>[] = [
+        {
+            key: "name",
+            header: "Name",
+            render: (scenario) => (
+                <div>
+                    <p className="font-medium text-foreground">{scenario.name}</p>
+                    {scenario.description && (
+                        <p className="text-xs text-muted-foreground truncate max-w-xs">
+                            {scenario.description}
+                        </p>
+                    )}
+                </div>
+            ),
+        },
+        {
+            key: "status",
+            header: "Status",
+            render: (scenario) => getStatusBadge(scenario.status),
+        },
+        {
+            key: "builds",
+            header: "Builds",
+            render: (scenario) => (
+                <span className="text-muted-foreground">
+                    <span className="font-medium">{formatNumber(scenario.builds_ingested)}</span>
+                    <span className="text-slate-400"> / {formatNumber(scenario.builds_total)}</span>
+                </span>
+            ),
+        },
+        {
+            key: "strategy",
+            header: "Strategy",
+            render: (scenario) => (
+                <span className="text-muted-foreground capitalize">
+                    {scenario.splitting_strategy?.replace(/_/g, " ") || "—"}
+                </span>
+            ),
+        },
+        {
+            key: "created",
+            header: "Created",
+            render: (scenario) => (
+                <span className="text-muted-foreground">
+                    {formatDateTime(scenario.created_at)}
+                </span>
+            ),
+        },
+    ];
 
     if (loading) {
         return (
@@ -305,130 +341,39 @@ export default function ScenariosPage() {
                     </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                            <thead className="bg-slate-50 dark:bg-slate-900/40">
-                                <tr>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Name
-                                    </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Status
-                                    </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Builds
-                                    </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Strategy
-                                    </th>
-                                    <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                                        Created
-                                    </th>
-                                    <th className="px-6 py-3" />
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                {scenarios.length === 0 ? (
-                                    <tr>
-                                        <td
-                                            colSpan={6}
-                                            className="px-6 py-12 text-center text-muted-foreground"
-                                        >
-                                            <div className="flex flex-col items-center gap-3">
-                                                <CheckCircle2 className="h-12 w-12 text-slate-300" />
-                                                <p>No dataset versions yet.</p>
-                                                <p className="text-sm">Create your first version using the button above.</p>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    scenarios.map((scenario) => (
-                                        <tr
-                                            key={scenario.id}
-                                            className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                                            onClick={() => router.push(`/scenarios/${scenario.id}`)}
-                                        >
-                                            <td className="px-6 py-4">
-                                                <div>
-                                                    <p className="font-medium text-foreground">{scenario.name}</p>
-                                                    {scenario.description && (
-                                                        <p className="text-xs text-muted-foreground truncate max-w-xs">
-                                                            {scenario.description}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                {getStatusBadge(scenario.status)}
-                                            </td>
-                                            <td className="px-6 py-4 text-muted-foreground">
-                                                <span className="font-medium">{formatNumber(scenario.builds_ingested)}</span>
-                                                <span className="text-slate-400"> / {formatNumber(scenario.builds_total)}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-muted-foreground capitalize">
-                                                {scenario.splitting_strategy?.replace(/_/g, " ") || "—"}
-                                            </td>
-                                            <td className="px-6 py-4 text-muted-foreground">
-                                                {formatDateTime(scenario.created_at)}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDelete(scenario);
-                                                    }}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                    <span className="sr-only">Delete</span>
-                                                </Button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                    <DataTable
+                        columns={columns}
+                        data={scenarios}
+                        total={total}
+                        page={page}
+                        pageSize={PAGE_SIZE}
+                        loading={tableLoading}
+                        emptyMessage="No dataset versions yet."
+                        emptySubMessage="Create your first version using the button above."
+                        emptyIcon={<CheckCircle2 className="h-12 w-12 text-slate-300" />}
+                        itemName="versions"
+                        onPageChange={(p) => loadScenarios(p, true)}
+                        onRowClick={(scenario) => router.push(`/scenarios/${scenario.id}`)}
+                        rowKey={(scenario) => scenario.id}
+                        alwaysShowPagination={true}
+                        actions={(scenario) => (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(scenario);
+                                }}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                <span className="sr-only">Delete</span>
+                            </Button>
+                        )}
+                    />
                 </CardContent>
-                {total > 0 && (
-                    <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4 text-sm text-muted-foreground dark:border-slate-800">
-                        <div>
-                            Showing {pageStart}-{pageEnd} of {total} versions
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            {tableLoading && (
-                                <div className="flex items-center gap-2">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span className="text-xs">Refreshing...</span>
-                                </div>
-                            )}
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handlePageChange("prev")}
-                                    disabled={page === 1 || tableLoading}
-                                >
-                                    Previous
-                                </Button>
-                                <span className="text-xs text-muted-foreground">
-                                    Page {page} of {totalPages}
-                                </span>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handlePageChange("next")}
-                                    disabled={page >= totalPages || tableLoading}
-                                >
-                                    Next
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </Card>
         </div>
     );
 }
+

@@ -17,7 +17,6 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
   ci_provider: "github_actions"
 
 features:
@@ -50,19 +49,10 @@ features:
 
 splitting:
   strategy: "stratified_within_group"
-  group_by: "language_group"  # Groups: backend, fullstack, scripting, other
+  group_by: "language"  # Direct language grouping (python, java, etc.)
   config:
     ratios:
       train: 0.70
       val: 0.15
       test: 0.15
     stratify_by: "outcome"
-    
-# preprocessing:
-#   missing_values_strategy: "mean"  # or "fill", "drop"
-#   normalization_method: "z_score"  # or "min_max", "none"
-
-
-output:
-  format: "parquet"
-  include_metadata: true

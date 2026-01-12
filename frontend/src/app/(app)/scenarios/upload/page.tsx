@@ -2,8 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, RotateCcw, CheckCircle2 } from "lucide-react";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/use-toast";
 import { useUploadBuildSourceWizard } from "./_components/hooks/useUploadDatasetWizard";
 import { UploadForm } from "./_components/UploadForm";
 import { UploadPreview } from "./_components/UploadPreview";
@@ -34,6 +36,17 @@ export default function UploadBuildDataPage() {
         validationStatus,
     } = wizard;
 
+    // Show error toast when error changes
+    useEffect(() => {
+        if (error) {
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: error,
+            });
+        }
+    }, [error]);
+
     const handleBack = () => {
         router.push("/scenarios");
     };
@@ -62,13 +75,6 @@ export default function UploadBuildDataPage() {
 
                 {/* Scrollable Form Content */}
                 <div className="flex-1 overflow-y-auto px-6 py-6">
-                    {/* Error Banner */}
-                    {error && (
-                        <div className="mb-6 p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md dark:bg-red-900/20 dark:border-red-800 dark:text-red-300">
-                            {error}
-                        </div>
-                    )}
-
                     {step === 1 ? (
                         <UploadForm
                             previewExists={!!step1.preview}
@@ -135,7 +141,7 @@ export default function UploadBuildDataPage() {
                                 <Button
                                     onClick={wizard.proceedToStep2}
                                     disabled={!step1.preview || !step1.isMappingValid || uploading}
-                                    className="min-w-[140px]"
+                                    className="min-w-[140px] bg-emerald-600 hover:bg-emerald-700"
                                 >
                                     {uploading ? (
                                         <>

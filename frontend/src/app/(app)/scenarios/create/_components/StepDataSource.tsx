@@ -77,7 +77,6 @@ export function StepDataSource() {
             const params: Record<string, string | boolean | number> = {
                 skip: (pageNum - 1) * PAGE_SIZE,
                 limit: PAGE_SIZE,
-                exclude_bots: true, // Always exclude bots
             };
 
             if (dataSource.date_start) {

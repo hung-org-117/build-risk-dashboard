@@ -327,7 +327,6 @@ def _filter_builds_for_scenario(
     conclusions = get_cfg(
         "conclusions", "builds", "conclusions", ["success", "failure"]
     )
-    exclude_bots = get_cfg("exclude_bots", "builds", "exclude_bots", True)
 
     # Date range handling
     date_start = config_dict.get("date_start")
@@ -386,13 +385,6 @@ def _filter_builds_for_scenario(
             )
         if date_filter:
             build_query["started_at"] = date_filter
-
-    # Exclude bot commits
-    if exclude_bots:
-        build_query["$and"] = [
-            {"actor_login": {"$not": {"$regex": "\\[bot\\]$", "$options": "i"}}},
-            {"actor_login": {"$not": {"$regex": "-bot$", "$options": "i"}}},
-        ]
 
     builds = raw_build_run_repo.find_many(build_query)
 

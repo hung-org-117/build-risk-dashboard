@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from "react";
 
 // =============================================================================
 // Constants - Matching backend enums
@@ -83,19 +83,14 @@ export interface SplittingConfig {
     test_groups: string[];
     val_groups: string[];
     train_groups: string[];
+    // Imbalanced train
+    reduce_label?: number;
+    reduce_ratio: number;
+    // Novelty
+    novelty_group?: string;
+    novelty_label?: number;
 }
 
-export interface PreprocessingConfig {
-    missing_values_strategy: "drop_row" | "fill" | "skip_feature";
-    fill_value: number | string;
-    normalization_method: "z_score" | "min_max" | "robust" | "none";
-    strict_mode: boolean;
-}
-
-export interface OutputConfig {
-    format: "parquet" | "csv" | "pickle";
-    include_metadata: boolean;
-}
 
 export interface PreviewStats {
     total_builds: number;
@@ -128,9 +123,6 @@ export interface WizardState {
     // Step 3: Splitting
     splitting: SplittingConfig;
 
-    // Step 4: Preprocessing & Output
-    preprocessing: PreprocessingConfig;
-    output: OutputConfig;
 
     // Loading states
     isPreviewLoading: boolean;
@@ -149,8 +141,6 @@ interface WizardContextValue {
     setFeatureConfigs: (configs: Record<string, any>) => void;
     setScanConfigs: (configs: Record<string, any>) => void;
     updateSplitting: (updates: Partial<SplittingConfig>) => void;
-    updatePreprocessing: (updates: Partial<PreprocessingConfig>) => void;
-    updateOutput: (updates: Partial<OutputConfig>) => void;
     setIsPreviewLoading: (loading: boolean) => void;
     setIsSubmitting: (submitting: boolean) => void;
     loadFromYaml: (config: YamlConfigInput) => void;
@@ -166,8 +156,20 @@ export interface YamlConfigInput {
         ci_provider?: string;
     };
     features?: { dag_features?: string[]; scan_metrics?: { sonarqube?: string[]; trivy?: string[] }; exclude?: string[] };
-    splitting?: { strategy?: string; group_by?: string; config?: { ratios?: { train?: number; val?: number; test?: number }; stratify_by?: string } };
-    output?: { format?: string; include_metadata?: boolean };
+    splitting?: {
+        strategy?: string;
+        group_by?: string;
+        config?: {
+            ratios?: { train?: number; val?: number; test?: number };
+            stratify_by?: string;
+            test_groups?: string[];
+            val_groups?: string[];
+            reduce_label?: number;
+            reduce_ratio?: number;
+            novelty_group?: string;
+            novelty_label?: number;
+        }
+    };
 }
 
 // =============================================================================
@@ -195,27 +197,20 @@ const initialFeatures: FeatureConfig = {
 
 const initialSplitting: SplittingConfig = {
     strategy: "stratified_within_group",
-    group_by: "language_group",
-    groups: ["backend", "fullstack", "scripting", "other"],
+    group_by: "language", // Default to language
+    groups: [],
     ratios: { train: 0.7, val: 0.15, test: 0.15 },
     stratify_by: "outcome",
     temporal_ordering: true,
     test_groups: [],
     val_groups: [],
     train_groups: [],
+    reduce_label: 1,
+    reduce_ratio: 0.5,
+    novelty_group: undefined,
+    novelty_label: 1,
 };
 
-const initialPreprocessing: PreprocessingConfig = {
-    missing_values_strategy: "drop_row",
-    fill_value: 0,
-    normalization_method: "z_score",
-    strict_mode: false,
-};
-
-const initialOutput: OutputConfig = {
-    format: "parquet",
-    include_metadata: true,
-};
 
 const initialState: WizardState = {
     step: 1,
@@ -228,8 +223,6 @@ const initialState: WizardState = {
     featureConfigs: {},
     scanConfigs: {},
     splitting: initialSplitting,
-    preprocessing: initialPreprocessing,
-    output: initialOutput,
     isPreviewLoading: false,
     isSubmitting: false,
 };
@@ -243,44 +236,38 @@ const WizardContext = createContext<WizardContextValue | null>(null);
 export function WizardProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<WizardState>(initialState);
 
-    const setStep = (step: number) => setState((s) => ({ ...s, step }));
-    const setName = (name: string) => setState((s) => ({ ...s, name }));
-    const setDescription = (description: string) => setState((s) => ({ ...s, description }));
+    const setStep = useCallback((step: number) => setState((s) => ({ ...s, step })), []);
+    const setName = useCallback((name: string) => setState((s) => ({ ...s, name })), []);
+    const setDescription = useCallback((description: string) => setState((s) => ({ ...s, description })), []);
 
-    const updateDataSource = (updates: Partial<DataSourceConfig>) =>
-        setState((s) => ({ ...s, dataSource: { ...s.dataSource, ...updates } }));
+    const updateDataSource = useCallback((updates: Partial<DataSourceConfig>) =>
+        setState((s) => ({ ...s, dataSource: { ...s.dataSource, ...updates } })), []);
 
-    const setPreviewStats = (stats: PreviewStats | null) =>
-        setState((s) => ({ ...s, previewStats: stats }));
+    const setPreviewStats = useCallback((stats: PreviewStats | null) =>
+        setState((s) => ({ ...s, previewStats: stats })), []);
 
-    const setPreviewRepos = (repos: { id: string; full_name: string }[]) =>
-        setState((s) => ({ ...s, previewRepos: repos }));
+    const setPreviewRepos = useCallback((repos: { id: string; full_name: string }[]) =>
+        setState((s) => ({ ...s, previewRepos: repos })), []);
 
-    const updateFeatures = (updates: Partial<FeatureConfig>) =>
-        setState((s) => ({ ...s, features: { ...s.features, ...updates } }));
+    const updateFeatures = useCallback((updates: Partial<FeatureConfig>) =>
+        setState((s) => ({ ...s, features: { ...s.features, ...updates } })), []);
 
-    const setFeatureConfigs = (configs: Record<string, any>) =>
-        setState((s) => ({ ...s, featureConfigs: configs }));
+    const setFeatureConfigs = useCallback((configs: Record<string, any>) =>
+        setState((s) => ({ ...s, featureConfigs: configs })), []);
 
-    const setScanConfigs = (configs: Record<string, any>) =>
-        setState((s) => ({ ...s, scanConfigs: configs }));
+    const setScanConfigs = useCallback((configs: Record<string, any>) =>
+        setState((s) => ({ ...s, scanConfigs: configs })), []);
 
-    const updateSplitting = (updates: Partial<SplittingConfig>) =>
-        setState((s) => ({ ...s, splitting: { ...s.splitting, ...updates } }));
+    const updateSplitting = useCallback((updates: Partial<SplittingConfig>) =>
+        setState((s) => ({ ...s, splitting: { ...s.splitting, ...updates } })), []);
 
-    const updatePreprocessing = (updates: Partial<PreprocessingConfig>) =>
-        setState((s) => ({ ...s, preprocessing: { ...s.preprocessing, ...updates } }));
+    const setIsPreviewLoading = useCallback((loading: boolean) =>
+        setState((s) => ({ ...s, isPreviewLoading: loading })), []);
 
-    const updateOutput = (updates: Partial<OutputConfig>) =>
-        setState((s) => ({ ...s, output: { ...s.output, ...updates } }));
+    const setIsSubmitting = useCallback((submitting: boolean) =>
+        setState((s) => ({ ...s, isSubmitting: submitting })), []);
 
-    const setIsPreviewLoading = (loading: boolean) =>
-        setState((s) => ({ ...s, isPreviewLoading: loading }));
-
-    const setIsSubmitting = (submitting: boolean) =>
-        setState((s) => ({ ...s, isSubmitting: submitting }));
-
-    const loadFromYaml = (config: YamlConfigInput) => {
+    const loadFromYaml = useCallback((config: YamlConfigInput) => {
         setState((s) => ({
             ...s,
             name: config.scenario?.name || s.name,
@@ -315,38 +302,50 @@ export function WizardProvider({ children }: { children: ReactNode }) {
                 },
                 stratify_by: config.splitting?.config?.stratify_by || s.splitting.stratify_by,
             },
-            output: {
-                ...s.output,
-                format: (config.output?.format as any) || s.output.format,
-                include_metadata: config.output?.include_metadata ?? s.output.include_metadata,
-            },
         }));
-    };
+    }, []);
 
-    const resetState = () => setState(initialState);
+    const resetState = useCallback(() => setState(initialState), []);
+
+    const value = useMemo(
+        () => ({
+            state,
+            setStep,
+            setName,
+            setDescription,
+            updateDataSource,
+            setPreviewStats,
+            setPreviewRepos,
+            updateFeatures,
+            setFeatureConfigs,
+            setScanConfigs,
+            updateSplitting,
+            setIsPreviewLoading,
+            setIsSubmitting,
+            loadFromYaml,
+            resetState,
+        }),
+        [
+            state,
+            setStep,
+            setName,
+            setDescription,
+            updateDataSource,
+            setPreviewStats,
+            setPreviewRepos,
+            updateFeatures,
+            setFeatureConfigs,
+            setScanConfigs,
+            updateSplitting,
+            setIsPreviewLoading,
+            setIsSubmitting,
+            loadFromYaml,
+            resetState,
+        ]
+    );
 
     return (
-        <WizardContext.Provider
-            value={{
-                state,
-                setStep,
-                setName,
-                setDescription,
-                updateDataSource,
-                setPreviewStats,
-                setPreviewRepos,
-                updateFeatures,
-                setFeatureConfigs,
-                setScanConfigs,
-                updateSplitting,
-                updatePreprocessing,
-                updateOutput,
-                setIsPreviewLoading,
-                setIsSubmitting,
-                loadFromYaml,
-                resetState,
-            }}
-        >
+        <WizardContext.Provider value={value}>
             {children}
         </WizardContext.Provider>
     );

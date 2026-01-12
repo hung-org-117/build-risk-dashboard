@@ -227,7 +227,7 @@ start_scenario_ingestion
 │   ├─ languages (from RawRepository.main_lang)
 │   ├─ conclusions (success, failure)
 │   ├─ ci_provider
-│   └─ exclude_bots
+│   └─ conclusions (success, failure)
 │
 ├─ Create TrainingIngestionBuild for each matched build
 ├─ Update status → INGESTING
@@ -247,8 +247,8 @@ DataSourceConfig = {
     date_start: "2024-01-01",
     date_end: "2024-12-31",
     conclusions: ["success", "failure"],
+    conclusions: ["success", "failure"],
     ci_provider: "all" | "github_actions" | "circleci",
-    exclude_bots: True,
 }
 ```
 

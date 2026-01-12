@@ -107,6 +107,15 @@ export function showErrorToast(title: string, description: string): boolean {
     return false;
 }
 
+// Request interceptor to handle common headers and FormData
+api.interceptors.request.use((config) => {
+    // If sending FormData, let the browser set the Content-Type with boundary
+    if (config.data instanceof FormData) {
+        delete config.headers["Content-Type"];
+    }
+    return config;
+});
+
 // Response interceptor to unwrap standardized response format
 api.interceptors.response.use(
     (response) => {

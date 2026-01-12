@@ -222,7 +222,6 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         languages: Optional[List[str]] = None,
         conclusions: Optional[List[str]] = None,
         ci_provider: Optional[str] = None,
-        exclude_bots: bool = True,
         repo_ids: Optional[List[ObjectId]] = None,
         skip: int = 0,
         limit: int = 50,
@@ -252,10 +251,6 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         # CI provider filter
         if ci_provider and ci_provider != "all":
             query["provider"] = ci_provider
-
-        # Exclude bot commits
-        if exclude_bots:
-            query["is_bot_commit"] = {"$ne": True}
 
         # Repo IDs filter (for language filtering - requires join with raw_repositories)
         if repo_ids:

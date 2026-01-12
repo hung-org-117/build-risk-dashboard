@@ -19,20 +19,11 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
 
 splitting:
   strategy: "leave_one_out"
-  group_by: "language_group"
+  group_by: "language"  # Direct language grouping
   config:
-    test_groups: ["backend"]      # Python, Java, Go, Rust → mapped to "backend"
-    val_groups: ["fullstack"]     # JavaScript → mapped to "fullstack"  
-    train_groups: ["scripting", "other"]
-    # Alternative: specify exact languages
-    # test_languages: ["python"]
-    # val_languages: ["javascript"]
-    # train_languages: ["java", "go", "rust"]
-
-output:
-  format: "parquet"
-  include_metadata: true
+    test_groups: ["python"]                # Python → Test
+    val_groups: ["javascript", "typescript"]  # JS/TS → Validation
+    train_groups: ["java", "go", "rust"]   # The rest → Train

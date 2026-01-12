@@ -44,7 +44,7 @@ def to_response(source: BuildSource) -> BuildSourceResponse:
         columns=source.columns,
         mapped_fields=source.mapped_fields,
         preview=source.preview,
-        ci_provider=source.ci_provider.value if source.ci_provider else None,
+        ci_provider=source.ci_provider if source.ci_provider else None,
         validation_status=source.validation_status,
         validation_progress=source.validation_progress,
         validation_stats=source.validation_stats,
@@ -163,8 +163,30 @@ def start_validation(
         raise HTTPException(status_code=404, detail="Build source not found")
 
     # Check if validation is already running
-    if source.validation_status.value == "validating":
+    if source.validation_status == "validating":
         raise HTTPException(status_code=400, detail="Validation already in progress")
+
+    # Validate required fields
+    if not source.name:
+        raise HTTPException(status_code=400, detail="Dataset name is required")
+    if not source.mapped_fields or not source.mapped_fields.build_id:
+        raise HTTPException(
+            status_code=400, detail="Build ID column mapping is required"
+        )
+    if not source.mapped_fields.repo_name:
+        raise HTTPException(
+            status_code=400, detail="Repository Name column mapping is required"
+        )
+
+    # Check if CI provider is set (either global or mapped)
+    has_ci_provider = bool(source.ci_provider) or (
+        source.mapped_fields and bool(source.mapped_fields.ci_provider)
+    )
+    if not has_ci_provider:
+        raise HTTPException(
+            status_code=400,
+            detail="CI Provider is required (either selected or mapped)",
+        )
 
     # Queue the validation task
     from app.tasks.source_validation import validate_build_source_task
@@ -191,7 +213,7 @@ def get_source_repos(
             source_id=str(s.source_id),
             raw_repo_id=str(s.raw_repo_id),
             full_name=s.full_name,
-            ci_provider=s.ci_provider.value if s.ci_provider else "github_actions",
+            ci_provider=s.ci_provider if s.ci_provider else "github_actions",
             builds_total=s.builds_total,
             builds_found=s.builds_found,
             builds_not_found=s.builds_not_found,

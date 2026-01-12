@@ -327,8 +327,21 @@ class TrainingScenarioService:
         res = start_scenario_processing.delay(scenario_id)
         return {"status": "queued", "task_id": res.id}
 
-    def generate_dataset(self, scenario_id: str, user_id: str) -> Dict[str, Any]:
-        """Phase 3: Generate Dataset (Split + Download)."""
+    def generate_dataset(
+        self,
+        scenario_id: str,
+        user_id: str,
+        preprocessing_config: Optional[Dict[str, Any]] = None,
+        output_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Phase 3: Generate Dataset (Split + Download).
+
+        Args:
+            scenario_id: Scenario ID
+            user_id: User ID for permission check
+            preprocessing_config: Optional override for preprocessing settings
+            output_config: Optional override for output settings
+        """
         from app.tasks.training_processing import generate_scenario_dataset
 
         scenario = self.scenario_repo.find_by_id(scenario_id)
@@ -347,7 +360,11 @@ class TrainingScenarioService:
                 ),
             )
 
-        res = generate_scenario_dataset.delay(scenario_id)
+        res = generate_scenario_dataset.delay(
+            scenario_id,
+            preprocessing_config=preprocessing_config,
+            output_config=output_config,
+        )
         return {"status": "queued", "task_id": res.id}
 
     # =========================================================================

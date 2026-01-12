@@ -775,10 +775,18 @@ def reprocess_failed_builds(
 def generate_scenario_dataset(
     self: PipelineTask,
     scenario_id: str,
+    preprocessing_config: Optional[Dict[str, Any]] = None,
+    output_config: Optional[Dict[str, Any]] = None,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
     Generate dataset - User-triggered split and export.
+
+    Args:
+        scenario_id: Scenario ID
+        preprocessing_config: Optional override for preprocessing settings
+        output_config: Optional override for output settings
+        correlation_id: Correlation ID for logging
 
     Validates that feature extraction is complete, then:
     - Collects features + scan_metrics from completed builds
@@ -856,17 +864,21 @@ def generate_scenario_dataset(
 
         df = _build_split_dataframe(enrichment_builds, raw_repos, self.db)
 
-        # Apply preprocessing
-        preprocessing_config = getattr(scenario, "preprocessing_config", None)
-        if preprocessing_config:
+        # Apply preprocessing (use passed config or fallback to scenario's config)
+        config_to_use = preprocessing_config
+        if not config_to_use:
+            entity_config = getattr(scenario, "preprocessing_config", None)
+            if entity_config:
+                config_to_use = (
+                    entity_config
+                    if isinstance(entity_config, dict)
+                    else entity_config.model_dump()
+                )
+
+        if config_to_use:
             from app.services.preprocessing_service import PreprocessingService
 
-            config_dict = (
-                preprocessing_config
-                if isinstance(preprocessing_config, dict)
-                else preprocessing_config.__dict__
-            )
-            preprocessing_service = PreprocessingService.from_dict(config_dict)
+            preprocessing_service = PreprocessingService.from_dict(config_to_use)
             df = preprocessing_service.preprocess(df)
             logger.info(f"{corr_prefix} Applied preprocessing")
 
@@ -1259,7 +1271,7 @@ def finalize_scan_dispatch(
 
 
 def _build_split_dataframe(
-    enrichment_builds: List[Any],
+    enrichment_builds: List[TrainingEnrichmentBuild],
     raw_repos: Dict[str, Any],
     db,
 ) -> pd.DataFrame:

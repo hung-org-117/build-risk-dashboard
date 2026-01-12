@@ -246,7 +246,10 @@ def generate_dataset(
 ) -> Dict[str, Any]:
     """Generate dataset (Phase 3 - Split & Export)."""
     service = TrainingScenarioService(db)
-    return service.generate_dataset(scenario_id, str(current_user["_id"]))
+    return service.generate_dataset(
+        scenario_id,
+        str(current_user["_id"]),
+    )
 
 
 # ============================================================================

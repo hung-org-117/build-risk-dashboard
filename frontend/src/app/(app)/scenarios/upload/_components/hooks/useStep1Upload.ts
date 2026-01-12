@@ -1,9 +1,40 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import Papa from "papaparse";
+import { z } from "zod";
 import { CI_PROVIDER_OPTIONS, CIProvider } from "@/types";
 import type { CSVPreview, MappingKey, CIProviderMode } from "../types";
+
+// Validation Schema using Zod
+const step1Schema = z.object({
+    name: z.string().trim().min(1, { message: "Dataset Name is required" }),
+    mappings: z.object({
+        build_id: z.string().min(1, { message: "Build ID mapping is required" }),
+        repo_name: z.string().min(1, { message: "Repo Name mapping is required" }),
+    }),
+    ciProviderMode: z.enum(["single", "column"] as const),
+    ciProvider: z.string().optional(),
+    ciProviderColumn: z.string().optional(),
+}).superRefine((data, ctx) => {
+    if (data.ciProviderMode === "single") {
+        if (!data.ciProvider) {
+            ctx.addIssue({
+                code: "custom",
+                message: "CI Provider must be selected",
+                path: ["ciProvider"],
+            });
+        }
+    } else {
+        if (!data.ciProviderColumn) {
+            ctx.addIssue({
+                code: "custom",
+                message: "CI Provider column must be mapped",
+                path: ["ciProviderColumn"],
+            });
+        }
+    }
+});
 
 interface UseStep1UploadReturn {
     file: File | null;
@@ -63,7 +94,17 @@ export function useStep1Upload(): UseStep1UploadReturn {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const isMappingValid = Boolean(mappings.build_id && mappings.repo_name);
+    // Validate using Zod schema
+    const isMappingValid = useMemo(() => {
+        const result = step1Schema.safeParse({
+            name,
+            mappings,
+            ciProviderMode,
+            ciProvider,
+            ciProviderColumn,
+        });
+        return result.success;
+    }, [name, mappings, ciProviderMode, ciProvider, ciProviderColumn]);
 
     const resetStep1 = useCallback(() => {
         setFile(null);

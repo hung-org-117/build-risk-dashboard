@@ -18,16 +18,11 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
 
 splitting:
   strategy: "leave_two_out"
-  group_by: "language_group"
+  group_by: "language"  # Direct language grouping
   config:
-    test_groups: ["backend", "scripting"]    # Python/Java/Go + Bash/Shell → Test
-    val_groups: ["fullstack"]                 # JavaScript/TypeScript → Val
-    train_groups: ["other"]                   # Còn lại → Train
-
-output:
-  format: "csv"  # Use CSV for easier inspection
-  include_metadata: true
+    test_groups: ["python", "java"]       # Python + Java → Test
+    val_groups: ["javascript"]            # JavaScript → Val
+    train_groups: ["go", "rust", "typescript"]  # Rest → Train

@@ -25,83 +25,83 @@ display(df.head())
 
 
 # Lọc cột cần thiết
-GROUP_COL = "gh_project_name"
-TIME_COL = "gh_build_started_at"
-BUILD_ID_COL = "tr_build_id"
-PREV_BUILD_COL = "tr_prev_build"
+GROUP_COL = "repo_full_name"
+TIME_COL = "build_started_at"
+BUILD_ID_COL = "build_id"
+PREV_BUILD_COL = "history_prev_build_id"
 LABEL_COL = "risk_label_numeric"
 
 # Temporal features (chuỗi build gần nhất)
 TEMPORAL_FEATURES = [
-    "is_prev_failed",
-    "prev_fail_streak",
-    "fail_rate_last_10",
-    "avg_src_churn_last_5",
-    "time_since_prev_build"
+    "history_prev_failed",
+    "history_fail_streak",
+    "history_fail_rate_10",
+    "history_avg_churn_5",
+    "history_days_since_prev"
 ]
 
 # Static features (sau build, trước deploy)
 STATIC_FEATURES = [
     "git_diff_src_churn",
-    "gh_diff_files_added",
-    "gh_diff_files_deleted",
-    "gh_diff_files_modified",
-    "gh_diff_tests_added",
-    "gh_diff_tests_deleted",
-    "gh_diff_src_files",
-    "gh_diff_doc_files",
-    "gh_diff_other_files",
-    "gh_num_commits_on_files_touched",
-    "files_modified_ratio",
-    "change_entropy",
-    "churn_ratio_vs_avg",
-    "gh_sloc",
-    "gh_repo_age",
-    "gh_repo_num_commits",
-    "gh_test_lines_per_kloc",
-    "gh_test_cases_per_kloc",
-    "gh_asserts_cases_per_kloc",
-    "gh_team_size",
+    "git_diff_files_added",
+    "git_diff_files_deleted",
+    "git_diff_files_modified",
+    "git_diff_tests_added",
+    "git_diff_tests_deleted",
+    "git_diff_src_files",
+    "git_diff_doc_files",
+    "git_diff_other_files",
+    "git_file_commit_density",
+    "git_files_modified_ratio",
+    "git_change_entropy",
+    "git_churn_vs_avg",
+    "repo_sloc",
+    "repo_age_days",
+    "repo_total_commits",
+    "repo_test_lines_per_kloc",
+    "repo_test_cases_per_kloc",
+    "repo_asserts_per_kloc",
+    "team_size",
     "author_ownership",
-    "is_new_contributor",
-    "days_since_last_author_commit",
-    "tr_log_num_jobs",
-    "tr_log_tests_run_sum",
-    "tr_log_tests_failed_sum",
-    "tr_log_tests_skipped_sum",
-    "tr_log_tests_ok_sum",
-    "tr_log_testduration_sum",
-    "tr_log_tests_fail_rate",
-    "tr_duration",
-    "tr_status_num",
-    "build_time_sin",
-    "build_time_cos",
-    "build_hour_risk_score"
+    "author_is_new",
+    "author_days_since_commit",
+    "log_jobs_count",
+    "log_tests_run",
+    "log_tests_failed",
+    "log_tests_skipped",
+    "log_tests_passed",
+    "log_test_duration_sec",
+    "log_tests_fail_rate",
+    "build_duration_sec",
+    "build_status_num",
+    "build_hour_sin",
+    "build_hour_cos",
+    "build_hour_risk"
 ]
 
 LOG1P_FEATURES = [
     "git_diff_src_churn",
-    "gh_diff_files_added",
-    "gh_diff_files_deleted",
-    "gh_diff_files_modified",
-    "gh_diff_tests_added",
-    "gh_diff_tests_deleted",
-    "gh_diff_src_files",
-    "gh_diff_doc_files",
-    "gh_diff_other_files",
-    "gh_num_commits_on_files_touched",
-    "gh_sloc",
-    "gh_repo_age",
-    "gh_repo_num_commits",
-    "tr_log_num_jobs",
-    "tr_log_tests_run_sum",
-    "tr_log_tests_failed_sum",
-    "tr_log_tests_skipped_sum",
-    "tr_log_tests_ok_sum",
-    "tr_log_testduration_sum",
-    "tr_duration",
-    "time_since_prev_build",
-    "days_since_last_author_commit"
+    "git_diff_files_added",
+    "git_diff_files_deleted",
+    "git_diff_files_modified",
+    "git_diff_tests_added",
+    "git_diff_tests_deleted",
+    "git_diff_src_files",
+    "git_diff_doc_files",
+    "git_diff_other_files",
+    "git_file_commit_density",
+    "repo_sloc",
+    "repo_age_days",
+    "repo_total_commits",
+    "log_jobs_count",
+    "log_tests_run",
+    "log_tests_failed",
+    "log_tests_skipped",
+    "log_tests_passed",
+    "log_test_duration_sec",
+    "build_duration_sec",
+    "history_days_since_prev",
+    "author_days_since_commit"
 ]
 
 # Dataset cho LSTM (sequence theo tr_prev_build)

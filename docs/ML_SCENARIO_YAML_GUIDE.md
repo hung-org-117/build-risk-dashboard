@@ -62,12 +62,9 @@ Cấu hình lọc repositories và builds từ database.
 
 ### Builds Filter
 
-| Field | Type | Mô tả |
-|-------|------|-------|
 | `date_range.start` | date | Ngày bắt đầu (YYYY-MM-DD) |
 | `date_range.end` | date | Ngày kết thúc |
 | `conclusions` | list | `["success", "failure"]` |
-| `exclude_bots` | bool | Loại bỏ bot commits (default: true) |
 
 ```yaml
 data_source:
@@ -79,7 +76,6 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
   ci_provider: "github_actions"  # or "all", "circleci"
 ```
 
@@ -186,7 +182,7 @@ features:
 ```yaml
 splitting:
   strategy: "stratified_within_group"
-  group_by: "language_group"
+  group_by: "language"  # Direct language (python, java, etc.)
   config:
     ratios:
       train: 0.70
@@ -199,11 +195,11 @@ splitting:
 ```yaml
 splitting:
   strategy: "leave_one_out"
-  group_by: "language_group"
+  group_by: "language"
   config:
-    test_groups: ["backend"]       # Python, Java, Go, Rust
-    val_groups: ["fullstack"]      # JavaScript
-    # Remaining groups → train
+    test_groups: ["python"]              # Python → Test
+    val_groups: ["javascript"]           # JS → Validation
+    train_groups: ["java", "go", "rust"] # Rest → Train
 ```
 
 #### Imbalanced Train
@@ -237,6 +233,10 @@ splitting:
 ---
 
 ## 📌 Section: `preprocessing`
+
+> [!NOTE]
+> Preprocessing is now configured at **dataset generation time**, not in the YAML file.
+> When you click "Generate Dataset" on a PROCESSED scenario, you can choose preprocessing options.
 
 | Field | Type | Values | Default |
 |-------|------|--------|---------|
@@ -305,7 +305,6 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
   ci_provider: "github_actions"
 
 features:
@@ -326,10 +325,11 @@ splitting:
       test: 0.15
     stratify_by: "outcome"
 
-preprocessing:
-  missing_values_strategy: "fill"
-  fill_value: 0
-  normalization_method: "z_score"
+# NOTE: Preprocessing is configured at dataset generation time via API/UI
+# preprocessing:
+#   missing_values_strategy: "fill"
+#   fill_value: 0
+#   normalization_method: "z_score"
 
 output:
   format: "parquet"

@@ -246,6 +246,109 @@ export function StepSplitting() {
                         )}
                     </div>
 
+                    {/* Leave One/Two Out Settings */}
+                    {(splitting.strategy === "leave_one_out" || splitting.strategy === "leave_two_out") && (
+                        <div className="space-y-3 col-span-2 border-t pt-4">
+                            <h4 className="text-sm font-medium">Validation Configuration</h4>
+                            <div className="grid gap-6 md:grid-cols-2">
+                                <div className="space-y-3">
+                                    <Label>Test Group(s) (Required)</Label>
+                                    <Input
+                                        placeholder="e.g. python"
+                                        value={splitting.test_groups?.join(", ") || ""}
+                                        onChange={(e) => updateSplitting({
+                                            test_groups: e.target.value.split(",").map(s => s.trim()).filter(Boolean)
+                                        })}
+                                    />
+                                    <p className="text-xs text-muted-foreground">Comma separated group values</p>
+                                </div>
+                                {splitting.strategy === "leave_two_out" && (
+                                    <div className="space-y-3">
+                                        <Label>Validation Group(s) (Required)</Label>
+                                        <Input
+                                            placeholder="e.g. javascript"
+                                            value={splitting.val_groups?.join(", ") || ""}
+                                            onChange={(e) => updateSplitting({
+                                                val_groups: e.target.value.split(",").map(s => s.trim()).filter(Boolean)
+                                            })}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Imbalanced Train Settings */}
+                    {splitting.strategy === "imbalanced_train" && (
+                        <div className="space-y-3 col-span-2 border-t pt-4">
+                            <h4 className="text-sm font-medium">Imbalance Configuration</h4>
+                            <div className="grid gap-6 md:grid-cols-2">
+                                <div className="space-y-3">
+                                    <Label>Reduce Label</Label>
+                                    <Select
+                                        value={splitting.reduce_label?.toString() ?? "1"}
+                                        onValueChange={(value) => updateSplitting({ reduce_label: parseInt(value) })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="1">Failure (1)</SelectItem>
+                                            <SelectItem value="0">Success (0)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-3">
+                                    <Label>Reduce Ratio</Label>
+                                    <div className="flex items-center gap-4">
+                                        <Slider
+                                            value={[splitting.reduce_ratio * 100]}
+                                            onValueChange={(val) => updateSplitting({ reduce_ratio: val[0] / 100 })}
+                                            max={100}
+                                            step={1}
+                                            className="flex-1"
+                                        />
+                                        <span className="w-12 text-sm font-mono">
+                                            {(splitting.reduce_ratio * 100).toFixed(0)}%
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Extreme Novelty Settings */}
+                    {splitting.strategy === "extreme_novelty" && (
+                        <div className="space-y-3 col-span-2 border-t pt-4">
+                            <h4 className="text-sm font-medium">Novelty Configuration</h4>
+                            <div className="grid gap-6 md:grid-cols-2">
+                                <div className="space-y-3">
+                                    <Label>Novelty Group (Required)</Label>
+                                    <Input
+                                        placeholder="e.g. python"
+                                        value={splitting.novelty_group || ""}
+                                        onChange={(e) => updateSplitting({ novelty_group: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-3">
+                                    <Label>Novelty Label</Label>
+                                    <Select
+                                        value={splitting.novelty_label?.toString() ?? "1"}
+                                        onValueChange={(value) => updateSplitting({ novelty_label: parseInt(value) })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="1">Failure (1)</SelectItem>
+                                            <SelectItem value="0">Success (0)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Ratios */}
                     <div className="space-y-6 pt-4 border-t">
                         <Label className="text-base">Split Ratios</Label>

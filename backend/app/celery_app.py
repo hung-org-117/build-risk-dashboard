@@ -101,6 +101,11 @@ celery_app.conf.update(
             Exchange("buildguard"),
             routing_key="pipeline.processing",
         ),
+        Queue(
+            "source_validation",
+            Exchange("buildguard"),
+            routing_key="source_validation",
+        ),
     ],
     broker_connection_retry_on_startup=True,
     # Celery Beat Schedule for periodic tasks

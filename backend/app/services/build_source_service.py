@@ -83,7 +83,7 @@ class BuildSourceService:
             setup_step=1,
         )
 
-        created = self.build_source_repo.create(source)
+        created = self.build_source_repo.insert_one(source)
         return created
 
     def get(self, source_id: str) -> Optional[BuildSource]:
@@ -119,11 +119,11 @@ class BuildSourceService:
         if description is not None:
             update_data["description"] = description
         if mapped_fields is not None:
-            update_data["mapped_fields"] = SourceMapping(**mapped_fields)
+            update_data["mapped_fields"] = SourceMapping(**mapped_fields).model_dump()
         if ci_provider is not None:
-            update_data["ci_provider"] = CIProvider(ci_provider)
+            update_data["ci_provider"] = CIProvider(ci_provider).value
 
-        return self.build_source_repo.update(source_id, **update_data)
+        return self.build_source_repo.update_one(source_id, update_data)
 
     def delete(self, source_id: str) -> bool:
         """Delete a build source and its related data."""
@@ -143,17 +143,19 @@ class BuildSourceService:
                 pass
 
         # Delete source record
-        return self.build_source_repo.delete(source_id)
+        return self.build_source_repo.delete_one(source_id)
 
     def start_validation(self, source_id: str, task_id: str) -> Optional[BuildSource]:
         """Mark source as validating and set task ID."""
-        return self.build_source_repo.update(
+        return self.build_source_repo.update_one(
             source_id,
-            validation_status=ValidationStatus.VALIDATING,
-            validation_task_id=task_id,
-            validation_started_at=datetime.utcnow(),
-            validation_progress=0,
-            validation_error=None,
+            {
+                "validation_status": ValidationStatus.VALIDATING,
+                "validation_task_id": task_id,
+                "validation_started_at": datetime.utcnow(),
+                "validation_progress": 0,
+                "validation_error": None,
+            },
         )
 
     def complete_validation(
@@ -164,23 +166,25 @@ class BuildSourceService:
     ) -> Optional[BuildSource]:
         """Mark validation as completed or failed."""
         status = ValidationStatus.FAILED if error else ValidationStatus.COMPLETED
-        return self.build_source_repo.update(
+        return self.build_source_repo.update_one(
             source_id,
-            validation_status=status,
-            validation_completed_at=datetime.utcnow(),
-            validation_progress=100,
-            validation_stats=stats,
-            validation_error=error,
-            setup_step=2 if not error else 1,
+            {
+                "validation_status": status,
+                "validation_completed_at": datetime.utcnow(),
+                "validation_progress": 100,
+                "validation_stats": stats,
+                "validation_error": error,
+                "setup_step": 2 if not error else 1,
+            },
         )
 
     def update_validation_progress(
         self, source_id: str, progress: int
     ) -> Optional[BuildSource]:
         """Update validation progress percentage."""
-        return self.build_source_repo.update(
+        return self.build_source_repo.update_one(
             source_id,
-            validation_progress=min(100, max(0, progress)),
+            {"validation_progress": min(100, max(0, progress))},
         )
 
     def get_repo_stats(self, source_id: str) -> List[Any]:

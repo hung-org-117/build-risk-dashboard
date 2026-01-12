@@ -113,11 +113,7 @@ export const buildSourcesApi = {
             formData.append("description", options.description);
         }
 
-        const response = await api.post<BuildSourceRecord>("/build-sources", formData, {
-            headers: {
-                "Content-Type": "multipart/form-data",
-            },
-        });
+        const response = await api.post<BuildSourceRecord>("/build-sources", formData);
 
         return response.data;
     },

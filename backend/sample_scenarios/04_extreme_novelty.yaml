@@ -18,20 +18,15 @@ data_source:
       start: "2024-01-01"
       end: "2024-12-31"
     conclusions: ["success", "failure"]
-    exclude_bots: true
 
 splitting:
   strategy: "extreme_novelty"
-  group_by: "language_group"
+  group_by: "language"  # Direct language grouping
   config:
-    novelty_group: "backend"     # Python maps to "backend" group
+    novelty_group: "python"       # Python failures → Test only
     novelty_label: 1             # Label 1 = failure
     # All samples with (group=backend AND label=1) → Test
     # Remaining samples split for train/val
     ratios:
       train: 0.85
       val: 0.15
-
-output:
-  format: "parquet"
-  include_metadata: true

@@ -175,7 +175,7 @@ def read_csv_chunks(
         chunk_df["repo_name"] = chunk_df["repo_name"].astype(str).str.strip()
 
         # Filter invalid repo format
-        valid_pattern = r"^[\\w.-]+/[\\w.-]+$"
+        valid_pattern = r"^[\w.-]+/[\w.-]+$"
         chunk_df = chunk_df[chunk_df["repo_name"].str.match(valid_pattern, na=False)]
 
         # Filter to only supported CI providers

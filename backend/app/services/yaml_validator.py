@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -34,7 +34,7 @@ class SplitStrategyEnum(str, Enum):
 class GroupByDimensionEnum(str, Enum):
     """Valid group_by dimensions."""
 
-    LANGUAGE_GROUP = "language_group"
+    LANGUAGE = "language"
     PERCENTAGE_OF_BUILDS_BEFORE = "percentage_of_builds_before"
     NUMBER_OF_BUILDS_BEFORE = "number_of_builds_before"
     TIME_OF_DAY = "time_of_day"
@@ -227,7 +227,7 @@ class SplittingSchema(BaseModel):
         ..., description="Splitting strategy (required)"
     )
     group_by: GroupByDimensionEnum = Field(
-        default=GroupByDimensionEnum.LANGUAGE_GROUP,
+        default=GroupByDimensionEnum.LANGUAGE,
         description="Dimension to group by",
     )
     config: SplittingConfigSchema = Field(default_factory=SplittingConfigSchema)
@@ -256,36 +256,6 @@ class SplittingSchema(BaseModel):
         return self
 
 
-class PreprocessingSchema(BaseModel):
-    """Preprocessing configuration."""
-
-    missing_values_strategy: MissingValuesStrategyEnum = Field(
-        default=MissingValuesStrategyEnum.DROP_ROW,
-        description="Strategy for handling missing values",
-    )
-    fill_value: Union[int, float, str] = Field(
-        default=0, description="Value to fill (if strategy=fill)"
-    )
-    normalization_method: NormalizationMethodEnum = Field(
-        default=NormalizationMethodEnum.Z_SCORE,
-        description="Normalization method",
-    )
-    strict_mode: bool = Field(
-        default=False, description="Fail if any feature is missing"
-    )
-
-
-class OutputSchema(BaseModel):
-    """Output configuration."""
-
-    format: OutputFormatEnum = Field(
-        default=OutputFormatEnum.PARQUET, description="Output file format"
-    )
-    include_metadata: bool = Field(
-        default=True, description="Include metadata in output"
-    )
-
-
 class MLScenarioYAMLSchema(BaseModel):
     """
     Complete ML Scenario YAML Schema.
@@ -306,14 +276,6 @@ class MLScenarioYAMLSchema(BaseModel):
     )
     splitting: SplittingSchema = Field(
         ..., description="Splitting configuration (required)"
-    )
-    preprocessing: PreprocessingSchema = Field(
-        default_factory=PreprocessingSchema,
-        description="Preprocessing config (optional)",
-    )
-    output: OutputSchema = Field(
-        default_factory=OutputSchema,
-        description="Output format (optional)",
     )
 
 
@@ -585,7 +547,7 @@ class YAMLValidatorService:
                             "name": "group_by",
                             "type": "enum",
                             "required": False,
-                            "default": "language_group",
+                            "default": "language",
                             "values": [e.value for e in GroupByDimensionEnum],
                             "description": "Dimension for grouping builds",
                         },

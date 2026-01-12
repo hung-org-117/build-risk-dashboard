@@ -63,8 +63,6 @@ from .training_scenario import (
     DataSourceConfig,
     FeatureConfig,
     GroupByDimension,
-    OutputConfig,
-    PreprocessingConfig,
     ScenarioStatus,
     SplitStrategy,
     SplittingConfig,
@@ -91,8 +89,6 @@ __all__ = [
     "DataSourceConfig",
     "FeatureConfig",
     "SplittingConfig",
-    "PreprocessingConfig",
-    "OutputConfig",
     "SplitStrategy",
     "GroupByDimension",
     # Ingestion & Enrichment

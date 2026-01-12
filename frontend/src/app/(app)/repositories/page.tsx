@@ -25,6 +25,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { toast } from "@/components/ui/use-toast";
 import { useSSE } from "@/contexts/sse-context";
 import { reposApi } from "@/lib/api";
@@ -118,8 +119,7 @@ export default function AdminReposPage() {
 
   const [deleteLoading, setDeleteLoading] = useState<Record<string, boolean>>({});
 
-  const handleDelete = async (repo: RepositoryRecord, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = async (repo: RepositoryRecord) => {
     if (deleteLoading[repo.id]) return;
 
     // Confirmation dialog
@@ -140,19 +140,60 @@ export default function AdminReposPage() {
     }
   };
 
-  const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
-  const pageStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const pageEnd = total === 0 ? 0 : Math.min(page * PAGE_SIZE, total);
-
-  const handlePageChange = (direction: "prev" | "next") => {
-    const targetPage =
-      direction === "prev"
-        ? Math.max(1, page - 1)
-        : Math.min(totalPages, page + 1);
-    if (targetPage !== page) {
-      void loadRepositories(targetPage, true);
+  const getRepoStatusBadge = (status: string) => {
+    switch (status) {
+      case "queued":
+        return <Badge variant="secondary">Queued</Badge>;
+      case "fetching":
+        return <Badge variant="default" className="bg-cyan-500 hover:bg-cyan-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Fetching</Badge>;
+      case "ingesting":
+        return <Badge variant="default" className="bg-blue-500 hover:bg-blue-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Ingesting</Badge>;
+      case "ingestion_complete":
+        return <Badge variant="default" className="bg-green-500 hover:bg-green-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Ingested</Badge>;
+      case "ingestion_partial":
+        return <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">Ingestion Partial</Badge>;
+      case "processing":
+        return <Badge variant="default" className="bg-purple-500 hover:bg-purple-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Processing</Badge>;
+      case "partial":
+        return <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">Partial</Badge>;
+      case "failed":
+        return <Badge variant="destructive">Failed</Badge>;
+      default:
+        return <Badge variant="outline" className="border-green-500 text-green-600">Imported</Badge>;
     }
   };
+
+  const columns: DataTableColumn<RepositoryRecord>[] = [
+    {
+      key: "full_name",
+      header: "Repo name",
+      render: (repo) => <span className="font-medium text-foreground">{repo.full_name}</span>,
+    },
+    {
+      key: "status",
+      header: "Import Status",
+      render: (repo) => getRepoStatusBadge(repo.status),
+    },
+    {
+      key: "last_synced_at",
+      header: "Last sync time",
+      render: (repo) => <span className="text-muted-foreground">{formatDateTime(repo.last_synced_at)}</span>,
+    },
+    {
+      key: "progress",
+      header: "Builds Progress",
+      render: (repo) => (
+        <ImportProgressDisplay
+          repoId={repo.id}
+          totalFetched={repo.builds_fetched}
+          totalIngested={repo.builds_ingested}
+          totalProcessed={repo.builds_completed}
+          totalFailed={repo.builds_ingestion_failed + repo.builds_processing_failed}
+          importStatus={repo.status}
+        />
+      ),
+    },
+  ];
 
   if (loading) {
     return (
@@ -180,7 +221,7 @@ export default function AdminReposPage() {
               Connect GitHub repositories and ingest builds.
             </CardDescription>
           </div>
-          <Button onClick={() => router.push("/repositories/import")} className="gap-2">
+          <Button onClick={() => router.push("/repositories/import")} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
             <Plus className="h-4 w-4" /> Add GitHub Repository
           </Button>
         </CardHeader>
@@ -226,145 +267,42 @@ export default function AdminReposPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-              <thead className="bg-slate-50 dark:bg-slate-900/40">
-                <tr>
-                  <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                    Repo name
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                    Import Status
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                    Last sync time
-                  </th>
-                  <th className="px-6 py-3 text-left font-semibold text-slate-500">
-                    Builds Progress
-                  </th>
-                  <th className="px-6 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {repositories.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      className="px-6 py-6 text-center text-sm text-muted-foreground"
-                    >
-                      No repositories have been connected yet.
-                    </td>
-                  </tr>
+          <DataTable
+            columns={columns}
+            data={repositories}
+            total={total}
+            page={page}
+            pageSize={PAGE_SIZE}
+            loading={tableLoading}
+            emptyMessage="No repositories have been connected yet."
+            itemName="repositories"
+            onPageChange={(p) => loadRepositories(p, true)}
+            onRowClick={(repo) => router.push(`/repositories/${repo.id}`)}
+            rowKey={(repo) => repo.id}
+            alwaysShowPagination={true}
+            actions={(repo) => (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(repo);
+                }}
+                disabled={deleteLoading[repo.id]}
+                title="Delete Repository"
+              >
+                {deleteLoading[repo.id] ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  repositories.map((repo) => (
-                    <tr
-                      key={repo.id}
-                      className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                      onClick={() => router.push(`/repositories/${repo.id}`)}
-                    >
-                      <td className="px-6 py-4 font-medium text-foreground">
-                        {repo.full_name}
-                      </td>
-                      <td className="px-6 py-4">
-                        {repo.status === "queued" ? (
-                          <Badge variant="secondary">Queued</Badge>
-                        ) : repo.status === "fetching" ? (
-                          <Badge variant="default" className="bg-cyan-500 hover:bg-cyan-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Fetching</Badge>
-                        ) : repo.status === "ingesting" ? (
-                          <Badge variant="default" className="bg-blue-500 hover:bg-blue-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Ingesting</Badge>
-                        ) : repo.status === "ingestion_complete" ? (
-                          <Badge variant="default" className="bg-green-500 hover:bg-green-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Ingested</Badge>
-                        ) : repo.status === "ingestion_partial" ? (
-                          <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">Ingestion Partial</Badge>
-                        ) : repo.status === "processing" ? (
-                          <Badge variant="default" className="bg-purple-500 hover:bg-purple-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Processing</Badge>
-                        ) : repo.status === "partial" ? (
-                          <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">Partial</Badge>
-                        ) : repo.status === "failed" ? (
-                          <Badge variant="destructive">Failed</Badge>
-                        ) : (
-                          <Badge variant="outline" className="border-green-500 text-green-600">Imported</Badge>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground">
-                        {formatDateTime(repo.last_synced_at)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <ImportProgressDisplay
-                          repoId={repo.id}
-                          totalFetched={repo.builds_fetched}
-                          totalIngested={repo.builds_ingested}
-                          totalProcessed={repo.builds_completed}
-                          totalFailed={repo.builds_ingestion_failed + repo.builds_processing_failed}
-                          importStatus={repo.status}
-                        />
-                      </td>
-                      <td className="px-6 py-4">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(repo, e as unknown as React.MouseEvent);
-                          }}
-                          disabled={deleteLoading[repo.id]}
-                          title="Delete Repository"
-                        >
-                          {deleteLoading[repo.id] ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
+                  <Trash2 className="h-4 w-4" />
                 )}
-              </tbody>
-            </table>
-          </div>
+                <span className="sr-only">Delete</span>
+              </Button>
+            )}
+          />
         </CardContent>
-        <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4 text-sm text-muted-foreground dark:border-slate-800">
-          <div>
-            {total > 0
-              ? `Showing ${pageStart}-${pageEnd} of ${total} repositories`
-              : "No repositories to display"}
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {tableLoading ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-xs">Refreshing...</span>
-              </div>
-            ) : null}
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handlePageChange("prev")}
-                disabled={page === 1 || tableLoading}
-              >
-                Previous
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handlePageChange("next")}
-                disabled={page >= totalPages || tableLoading}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
-        </div>
       </Card>
-
-
     </div>
   );
 }

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.entities.training_scenario import (
     GroupByDimension,
@@ -18,7 +18,6 @@ class DataSourceConfigDTO(BaseModel):
     date_start: Optional[datetime] = None
     date_end: Optional[datetime] = None
     conclusions: List[str] = ["success", "failure"]
-    exclude_bots: bool = True
     ci_provider: str = "all"
 
 
@@ -33,7 +32,7 @@ class FeatureConfigDTO(BaseModel):
 
 class SplittingConfigDTO(BaseModel):
     strategy: SplitStrategy = SplitStrategy.STRATIFIED_WITHIN_GROUP
-    group_by: GroupByDimension = GroupByDimension.LANGUAGE_GROUP
+    group_by: GroupByDimension = GroupByDimension.LANGUAGE
     groups: List[str] = []
     ratios: Dict[str, float] = {"train": 0.7, "val": 0.15, "test": 0.15}
     stratify_by: str = "outcome"
@@ -46,17 +45,30 @@ class SplittingConfigDTO(BaseModel):
     novelty_label: Optional[int] = None
     temporal_ordering: bool = True
 
-
-class PreprocessingConfigDTO(BaseModel):
-    missing_values_strategy: str = "drop_row"
-    fill_value: Any = 0
-    normalization_method: str = "z_score"
-    strict_mode: bool = False
-
-
-class OutputConfigDTO(BaseModel):
-    format: str = "parquet"
-    include_metadata: bool = True
+    @model_validator(mode="after")
+    def validate_strategy_config(self) -> "SplittingConfigDTO":
+        """Validate that required config fields are set for each strategy."""
+        if self.strategy == SplitStrategy.LEAVE_ONE_OUT:
+            if not self.test_groups:
+                raise ValueError(
+                    "leave_one_out strategy requires test_groups to be specified"
+                )
+        elif self.strategy == SplitStrategy.LEAVE_TWO_OUT:
+            if not self.test_groups or not self.val_groups:
+                raise ValueError(
+                    "leave_two_out strategy requires test_groups and val_groups"
+                )
+        elif self.strategy == SplitStrategy.IMBALANCED_TRAIN:
+            if self.reduce_label is None:
+                raise ValueError(
+                    "imbalanced_train strategy requires reduce_label (0 or 1)"
+                )
+        elif self.strategy == SplitStrategy.EXTREME_NOVELTY:
+            if self.novelty_group is None or self.novelty_label is None:
+                raise ValueError(
+                    "extreme_novelty strategy requires novelty_group and novelty_label"
+                )
+        return self
 
 
 class TrainingScenarioCreate(BaseModel):
@@ -69,8 +81,6 @@ class TrainingScenarioCreate(BaseModel):
     data_source_config: Optional[DataSourceConfigDTO] = None
     feature_config: Optional[FeatureConfigDTO] = None
     splitting_config: Optional[SplittingConfigDTO] = None
-    preprocessing_config: Optional[PreprocessingConfigDTO] = None
-    output_config: Optional[OutputConfigDTO] = None
 
 
 class TrainingScenarioUpdate(BaseModel):
@@ -91,8 +101,6 @@ class TrainingScenarioResponse(BaseModel):
     data_source_config: DataSourceConfigDTO
     feature_config: FeatureConfigDTO  # Includes scan_tool_config and extractor_configs
     splitting_config: SplittingConfigDTO
-    preprocessing_config: PreprocessingConfigDTO
-    output_config: OutputConfigDTO
     yaml_config: str
 
     # Statistics

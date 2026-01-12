@@ -23,13 +23,6 @@ import { WizardProvider, useWizard } from "./_components/WizardContext";
 import { StepDataSource } from "./_components/StepDataSource";
 import { StepFeatures } from "./_components/StepFeatures";
 import { StepSplitting } from "./_components/StepSplitting";
-import { StepPreprocessing } from "./_components/StepPreprocessing";
-import { FileOutput } from "lucide-react";
-
-
-
-
-
 import { trainingScenariosApi } from "@/lib/api/training-scenarios";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -58,11 +51,7 @@ function StepReview() {
                     dag_features: state.features.dag_features,
                     scan_metrics: state.features.scan_metrics,
                     exclude: state.features.exclude,
-                    // Detailed configs from context
                     scan_tool_config: state.scanConfigs,
-                    // featureConfigs structure: { global: {}, repos: {} } 
-                    // API expects extractor_configs (global?) and maybe something else for repos? 
-                    // Assuming featureConfigs.global maps to extractor_configs 
                     extractor_configs: state.featureConfigs.global,
                 },
                 splitting_config: {
@@ -72,16 +61,13 @@ function StepReview() {
                     ratios: state.splitting.ratios,
                     stratify_by: state.splitting.stratify_by,
                     temporal_ordering: state.splitting.temporal_ordering,
-                },
-                preprocessing_config: {
-                    missing_values_strategy: state.preprocessing.missing_values_strategy,
-                    fill_value: state.preprocessing.fill_value,
-                    normalization_method: state.preprocessing.normalization_method,
-                    strict_mode: state.preprocessing.strict_mode,
-                },
-                output_config: {
-                    format: state.output.format,
-                    include_metadata: state.output.include_metadata,
+                    test_groups: state.splitting.test_groups,
+                    val_groups: state.splitting.val_groups,
+                    train_groups: state.splitting.train_groups,
+                    reduce_label: state.splitting.reduce_label,
+                    reduce_ratio: state.splitting.reduce_ratio,
+                    novelty_group: state.splitting.novelty_group,
+                    novelty_label: state.splitting.novelty_label,
                 },
             };
 
@@ -161,17 +147,8 @@ function StepReview() {
                         Test: {(state.splitting.ratios.test * 100).toFixed(0)}%
                     </p>
                 </div>
-                <div className="rounded-lg border p-4">
-                    <h4 className="font-medium mb-2">Preprocessing</h4>
-                    <p className="text-sm text-muted-foreground">
-                        Missing values: {state.preprocessing.missing_values_strategy.replace(/_/g, " ")}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                        Normalization: {state.preprocessing.normalization_method.replace(/_/g, " ")}
-                    </p>
-                </div>
                 <div className="flex justify-between pt-4">
-                    <Button variant="outline" onClick={() => setStep(4)} disabled={state.isSubmitting}>
+                    <Button variant="outline" onClick={() => setStep(3)} disabled={state.isSubmitting}>
                         Back
                     </Button>
                     <Button
@@ -203,8 +180,7 @@ function StepIndicator() {
         { num: 1, label: "Data Source", icon: Database },
         { num: 2, label: "Features", icon: Settings2 },
         { num: 3, label: "Splitting", icon: Layers },
-        { num: 4, label: "Preprocessing", icon: FileOutput },
-        { num: 5, label: "Review", icon: FileCheck },
+        { num: 4, label: "Review", icon: FileCheck },
     ];
 
     return (
@@ -279,8 +255,7 @@ function WizardContent() {
             {state.step === 1 && <StepDataSource />}
             {state.step === 2 && <StepFeatures />}
             {state.step === 3 && <StepSplitting />}
-            {state.step === 4 && <StepPreprocessing />}
-            {state.step === 5 && <StepReview />}
+            {state.step === 4 && <StepReview />}
         </div>
     );
 }

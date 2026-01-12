@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.entities.base import BaseEntity, PyObjectId
 
@@ -44,7 +44,7 @@ class SplitStrategy(str, Enum):
 class GroupByDimension(str, Enum):
     """Available dimensions for grouping data."""
 
-    LANGUAGE_GROUP = "language_group"
+    LANGUAGE = "language"
     PERCENTAGE_OF_BUILDS_BEFORE = "percentage_of_builds_before"
     NUMBER_OF_BUILDS_BEFORE = "number_of_builds_before"
     TIME_OF_DAY = "time_of_day"
@@ -81,11 +81,25 @@ class DataSourceConfig(BaseEntity):
         default_factory=lambda: ["success", "failure"],
         description="Build conclusions to include",
     )
-    exclude_bots: bool = True
     ci_provider: str = Field(
         default="all",
         description="CI provider filter: all | github_actions | circleci",
     )
+
+    @model_validator(mode="after")
+    def validate_filter_config(self) -> "DataSourceConfig":
+        """Validate that filter_by has corresponding values."""
+        if self.filter_by == "by_language" and not self.languages:
+            raise ValueError(
+                "filter_by='by_language' requires languages to be specified"
+            )
+        if self.filter_by == "by_name" and not self.repo_names:
+            raise ValueError("filter_by='by_name' requires repo_names to be specified")
+        if self.filter_by == "by_owner" and not self.owners:
+            raise ValueError("filter_by='by_owner' requires owners to be specified")
+        if self.date_start and self.date_end and self.date_start > self.date_end:
+            raise ValueError("date_start must be before date_end")
+        return self
 
 
 class FeatureConfig(BaseEntity):
@@ -128,12 +142,12 @@ class SplittingConfig(BaseEntity):
         description="Splitting strategy to apply",
     )
     group_by: GroupByDimension = Field(
-        default=GroupByDimension.LANGUAGE_GROUP,
+        default=GroupByDimension.LANGUAGE,
         description="Dimension to group data by",
     )
     groups: List[str] = Field(
         default_factory=list,
-        description="Group values (e.g., ['backend', 'fullstack', 'scripting', 'other'])",
+        description="Group values (e.g., ['python', 'java', 'go'])",
     )
     ratios: Dict[str, float] = Field(
         default_factory=lambda: {"train": 0.7, "val": 0.15, "test": 0.15},
@@ -163,42 +177,38 @@ class SplittingConfig(BaseEntity):
     # Temporal ordering (default: sort by build time before splitting)
     temporal_ordering: bool = Field(
         default=True,
-        description="If true, sort by build_started_at before splitting (train=oldest, test=newest)",
+        description="Sort by build_started_at before splitting (train=oldest, test=newest)",
     )
 
-
-class PreprocessingConfig(BaseEntity):
-    """Configuration for data preprocessing."""
-
-    class Config:
-        extra = "allow"
-
-    missing_values_strategy: str = Field(
-        default="drop_row",
-        description="Strategy for missing values: drop_row | fill | skip_feature",
-    )
-    fill_value: Any = 0
-    normalization_method: str = Field(
-        default="z_score",
-        description="Normalization: z_score | min_max | robust | none",
-    )
-    strict_mode: bool = Field(
-        default=False,
-        description="If true, fail if any feature is missing",
-    )
-
-
-class OutputConfig(BaseEntity):
-    """Configuration for output files."""
-
-    class Config:
-        extra = "allow"
-
-    format: str = Field(
-        default="parquet",
-        description="Output format: parquet | csv | pickle",
-    )
-    include_metadata: bool = True
+    @model_validator(mode="after")
+    def validate_strategy_config(self) -> "SplittingConfig":
+        """Validate that required config fields are set for each strategy."""
+        if self.strategy == SplitStrategy.LEAVE_ONE_OUT:
+            if not self.test_groups:
+                raise ValueError(
+                    "leave_one_out strategy requires test_groups to be specified"
+                )
+        elif self.strategy == SplitStrategy.LEAVE_TWO_OUT:
+            if not self.test_groups or not self.val_groups:
+                raise ValueError(
+                    "leave_two_out strategy requires test_groups and val_groups"
+                )
+        elif self.strategy == SplitStrategy.IMBALANCED_TRAIN:
+            if self.reduce_label is None:
+                raise ValueError(
+                    "imbalanced_train strategy requires reduce_label (0 or 1)"
+                )
+        elif self.strategy == SplitStrategy.EXTREME_NOVELTY:
+            if self.novelty_group is None or self.novelty_label is None:
+                raise ValueError(
+                    "extreme_novelty strategy requires novelty_group and novelty_label"
+                )
+        # Validate ratios sum to 1.0
+        if self.ratios:
+            total = sum(self.ratios.values())
+            if abs(total - 1.0) > 0.01:
+                raise ValueError(f"Ratios must sum to 1.0, got {total:.2f}")
+        return self
 
 
 class TrainingScenario(BaseEntity):
@@ -230,10 +240,6 @@ class TrainingScenario(BaseEntity):
         default_factory=FeatureConfig
     )  # Includes scan_tool_config and extractor_configs
     splitting_config: SplittingConfig = Field(default_factory=SplittingConfig)
-    preprocessing_config: PreprocessingConfig = Field(
-        default_factory=PreprocessingConfig
-    )
-    output_config: OutputConfig = Field(default_factory=OutputConfig)
 
     # Pipeline status
     status: ScenarioStatus = Field(
