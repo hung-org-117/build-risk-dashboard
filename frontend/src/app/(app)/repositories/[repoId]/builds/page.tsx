@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { reposApi } from "@/lib/api";
 import { UnifiedBuildsTable } from "../_tabs/builds/UnifiedBuildsTable";
-import { useRepo } from "../repo-context";
+import { useRepo } from "@/components/repositories/RepoContext";
 import { ActionProgressBanner } from "../../_components/ActionProgressBanner";
 
 export default function BuildsPage() {

@@ -118,6 +118,8 @@ export default function SettingsPage() {
         router.push(`/settings?${params.toString()}`);
     };
 
+
+
     // Load user on mount
     useEffect(() => {
         const loadUser = async () => {
@@ -251,10 +253,6 @@ export default function SettingsPage() {
                         <User className="h-4 w-4" />
                         Profile
                     </TabsTrigger>
-                    <TabsTrigger value="history" className="flex items-center gap-2">
-                        <History className="h-4 w-4" />
-                        History
-                    </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="notifications" className="space-y-6">
@@ -296,6 +294,8 @@ export default function SettingsPage() {
                             </div>
                         </CardContent>
                     </Card>
+
+
 
                     {/* Email Notifications */}
                     <Card>
@@ -526,10 +526,6 @@ export default function SettingsPage() {
 
                 <TabsContent value="profile" className="space-y-6">
                     <ProfileSettings />
-                </TabsContent>
-
-                <TabsContent value="history" className="space-y-6">
-                    <NotificationsList />
                 </TabsContent>
             </Tabs>
         </div>

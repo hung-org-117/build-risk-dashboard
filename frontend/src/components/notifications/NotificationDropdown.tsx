@@ -198,10 +198,10 @@ export function NotificationDropdown({ className }: NotificationDropdownProps) {
                                 type="button"
                                 onClick={() => {
                                     setIsOpen(false)
-                                    router.push('/settings')
+                                    router.push('/notification-history')
                                 }}
                             >
-                                View all notifications
+                                View Notification History
                             </button>
                         </div>
                     )}

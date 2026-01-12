@@ -76,10 +76,10 @@ from .token import (
     TokenVerifyResponse,
 )
 from .training_scenario import (
-    TrainingScenarioCreate,
+    TrainingScenarioCreateDTO,
     TrainingScenarioListResponse,
     TrainingScenarioResponse,
-    TrainingScenarioUpdate,
+    TrainingScenarioUpdateDTO,
 )
 from .user import (
     OAuthIdentityResponse,
@@ -151,8 +151,8 @@ __all__ = [
     "ExecutionLevelResponse",
     "DAGResponse",
     # Training Scenario
-    "TrainingScenarioCreate",
-    "TrainingScenarioUpdate",
+    "TrainingScenarioCreateDTO",
+    "TrainingScenarioUpdateDTO",
     "TrainingScenarioResponse",
     "TrainingScenarioListResponse",
     # Settings

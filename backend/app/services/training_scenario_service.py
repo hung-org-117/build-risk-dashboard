@@ -20,19 +20,15 @@ from app import paths
 from app.dtos.training_scenario import (
     DataSourceConfigDTO,
     FeatureConfigDTO,
-    OutputConfigDTO,
-    PreprocessingConfigDTO,
     SplittingConfigDTO,
-    TrainingScenarioCreate,
+    TrainingScenarioCreateDTO,
     TrainingScenarioResponse,
-    TrainingScenarioUpdate,
+    TrainingScenarioUpdateDTO,
 )
 from app.entities.training_dataset_split import TrainingDatasetSplit
 from app.entities.training_scenario import (
     DataSourceConfig,
     FeatureConfig,
-    OutputConfig,
-    PreprocessingConfig,
     ScenarioStatus,
     SplittingConfig,
     TrainingScenario,
@@ -102,7 +98,7 @@ class TrainingScenarioService:
     def create_scenario(
         self,
         user_id: str,
-        data: TrainingScenarioCreate,
+        data: TrainingScenarioCreateDTO,
     ) -> TrainingScenarioResponse:
         """Create a new scenario from YAML config."""
         # Check for duplicate name
@@ -131,10 +127,6 @@ class TrainingScenarioService:
             splitting_config=self._parse_splitting_config(
                 parsed_config.get("splitting", {})
             ),
-            preprocessing_config=self._parse_preprocessing_config(
-                parsed_config.get("preprocessing", {})
-            ),
-            output_config=self._parse_output_config(parsed_config.get("output", {})),
             status=ScenarioStatus.QUEUED,
             created_by=ObjectId(user_id),
             created_at=datetime.utcnow(),
@@ -158,7 +150,7 @@ class TrainingScenarioService:
         self,
         scenario_id: str,
         user_id: str,
-        data: TrainingScenarioUpdate,
+        data: TrainingScenarioUpdateDTO,
     ) -> TrainingScenarioResponse:
         """Update scenario fields."""
         scenario = self.scenario_repo.find_by_id(scenario_id)
@@ -205,12 +197,6 @@ class TrainingScenarioService:
             ).model_dump()
             updates["splitting_config"] = self._parse_splitting_config(
                 parsed_config.get("splitting", {})
-            ).model_dump()
-            updates["preprocessing_config"] = self._parse_preprocessing_config(
-                parsed_config.get("preprocessing", {})
-            ).model_dump()
-            updates["output_config"] = self._parse_output_config(
-                parsed_config.get("output", {})
             ).model_dump()
 
             # Update saved config file
@@ -388,10 +374,6 @@ class TrainingScenarioService:
             splitting_config=SplittingConfigDTO(
                 **scenario.splitting_config.model_dump()
             ),
-            preprocessing_config=PreprocessingConfigDTO(
-                **scenario.preprocessing_config.model_dump()
-            ),
-            output_config=OutputConfigDTO(**scenario.output_config.model_dump()),
             yaml_config=scenario.yaml_config,
             # Stats
             builds_total=scenario.builds_total,
@@ -464,14 +446,6 @@ class TrainingScenarioService:
             flat.update(config["config"])
             return SplittingConfig(**flat)
         return SplittingConfig(**config)
-
-    def _parse_preprocessing_config(
-        self, config: Dict[str, Any]
-    ) -> PreprocessingConfig:
-        return PreprocessingConfig(**config)
-
-    def _parse_output_config(self, config: Dict[str, Any]) -> OutputConfig:
-        return OutputConfig(**config)
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:

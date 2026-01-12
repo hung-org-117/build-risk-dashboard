@@ -5,7 +5,7 @@ import { Loader2, Play, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { reposApi } from "@/lib/api";
-import { useRepo } from "../repo-context";
+import { useRepo } from "@/components/repositories/RepoContext";
 
 import { ExportPanel } from "../builds/_components/ExportPanel";
 

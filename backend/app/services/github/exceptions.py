@@ -23,6 +23,10 @@ class GithubRetryableError(GithubError):
     """Raised for transient issues where retrying later may succeed."""
 
 
+class GithubInvalidTokenError(GithubError):
+    """Raised when a GitHub token is invalid or revoked (HTTP 401)."""
+
+
 class GithubAllRateLimitError(GithubError):
     """Raised when all GitHub tokens hit rate limits."""
 

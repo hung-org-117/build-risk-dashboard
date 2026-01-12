@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Search, BookTemplate, Check, ChevronsUpDown } from "lucide-react";
-import { datasetsApi } from "@/lib/api";
+import { templatesApi } from "@/lib/api";
 import type { DatasetTemplateRecord } from "@/types";
 import {
     Popover,
@@ -37,7 +37,7 @@ export function TemplateSelector({ onApplyTemplate, disabled }: TemplateSelector
         async function loadTemplates() {
             try {
                 setLoading(true);
-                const response = await datasetsApi.listTemplates();
+                const response = await templatesApi.list();
                 setTemplates(response.items);
             } catch (err) {
                 console.error("Failed to load templates:", err);

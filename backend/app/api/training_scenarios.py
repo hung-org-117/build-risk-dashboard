@@ -3,11 +3,12 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from app.database.mongo import get_db
+from app.database.mongo import Database, get_db
 from app.dtos.training_scenario import (
-    TrainingScenarioCreate,
+    TrainingScenarioCreateDTO,
+    TrainingScenarioListResponse,
     TrainingScenarioResponse,
-    TrainingScenarioUpdate,
+    TrainingScenarioUpdateDTO,
 )
 from app.entities.training_scenario import ScenarioStatus
 from app.entities.user import User
@@ -80,7 +81,6 @@ def preview_builds(
         date_end=date_end,
         conclusions=conclusions_list,
         ci_provider=ci_provider,
-        exclude_bots=exclude_bots,
         repo_ids=repo_ids,
         skip=skip,
         limit=limit,
@@ -131,7 +131,7 @@ def preview_builds(
     }
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("/", response_model=TrainingScenarioListResponse)
 def list_scenarios(
     skip: int = 0,
     limit: int = 20,
@@ -139,7 +139,7 @@ def list_scenarios(
     q: Optional[str] = None,
     current_user: User = Depends(get_current_user),  # noqa: B008
     db=Depends(get_db),  # noqa: B008
-) -> Dict[str, Any]:
+) -> TrainingScenarioListResponse:
     """List training scenarios."""
     service = TrainingScenarioService(db)
 
@@ -166,14 +166,14 @@ def list_scenarios(
 
 
 @router.post("/", response_model=TrainingScenarioResponse)
-def create_scenario(
-    data: TrainingScenarioCreate,
-    current_user: User = Depends(get_current_user),  # noqa: B008
-    db=Depends(get_db),  # noqa: B008
+async def create_training_scenario(
+    scenario: TrainingScenarioCreateDTO,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db),
 ) -> TrainingScenarioResponse:
     """Create a new training scenario."""
     service = TrainingScenarioService(db)
-    return service.create_scenario(str(current_user["_id"]), data)
+    return service.create_scenario(str(current_user["_id"]), scenario)
 
 
 @router.get("/{scenario_id}", response_model=TrainingScenarioResponse)
@@ -187,16 +187,16 @@ def get_scenario(
     return service.get_scenario(scenario_id, str(current_user["_id"]))
 
 
-@router.put("/{scenario_id}", response_model=TrainingScenarioResponse)
-def update_scenario(
+@router.patch("/{scenario_id}", response_model=TrainingScenarioResponse)
+async def update_training_scenario(
     scenario_id: str,
-    data: TrainingScenarioUpdate,
-    current_user: User = Depends(get_current_user),  # noqa: B008
-    db=Depends(get_db),  # noqa: B008
+    update_data: TrainingScenarioUpdateDTO,
+    current_user: dict = Depends(get_current_user),
+    db: Database = Depends(get_db),
 ) -> TrainingScenarioResponse:
     """Update training scenario."""
     service = TrainingScenarioService(db)
-    return service.update_scenario(scenario_id, str(current_user["_id"]), data)
+    return service.update_scenario(scenario_id, str(current_user["_id"]), update_data)
 
 
 @router.delete("/{scenario_id}")
@@ -584,8 +584,9 @@ def retry_commit_scan(
     Retry a failed commit scan.
     """
     from bson import ObjectId
-    from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
     from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+    from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
     # Verify scenario access
     service = TrainingScenarioService(db)

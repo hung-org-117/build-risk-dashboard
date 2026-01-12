@@ -51,34 +51,62 @@ class TokenService:
                 raw_token = raw_token.decode()
 
             # Query GitHub API for rate limit
-            rate_limit_info = await get_token_rate_limit(raw_token)
+            try:
+                rate_limit_info = await get_token_rate_limit(raw_token)
 
-            if rate_limit_info:
-                self._pool.update_rate_limit(
-                    token_hash,
-                    remaining=rate_limit_info["remaining"],
-                    limit=rate_limit_info["limit"],
-                    reset_at=rate_limit_info["reset_at"],
-                )
+                if rate_limit_info:
+                    self._pool.update_rate_limit(
+                        token_hash,
+                        remaining=rate_limit_info["remaining"],
+                        limit=rate_limit_info["limit"],
+                        reset_at=rate_limit_info["reset_at"],
+                    )
 
-                results.append(
-                    {
-                        "id": token_info["id"],
-                        "success": True,
-                        "remaining": rate_limit_info["remaining"],
-                        "limit": rate_limit_info["limit"],
-                    }
-                )
-                refreshed += 1
-            else:
-                results.append(
-                    {
-                        "id": token_info["id"],
-                        "success": False,
-                        "error": "Failed to get rate limit from GitHub API",
-                    }
-                )
-                failed += 1
+                    results.append(
+                        {
+                            "id": token_info["id"],
+                            "success": True,
+                            "remaining": rate_limit_info["remaining"],
+                            "limit": rate_limit_info["limit"],
+                        }
+                    )
+                    refreshed += 1
+                else:
+                    results.append(
+                        {
+                            "id": token_info["id"],
+                            "success": False,
+                            "error": "Failed to get rate limit from GitHub API",
+                        }
+                    )
+                    failed += 1
+
+            except Exception as e:
+                # Check for InvalidTokenError
+                error_msg = str(e).lower()
+                if (
+                    "invalid" in error_msg
+                    or "revoked" in error_msg
+                    or "401" in error_msg
+                ):
+                    self._pool.mark_token_invalid(token_hash)
+                    results.append(
+                        {
+                            "id": token_info["id"],
+                            "success": False,
+                            "error": f"Token invalid/revoked: {e}. Marked as INVALID.",
+                        }
+                    )
+                    failed += 1
+                else:
+                    results.append(
+                        {
+                            "id": token_info["id"],
+                            "success": False,
+                            "error": f"Error: {e}",
+                        }
+                    )
+                    failed += 1
 
         return {"refreshed": refreshed, "failed": failed, "results": results}
 
@@ -165,7 +193,9 @@ class TokenService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Please select a valid status: Active or Disabled",
                 )
-            self._pool._redis.hset(f"github_tokens:stats:{token_hash}", "status", token_status)
+            self._pool._redis.hset(
+                f"github_tokens:stats:{token_hash}", "status", token_status
+            )
 
         if label is not None:
             self._pool._redis.hset(f"github_tokens:stats:{token_hash}", "label", label)
@@ -233,8 +263,12 @@ class TokenService:
 
             return {
                 "valid": True,
-                "rate_limit_remaining": (rate_limit_info["remaining"] if rate_limit_info else None),
-                "rate_limit_limit": (rate_limit_info["limit"] if rate_limit_info else None),
+                "rate_limit_remaining": (
+                    rate_limit_info["remaining"] if rate_limit_info else None
+                ),
+                "rate_limit_limit": (
+                    rate_limit_info["limit"] if rate_limit_info else None
+                ),
             }
         else:
             return {

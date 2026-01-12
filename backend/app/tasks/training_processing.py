@@ -775,8 +775,6 @@ def reprocess_failed_builds(
 def generate_scenario_dataset(
     self: PipelineTask,
     scenario_id: str,
-    preprocessing_config: Optional[Dict[str, Any]] = None,
-    output_config: Optional[Dict[str, Any]] = None,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
@@ -863,24 +861,6 @@ def generate_scenario_dataset(
         }
 
         df = _build_split_dataframe(enrichment_builds, raw_repos, self.db)
-
-        # Apply preprocessing (use passed config or fallback to scenario's config)
-        config_to_use = preprocessing_config
-        if not config_to_use:
-            entity_config = getattr(scenario, "preprocessing_config", None)
-            if entity_config:
-                config_to_use = (
-                    entity_config
-                    if isinstance(entity_config, dict)
-                    else entity_config.model_dump()
-                )
-
-        if config_to_use:
-            from app.services.preprocessing_service import PreprocessingService
-
-            preprocessing_service = PreprocessingService.from_dict(config_to_use)
-            df = preprocessing_service.preprocess(df)
-            logger.info(f"{corr_prefix} Applied preprocessing")
 
         # Apply splitting strategy
         splitting_service = SplittingStrategyService()

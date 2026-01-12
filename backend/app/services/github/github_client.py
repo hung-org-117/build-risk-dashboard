@@ -62,7 +62,9 @@ class GitHubClient:
 
         self._api_url = (api_url or settings.GITHUB_API_URL).rstrip("/")
         transport = httpx.HTTPTransport(retries=3)
-        self._rest = httpx.Client(base_url=self._api_url, timeout=120, transport=transport)
+        self._rest = httpx.Client(
+            base_url=self._api_url, timeout=120, transport=transport
+        )
 
     def _headers(self) -> Dict[str, str]:
         headers = {
@@ -87,7 +89,11 @@ class GitHubClient:
                         self._current_token_key,
                         int(remaining),
                         int(limit) if limit else 5000,
-                        (datetime.fromtimestamp(int(reset), tz=timezone.utc) if reset else None),
+                        (
+                            datetime.fromtimestamp(int(reset), tz=timezone.utc)
+                            if reset
+                            else None
+                        ),
                     )
                 except (TypeError, ValueError) as e:
                     logger.warning(f"Failed to update rate limit from headers: {e}")
@@ -127,12 +133,16 @@ class GitHubClient:
             try:
                 reset_dt = None
                 if reset_header:
-                    reset_dt = datetime.fromtimestamp(float(reset_header), tz=timezone.utc)
+                    reset_dt = datetime.fromtimestamp(
+                        float(reset_header), tz=timezone.utc
+                    )
                 self._redis_pool.mark_rate_limited(self._current_token_key, reset_dt)
             except (TypeError, ValueError) as e:
                 logger.warning(f"Failed to mark rate limited in Redis: {e}")
 
-        raise GithubRateLimitError("GitHub rate limit reached", retry_after=wait_seconds)
+        raise GithubRateLimitError(
+            "GitHub rate limit reached", retry_after=wait_seconds
+        )
 
     def _handle_secondary_rate_limit(self, response: httpx.Response) -> None:
         """
@@ -151,7 +161,9 @@ class GitHubClient:
             try:
                 wait_seconds = max(float(retry_after_header), 60.0)
             except ValueError as e:
-                logger.warning(f"Failed to parse Retry-After header for secondary limit: {e}")
+                logger.warning(
+                    f"Failed to parse Retry-After header for secondary limit: {e}"
+                )
 
         logger.warning(
             f"GitHub secondary rate limit (abuse detection) hit, "
@@ -228,13 +240,35 @@ class GitHubClient:
                         )
 
                     # Exponential backoff: 1s, 2s, 4s, ... capped at RETRY_BACKOFF_MAX
-                    delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
+                    delay = min(
+                        RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX
+                    )
                     logger.warning(
                         f"HTTP {response.status_code} error, retrying in {delay:.1f}s "
                         f"(attempt {retries}/{max_retries})"
                     )
                     time.sleep(delay)
                     continue
+
+                # Handle 401 Unauthorized - Token expired/invalid, try to rotate
+                if response.status_code == 401:
+                    logger.warning(
+                        f"Token {self._current_token_key[:8] if self._current_token_key else 'N/A'}... "
+                        f"is invalid (401). Marking invalid and attempting rotation..."
+                    )
+
+                    # Mark invalid in Redis pool if applicable
+                    if self._redis_pool and self._current_token_key:
+                        self._redis_pool.mark_token_invalid(self._current_token_key)
+
+                    if self._rotate_token():
+                        logger.info(
+                            "Successfully rotated token after 401, retrying request..."
+                        )
+                        continue
+                    logger.error(
+                        "Token invalid (401) and no other tokens available for rotation."
+                    )
 
                 return self._handle_response(response)
 
@@ -246,7 +280,9 @@ class GitHubClient:
                         f"Max retries ({max_retries}) exceeded for network error: {e}"
                     ) from e
 
-                delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
+                delay = min(
+                    RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX
+                )
                 logger.warning(
                     f"Network error: {e}, retrying in {delay:.1f}s "
                     f"(attempt {retries}/{max_retries})"
@@ -440,7 +476,9 @@ class GitHubClient:
             return self._get_with_cache(f"/repos/{full_name}/languages", ttl=86400)
         return self._rest_request("GET", f"/repos/{full_name}/languages")
 
-    def list_authenticated_repositories(self, per_page: int = 10) -> List[Dict[str, Any]]:
+    def list_authenticated_repositories(
+        self, per_page: int = 10
+    ) -> List[Dict[str, Any]]:
         params = {
             "per_page": per_page,
             "sort": "updated",
@@ -452,10 +490,14 @@ class GitHubClient:
     def list_user_installations(self) -> List[Dict[str, Any]]:
         """List installations accessible to the user access token."""
         response = self._rest_request("GET", "/user/installations")
-        installations = response.get("installations", []) if isinstance(response, dict) else []
+        installations = (
+            response.get("installations", []) if isinstance(response, dict) else []
+        )
         return installations
 
-    def search_repositories(self, query: str, per_page: int = 10) -> List[Dict[str, Any]]:
+    def search_repositories(
+        self, query: str, per_page: int = 10
+    ) -> List[Dict[str, Any]]:
         params = {"q": query, "per_page": per_page}
         response = self._rest_request("GET", "/search/repositories", params=params)
         items = response.get("items", []) if isinstance(response, dict) else []
@@ -474,7 +516,9 @@ class GitHubClient:
         Returns:
             Dict with 'workflow_runs' list and 'total_count'
         """
-        return self._rest_request("GET", f"/repos/{full_name}/actions/runs", params=params)
+        return self._rest_request(
+            "GET", f"/repos/{full_name}/actions/runs", params=params
+        )
 
     def paginate_workflow_runs(
         self, full_name: str, params: Optional[Dict[str, Any]] = None
@@ -537,7 +581,9 @@ class GitHubClient:
         return self._rest_request("GET", f"/repos/{full_name}/actions/runs/{run_id}")
 
     def list_workflow_jobs(self, full_name: str, run_id: int) -> List[Dict[str, Any]]:
-        jobs = self._rest_request("GET", f"/repos/{full_name}/actions/runs/{run_id}/jobs")
+        jobs = self._rest_request(
+            "GET", f"/repos/{full_name}/actions/runs/{run_id}/jobs"
+        )
         return jobs.get("jobs", [])
 
     def get_pull_request(
@@ -552,13 +598,17 @@ class GitHubClient:
             use_cache: Whether to use ETag caching (default True)
         """
         if use_cache:
-            return self._get_with_cache(f"/repos/{full_name}/pulls/{pr_number}", ttl=300)
+            return self._get_with_cache(
+                f"/repos/{full_name}/pulls/{pr_number}", ttl=300
+            )
         return self._rest_request("GET", f"/repos/{full_name}/pulls/{pr_number}")
 
     def get_pulls(self, full_name: str) -> List[Dict[str, Any]]:
         return self._rest_request("GET", f"/repos/{full_name}/pulls")
 
-    def get_commit(self, full_name: str, sha: str, use_cache: bool = True) -> Dict[str, Any]:
+    def get_commit(
+        self, full_name: str, sha: str, use_cache: bool = True
+    ) -> Dict[str, Any]:
         """
         Get commit details.
 
@@ -614,16 +664,22 @@ class GitHubClient:
             from app.services.github.github_cache import get_github_cache
 
             cache = get_github_cache()
-            cache_key = f"{self._api_url}/repos/{full_name}/issues/{issue_number}/comments"
+            cache_key = (
+                f"{self._api_url}/repos/{full_name}/issues/{issue_number}/comments"
+            )
             _, _, cached_data = cache.get_cached(cache_key)
             if cached_data:
                 return cached_data
 
-            result = list(self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments"))
+            result = list(
+                self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments")
+            )
             cache.set_cached(cache_key, result, None, None, ttl=300)
             return result
 
-        return list(self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments"))
+        return list(
+            self._paginate(f"/repos/{full_name}/issues/{issue_number}/comments")
+        )
 
     def list_review_comments(
         self, full_name: str, pr_number: int, use_cache: bool = True
@@ -638,7 +694,9 @@ class GitHubClient:
             if cached_data:
                 return cached_data
 
-            result = list(self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments"))
+            result = list(
+                self._paginate(f"/repos/{full_name}/pulls/{pr_number}/comments")
+            )
             cache.set_cached(cache_key, result, None, None, ttl=300)
             return result
 
@@ -658,7 +716,9 @@ class GitHubClient:
         """
         # Compare results are immutable for same base/head, cache for 1 hour
         if use_cache:
-            return self._get_with_cache(f"/repos/{full_name}/compare/{base}...{head}", ttl=3600)
+            return self._get_with_cache(
+                f"/repos/{full_name}/compare/{base}...{head}", ttl=3600
+            )
         return self._rest_request("GET", f"/repos/{full_name}/compare/{base}...{head}")
 
     def download_job_logs(self, full_name: str, job_id: int) -> bytes:
@@ -743,7 +803,10 @@ class GitHubClient:
                         f"/repos/{full_name}/actions/runs/{run_id}/logs",
                         headers=self._headers(),
                     )
-                    if response.status_code == 403 and "rate limit" in response.text.lower():
+                    if (
+                        response.status_code == 403
+                        and "rate limit" in response.text.lower()
+                    ):
                         self._handle_rate_limit(response)
                     break
                 except GithubRateLimitError:
@@ -789,9 +852,13 @@ def get_user_github_client(db: Database, user_id: str) -> GitHubClient:
     if not user_id:
         raise GithubConfigurationError("user_id is required for user auth")
 
-    identity = db.oauth_identities.find_one({"user_id": ObjectId(user_id), "provider": "github"})
+    identity = db.oauth_identities.find_one(
+        {"user_id": ObjectId(user_id), "provider": "github"}
+    )
     if not identity or not identity.get("access_token"):
-        raise GithubConfigurationError(f"No GitHub OAuth token found for user {user_id}")
+        raise GithubConfigurationError(
+            f"No GitHub OAuth token found for user {user_id}"
+        )
     return GitHubClient(token=identity["access_token"])
 
 

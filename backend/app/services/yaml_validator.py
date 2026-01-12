@@ -49,32 +49,6 @@ class FilterByEnum(str, Enum):
     BY_OWNER = "by_owner"
 
 
-class OutputFormatEnum(str, Enum):
-    """Valid output formats."""
-
-    PARQUET = "parquet"
-    CSV = "csv"
-    PICKLE = "pickle"
-
-
-class MissingValuesStrategyEnum(str, Enum):
-    """Valid missing values strategies."""
-
-    DROP_ROW = "drop_row"
-    FILL = "fill"
-    MEAN = "mean"
-    SKIP_FEATURE = "skip_feature"
-
-
-class NormalizationMethodEnum(str, Enum):
-    """Valid normalization methods."""
-
-    Z_SCORE = "z_score"
-    MIN_MAX = "min_max"
-    ROBUST = "robust"
-    NONE = "none"
-
-
 # =============================================================================
 # SCHEMA MODELS
 # =============================================================================
@@ -575,51 +549,6 @@ class YAMLValidatorService:
                             "type": "string",
                             "required": "for extreme_novelty",
                             "description": "Group for novelty testing",
-                        },
-                    ],
-                },
-                {
-                    "name": "preprocessing",
-                    "required": False,
-                    "description": "Data preprocessing options",
-                    "fields": [
-                        {
-                            "name": "missing_values_strategy",
-                            "type": "enum",
-                            "required": False,
-                            "default": "drop_row",
-                            "values": [e.value for e in MissingValuesStrategyEnum],
-                            "description": "How to handle missing values",
-                        },
-                        {
-                            "name": "normalization_method",
-                            "type": "enum",
-                            "required": False,
-                            "default": "z_score",
-                            "values": [e.value for e in NormalizationMethodEnum],
-                            "description": "Normalization method for numeric features",
-                        },
-                    ],
-                },
-                {
-                    "name": "output",
-                    "required": False,
-                    "description": "Output file configuration",
-                    "fields": [
-                        {
-                            "name": "format",
-                            "type": "enum",
-                            "required": False,
-                            "default": "parquet",
-                            "values": [e.value for e in OutputFormatEnum],
-                            "description": "Output file format",
-                        },
-                        {
-                            "name": "include_metadata",
-                            "type": "boolean",
-                            "required": False,
-                            "default": True,
-                            "description": "Include build metadata in output",
                         },
                     ],
                 },

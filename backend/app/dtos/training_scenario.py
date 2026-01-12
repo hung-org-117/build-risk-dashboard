@@ -71,7 +71,7 @@ class SplittingConfigDTO(BaseModel):
         return self
 
 
-class TrainingScenarioCreate(BaseModel):
+class TrainingScenarioCreateDTO(BaseModel):
     name: str = Field(..., min_length=1)
     description: Optional[str] = None
     version: str = "1.0"
@@ -83,7 +83,7 @@ class TrainingScenarioCreate(BaseModel):
     splitting_config: Optional[SplittingConfigDTO] = None
 
 
-class TrainingScenarioUpdate(BaseModel):
+class TrainingScenarioUpdateDTO(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     yaml_config: Optional[str] = None

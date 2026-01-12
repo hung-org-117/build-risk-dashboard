@@ -725,11 +725,21 @@ def reingest_failed_builds(
 
     Only retries builds with status=FAILED (actual errors like timeout, network failure).
     Does NOT retry MISSING_RESOURCE builds (expected - logs expired, commit not found).
+
+    This function:
+    1. Resets FAILED builds to PENDING
+    2. Builds ingestion chains directly from those PENDING builds
+    3. Dispatches the ingestion workflow (without re-creating TrainingIngestionBuild records)
     """
+    from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
+    from app.tasks.shared import TrainingPipelineContext, build_workflow_with_context
+
     correlation_id = str(uuid.uuid4())
+    corr_prefix = f"[corr={correlation_id[:8]}]"
 
     scenario_repo = TrainingScenarioRepository(self.db)
     ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+    raw_repo_repo = RawRepositoryRepository(self.db)
 
     # Validate scenario exists
     scenario = scenario_repo.find_by_id(scenario_id)
@@ -781,16 +791,121 @@ def reingest_failed_builds(
     if reset_result.modified_count == 0:
         return {"status": "error", "message": "Failed to reset any builds"}
 
-    # Re-trigger ingestion
-    start_scenario_ingestion.delay(scenario_id)
+    logger.info(
+        f"{corr_prefix} Reset {reset_result.modified_count} failed builds to PENDING"
+    )
+
+    # Update scenario status to INGESTING
+    scenario_repo.update_one(
+        scenario_id,
+        {
+            "status": ScenarioStatus.INGESTING.value,
+            "ingestion_started_at": datetime.utcnow(),
+            "error_message": None,
+        },
+    )
+
+    # Query the PENDING builds we just reset
+    pending_builds = list(
+        ingestion_build_repo.collection.find(
+            {
+                "scenario_id": ObjectId(scenario_id),
+                "status": IngestionStatus.PENDING.value,
+            }
+        )
+    )
+
+    if not pending_builds:
+        logger.warning(f"{corr_prefix} No PENDING builds found after reset")
+        return {"status": "error", "message": "No PENDING builds found after reset"}
+
+    # Group pending builds by repo
+    builds_by_repo: Dict[str, List[Dict[str, Any]]] = {}
+    for build_doc in pending_builds:
+        repo_id = str(build_doc["raw_repo_id"])
+        build_info = {
+            "ingestion_build_id": str(build_doc["_id"]),
+            "ci_run_id": build_doc.get("ci_run_id", ""),
+            "commit_sha": build_doc.get("commit_sha", ""),
+        }
+        if repo_id not in builds_by_repo:
+            builds_by_repo[repo_id] = []
+        builds_by_repo[repo_id].append(build_info)
+
+    # Build ingestion chains (same logic as start_scenario_ingestion)
+    required_resources = ["git_history", "git_worktree", "build_logs"]
+    tasks_by_level = get_ingestion_tasks_by_level(required_resources)
+
+    ingestion_chains = []
+    for raw_repo_id, repo_builds in builds_by_repo.items():
+        raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+        if not raw_repo:
+            logger.warning(f"{corr_prefix} Repo {raw_repo_id} not found, skipping")
+            continue
+
+        build_ids = [b["ci_run_id"] for b in repo_builds if b.get("ci_run_id")]
+        commit_shas = list(
+            {b["commit_sha"] for b in repo_builds if b.get("commit_sha")}
+        )
+
+        if not build_ids:
+            continue
+
+        ctx = TrainingPipelineContext(
+            scenario_id=scenario_id,
+            correlation_id=correlation_id,
+            _raw_repo_id=raw_repo_id,
+            _github_repo_id=raw_repo.github_repo_id,
+            _full_name=raw_repo.full_name,
+        )
+
+        repo_chain = build_workflow_with_context(
+            tasks_by_level=tasks_by_level,
+            ctx=ctx,
+            raw_repo_id=raw_repo_id,
+            github_repo_id=raw_repo.github_repo_id,
+            full_name=raw_repo.full_name,
+            build_ids=build_ids,
+            commit_shas=commit_shas,
+            ci_provider="github_actions",
+        )
+
+        if repo_chain:
+            ingestion_chains.append(repo_chain)
+
+    if not ingestion_chains:
+        logger.warning(f"{corr_prefix} No ingestion chains created")
+        scenario_repo.update_one(
+            scenario_id,
+            {"status": ScenarioStatus.INGESTED.value},
+        )
+        return {"status": "completed", "message": "No ingestion work needed"}
+
+    # Dispatch chord: group of ingestion chains -> aggregate callback
+    workflow = chord(
+        group(*ingestion_chains),
+        aggregate_scenario_ingestion.s(
+            scenario_id=scenario_id,
+            correlation_id=correlation_id,
+        ),
+    )
+    workflow.apply_async()
 
     logger.info(
-        f"Re-triggered ingestion for {reset_result.modified_count} failed builds"
+        f"{corr_prefix} Dispatched re-ingestion for {len(pending_builds)} builds "
+        f"across {len(ingestion_chains)} repos"
+    )
+
+    publish_scenario_update(
+        scenario_id=scenario_id,
+        status=ScenarioStatus.INGESTING.value,
+        current_phase=f"Re-ingesting {len(pending_builds)} failed builds...",
     )
 
     return {
         "status": "queued",
         "builds_reset": reset_result.modified_count,
         "total_failed": failed_count,
+        "repos_to_process": len(ingestion_chains),
         "correlation_id": correlation_id,
     }

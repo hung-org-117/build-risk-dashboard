@@ -855,18 +855,12 @@ def dispatch_ingestion(
         },
     )
 
-    # Get required resources based on template
-    from app.services.dataset_template_service import DatasetTemplateService
-
-    template_service = DatasetTemplateService(self.db)
-    required_resources = template_service.get_required_resources_for_template(
-        "Risk Prediction"
-    )
-    tasks_by_level = get_ingestion_tasks_by_level(list(required_resources))
+    required_resources = ["git_history", "git_worktree", "build_logs"]
+    tasks_by_level = get_ingestion_tasks_by_level(required_resources)
 
     import_build_repo.init_resource_status(repo_config_id, list(required_resources))
 
-    # Update DB and publish WebSocket for IN_PROGRESS status
+    # Update DB and publish SSE for IN_PROGRESS status
     from app.entities.model_import_build import ResourceStatus
     from app.tasks.pipeline.shared.resources import (
         get_ingestion_only_resources,
