@@ -204,7 +204,6 @@ export interface SplittingConfig {
   reduce_ratio: number;
   novelty_group?: string;
   novelty_label?: number;
-  temporal_ordering: boolean;
 }
 
 export interface PreprocessingConfig {

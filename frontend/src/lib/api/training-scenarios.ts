@@ -76,6 +76,7 @@ export interface PreviewBuild {
     branch: string;
     commit_sha: string;
     conclusion: string;
+    language?: string;
     run_started_at?: string;
     duration_seconds?: number;
 }

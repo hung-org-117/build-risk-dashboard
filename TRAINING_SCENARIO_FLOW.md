@@ -412,7 +412,6 @@ SplittingConfig = {
         val: 0.15,
         test: 0.15,
     },
-    temporal_ordering: True,  # Sort by build_started_at
 }
 ```
 
@@ -483,7 +482,7 @@ SplittingConfig = {
          │              │ split_assignment    │   # train/val/test
          │              │ group_value         │   # for leave-out strategies
          │              │ outcome             │   # 0=success, 1=failure
-         │              │ build_started_at    │   # for temporal ordering
+         │              │ build_started_at    │
          │              └─────────────────────┘
          │
          ▼

@@ -9,7 +9,6 @@ Features extracted from historical build data:
 """
 
 import logging
-from datetime import timezone
 from typing import Any, Dict, List, Optional
 
 from hamilton.function_modifiers import extract_fields, tag
@@ -33,16 +32,63 @@ RECENT_BUILDS_COUNT = 5
 MAX_BUILDS_HISTORY = 500
 
 
-# =============================================================================
-# Time Features - REMOVED: moved to build.py as build_day_of_week and build_hour
-# =============================================================================
+# Build Position Features (for Splitting/Grouping)
+@extract_fields(
+    {
+        "percentage_of_builds_before": float,
+        "number_of_builds_before": int,
+    }
+)
+@tag(group="position")
+def build_position_features(
+    raw_build_runs: RawBuildRunsCollection,
+    build_run: BuildRunInput,
+    repo: RepoInput,
+) -> Dict[str, Any]:
+    """
+    Calculate build position in project timeline for grouping/splitting.
+
+    - percentage_of_builds_before: Percentage of this build's position (0-100)
+    - number_of_builds_before: Count of builds before this one
+    """
+    from bson import ObjectId
+
+    result = {
+        "percentage_of_builds_before": 0.0,
+        "number_of_builds_before": 0,
+    }
+
+    if not build_run.created_at:
+        return result
+
+    try:
+        repo_id = ObjectId(repo.id)
+
+        # Count builds before this one
+        builds_before = raw_build_runs.count_documents(
+            {
+                "raw_repo_id": repo_id,
+                "created_at": {"$lt": build_run.created_at},
+            }
+        )
+
+        # Count total builds in project
+        total_builds = raw_build_runs.count_documents({"raw_repo_id": repo_id})
+
+        result["number_of_builds_before"] = builds_before
+
+        if total_builds > 0:
+            result["percentage_of_builds_before"] = round(
+                (builds_before / total_builds) * 100, 2
+            )
+
+    except Exception as e:
+        logger.warning(f"Failed to calculate build position: {e}")
+
+    return result
 
 
-# =============================================================================
 # Build History Features (Link to Last Build)
-# =============================================================================
-
-
 @extract_fields(
     {
         "history_prev_result": Optional[str],

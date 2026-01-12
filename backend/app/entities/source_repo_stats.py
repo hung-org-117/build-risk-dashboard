@@ -40,5 +40,4 @@ class SourceRepoStats(BaseEntity):
     builds_found: int = 0
     builds_not_found: int = 0
     builds_filtered: int = 0
-    is_valid: bool = True
     validation_error: Optional[str] = None

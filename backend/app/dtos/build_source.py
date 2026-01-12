@@ -97,5 +97,4 @@ class SourceRepoStatsResponse(BaseModel):
     builds_found: int
     builds_not_found: int
     builds_filtered: int
-    is_valid: bool
     validation_error: Optional[str]

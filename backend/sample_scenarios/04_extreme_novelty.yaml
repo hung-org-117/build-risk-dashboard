@@ -21,7 +21,7 @@ data_source:
 
 splitting:
   strategy: "extreme_novelty"
-  group_by: "language"  # Direct language grouping
+  group_by: "repo_language"  # Direct language grouping
   config:
     novelty_group: "python"       # Python failures → Test only
     novelty_label: 1             # Label 1 = failure

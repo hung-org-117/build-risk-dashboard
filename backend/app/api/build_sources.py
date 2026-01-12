@@ -218,7 +218,6 @@ def get_source_repos(
             builds_found=s.builds_found,
             builds_not_found=s.builds_not_found,
             builds_filtered=s.builds_filtered,
-            is_valid=s.is_valid,
             validation_error=s.validation_error,
         )
         for s in stats

@@ -10,6 +10,26 @@ from app.tasks.pipeline.feature_dag._types import (
 )
 
 TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
+    # === Build Position (for Splitting/Grouping) ===
+    "percentage_of_builds_before": FeatureDefinition(
+        name="percentage_of_builds_before",
+        display_name="Percentage of Builds Before",
+        description="Percentage of this build's position in the project timeline (0-100)",
+        category=FeatureCategory.BUILD_HISTORY,
+        data_type=FeatureDataType.FLOAT,
+        extractor_node="temporal",
+        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        valid_range=(0.0, 100.0),
+    ),
+    "number_of_builds_before": FeatureDefinition(
+        name="number_of_builds_before",
+        display_name="Number of Builds Before",
+        description="Number of builds in the project before this one",
+        category=FeatureCategory.BUILD_HISTORY,
+        data_type=FeatureDataType.INTEGER,
+        extractor_node="temporal",
+        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+    ),
     # === Build History ===
     "history_prev_build_id": FeatureDefinition(
         name="history_prev_build_id",

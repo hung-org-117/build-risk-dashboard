@@ -43,7 +43,6 @@ class SplittingConfigDTO(BaseModel):
     reduce_ratio: float = 0.5
     novelty_group: Optional[str] = None
     novelty_label: Optional[int] = None
-    temporal_ordering: bool = True
 
     @model_validator(mode="after")
     def validate_strategy_config(self) -> "SplittingConfigDTO":

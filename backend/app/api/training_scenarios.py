@@ -36,7 +36,6 @@ def preview_builds(
     ci_provider: Optional[str] = Query(None, description="CI provider filter"),
     skip: int = 0,
     limit: int = 20,
-    current_user: User = Depends(get_current_user),  # noqa: B008
     db=Depends(get_db),  # noqa: B008
 ) -> Dict[str, Any]:
     """
@@ -45,85 +44,57 @@ def preview_builds(
     Used by Training Scenario wizard to preview available builds before creating a scenario.
     Returns paginated builds and aggregate stats.
     """
-    raw_repo_repo = RawRepositoryRepository(db)
     raw_build_run_repo = RawBuildRunRepository(db)
 
     # Parse comma-separated values
     conclusions_list = conclusions.split(",") if conclusions else None
     languages_list = languages.split(",") if languages else None
 
-    # Get repo IDs filtered by language
-    repo_ids = None
-    if languages_list:
-        import re
-
-        # Find repos matching the languages (case-insensitive)
-        regex_list = [
-            re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages_list
-        ]
-        language_query = {"main_lang": {"$in": regex_list}}
-        matching_repos = list(raw_repo_repo.collection.find(language_query, {"_id": 1}))
-        repo_ids = [r["_id"] for r in matching_repos]
-
-        # If no repos match language, return empty result
-        if not repo_ids:
-            return {
-                "builds": [],
-                "stats": {
-                    "total_builds": 0,
-                    "total_repos": 0,
-                    "outcome_distribution": {"success": 0, "failure": 0},
-                },
-                "pagination": {"skip": skip, "limit": limit, "total": 0},
-            }
-
-    # Get builds with filters
-    builds, stats = raw_build_run_repo.find_with_filters(
+    # 1. Fetch Builds (with Language join)
+    builds_data = raw_build_run_repo.find_builds_with_filters(
         date_start=date_start,
         date_end=date_end,
         conclusions=conclusions_list,
         ci_provider=ci_provider,
-        repo_ids=repo_ids,
+        languages=languages_list,
         skip=skip,
         limit=limit,
     )
 
-    # Serialize builds
-    builds_data = []
-    unique_repos: dict = {}  # repo_id -> repo_info
-    for build in builds:
-        # Collect unique repos
-        repo_id_str = str(build.raw_repo_id)
-        if repo_id_str not in unique_repos:
-            unique_repos[repo_id_str] = {
-                "id": repo_id_str,
-                "full_name": build.repo_name or "",
-            }
+    # 2. Fetch Stats
+    stats = raw_build_run_repo.get_stats_with_filters(
+        date_start=date_start,
+        date_end=date_end,
+        conclusions=conclusions_list,
+        ci_provider=ci_provider,
+        languages=languages_list,
+    )
 
-        builds_data.append(
+    # Serialize builds
+    processed_builds = []
+    for build in builds_data:
+        processed_builds.append(
             {
-                "id": str(build.id),
-                "raw_repo_id": repo_id_str,
-                "repo_name": build.repo_name,
-                "branch": build.branch,
-                "commit_sha": build.commit_sha[:8] if build.commit_sha else "",
-                "conclusion": (
-                    build.conclusion.value
-                    if hasattr(build.conclusion, "value")
-                    else build.conclusion
+                "id": str(build.get("_id")),
+                "raw_repo_id": str(build.get("raw_repo_id")),
+                "repo_name": build.get("repo_name"),
+                "branch": build.get("branch"),
+                "commit_sha": (
+                    build.get("commit_sha", "")[:8] if build.get("commit_sha") else ""
                 ),
+                "conclusion": build.get("conclusion"),
                 "run_started_at": (
-                    build.run_started_at.isoformat() if build.run_started_at else None
+                    build["run_started_at"].isoformat()
+                    if build.get("run_started_at")
+                    else None
                 ),
-                "duration_seconds": build.duration_seconds,
+                "duration_seconds": build.get("duration_seconds"),
+                "language": build.get("language") or "Unknown",
             }
         )
 
-    # Add repos to stats
-    stats["repos"] = list(unique_repos.values())
-
     return {
-        "builds": builds_data,
+        "builds": processed_builds,
         "stats": stats,
         "pagination": {
             "skip": skip,

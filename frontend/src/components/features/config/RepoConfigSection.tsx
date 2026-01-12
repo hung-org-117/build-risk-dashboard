@@ -135,7 +135,7 @@ export function RepoConfigSection({
         return Object.values(config).some(arr => arr.length > 0);
     }, [repoConfigs]);
 
-    // Filter repos
+    // Filter and Sort repos
     const filteredRepos = useMemo(() => {
         let result = repos;
         if (searchQuery.trim()) {
@@ -147,7 +147,8 @@ export function RepoConfigSection({
         } else if (filterMode === "default") {
             result = result.filter(r => !hasOverride(r.id));
         }
-        return result;
+        // Sort alphabetically by full_name
+        return [...result].sort((a, b) => a.full_name.localeCompare(b.full_name));
     }, [repos, searchQuery, filterMode, hasOverride]);
 
     // Paginated repos

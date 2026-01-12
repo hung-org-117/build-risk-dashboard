@@ -203,7 +203,6 @@ function WizardContent() {
                     groups: state.splitting.groups,
                     ratios: state.splitting.ratios,
                     stratify_by: state.splitting.stratify_by,
-                    temporal_ordering: state.splitting.temporal_ordering,
                     test_groups: state.splitting.test_groups,
                     val_groups: state.splitting.val_groups,
                     train_groups: state.splitting.train_groups,

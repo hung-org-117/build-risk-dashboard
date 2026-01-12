@@ -317,10 +317,11 @@ export function StepDataSource() {
                             <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10 shadow-sm border-b">
                                 <tr>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Repository</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Language</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Branch</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Commit</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Conclusion</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Date</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Build Created</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
@@ -349,6 +350,7 @@ export function StepDataSource() {
                                     previewBuilds.map((build) => (
                                         <tr key={build.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
                                             <td className="px-4 py-3 font-medium">{build.repo_name}</td>
+                                            <td className="px-4 py-3 text-muted-foreground">{build.language || "Unknown"}</td>
                                             <td className="px-4 py-3 text-muted-foreground">{build.branch}</td>
                                             <td className="px-4 py-3 font-mono text-xs opacity-70">{build.commit_sha.substring(0, 7)}</td>
                                             <td className="px-4 py-3">{getConclusionBadge(build.conclusion)}</td>

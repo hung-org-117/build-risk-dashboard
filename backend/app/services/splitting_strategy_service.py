@@ -131,6 +131,108 @@ class BaseSplittingStrategy(ABC):
         return train_indices, val_indices, test_indices
 
 
+class RandomSplitStrategy(BaseSplittingStrategy):
+    """
+    Random Split: Randomly assigns builds to sets based on ratios.
+    No stratification or grouping - pure random assignment.
+    """
+
+    def split(
+        self,
+        df: pd.DataFrame,
+        group_column: str,
+        label_column: str = "outcome",
+    ) -> SplitResult:
+        ratios = self.config.ratios or {"train": 0.7, "val": 0.15, "test": 0.15}
+        indices = df.index.tolist()
+
+        np.random.seed(42)
+        np.random.shuffle(indices)
+
+        n = len(indices)
+        train_end = int(n * ratios.get("train", 0.7))
+        val_end = int(n * (ratios.get("train", 0.7) + ratios.get("val", 0.15)))
+
+        return SplitResult(
+            train_indices=indices[:train_end],
+            val_indices=indices[train_end:val_end],
+            test_indices=indices[val_end:],
+            metadata={
+                "strategy": "random_split",
+                "ratios": ratios,
+            },
+        )
+
+
+class TimeSeriesSplitStrategy(BaseSplittingStrategy):
+    """
+    Time Series Split: Splits based on time (Train < Val < Test).
+    Sorts by build_started_at ASC to ensure chronological ordering.
+    """
+
+    def split(
+        self,
+        df: pd.DataFrame,
+        group_column: str,
+        label_column: str = "outcome",
+    ) -> SplitResult:
+        ratios = self.config.ratios or {"train": 0.7, "val": 0.15, "test": 0.15}
+
+        # Sort by build time ASC to ensure chronological order
+        if "build_started_at" in df.columns:
+            df = df.sort_values("build_started_at", na_position="first").reset_index(
+                drop=True
+            )
+
+        indices = df.index.tolist()
+        n = len(indices)
+        train_end = int(n * ratios.get("train", 0.7))
+        val_end = int(n * (ratios.get("train", 0.7) + ratios.get("val", 0.15)))
+
+        return SplitResult(
+            train_indices=indices[:train_end],
+            val_indices=indices[train_end:val_end],
+            test_indices=indices[val_end:],
+            metadata={
+                "strategy": "time_series_split",
+                "ratios": ratios,
+                "note": "Train=oldest, Val=middle, Test=newest",
+            },
+        )
+
+
+class StratifiedSplitStrategy(BaseSplittingStrategy):
+    """
+    Stratified Split: Maintains label distribution in each split.
+    Like random split but preserves class balance.
+    """
+
+    def split(
+        self,
+        df: pd.DataFrame,
+        group_column: str,
+        label_column: str = "outcome",
+    ) -> SplitResult:
+        ratios = self.config.ratios or {"train": 0.7, "val": 0.15, "test": 0.15}
+
+        train_idx, val_idx, test_idx = self._get_stratified_split(
+            df,
+            label_column,
+            train_ratio=ratios.get("train", 0.7),
+            val_ratio=ratios.get("val", 0.15),
+        )
+
+        return SplitResult(
+            train_indices=train_idx,
+            val_indices=val_idx,
+            test_indices=test_idx,
+            metadata={
+                "strategy": "stratified_split",
+                "ratios": ratios,
+            },
+        )
+
+
 class StratifiedWithinGroupStrategy(BaseSplittingStrategy):
     """
     Strategy 1/6/11: Stratified Within Group (Baseline 70-15-15)
@@ -434,17 +536,14 @@ class SplittingStrategyFactory:
     """Factory for creating splitting strategy instances."""
 
     STRATEGY_MAP = {
+        SplitStrategy.RANDOM_SPLIT: RandomSplitStrategy,
+        SplitStrategy.TIME_SERIES_SPLIT: TimeSeriesSplitStrategy,
+        SplitStrategy.STRATIFIED_SPLIT: StratifiedSplitStrategy,
         SplitStrategy.STRATIFIED_WITHIN_GROUP: StratifiedWithinGroupStrategy,
         SplitStrategy.LEAVE_ONE_OUT: LeaveOneOutStrategy,
         SplitStrategy.LEAVE_TWO_OUT: LeaveTwoOutStrategy,
         SplitStrategy.IMBALANCED_TRAIN: ImbalancedTrainStrategy,
         SplitStrategy.EXTREME_NOVELTY: ExtremeNoveltyStrategy,
-        # String fallbacks
-        "stratified_within_group": StratifiedWithinGroupStrategy,
-        "leave_one_out": LeaveOneOutStrategy,
-        "leave_two_out": LeaveTwoOutStrategy,
-        "imbalanced_train": ImbalancedTrainStrategy,
-        "extreme_novelty": ExtremeNoveltyStrategy,
     }
 
     @classmethod
@@ -500,14 +599,6 @@ class SplittingStrategyService:
         Returns:
             SplitResult with split indices and metadata
         """
-        # Temporal ordering: sort by build time before splitting
-        # This ensures train=oldest, val=middle, test=newest
-        temporal_ordering = getattr(config, "temporal_ordering", True)
-        if temporal_ordering and "build_started_at" in df.columns:
-            df = df.sort_values("build_started_at", na_position="first").reset_index(
-                drop=True
-            )
-            logger.info("Applied temporal ordering: sorted by build_started_at")
 
         # Prepare group column based on dimension
         group_column = self._prepare_group_column(df, config.group_by)
@@ -518,7 +609,6 @@ class SplittingStrategyService:
 
         # Add metadata
         result.metadata["original_group_by"] = str(config.group_by)
-        result.metadata["temporal_ordering"] = temporal_ordering
 
         return result
 
@@ -539,7 +629,8 @@ class SplittingStrategyService:
         """
         group_by_str = str(group_by) if not isinstance(group_by, str) else group_by
 
-        if group_by_str == "language" or group_by == GroupByDimension.LANGUAGE:
+        # Handle language grouping (with lowercase normalization)
+        if group_by_str == "repo_language" or group_by == GroupByDimension.LANGUAGE:
             return self._prepare_language_column(df)
 
         elif (
@@ -558,19 +649,17 @@ class SplittingStrategyService:
             return self._create_time_of_day_bins(df)
 
         else:
-            # Use column directly if exists
+            # Use column directly if exists (repo_full_name, build_ci_provider, etc.)
             if group_by_str in df.columns:
                 return group_by_str
             raise ValueError(f"Unknown grouping dimension: {group_by}")
 
     def _prepare_language_column(self, df: pd.DataFrame) -> str:
-        """Use primary_language column directly for grouping."""
+        """Create normalized language column for grouping."""
         column_name = "_language"
 
-        if "primary_language" in df.columns:
-            df[column_name] = df["primary_language"].str.lower().fillna("other")
-        elif "language" in df.columns:
-            df[column_name] = df["language"].str.lower().fillna("other")
+        if "repo_language" in df.columns:
+            df[column_name] = df["repo_language"].str.lower().fillna("other")
         else:
             # Default to "other" if no language column
             df[column_name] = "other"
@@ -620,17 +709,11 @@ class SplittingStrategyService:
         """Create 4 time-of-day bins (night/morning/afternoon/evening)."""
         bin_column = "_time_of_day_bin"
 
-        if "time_of_day" in df.columns:
-            hour_col = df["time_of_day"]
-        elif "hour" in df.columns:
-            hour_col = df["hour"]
-        elif "started_at" in df.columns:
-            try:
-                hour_col = pd.to_datetime(df["started_at"]).dt.hour
-            except Exception:
-                hour_col = pd.Series([12] * len(df))  # Default to afternoon
+        if "build_hour" in df.columns:
+            hour_col = df["build_hour"]
         else:
-            hour_col = pd.Series([12] * len(df))  # Default to afternoon
+            # Default to afternoon if build_hour not available
+            hour_col = pd.Series([12] * len(df))
 
         def hour_to_period(h):
             if 0 <= h < 6:

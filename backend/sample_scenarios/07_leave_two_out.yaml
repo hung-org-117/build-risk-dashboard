@@ -21,7 +21,7 @@ data_source:
 
 splitting:
   strategy: "leave_two_out"
-  group_by: "language"  # Direct language grouping
+  group_by: "repo_language"  # Direct language grouping
   config:
     test_groups: ["python", "java"]       # Python + Java → Test
     val_groups: ["javascript"]            # JavaScript → Val

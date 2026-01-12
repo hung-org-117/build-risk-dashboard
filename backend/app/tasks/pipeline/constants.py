@@ -7,7 +7,18 @@ from app.tasks.pipeline.feature_dag.extractors import (
     temporal,
 )
 
-DEFAULT_FEATURES = {"build_id", "repo_full_name", "build_ci_provider"}
+DEFAULT_FEATURES = {
+    # Core identification
+    "build_id",
+    "repo_full_name",
+    "build_ci_provider",
+    # Grouping features for splitting
+    "repo_language",
+    "build_hour",
+    "percentage_of_builds_before",
+    "number_of_builds_before",
+    "build_started_at",
+}
 
 HAMILTON_MODULES = [
     build,

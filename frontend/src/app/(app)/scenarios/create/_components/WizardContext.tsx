@@ -79,7 +79,6 @@ export interface SplittingConfig {
     };
     stratify_by: string;
     // Advanced options
-    temporal_ordering: boolean;
     test_groups: string[];
     val_groups: string[];
     train_groups: string[];
@@ -201,7 +200,6 @@ const initialSplitting: SplittingConfig = {
     groups: [],
     ratios: { train: 0.7, val: 0.15, test: 0.15 },
     stratify_by: "outcome",
-    temporal_ordering: true,
     test_groups: [],
     val_groups: [],
     train_groups: [],

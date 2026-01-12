@@ -49,7 +49,7 @@ features:
 
 splitting:
   strategy: "stratified_within_group"
-  group_by: "language"  # Direct language grouping (python, java, etc.)
+  group_by: "repo_language"  # Direct language grouping (python, java, etc.)
   config:
     ratios:
       train: 0.70

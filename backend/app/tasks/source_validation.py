@@ -595,6 +595,58 @@ def validate_source_builds_chunk(
             else:
                 builds_to_validate.append(build_info)
 
+        builds_to_fetch = []
+
+        # Get IDs to check
+        build_ids_to_check = [b["build_id"] for b in builds_to_validate]
+
+        # Query RawBuildRun for these builds within this repo
+        # Note: We query by raw_repo_id and build_id to ensure uniqueness scope
+        cached_runs = []
+        if effective_repo_id and build_ids_to_check:
+            cached_runs = raw_build_run_repo.find_many(
+                {
+                    "raw_repo_id": ObjectId(effective_repo_id),
+                    "build_id": {"$in": build_ids_to_check},
+                }
+            )
+
+        cached_map = {r.build_id: r for r in cached_runs}
+
+        for build_info in builds_to_validate:
+            build_id = build_info["build_id"]
+            cached_run = cached_map.get(build_id)
+
+            if cached_run:
+                # Found in cache! Use it directly
+                # Verify it has a valid ID
+                if not cached_run.id:
+                    # Should not happen if coming from DB, but safe check
+                    builds_to_fetch.append(build_info)
+                    continue
+
+                # Create SourceBuild immediately
+                builds_to_insert.append(
+                    SourceBuild(
+                        source_id=ObjectId(source_id),
+                        build_id_from_source=build_id,
+                        repo_name_from_source=repo_name,
+                        raw_repo_id=ObjectId(effective_repo_id),
+                        status=SourceBuildStatus.FOUND,
+                        raw_run_id=cached_run.id,
+                        validated_at=utc_now(),
+                    )
+                )
+                builds_found += 1
+                # We count this as found, but NOT as fetched (implicitly)
+                # If we wanted to track cache hits, we could add a stat
+            else:
+                # Not in cache, must fetch
+                builds_to_fetch.append(build_info)
+
+        # Update the list to only those needing fetch
+        builds_to_validate = builds_to_fetch
+
         # Fetch all build details concurrently
         async def fetch_build_details_batch() -> List[Any]:
             """Fetch all build data concurrently using fetch_build_details."""
@@ -807,19 +859,25 @@ def aggregate_source_validation_results(
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
-        db = get_database()
-        source_repo = BuildSourceRepository(db)
-        source_build_repo = SourceBuildRepository(db)
+        source_repo = BuildSourceRepository(self.db)
+        source_build_repo = SourceBuildRepository(self.db)
 
         # Get final counts from database
         status_counts = source_build_repo.count_by_status(source_id)
 
+        # Get "not found" or "private" counts from Redis (preserved from worker tasks)
+        stats_from_redis = get_validation_stats(self.redis, source_id)
+        repos_not_found = stats_from_redis.get("repos_not_found", 0)
+        repos_private = stats_from_redis.get("repos_private", 0)
+        repos_total = stats_from_redis.get("total_repos", 0)
+        repos_valid = stats_from_redis.get("repos_valid", 0)
+
         # Build final stats
         stats = ValidationStats(
-            repos_total=status_counts.get("repos_total", 0),
-            repos_valid=status_counts.get("repos_valid", 0),
-            repos_invalid=status_counts.get("repos_invalid", 0),
-            repos_not_found=status_counts.get("repos_not_found", 0),
+            repos_total=repos_total,
+            repos_valid=repos_valid,
+            repos_invalid=repos_private,
+            repos_not_found=repos_not_found,
             builds_total=sum(status_counts.values()),
             builds_found=status_counts.get(SourceBuildStatus.FOUND.value, 0),
             builds_not_found=status_counts.get(SourceBuildStatus.NOT_FOUND.value, 0)
@@ -853,7 +911,7 @@ def aggregate_source_validation_results(
 
         logger.info(
             f"[corr={correlation_id[:8]}] Source {source_id} validation completed: "
-            f"{stats.builds_found} found, {stats.builds_not_found} not found"
+            f"{stats.repos_total} repos, {stats.builds_found} builds found"
         )
 
         return {

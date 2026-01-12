@@ -34,6 +34,9 @@ class ScenarioStatus(str, Enum):
 class SplitStrategy(str, Enum):
     """Available splitting strategies."""
 
+    RANDOM_SPLIT = "random_split"
+    TIME_SERIES_SPLIT = "time_series_split"
+    STRATIFIED_SPLIT = "stratified_split"
     STRATIFIED_WITHIN_GROUP = "stratified_within_group"
     LEAVE_ONE_OUT = "leave_one_out"
     LEAVE_TWO_OUT = "leave_two_out"
@@ -44,7 +47,9 @@ class SplitStrategy(str, Enum):
 class GroupByDimension(str, Enum):
     """Available dimensions for grouping data."""
 
-    LANGUAGE = "language"
+    REPO_FULL_NAME = "repo_full_name"
+    REPO_LANGUAGE = "repo_language"
+    BUILD_CI_PROVIDER = "build_ci_provider"
     PERCENTAGE_OF_BUILDS_BEFORE = "percentage_of_builds_before"
     NUMBER_OF_BUILDS_BEFORE = "number_of_builds_before"
     TIME_OF_DAY = "time_of_day"
@@ -142,7 +147,7 @@ class SplittingConfig(BaseEntity):
         description="Splitting strategy to apply",
     )
     group_by: GroupByDimension = Field(
-        default=GroupByDimension.LANGUAGE,
+        default=GroupByDimension.REPO_LANGUAGE,
         description="Dimension to group data by",
     )
     groups: List[str] = Field(
@@ -174,15 +179,27 @@ class SplittingConfig(BaseEntity):
     novelty_group: Optional[str] = None
     novelty_label: Optional[int] = None
 
-    # Temporal ordering (default: sort by build time before splitting)
-    temporal_ordering: bool = Field(
-        default=True,
-        description="Sort by build_started_at before splitting (train=oldest, test=newest)",
-    )
-
     @model_validator(mode="after")
     def validate_strategy_config(self) -> "SplittingConfig":
         """Validate that required config fields are set for each strategy."""
+        # Strategies that require ratios
+        ratio_strategies = {
+            SplitStrategy.RANDOM_SPLIT,
+            SplitStrategy.TIME_SERIES_SPLIT,
+            SplitStrategy.STRATIFIED_SPLIT,
+            SplitStrategy.STRATIFIED_WITHIN_GROUP,
+            SplitStrategy.IMBALANCED_TRAIN,
+        }
+
+        # Validate ratio-based strategies have ratios
+        if self.strategy in ratio_strategies:
+            if not self.ratios:
+                raise ValueError(f"{self.strategy.value} strategy requires ratios")
+            total = sum(self.ratios.values())
+            if abs(total - 1.0) > 0.01:
+                raise ValueError(f"Ratios must sum to 1.0, got {total:.2f}")
+
+        # Strategy-specific validations
         if self.strategy == SplitStrategy.LEAVE_ONE_OUT:
             if not self.test_groups:
                 raise ValueError(
@@ -203,11 +220,7 @@ class SplittingConfig(BaseEntity):
                 raise ValueError(
                     "extreme_novelty strategy requires novelty_group and novelty_label"
                 )
-        # Validate ratios sum to 1.0
-        if self.ratios:
-            total = sum(self.ratios.values())
-            if abs(total - 1.0) > 0.01:
-                raise ValueError(f"Ratios must sum to 1.0, got {total:.2f}")
+
         return self
 
 
