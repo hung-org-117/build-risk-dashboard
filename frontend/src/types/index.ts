@@ -642,6 +642,21 @@ export interface FeatureDAGResponse {
 
 // Admin-only Dashboard Types
 
+export interface DatasetEnrichmentStats {
+  active_scenarios: number;
+  queued_scenarios: number;
+  processing_scenarios: number;
+  completed_scenarios: number;
+  total_enriched_builds: number;
+}
+
+export interface ModelPipelineStats {
+  total_repos: number;
+  fetching_repos: number;
+  ingesting_repos: number;
+  processing_repos: number;
+  processed_repos: number;
+}
 
 export interface MonitoringSummary {
   celery_workers: number;
@@ -650,6 +665,8 @@ export interface MonitoringSummary {
 }
 
 export interface AdminDashboardExtras {
+  dataset_enrichment: DatasetEnrichmentStats;
+  model_pipeline: ModelPipelineStats;
   monitoring: MonitoringSummary;
   total_users: number;
 }

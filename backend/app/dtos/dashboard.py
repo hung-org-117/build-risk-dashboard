@@ -27,11 +27,23 @@ class RepoDistributionEntry(BaseModel):
 
 
 class DatasetEnrichmentStats(BaseModel):
-    """Stats for Dataset Enrichment pipeline (Admin only)."""
+    """Stats for Training Scenario (Dataset Enrichment) pipeline (Admin only)."""
 
-    active_projects: int = 0
-    processing_versions: int = 0
-    total_enriched_builds: int = 0
+    active_scenarios: int = 0  # Total training scenarios
+    queued_scenarios: int = 0  # Scenarios in queue
+    processing_scenarios: int = 0  # Actively processing scenarios
+    completed_scenarios: int = 0  # Completed scenarios
+    total_enriched_builds: int = 0  # Total source builds processed
+
+
+class ModelPipelineStats(BaseModel):
+    """Stats for Model Pipeline (Repo Imports) (Admin only)."""
+
+    total_repos: int = 0  # Total imported repositories
+    fetching_repos: int = 0  # Repos currently fetching
+    ingesting_repos: int = 0  # Repos currently ingesting
+    processing_repos: int = 0  # Repos currently processing
+    processed_repos: int = 0  # Repos fully processed with predictions
 
 
 class MonitoringSummary(BaseModel):
@@ -46,6 +58,7 @@ class AdminDashboardExtras(BaseModel):
     """Extra metrics only visible to Admin."""
 
     dataset_enrichment: DatasetEnrichmentStats
+    model_pipeline: ModelPipelineStats
     monitoring: MonitoringSummary
     total_users: int = 0
 

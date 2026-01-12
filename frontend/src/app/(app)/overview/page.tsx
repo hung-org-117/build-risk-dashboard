@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
-import { ShieldCheck, Workflow, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload, Timer } from "lucide-react";
+import { ShieldCheck, Workflow, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload, Timer, Database, Users, AlertTriangle, Activity, Layers, CheckCircle2, Clock, Loader2, Rocket, FolderGit2 } from "lucide-react";
 
 import GridLayout from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
@@ -65,14 +65,28 @@ const ROW_HEIGHT = 100;
 
 // Preset layouts
 const PRESET_LAYOUTS = {
-  // 4 equal stat cards in row 1, then 2 equal large widgets
-  fourColumn: [
+  // Default layout for admins with pipeline summaries
+  default: [
+    { widget_id: "total_builds", x: 0, y: 0, w: 3, h: 1 },
+    { widget_id: "success_rate", x: 3, y: 0, w: 3, h: 1 },
+    { widget_id: "avg_duration", x: 6, y: 0, w: 3, h: 1 },
+    { widget_id: "active_repos", x: 9, y: 0, w: 3, h: 1 },
+    { widget_id: "model_pipeline_summary", x: 0, y: 1, w: 6, h: 2 },
+    { widget_id: "training_scenario_summary", x: 6, y: 1, w: 6, h: 2 },
+    { widget_id: "repo_distribution", x: 0, y: 3, w: 6, h: 3 },
+    { widget_id: "recent_builds", x: 6, y: 3, w: 6, h: 3 },
+  ],
+  // User-friendly layout without admin widgets
+  user: [
     { widget_id: "total_builds", x: 0, y: 0, w: 3, h: 1 },
     { widget_id: "success_rate", x: 3, y: 0, w: 3, h: 1 },
     { widget_id: "avg_duration", x: 6, y: 0, w: 3, h: 1 },
     { widget_id: "active_repos", x: 9, y: 0, w: 3, h: 1 },
     { widget_id: "repo_distribution", x: 0, y: 1, w: 6, h: 3 },
     { widget_id: "recent_builds", x: 6, y: 1, w: 6, h: 3 },
+    { widget_id: "risk_distribution", x: 0, y: 4, w: 6, h: 2 },
+    { widget_id: "high_risk_builds", x: 6, y: 4, w: 3, h: 1 },
+    { widget_id: "getting_started", x: 9, y: 4, w: 3, h: 2 },
   ],
   // 2/3 split: 2 wide on left, 1 on right
   twoThirdSplit: [
@@ -106,7 +120,7 @@ const PRESET_LAYOUTS = {
 export default function OverviewPage() {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
-  const { authenticated, loading: authLoading } = useAuth();
+  const { authenticated, loading: authLoading, user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummaryResponse | null>(null);
   const [widgets, setWidgets] = useState<WidgetConfig[]>([]);
   const [availableWidgets, setAvailableWidgets] = useState<WidgetDefinition[]>([]);
@@ -115,6 +129,9 @@ export default function OverviewPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1200);
   const [recentBuilds, setRecentBuilds] = useState<Build[]>([]);
+
+  // Check if user is admin
+  const isAdmin = user?.role === "admin";
 
   // Measure container width
   useEffect(() => {
@@ -207,10 +224,15 @@ export default function OverviewPage() {
 
   const applyPreset = (presetName: keyof typeof PRESET_LAYOUTS) => {
     const preset = PRESET_LAYOUTS[presetName];
-    setWidgets((prev) =>
-      prev.map((widget) => {
+    // Get widget IDs that user has permission to view
+    const availableWidgetIds = new Set(availableWidgets.map((w) => w.widget_id));
+
+    setWidgets((prev) => {
+      // First, disable all widgets not in preset or not available
+      const updatedWidgets = prev.map((widget) => {
         const presetItem = preset.find((p) => p.widget_id === widget.widget_id);
-        if (presetItem) {
+        // Only apply preset if widget is available to this user
+        if (presetItem && availableWidgetIds.has(widget.widget_id)) {
           return {
             ...widget,
             x: presetItem.x,
@@ -220,9 +242,36 @@ export default function OverviewPage() {
             enabled: true,
           };
         }
-        return widget;
-      })
-    );
+        // Disable widgets not in this preset
+        return { ...widget, enabled: false };
+      });
+
+      // Add any missing widgets from preset that are available
+      preset.forEach((presetItem) => {
+        if (
+          !updatedWidgets.find((w) => w.widget_id === presetItem.widget_id) &&
+          availableWidgetIds.has(presetItem.widget_id)
+        ) {
+          const definition = availableWidgets.find(
+            (a) => a.widget_id === presetItem.widget_id
+          );
+          if (definition) {
+            updatedWidgets.push({
+              widget_id: presetItem.widget_id,
+              widget_type: definition.widget_type,
+              title: definition.title,
+              enabled: true,
+              x: presetItem.x,
+              y: presetItem.y,
+              w: presetItem.w,
+              h: presetItem.h,
+            });
+          }
+        }
+      });
+
+      return updatedWidgets;
+    });
   };
 
   const toggleWidget = (widgetId: string) => {
@@ -644,7 +693,51 @@ export default function OverviewPage() {
           />
         );
       // Admin-only widgets
-      case "dataset_enrichment_summary":
+      case "model_pipeline_summary":
+        const pipelineStats = summary?.admin_extras?.model_pipeline;
+        return (
+          <Card className={commonCardClass}>
+            {isEditing && (
+              <div className="absolute top-2 left-2 z-10">
+                <GripVertical className="h-4 w-4 text-muted-foreground" />
+              </div>
+            )}
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
+              <CardDescription className="text-xs truncate">
+                Model Pipeline Status
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
+              <div className="flex flex-col items-center min-w-0">
+                <FolderGit2 className="h-5 w-5 text-slate-500 mb-1" />
+                <div className="text-xl font-bold text-slate-600">{pipelineStats?.total_repos ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Total</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <Loader2 className="h-5 w-5 text-blue-500 mb-1" />
+                <div className="text-xl font-bold text-blue-600">{pipelineStats?.fetching_repos ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Fetching</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <Database className="h-5 w-5 text-purple-500 mb-1" />
+                <div className="text-xl font-bold text-purple-600">{pipelineStats?.ingesting_repos ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Ingesting</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <Activity className="h-5 w-5 text-amber-500 mb-1" />
+                <div className="text-xl font-bold text-amber-600">{pipelineStats?.processing_repos ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Processing</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
+                <div className="text-xl font-bold text-green-600">{pipelineStats?.processed_repos ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Processed</div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      case "training_scenario_summary":
         const enrichmentStats = summary?.admin_extras?.dataset_enrichment;
         return (
           <Card className={commonCardClass}>
@@ -656,21 +749,34 @@ export default function OverviewPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
               <CardDescription className="text-xs truncate">
-                Dataset Enrichment Pipeline
+                Training Scenario Pipeline
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex items-center justify-center gap-4 h-[calc(100%-60px)]">
-              <div className="flex flex-col items-center">
-                <div className="text-2xl font-bold text-blue-600">{enrichmentStats?.active_projects ?? 0}</div>
-                <div className="text-xs text-muted-foreground">Projects</div>
+            <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
+              <div className="flex flex-col items-center min-w-0">
+                <Rocket className="h-5 w-5 text-blue-500 mb-1" />
+                <div className="text-xl font-bold text-blue-600">{enrichmentStats?.active_scenarios ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Active</div>
               </div>
-              <div className="flex flex-col items-center">
-                <div className="text-2xl font-bold text-amber-600">{enrichmentStats?.processing_versions ?? 0}</div>
-                <div className="text-xs text-muted-foreground">Processing</div>
+              <div className="flex flex-col items-center min-w-0">
+                <Clock className="h-5 w-5 text-slate-500 mb-1" />
+                <div className="text-xl font-bold text-slate-600">{enrichmentStats?.queued_scenarios ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Queued</div>
               </div>
-              <div className="flex flex-col items-center">
-                <div className="text-2xl font-bold text-green-600">{enrichmentStats?.total_enriched_builds ?? 0}</div>
-                <div className="text-xs text-muted-foreground">Enriched</div>
+              <div className="flex flex-col items-center min-w-0">
+                <Loader2 className="h-5 w-5 text-amber-500 mb-1" />
+                <div className="text-xl font-bold text-amber-600">{enrichmentStats?.processing_scenarios ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Processing</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
+                <div className="text-xl font-bold text-green-600">{enrichmentStats?.completed_scenarios ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Completed</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <Layers className="h-5 w-5 text-indigo-500 mb-1" />
+                <div className="text-xl font-bold text-indigo-600">{enrichmentStats?.total_enriched_builds ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Enriched</div>
               </div>
             </CardContent>
           </Card>
@@ -822,8 +928,8 @@ export default function OverviewPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => applyPreset("fourColumn")}
-                  title="4 Equal Columns"
+                  onClick={() => applyPreset(isAdmin ? "default" : "user")}
+                  title={isAdmin ? "Default Admin Layout" : "Default Layout"}
                   className="h-7 px-2"
                 >
                   <Grid2x2 className="h-4 w-4" />

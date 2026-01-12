@@ -176,14 +176,25 @@ def get_available_widgets(
         ),
     ]
 
-    # Admin-only widgets (based on sidebar features)
+    # Admin-only widgets (require admin_extras data)
     admin_widgets = [
         (
             WidgetDefinition(
-                widget_id="dataset_enrichment_summary",
-                widget_type="stat",
-                title="Data Enrichments",
-                description="Active projects and processing status",
+                widget_id="model_pipeline_summary",
+                widget_type="card",
+                title="Model Pipeline",
+                description="Repo import pipeline status (fetching/ingesting/processing)",
+                default_w=2,
+                default_h=1,
+            ),
+            Permission.ADMIN_FULL,  # Requires admin_extras.model_pipeline
+        ),
+        (
+            WidgetDefinition(
+                widget_id="training_scenario_summary",
+                widget_type="card",
+                title="Training Scenarios",
+                description="Training scenario pipeline status",
                 default_w=2,
                 default_h=1,
             ),
@@ -193,7 +204,7 @@ def get_available_widgets(
             WidgetDefinition(
                 widget_id="monitoring_summary",
                 widget_type="stat",
-                title="Monitoring Summary",
+                title="System Health",
                 description="System errors and alerts (24h)",
                 default_w=2,
                 default_h=1,
@@ -229,8 +240,22 @@ def get_available_widgets(
         ),
     ]
 
-    # Return ALL widgets for all authenticated users
-    # Role-based data filtering happens in the service layer, not widget visibility
-    all_widgets = common_widgets + admin_widgets + user_widgets
+    # Filter widgets based on user's role permissions
+    result = []
 
-    return [widget for widget, _ in all_widgets]
+    # Add common widgets if user has permission
+    for widget, permission in common_widgets:
+        if has_permission(role, permission):
+            result.append(widget)
+
+    # Add admin widgets only if user has required permission
+    for widget, permission in admin_widgets:
+        if has_permission(role, permission):
+            result.append(widget)
+
+    # Add user widgets (e.g., getting_started)
+    for widget, permission in user_widgets:
+        if has_permission(role, permission):
+            result.append(widget)
+
+    return result

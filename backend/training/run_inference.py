@@ -1,94 +1,102 @@
+import joblib
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import joblib
-import pandas as pd
-import numpy as np
 
 LABEL_COL = "risk_label_numeric"
-GROUP_COL = "gh_project_name"
-TIME_COL = "gh_build_started_at"
-BUILD_ID_COL = "tr_build_id"
-PREV_BUILD_COL = "tr_prev_build"
+GROUP_COL = "repo_full_name"
+TIME_COL = "build_started_at"
+BUILD_ID_COL = "build_id"
+PREV_BUILD_COL = "history_prev_build_id"
 SEQ_LEN = 10
-LSTM_HIDDEN_DIM = 64
-LSTM_LAYERS = 1
-LSTM_DROPOUT = 0.0
-TEMPORAL_DROPOUT = 0.0
-MIN_SEQ_LEN = 1
+LSTM_HIDDEN_DIM = 96
+LSTM_LAYERS = 2
+LSTM_DROPOUT = 0.2
+TEMPORAL_DROPOUT = 0.2
+MIN_SEQ_LEN = 4
 
+# Temporal features (used in LSTM sequence - build history patterns)
 TEMPORAL_FEATURES = [
-    "is_prev_failed",
-    "prev_fail_streak",
-    "fail_rate_last_10",
-    "avg_src_churn_last_5",
-    "time_since_prev_build"
+    "history_prev_failed",
+    "history_fail_streak",
+    "history_fail_rate_10",
+    "history_avg_churn_5",
+    "history_days_since_prev",
 ]
 
+# Static features (point-in-time values for current build)
 STATIC_FEATURES = [
+    # Code churn features
     "git_diff_src_churn",
-    "gh_diff_files_added",
-    "gh_diff_files_deleted",
-    "gh_diff_files_modified",
-    "gh_diff_tests_added",
-    "gh_diff_tests_deleted",
-    "gh_diff_src_files",
-    "gh_diff_doc_files",
-    "gh_diff_other_files",
-    "gh_num_commits_on_files_touched",
-    "files_modified_ratio",
-    "change_entropy",
-    "churn_ratio_vs_avg",
-    "gh_sloc",
-    "gh_repo_age",
-    "gh_repo_num_commits",
-    "gh_test_lines_per_kloc",
-    "gh_test_cases_per_kloc",
-    "gh_asserts_cases_per_kloc",
-    "gh_team_size",
+    "git_diff_files_added",
+    "git_diff_files_deleted",
+    "git_diff_files_modified",
+    "git_diff_tests_added",
+    "git_diff_tests_deleted",
+    "git_diff_src_files",
+    "git_diff_doc_files",
+    "git_diff_other_files",
+    "git_file_commit_density",
+    "git_files_modified_ratio",
+    "git_change_entropy",
+    "git_churn_vs_avg",
+    # Repository metrics
+    "repo_sloc",
+    "repo_age_days",
+    "repo_total_commits",
+    "repo_test_lines_per_kloc",
+    "repo_test_cases_per_kloc",
+    "repo_asserts_per_kloc",
+    # Team features
+    "team_size",
     "author_ownership",
-    "is_new_contributor",
-    "days_since_last_author_commit",
-    "tr_log_num_jobs",
-    "tr_log_tests_run_sum",
-    "tr_log_tests_failed_sum",
-    "tr_log_tests_skipped_sum",
-    "tr_log_tests_ok_sum",
-    "tr_log_testduration_sum",
-    "tr_log_tests_fail_rate",
-    "tr_duration",
-    "tr_status_num",
-    "build_time_sin",
-    "build_time_cos",
-    "build_hour_risk_score"
+    "author_is_new",
+    "author_days_since_commit",
+    # Test metrics from build logs
+    "log_jobs_count",
+    "log_tests_run",
+    "log_tests_failed",
+    "log_tests_skipped",
+    "log_tests_passed",
+    "log_test_duration_sec",
+    "log_tests_fail_rate",
+    "build_duration_sec",
+    "build_status_num",
+    # Time features
+    "build_hour_sin",
+    "build_hour_cos",
+    "build_hour_risk",
 ]
 
+# Features that need log1p transformation
 LOG1P_FEATURES = [
     "git_diff_src_churn",
-    "gh_diff_files_added",
-    "gh_diff_files_deleted",
-    "gh_diff_files_modified",
-    "gh_diff_tests_added",
-    "gh_diff_tests_deleted",
-    "gh_diff_src_files",
-    "gh_diff_doc_files",
-    "gh_diff_other_files",
-    "gh_num_commits_on_files_touched",
-    "gh_sloc",
-    "gh_repo_age",
-    "gh_repo_num_commits",
-    "tr_log_num_jobs",
-    "tr_log_tests_run_sum",
-    "tr_log_tests_failed_sum",
-    "tr_log_tests_skipped_sum",
-    "tr_log_tests_ok_sum",
-    "tr_log_testduration_sum",
-    "tr_duration",
-    "time_since_prev_build",
-    "days_since_last_author_commit"
+    "git_diff_files_added",
+    "git_diff_files_deleted",
+    "git_diff_files_modified",
+    "git_diff_tests_added",
+    "git_diff_tests_deleted",
+    "git_diff_src_files",
+    "git_diff_doc_files",
+    "git_diff_other_files",
+    "git_file_commit_density",
+    "repo_sloc",
+    "repo_age_days",
+    "repo_total_commits",
+    "log_jobs_count",
+    "log_tests_run",
+    "log_tests_failed",
+    "log_tests_skipped",
+    "log_tests_passed",
+    "log_test_duration_sec",
+    "build_duration_sec",
+    "history_days_since_prev",
+    "author_days_since_commit",
 ]
 
 STATUS_MAP = {"passed": 0, "failed": 1}
+
 
 class BayesianLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers=1, dropout=0.0, temporal_dropout=0.0):
@@ -98,7 +106,7 @@ class BayesianLSTM(nn.Module):
             hidden_dim,
             batch_first=True,
             num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0.0
+            dropout=dropout if num_layers > 1 else 0.0,
         )
         self.attn = nn.Linear(hidden_dim, 1)
         self.temporal_dropout = nn.Dropout(temporal_dropout)
@@ -106,16 +114,11 @@ class BayesianLSTM(nn.Module):
     def forward(self, x, lengths):
         lengths_cpu = lengths.to("cpu")
         packed = nn.utils.rnn.pack_padded_sequence(
-            x,
-            lengths_cpu,
-            batch_first=True,
-            enforce_sorted=False
+            x, lengths_cpu, batch_first=True, enforce_sorted=False
         )
         packed_out, _ = self.lstm(packed)
         h, _ = nn.utils.rnn.pad_packed_sequence(
-            packed_out,
-            batch_first=True,
-            total_length=x.size(1)
+            packed_out, batch_first=True, total_length=x.size(1)
         )
 
         max_len = h.size(1)
@@ -126,24 +129,28 @@ class BayesianLSTM(nn.Module):
         context = (weights * h).sum(dim=1)
         return self.temporal_dropout(context)
 
+
 # Bayesian MLP (Static branch)
 class BayesianMLP(nn.Module):
-  def __init__(self, input_dim):
-      super().__init__()
-      self.net = nn.Sequential(
-          nn.Linear(input_dim, 128),
-          nn.ReLU(),
-          nn.Dropout(0.4),
-          nn.Linear(128, 64),
-          nn.ReLU(),
-          nn.Dropout(0.4)
-      )
+    def __init__(self, input_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+        )
 
-  def forward(self, x):
-      return self.net(x)
+    def forward(self, x):
+        return self.net(x)
+
 
 class BayesianRiskModel(nn.Module):
-    def __init__(self, temporal_dim, static_dim, lstm_hidden_dim, lstm_layers, lstm_dropout, temporal_dropout):
+    def __init__(
+        self, temporal_dim, static_dim, lstm_hidden_dim, lstm_layers, lstm_dropout, temporal_dropout
+    ):
         super().__init__()
 
         self.temporal = BayesianLSTM(
@@ -151,15 +158,12 @@ class BayesianRiskModel(nn.Module):
             lstm_hidden_dim,
             num_layers=lstm_layers,
             dropout=lstm_dropout,
-            temporal_dropout=temporal_dropout
+            temporal_dropout=temporal_dropout,
         )
         self.static = BayesianMLP(static_dim)
 
         self.classifier = nn.Sequential(
-            nn.Linear(lstm_hidden_dim + 64, 64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, 3)
+            nn.Linear(lstm_hidden_dim + 64, 64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64, 3)
         )
 
     def forward(self, seq, static, lengths):
@@ -167,12 +171,14 @@ class BayesianRiskModel(nn.Module):
         s = self.static(static)
         x = torch.cat([t, s], dim=1)
         return self.classifier(x)
-    
+
+
 # Load model
 SAVE_DIR = "./artifacts"
 MODEL_PATH = f"{SAVE_DIR}/bayesian_risk_model.pt"
 SCALER_STATIC_PATH = f"{SAVE_DIR}/scaler_static.pkl"
 SCALER_TEMPORAL_PATH = f"{SAVE_DIR}/scaler_temporal.pkl"
+
 
 def load_bayesian_model(model_path, device):
     checkpoint = torch.load(model_path, map_location=device)
@@ -189,7 +195,7 @@ def load_bayesian_model(model_path, device):
         lstm_hidden_dim=lstm_hidden_dim,
         lstm_layers=lstm_layers,
         lstm_dropout=lstm_dropout,
-        temporal_dropout=temporal_dropout
+        temporal_dropout=temporal_dropout,
     )
 
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -202,15 +208,11 @@ def load_bayesian_model(model_path, device):
 
     return model, temporal_features, static_features, log1p_features, seq_len, min_seq_len
 
+
 RISK_LABELS = ["Low", "Medium", "High"]
 
-def bayesian_inference(
-    model,
-    seq_tensor,
-    static_tensor,
-    lengths_tensor,
-    n_samples=30
-):
+
+def bayesian_inference(model, seq_tensor, static_tensor, lengths_tensor, n_samples=30):
     model.train()  # bật dropout
 
     probs = []
@@ -230,6 +232,7 @@ def bayesian_inference(
 
     return mean_prob, uncertainty, pred_label
 
+
 def prepare_dataframe(df, temporal_features, static_features, log1p_features):
     if "tr_status" in df.columns:
         df["tr_status_num"] = df["tr_status"].map(STATUS_MAP).fillna(-1).astype(int)
@@ -242,12 +245,9 @@ def prepare_dataframe(df, temporal_features, static_features, log1p_features):
     if "tr_build_number" in df.columns:
         sort_cols.append("tr_build_number")
 
-    required_cols = temporal_features + static_features + [
-        GROUP_COL,
-        TIME_COL,
-        BUILD_ID_COL,
-        PREV_BUILD_COL
-    ]
+    required_cols = (
+        temporal_features + static_features + [GROUP_COL, TIME_COL, BUILD_ID_COL, PREV_BUILD_COL]
+    )
     used_cols = list(set(required_cols + sort_cols))
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -270,18 +270,16 @@ def prepare_dataframe(df, temporal_features, static_features, log1p_features):
         df[col] = np.log1p(df[col].clip(lower=0))
 
     df[BUILD_ID_COL] = pd.to_numeric(df[BUILD_ID_COL], errors="coerce").fillna(-1).astype("int64")
-    df[PREV_BUILD_COL] = pd.to_numeric(df[PREV_BUILD_COL], errors="coerce").fillna(-1).astype("int64")
+    df[PREV_BUILD_COL] = (
+        pd.to_numeric(df[PREV_BUILD_COL], errors="coerce").fillna(-1).astype("int64")
+    )
 
     df = df.sort_values(sort_cols).reset_index(drop=True)
     return df
 
+
 def build_sequences_from_prev(
-    df,
-    temporal_features,
-    static_features,
-    seq_len,
-    min_seq_len=1,
-    group_col=GROUP_COL
+    df, temporal_features, static_features, seq_len, min_seq_len=1, group_col=GROUP_COL
 ):
     build_ids = df[BUILD_ID_COL].to_numpy()
     prev_ids = df[PREV_BUILD_COL].to_numpy()
@@ -332,13 +330,12 @@ def build_sequences_from_prev(
 
     return np.array(sequences), np.array(statics), indices, np.array(lengths)
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model, temporal_features, static_features, log1p_features, seq_len, min_seq_len = load_bayesian_model(
-        MODEL_PATH,
-        device
+    model, temporal_features, static_features, log1p_features, seq_len, min_seq_len = (
+        load_bayesian_model(MODEL_PATH, device)
     )
     scaler_static = joblib.load(SCALER_STATIC_PATH)
     scaler_temporal = joblib.load(SCALER_TEMPORAL_PATH)
@@ -361,7 +358,7 @@ if __name__ == "__main__":
         static_features,
         seq_len,
         min_seq_len=min_seq_len,
-        group_col=GROUP_COL
+        group_col=GROUP_COL,
     )
 
     seq_tensor = torch.tensor(sequences, dtype=torch.float32).to(device)
@@ -370,26 +367,23 @@ if __name__ == "__main__":
 
     print(seq_tensor.shape, static_tensor.shape)
 
-
     mean_prob, uncertainty, pred_label = bayesian_inference(
-        model,
-        seq_tensor,
-        static_tensor,
-        lengths_tensor,
-        n_samples=30
+        model, seq_tensor, static_tensor, lengths_tensor, n_samples=30
     )
 
     # Xuất kết quả inference
-    results = pd.DataFrame({
-        "tr_build_id": df.loc[indices, BUILD_ID_COL].values,
-        "gh_project_name": df.loc[indices, GROUP_COL].values,
-        "gh_build_started_at": df.loc[indices, TIME_COL].values,
-        "risk_prediction": pred_label,
-        "prob_low": mean_prob[:, 0],
-        "prob_medium": mean_prob[:, 1],
-        "prob_high": mean_prob[:, 2],
-        "predictive_uncertainty": uncertainty
-    })
+    results = pd.DataFrame(
+        {
+            "tr_build_id": df.loc[indices, BUILD_ID_COL].values,
+            "gh_project_name": df.loc[indices, GROUP_COL].values,
+            "gh_build_started_at": df.loc[indices, TIME_COL].values,
+            "risk_prediction": pred_label,
+            "prob_low": mean_prob[:, 0],
+            "prob_medium": mean_prob[:, 1],
+            "prob_high": mean_prob[:, 2],
+            "predictive_uncertainty": uncertainty,
+        }
+    )
 
     print("Test results:")
     print(results)
