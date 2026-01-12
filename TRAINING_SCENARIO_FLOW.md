@@ -75,15 +75,15 @@ TrainingScenario (COMPLETED) + Dataset Splits Ready
 ### Queue Architecture
 
 ```
-┌────────────────────────────────────────┐
-│        Celery Queue System             │
-├────────────────────────────────────────┤
-│ validation     │ Build source validation│
-│ ingestion      │ Clone, worktree, logs  │
-│ processing     │ Feature extraction     │
-│ trivy_scan     │ Trivy security scans   │
-│ sonar_scan     │ SonarQube analysis     │
-└────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│           Celery Queue System                │
+├──────────────────────────────────────────────┤
+│ scenario_ingestion  │ Filtering, clone,      │
+│                     │ worktree, logs         │
+│ scenario_processing │ Feature extraction,    │
+│                     │ dataset generation     │
+│ scenario_scanning   │ Trivy/SonarQube scans  │
+└──────────────────────────────────────────────┘
 ```
 
 ### Status Flow
@@ -201,10 +201,10 @@ source_validation_orchestrator
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `start_scenario_ingestion` | processing | 180s | Orchestrator: Filter + dispatch ingestion |
-| `aggregate_scenario_ingestion` | ingestion | 120s | Aggregate results, mark INGESTED |
-| `handle_scenario_chord_error` | ingestion | 120s | Error callback |
-| `reingest_failed_builds` | processing | 900s | Retry FAILED builds |
+| `start_scenario_ingestion` | scenario_ingestion | 180s | Orchestrator: Filter + dispatch ingestion |
+| `aggregate_scenario_ingestion` | scenario_ingestion | 180s | Aggregate results, mark INGESTED |
+| `handle_scenario_chord_error` | scenario_ingestion | 120s | Error callback |
+| `reingest_failed_builds` | scenario_ingestion | 900s | Retry FAILED builds |
 
 ### 1.2 Filtering Flow
 
@@ -277,13 +277,14 @@ DataSourceConfig = {
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `start_scenario_processing` | processing | 120s | User triggers Phase 2 |
-| `dispatch_scans_and_processing` | processing | 180s | Dispatch scans + feature extraction |
-| `dispatch_scenario_scans` | processing | 600s | Fire-and-forget scan dispatch |
-| `dispatch_enrichment_batches` | processing | 360s | Create EnrichmentBuild, dispatch chain |
-| `process_single_enrichment` | processing | 900s | Extract features for 1 build |
-| `finalize_scenario_processing` | processing | 120s | Mark PROCESSED |
-| `reprocess_failed_builds` | processing | 360s | Retry failed builds |
+| `start_scenario_processing` | scenario_processing | 120s | User triggers Phase 2 |
+| `dispatch_scans_and_processing` | scenario_processing | 180s | Dispatch scans + feature extraction |
+| `dispatch_scenario_scans` | scenario_scanning | 600s | Fire-and-forget scan dispatch |
+| `dispatch_enrichment_batches` | scenario_processing | 240s | Create EnrichmentBuild, dispatch chain |
+| `process_single_enrichment` | scenario_processing | 600s | Extract features for 1 build (max_retries=2) |
+| `finalize_scenario_processing` | scenario_processing | 120s | Mark PROCESSED, notify users |
+| `reprocess_failed_builds` | scenario_processing | 360s | Retry failed builds |
+| `handle_processing_chain_error` | scenario_processing | 120s | Error handler for chain failures |
 
 ### 2.2 Processing Flow
 
@@ -479,6 +480,10 @@ SplittingConfig = {
          │              │ ingestion_build_id  │
          │              │ feature_vector_id   │───► FeatureVector
          │              │ extraction_status   │
+         │              │ split_assignment    │   # train/val/test
+         │              │ group_value         │   # for leave-out strategies
+         │              │ outcome             │   # 0=success, 1=failure
+         │              │ build_started_at    │   # for temporal ordering
          │              └─────────────────────┘
          │
          ▼
@@ -542,9 +547,9 @@ class ExtractionStatus(str, Enum):
 
 | Method | Endpoint | Mô Tả |
 |--------|----------|-------|
-| `POST` | `/training-scenarios/{id}/start-ingestion` | Start Phase 1 |
-| `POST` | `/training-scenarios/{id}/start-processing` | Start Phase 2 |
-| `POST` | `/training-scenarios/{id}/generate-dataset` | Start Phase 3 |
+| `POST` | `/training-scenarios/{id}/ingest` | Start Phase 1 (Ingestion) |
+| `POST` | `/training-scenarios/{id}/process` | Start Phase 2 (Processing) |
+| `POST` | `/training-scenarios/{id}/generate` | Start Phase 3 (Dataset Generation) |
 | `POST` | `/training-scenarios/{id}/retry-ingestion` | Retry failed ingestion |
 | `POST` | `/training-scenarios/{id}/retry-processing` | Retry failed processing |
 
@@ -552,10 +557,21 @@ class ExtractionStatus(str, Enum):
 
 | Method | Endpoint | Mô Tả |
 |--------|----------|-------|
-| `GET` | `/training-scenarios/{id}/builds/import` | List ingestion builds |
-| `GET` | `/training-scenarios/{id}/builds/enrichment` | List enrichment builds |
+| `GET` | `/training-scenarios/{id}/ingestion-builds` | List ingestion builds |
+| `GET` | `/training-scenarios/{id}/enrichment-builds` | List enrichment builds |
+| `GET` | `/training-scenarios/{id}/enrichment-builds/{build_id}` | Get enrichment build detail |
 | `GET` | `/training-scenarios/{id}/splits` | List dataset splits |
+| `GET` | `/training-scenarios/{id}/splits/{split_id}/download` | Download single split file |
+| `GET` | `/training-scenarios/{id}/splits/download-all` | Download all splits as zip |
 | `GET` | `/training-scenarios/preview-builds` | Preview builds with filters |
+
+### Scan Status
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/training-scenarios/{id}/scan-status` | Get scan progress status |
+| `GET` | `/training-scenarios/{id}/commit-scans` | List commit scan results |
+| `POST` | `/training-scenarios/{id}/commit-scans/{commit_sha}/retry` | Retry failed scan |
 
 ---
 
@@ -568,6 +584,7 @@ class ExtractionStatus(str, Enum):
 ```
 /scenarios
 ├── page.tsx                   # Scenario list
+├── import/                    # Import from existing data sources
 ├── upload/                    # BuildSource upload wizard
 │   ├── page.tsx
 │   └── _components/
@@ -581,9 +598,9 @@ class ExtractionStatus(str, Enum):
 │       └── WizardContext.tsx      # Wizard state management
 └── [scenarioId]/
     ├── layout.tsx             # Tabs navigation
-    ├── page.tsx               # Overview
-    ├── builds/                # Ingestion + Enrichment builds
-    ├── analysis/              # Feature analysis
+    ├── page.tsx               # Overview/Dashboard
+    ├── builds/                # Ingestion + Enrichment builds list
+    ├── analysis/              # Feature analysis & visualization
     └── export/                # Download splits
         └── page.tsx
 ```

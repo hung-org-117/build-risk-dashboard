@@ -70,14 +70,15 @@ ModelRepoConfig (PROCESSED) + Predictions Ready
 ### Queue Architecture
 
 ```
-┌────────────────────────────────────────┐
-│        Celery Queue System             │
-├────────────────────────────────────────┤
-│ processing   │ Orchestration, feature  │
-│              │ extraction              │
-│ ingestion    │ Clone, worktree, logs   │
-│ prediction   │ ML model predictions    │
-└────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│           Celery Queue System                │
+├──────────────────────────────────────────────┤
+│ model_processing  │ Orchestration, feature   │
+│                   │ extraction, finalization │
+│ model_ingestion   │ Fetch, clone, worktree,  │
+│                   │ build logs download      │
+│ model_prediction  │ ML model predictions     │
+└──────────────────────────────────────────────┘
 ```
 
 ### Status Flow
@@ -118,11 +119,12 @@ ModelRepoConfig Status Flow:
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `start_model_processing` | processing | 180s | Orchestrator: Bắt đầu toàn bộ pipeline |
-| `ingest_model_builds` | ingestion | 180s | Dispatch fetch tasks (parallel or sequential) |
-| `fetch_builds_batch` | ingestion | 360s | Fetch một page builds từ CI API |
-| `fetch_builds_until_existing` | ingestion | 900s | Sequential fetch cho sync mode |
-| `aggregate_fetch_results` | ingestion | 120s | Aggregate fetch results (chord callback) |
+| `start_model_processing` | model_processing | 180s | Orchestrator: Bắt đầu toàn bộ pipeline |
+| `ingest_model_builds` | model_ingestion | 180s | Dispatch fetch tasks (parallel or sequential) |
+| `fetch_builds_batch` | model_ingestion | 360s | Fetch một page builds từ CI API |
+| `fetch_builds_until_existing` | model_ingestion | 900s | Sequential fetch cho sync mode |
+| `aggregate_fetch_results` | model_ingestion | 120s | Aggregate fetch results (chord callback) |
+| `handle_fetch_chord_error` | model_ingestion | 120s | Error handler cho fetch chord failures |
 
 ### 1.2 Import Flow Diagram
 
@@ -172,7 +174,7 @@ ingest_model_builds
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `ingest_webhook_build` | ingestion | 300s | Ingest single build từ webhook event |
+| `ingest_webhook_build` | model_ingestion | 300s | Ingest single build từ webhook event |
 
 ```
 GitHub sends webhook (workflow_run.completed)
@@ -291,10 +293,10 @@ fetch_kwargs = {
 
 | Task | Queue | Timeout | Retries | Mô Tả |
 |------|-------|---------|---------|-------|
-| `dispatch_ingestion` | ingestion | 180s | N/A | Build và dispatch ingestion workflow |
-| `aggregate_model_ingestion_results` | ingestion | 60s | N/A | Aggregate results, mark builds INGESTED |
-| `handle_ingestion_chord_error` | ingestion | 120s | N/A | Error handler cho chord failure |
-| `reingest_failed_builds` | ingestion | 900s | N/A | Retry FAILED builds (not MISSING_RESOURCE) |
+| `dispatch_ingestion` | model_ingestion | 180s | N/A | Build và dispatch ingestion workflow |
+| `aggregate_model_ingestion_results` | model_ingestion | 60s | N/A | Aggregate results, mark builds INGESTED |
+| `handle_ingestion_chord_error` | model_ingestion | 120s | N/A | Error handler cho chord failure |
+| `reingest_failed_builds` | model_ingestion | 900s | N/A | Retry FAILED builds (not MISSING_RESOURCE) |
 
 ### 2.2 Resource DAG
 
@@ -392,12 +394,12 @@ class ResourceStatusEntry(BaseModel):
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `start_processing_phase` | processing | 120s | User triggers Phase 2, find pending builds |
-| `dispatch_build_processing` | processing | 360s | Create ModelTrainingBuild, dispatch chain |
-| `process_workflow_run` | processing | 900s | Extract features cho 1 build |
-| `finalize_model_processing` | processing | 120s | Aggregate results, dispatch predictions |
-| `retry_failed_builds` | processing | 360s | Retry FAILED builds |
-| `handle_processing_chain_error` | processing | 120s | Error handler for chain failures |
+| `start_processing_phase` | model_processing | 120s | User triggers Phase 2, find pending builds |
+| `dispatch_build_processing` | model_processing | 360s | Create ModelTrainingBuild, dispatch chain |
+| `process_workflow_run` | model_processing | 900s | Extract features cho 1 build (max_retries=3) |
+| `finalize_model_processing` | model_processing | 120s | Aggregate results, dispatch predictions |
+| `retry_failed_builds` | model_processing | 360s | Retry FAILED builds (extraction + prediction) |
+| `handle_processing_chain_error` | model_processing | 120s | Error handler for chain failures |
 
 ### 3.2 Processing Flow
 
@@ -535,7 +537,26 @@ update_data["last_processed_import_build_id"] = ObjectId(last_build_id)
 {
     raw_repo_id: ObjectId,
     raw_build_run_id: ObjectId,
-    ci_run_id: str,
+    
+    # Scoping (Context)
+    scope: FeatureVectorScope,      # "model_training" | "dataset_enrichment"
+    config_id: Optional[ObjectId],  # Reference to ModelRepoConfig or DatasetVersion
+    
+    # Version tracking
+    dag_version: str,               # Version of Hamilton DAG used
+    computed_at: datetime,
+    
+    # Temporal linking
+    tr_prev_build: Optional[str],   # Previous build's ci_run_id
+    
+    # Extraction status
+    extraction_status: ExtractionStatus,
+    extraction_error: Optional[str],
+    
+    # Graceful degradation tracking
+    is_missing_commit: bool,        # Whether commit is missing from repo
+    missing_resources: List[str],   # Resources unavailable (e.g., 'git_worktree')
+    skipped_features: List[str],    # Features skipped due to missing resources
     
     # Computed features
     features: {
@@ -546,12 +567,18 @@ update_data["last_processed_import_build_id"] = ObjectId(last_build_id)
         "tr_prev_build_duration": 180.5,
         ...
     },
+    feature_count: int,
     
     # Normalized features (for prediction)
     normalized_features: {...},
     
-    # Temporal linking
-    tr_prev_build: Optional[str],  # Previous build's ci_run_id
+    # Scan metrics (backfilled asynchronously)
+    scan_metrics: {
+        "sonar_bugs": 2,
+        "sonar_code_smells": 15,
+        "trivy_vuln_total": 3,
+        ...
+    },
 }
 ```
 
@@ -567,8 +594,8 @@ update_data["last_processed_import_build_id"] = ObjectId(last_build_id)
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `predict_builds_batch` | prediction | 360s | Batch prediction cho nhiều builds |
-| `finalize_prediction` | processing | 120s | Finalize: set status PROCESSED after all predictions |
+| `predict_builds_batch` | model_prediction | 360s | Batch prediction cho nhiều builds |
+| `finalize_prediction` | model_prediction | 120s | Finalize: set status PROCESSED, send notifications |
 
 ### 4.2 Prediction Flow
 
@@ -684,12 +711,11 @@ class ModelImportStatus(str, Enum):
 
 class ModelImportBuildStatus(str, Enum):
     """ModelImportBuild status (ingestion phase)"""
-    PENDING = "pending"
-    FETCHED = "fetched"
-    INGESTING = "ingesting"
-    INGESTED = "ingested"
-    MISSING_RESOURCE = "missing_resource"  # Not retryable
-    FAILED = "failed"                       # Retryable
+    FETCHED = "fetched"             # Build info fetched from CI API
+    INGESTING = "ingesting"         # Ingestion in progress
+    INGESTED = "ingested"           # Resources ready for processing
+    MISSING_RESOURCE = "missing_resource"  # Expected: logs expired (Not retryable)
+    FAILED = "failed"                       # Actual error: timeout, network (Retryable)
 
 class ExtractionStatus(str, Enum):
     """ModelTrainingBuild extraction/prediction status"""
