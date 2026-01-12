@@ -44,9 +44,13 @@ export interface RepoAccessResponse {
 
 // Admin Users API
 export const adminUsersApi = {
-    list: async (q?: string): Promise<UserListResponse> => {
+    list: async (q?: string, page: number = 1, pageSize: number = 20): Promise<UserListResponse> => {
         const response = await api.get<UserListResponse>("/admin/users", {
-            params: q ? { q } : undefined,
+            params: {
+                q: q || undefined,
+                page,
+                page_size: pageSize,
+            },
         });
         return response.data;
     },

@@ -308,7 +308,7 @@ def fetch_builds_until_existing(
 
     # Get CI provider instance
     ci_provider_enum = CIProvider(ci_provider)
-    provider_config = get_provider_config(ci_provider_enum)
+    provider_config = get_provider_config(ci_provider_enum, db=self.db)
     ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=self.db)
 
     # Get RawRepository for later
@@ -538,7 +538,7 @@ def fetch_builds_batch(
 
     # Get CI provider instance
     ci_provider_enum = CIProvider(ci_provider)
-    provider_config = get_provider_config(ci_provider_enum)
+    provider_config = get_provider_config(ci_provider_enum, db=self.db)
     ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=self.db)
 
     fetch_kwargs = {

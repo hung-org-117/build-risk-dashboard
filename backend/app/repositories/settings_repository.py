@@ -28,9 +28,33 @@ class SettingsRepository(BaseRepository[ApplicationSettings]):
 
         if existing:
             # Update existing
+            dump = settings.model_dump(by_alias=True, exclude_none=True)
+
+            # Explicitly merge encrypted tokens if present in the entity
+            # This ensures they are not dropped by serialization quirks
+            if settings.circleci.token_encrypted:
+                dump.setdefault("circleci", {})[
+                    "token_encrypted"
+                ] = settings.circleci.token_encrypted
+
+            if settings.travis.token_encrypted:
+                dump.setdefault("travis", {})[
+                    "token_encrypted"
+                ] = settings.travis.token_encrypted
+
+            if settings.sonarqube.token_encrypted:
+                dump.setdefault("sonarqube", {})[
+                    "token_encrypted"
+                ] = settings.sonarqube.token_encrypted
+
+            if settings.sonarqube.webhook_secret_encrypted:
+                dump.setdefault("sonarqube", {})[
+                    "webhook_secret_encrypted"
+                ] = settings.sonarqube.webhook_secret_encrypted
+
             return self.update_one(
                 self.SETTINGS_ID,
-                settings.model_dump(by_alias=True, exclude_none=True),
+                dump,
             )
         else:
             # Insert new

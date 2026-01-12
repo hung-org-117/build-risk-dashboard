@@ -9,14 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { useToast } from '@/components/ui/use-toast'
 import {
   Dialog,
@@ -56,6 +49,10 @@ export function GitHubTokensTab() {
   // Edit token
   const [editingToken, setEditingToken] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
+
+  // Pagination
+  const [page, setPage] = useState(1)
+  const pageSize = 10
 
   const { toast } = useToast()
 
@@ -144,7 +141,7 @@ export function GitHubTokensTab() {
       await tokensApi.update(token.id, { status: newStatus })
       toast({
         title: 'Success',
-        description: `Token ${newStatus === 'disabled' ? 'disabled' : 'enabled'}`,
+        description: 'Token ' + (newStatus === 'disabled' ? 'disabled' : 'enabled'),
       })
       fetchData()
     } catch (error) {
@@ -207,9 +204,74 @@ export function GitHubTokensTab() {
     return formatDateTime(date)
   }
 
+  // Define columns for DataTable
+  const columns: DataTableColumn<GithubToken>[] = [
+    {
+      key: 'label',
+      header: 'Label',
+      render: (token) => {
+        if (editingToken === token.id) {
+          return (
+            <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+              <Input
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+                className="h-8 w-32"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleUpdateLabel(token.id)
+                  if (e.key === 'Escape') setEditingToken(null)
+                }}
+                autoFocus
+              />
+              <Button size="sm" variant="ghost" onClick={() => handleUpdateLabel(token.id)}>
+                <CheckCircle className="w-4 h-4" />
+              </Button>
+            </div>
+          )
+        }
+        return <span className="font-medium">{token.label || '-'}</span>
+      },
+    },
+    {
+      key: 'token',
+      header: 'Token',
+      render: (token) => <code className="text-xs bg-muted px-2 py-1 rounded">{token.masked_token}</code>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (token) => getStatusBadge(token.status),
+    },
+    {
+      key: 'remaining',
+      header: 'Remaining',
+      className: 'text-right',
+      render: (token) => (
+        token.rate_limit_remaining !== null ? (
+          <span className={token.rate_limit_remaining === 0 ? 'text-red-600' : ''}>
+            {token.rate_limit_remaining.toLocaleString()}
+          </span>
+        ) : '-'
+      ),
+    },
+    {
+      key: 'reset',
+      header: 'Reset',
+      render: (token) => formatResetTime(token.rate_limit_reset_at),
+    },
+    {
+      key: 'lastUsed',
+      header: 'Last Used',
+      render: (token) => <span className="text-sm text-muted-foreground">{formatDate(token.last_used_at)}</span>,
+    },
+  ]
+
   const quotaPercentage = poolStatus
     ? Math.min(100, (poolStatus.estimated_requests_available / (poolStatus.total_tokens * 5000)) * 100)
     : 0
+
+  // Calculate generic pagination
+  const paginatedTokens = tokens.slice((page - 1) * pageSize, page * pageSize)
 
   return (
     <div className="space-y-6">
@@ -423,107 +485,59 @@ export function GitHubTokensTab() {
             </label>
           </div>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Label</TableHead>
-                <TableHead>Token</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Remaining</TableHead>
-                <TableHead>Reset</TableHead>
-                <TableHead>Last Used</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tokens.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                    No tokens configured. Add a token to get started.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                tokens.map((token) => (
-                  <TableRow key={token.id}>
-                    <TableCell>
-                      {editingToken === token.id ? (
-                        <div className="flex gap-1">
-                          <Input
-                            value={editLabel}
-                            onChange={(e) => setEditLabel(e.target.value)}
-                            className="h-8 w-32"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleUpdateLabel(token.id)
-                              if (e.key === 'Escape') setEditingToken(null)
-                            }}
-                          />
-                          <Button size="sm" variant="ghost" onClick={() => handleUpdateLabel(token.id)}>
-                            <CheckCircle className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <span className="font-medium">{token.label || '-'}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <code className="text-xs bg-muted px-2 py-1 rounded">{token.masked_token}</code>
-                    </TableCell>
-                    <TableCell>{getStatusBadge(token.status)}</TableCell>
-                    <TableCell className="text-right">
-                      {token.rate_limit_remaining !== null ? (
-                        <span className={token.rate_limit_remaining === 0 ? 'text-red-600' : ''}>
-                          {token.rate_limit_remaining.toLocaleString()}
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell>{formatResetTime(token.rate_limit_reset_at)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDate(token.last_used_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-1 justify-end">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setEditingToken(token.id)
-                            setEditLabel(token.label)
-                          }}
-                          title="Edit label"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleToggleStatus(token)}
-                          title={token.status === 'disabled' ? 'Enable' : 'Disable'}
-                        >
-                          {token.status === 'disabled' ? (
-                            <Power className="w-4 h-4" />
-                          ) : (
-                            <PowerOff className="w-4 h-4" />
-                          )}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-red-600 hover:text-red-700"
-                          onClick={() => handleDeleteToken(token.id)}
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+        <CardContent className="p-0">
+          <DataTable
+            columns={columns}
+            data={paginatedTokens}
+            total={tokens.length}
+            page={page}
+            pageSize={pageSize}
+            loading={loading}
+            emptyMessage="No tokens configured."
+            emptySubMessage="Add a token to get started."
+            emptyIcon={<Key className="h-12 w-12 text-slate-300" />}
+            itemName="tokens"
+            onPageChange={setPage}
+            rowKey={(token) => token.id}
+            alwaysShowPagination={true}
+            actions={(token) => (
+              <div className="flex gap-1 justify-end">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setEditingToken(token.id)
+                    setEditLabel(token.label)
+                  }}
+                  title="Edit label"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleToggleStatus(token)}
+                  title={token.status === 'disabled' ? 'Enable' : 'Disable'}
+                >
+                  {token.status === 'disabled' ? (
+                    <Power className="w-4 h-4" />
+                  ) : (
+                    <PowerOff className="w-4 h-4" />
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-red-600 hover:text-red-700"
+                  onClick={() => handleDeleteToken(token.id)}
+                  title="Delete"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
+          />
         </CardContent>
       </Card>
     </div>

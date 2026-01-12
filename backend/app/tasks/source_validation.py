@@ -546,7 +546,7 @@ def validate_source_builds_chunk(
     ci_provider = CIProvider(ci_provider_str)
 
     # Get CI provider client with config from settings (includes token)
-    ci_config = get_provider_config(ci_provider)
+    ci_config = get_provider_config(ci_provider, db=db)
     ci_client = get_ci_provider(ci_provider, config=ci_config, db=db)
 
     # Hardcoded filters (matching model_ingestion.py behavior)

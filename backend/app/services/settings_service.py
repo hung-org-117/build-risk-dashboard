@@ -1,5 +1,3 @@
-"""Service for managing application settings."""
-
 import base64
 import hashlib
 import logging
@@ -149,20 +147,27 @@ class SettingsService:
         # Update CircleCI
         if request.circleci:
             circleci_data = request.circleci.model_dump(exclude_none=True)
+            logger.info(f"Processing CircleCI update. Keys: {circleci_data.keys()}")
+
             if circleci_data.get("token") and not circleci_data["token"].startswith(
                 "****"
             ):
-                circleci_data["token_encrypted"] = self._encrypt_token(
-                    circleci_data.pop("token")
-                )
+                encrypted = self._encrypt_token(circleci_data.pop("token"))
+                circleci_data["token_encrypted"] = encrypted
+                self._log_debug("CircleCI token encrypted successfully")
             else:
                 circleci_data.pop("token", None)
+                logger.info("No new CircleCI token provided or masked")
+
             # Merge with existing
             existing.circleci = CircleCISettings(
                 base_url=circleci_data.get("base_url", existing.circleci.base_url),
                 token_encrypted=circleci_data.get(
                     "token_encrypted", existing.circleci.token_encrypted
                 ),
+            )
+            logger.info(
+                f"CircleCISettings updated. token_encrypted present: {bool(existing.circleci.token_encrypted)}"
             )
 
         # Update Travis
@@ -225,6 +230,9 @@ class SettingsService:
 
         # Save to database
         existing.mark_updated()
+        logger.info(
+            f"Saving settings. CircleCI token_encrypted: {bool(existing.circleci.token_encrypted)}"
+        )
         self.repo.upsert_settings(existing)
 
         return self.get_settings()

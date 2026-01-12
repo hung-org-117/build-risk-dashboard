@@ -25,6 +25,8 @@ class AdminUserListResponse(BaseModel):
 
     items: List[AdminUserResponse]
     total: int
+    page: int = 1
+    page_size: int = 20
 
 
 class AdminUserUpdateRequest(BaseModel):

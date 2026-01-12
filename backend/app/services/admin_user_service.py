@@ -33,12 +33,19 @@ class AdminUserService:
             created_at=user.created_at,
         )
 
-    def list_users(self, search: str = None) -> AdminUserListResponse:
+    def list_users(
+        self, search: str = None, page: int = 1, page_size: int = 20
+    ) -> AdminUserListResponse:
         """List all users (UC6: View User List)."""
-        users = self.user_repo.list_all(search=search)
+        skip = (page - 1) * page_size
+        users = self.user_repo.list_all(search=search, skip=skip, limit=page_size)
+        total = self.user_repo.count_all(search=search)
+
         return AdminUserListResponse(
             items=[self._to_response(u) for u in users],
-            total=len(users),
+            total=total,
+            page=page,
+            page_size=page_size,
         )
 
     def get_user(self, user_id: str) -> AdminUserResponse:
@@ -51,7 +58,9 @@ class AdminUserService:
             )
         return self._to_response(user)
 
-    def update_user(self, user_id: str, payload: AdminUserUpdateRequest) -> AdminUserResponse:
+    def update_user(
+        self, user_id: str, payload: AdminUserUpdateRequest
+    ) -> AdminUserResponse:
         """Update user profile."""
         updates = payload.model_dump(exclude_unset=True)
         if not updates:

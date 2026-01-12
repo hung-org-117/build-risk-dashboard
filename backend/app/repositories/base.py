@@ -134,17 +134,14 @@ class BaseRepository(ABC, Generic[T]):
         updates: Dict[str, Any],
         session: Optional[ClientSession] = None,
     ) -> Optional[T]:
-        """Update a document by ID
-
-        Args:
-            entity_id: Document ID to update
-            updates: Fields to update (will be wrapped in $set)
-            session: Optional MongoDB session for transaction support
-        """
+        """Update a document by ID"""
         identifier = self._to_object_id(entity_id)
         if identifier is None:
             return None
-        self.collection.update_one({"_id": identifier}, {"$set": updates}, session=session)
+
+        self.collection.update_one(
+            {"_id": identifier}, {"$set": updates}, session=session
+        )
         return self.find_by_id(identifier)
 
     def update_many(
@@ -229,7 +226,9 @@ class BaseRepository(ABC, Generic[T]):
             query,
             update,
             upsert=upsert,
-            return_document=ReturnDocument.AFTER if return_updated else ReturnDocument.BEFORE,
+            return_document=(
+                ReturnDocument.AFTER if return_updated else ReturnDocument.BEFORE
+            ),
         )
         return self._to_model(doc)
 

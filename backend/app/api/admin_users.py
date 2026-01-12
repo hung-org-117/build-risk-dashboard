@@ -26,12 +26,14 @@ router = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
 )
 def list_users(
     q: Optional[str] = Query(None, description="Search by name, username, or email"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     db: Database = Depends(get_db),
     _admin: dict = Depends(RequirePermission(Permission.MANAGE_USERS)),
 ):
     """List all users (Admin only). UC6: View User List"""
     service = AdminUserService(db)
-    return service.list_users(search=q)
+    return service.list_users(search=q, page=page, page_size=page_size)
 
 
 @router.get(

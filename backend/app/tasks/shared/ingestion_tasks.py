@@ -1009,7 +1009,7 @@ def download_logs_chunk(
 
             build_run_repo = RawBuildRunRepository(self.db)
             ci_provider_enum = CIProvider(ci_provider)
-            provider_config = get_provider_config(ci_provider_enum)
+            provider_config = get_provider_config(ci_provider_enum, db=self.db)
             ci_instance = get_ci_provider(ci_provider_enum, provider_config, db=self.db)
 
             logs_downloaded = result["logs_downloaded"]

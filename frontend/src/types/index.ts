@@ -904,3 +904,23 @@ export interface NotificationListResponse {
 export interface UnreadCountResponse {
   count: number;
 }
+
+// ============================================================================
+// TEMPLATE TYPES (For Scenario Creation)
+// ============================================================================
+
+export interface DatasetTemplateRecord {
+  id: string;
+  name: string;
+  description?: string;
+  feature_names: string[];
+  tags?: string[];
+  source?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DatasetTemplateListResponse {
+  items: DatasetTemplateRecord[];
+  total: number;
+}

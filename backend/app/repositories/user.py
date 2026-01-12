@@ -20,7 +20,7 @@ class UserRepository(BaseRepository[User]):
         """Find a user by email"""
         return self.find_one({"email": email})
 
-    def list_all(self, search: str = None) -> List[User]:
+    def list_all(self, search: str = None, skip: int = 0, limit: int = 0) -> List[User]:
         """List all users sorted by creation date, optionally filtered by search."""
         query = {}
         if search:
@@ -30,7 +30,18 @@ class UserRepository(BaseRepository[User]):
                 {"email": {"$regex": search, "$options": "i"}},
                 {"username": {"$regex": search, "$options": "i"}},
             ]
-        return self.find_many(query, sort=[("created_at", -1)])
+        return self.find_many(query, sort=[("created_at", -1)], skip=skip, limit=limit)
+
+    def count_all(self, search: str = None) -> int:
+        """Count users, optionally filtered by search."""
+        query = {}
+        if search:
+            query["$or"] = [
+                {"name": {"$regex": search, "$options": "i"}},
+                {"email": {"$regex": search, "$options": "i"}},
+                {"username": {"$regex": search, "$options": "i"}},
+            ]
+        return self.collection.count_documents(query)
 
     def create_user(self, email: str, name: Optional[str], role: str = "user") -> User:
         """Create a new user"""
