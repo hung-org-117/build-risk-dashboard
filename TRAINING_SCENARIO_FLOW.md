@@ -392,14 +392,17 @@ generate_export_dataset (Celery task)
 │
 ├─ Build pandas DataFrame
 │   ├─ Feature columns
-│   ├─ Label column (outcome: success/failure)
+│   ├─ Label column (outcome: 0=success, 1=failure)
 │   └─ Metadata (repo, commit, build_id)
 │
 ├─ Apply splitting strategy (from export config):
 │   ├─ stratified_within_group (default)
-│   ├─ leave_one_out / leave_two_out
+│   ├─ leave_one_out (L1GO) - requires ≥3 groups
+│   ├─ leave_two_out (L2GO) - requires ≥4 groups
+│   ├─ extreme_novelty - isolate target group+label → test
+│   ├─ imbalanced_train - reduce label 1 in train only
 │   ├─ time_series_split
-│   └─ random_split
+│   └─ random_split / stratified_split
 │
 ├─ Export files to export-specific directory:
 │   ├─ train.parquet (based on ratios)
@@ -415,19 +418,46 @@ generate_export_dataset (Celery task)
 
 ```python
 ExportSplittingConfig = {
-    strategy: "stratified_within_group",
-    group_by: "repo_language" | "time_of_day" | "percentage_of_builds_before",
-    stratify_by: "outcome" | "conclusion",
+    strategy: "stratified_within_group" | "leave_one_out" | "leave_two_out" |
+              "extreme_novelty" | "imbalanced_train" | "time_series_split" |
+              "random_split" | "stratified_split",
+    group_by: "repo_language" | "time_of_day" |
+              "percentage_of_builds_before" | "number_of_builds_before",
+    stratify_by: "outcome",
     ratios: {
         train: 0.7,
         val: 0.15,
         test: 0.15,
     },
+    # Dynamic binning parameters:
+    num_bins: 4,        # 2-10, for numeric features (% builds, # builds)
+    time_slots: 4,      # 2-12, for time_of_day grouping
+
     # For leave_one_out/leave_two_out strategies:
-    test_groups: ["python"],
+    test_groups: ["python"],        # L1GO: 1 group, L2GO: 2 groups
     val_groups: ["java"],
+
+    # For extreme_novelty strategy:
+    novelty_group: "python",        # Target group to isolate
+    novelty_label: 1,               # 0=success, 1=failure (must be 0 or 1)
+
+    # For imbalanced_train strategy:
+    imbalance_reduction_rate: 0.5,  # 0-1, percentage of label 1 to remove from train
 }
 ```
+
+### Splitting Strategies (app.services.strategies/)
+
+| Strategy | Mô tả | Requirements |
+|----------|-------|-------------|
+| `stratified_within_group` | Split within each group with stratification | - |
+| `leave_one_out` (L1GO) | 1 group → test, 1 group → val | ≥3 groups |
+| `leave_two_out` (L2GO) | 2 groups → test, 1 group → val | ≥4 groups |
+| `extreme_novelty` | Target group + label → test (zero-shot) | novelty_group, novelty_label |
+| `imbalanced_train` | Remove X% of label 1 from train only | imbalance_reduction_rate |
+| `time_series_split` | Chronological split (oldest → newest) | build_started_at column |
+| `random_split` | Pure random assignment | - |
+| `stratified_split` | Random split preserving label distribution | - |
 
 ### TrainingDatasetExport
 
