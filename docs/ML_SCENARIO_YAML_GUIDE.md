@@ -259,7 +259,7 @@ preprocessing:
 
 | Field | Type | Values | Default |
 |-------|------|--------|---------|
-| `format` | enum | `parquet`, `csv`, `pickle` | `parquet` |
+| `format` | enum | `parquet`, `csv` | `parquet` |
 | `include_metadata` | bool | - | true |
 
 ```yaml

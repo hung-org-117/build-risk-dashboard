@@ -15,6 +15,8 @@ from app.entities.user import User
 from app.middleware.auth import get_current_user
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
+from app.services.training_ingestion_service import TrainingIngestionService
+from app.services.training_processing_service import TrainingProcessingService
 from app.services.training_scenario_service import TrainingScenarioService
 
 router = APIRouter()
@@ -102,6 +104,100 @@ def preview_builds(
             "total": stats.get("total_builds", 0),
         },
     }
+
+
+# ============================================================================
+# Splitting Groups Discovery (Wizard Step 3 - for LOO/LTO)
+# ============================================================================
+
+
+@router.get("/splitting-groups")
+def get_splitting_groups(
+    group_by: str = Query(
+        ..., description="Group by dimension: repo_language, time_of_day, etc."
+    ),
+    date_start: Optional[datetime] = None,
+    date_end: Optional[datetime] = None,
+    languages: Optional[str] = Query(None, description="Comma-separated languages"),
+    conclusions: Optional[str] = Query(
+        None, description="Comma-separated conclusions (success,failure)"
+    ),
+    ci_provider: Optional[str] = Query(None, description="CI provider filter"),
+    db=Depends(get_db),  # noqa: B008
+) -> Dict[str, Any]:
+    """
+    Get available groups for splitting strategies.
+
+    Used by LOO/LTO to show selectable test/val groups with counts.
+    Returns groups that actually exist in the filtered dataset.
+    """
+    import pandas as pd
+
+    from app.entities.enums import GroupByDimension
+    from app.services.splitting_strategy_service import SplittingStrategyService
+
+    raw_build_run_repo = RawBuildRunRepository(db)
+
+    # Parse comma-separated values
+    conclusions_list = conclusions.split(",") if conclusions else None
+    languages_list = languages.split(",") if languages else None
+
+    # Get all builds matching filters (no pagination)
+    builds_data = raw_build_run_repo.find_builds_with_filters(
+        date_start=date_start,
+        date_end=date_end,
+        conclusions=conclusions_list,
+        ci_provider=ci_provider,
+        languages=languages_list,
+        skip=0,
+        limit=100000,  # Get all for grouping
+    )
+
+    if not builds_data:
+        return {
+            "group_by": group_by,
+            "groups": [],
+            "total_builds": 0,
+        }
+
+    # Convert to DataFrame
+    df = pd.DataFrame(builds_data)
+
+    # Map column names for compatibility with splitting service
+    column_mapping = {
+        "language": "repo_language",
+    }
+    df.rename(columns=column_mapping, inplace=True)
+
+    # Validate group_by
+    try:
+        group_by_enum = GroupByDimension(group_by)
+    except ValueError:
+        return {
+            "error": f"Invalid group_by: {group_by}",
+            "valid_options": [e.value for e in GroupByDimension],
+        }
+
+    # Get available groups
+    splitting_service = SplittingStrategyService()
+    return splitting_service.get_available_groups(df, group_by_enum)
+
+
+@router.get("/{scenario_id}/splitting-groups")
+def get_scenario_splitting_groups(
+    scenario_id: str,
+    dimension: str = Query(..., description="Grouping dimension"),
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+) -> Dict[str, Any]:
+    """
+    Get splitting groups for an existing scenario.
+    """
+    service = TrainingScenarioService(db)
+    # Check access
+    service.get_scenario(scenario_id, str(current_user["_id"]))
+
+    return service.get_splitting_group_values(scenario_id, dimension)
 
 
 @router.get("/", response_model=TrainingScenarioListResponse)
@@ -196,7 +292,7 @@ def start_ingestion(
     db=Depends(get_db),  # noqa: B008
 ) -> Dict[str, Any]:
     """Start ingestion phase (Phase 1)."""
-    service = TrainingScenarioService(db)
+    service = TrainingIngestionService(db)
     return service.start_ingestion(scenario_id, str(current_user["_id"]))
 
 
@@ -207,7 +303,7 @@ def start_processing(
     db=Depends(get_db),  # noqa: B008
 ) -> Dict[str, Any]:
     """Start processing phase (Phase 2)."""
-    service = TrainingScenarioService(db)
+    service = TrainingProcessingService(db)
     return service.start_processing(scenario_id, str(current_user["_id"]))
 
 
@@ -222,100 +318,6 @@ def generate_dataset(
     return service.generate_dataset(
         scenario_id,
         str(current_user["_id"]),
-    )
-
-
-# ============================================================================
-# Artifacts
-# ============================================================================
-
-
-@router.get("/{scenario_id}/splits")
-def get_scenario_splits(
-    scenario_id: str,
-    current_user: User = Depends(get_current_user),  # noqa: B008
-    db=Depends(get_db),  # noqa: B008
-):
-    """Get generated split files."""
-    service = TrainingScenarioService(db)
-    return service.get_scenario_splits(scenario_id, str(current_user["_id"]))
-
-
-@router.get("/{scenario_id}/splits/{split_id}/download")
-def download_split_file(
-    scenario_id: str,
-    split_id: str,
-    current_user: User = Depends(get_current_user),  # noqa: B008
-    db=Depends(get_db),  # noqa: B008
-):
-    """Download a dataset split file."""
-    from fastapi import HTTPException
-    from fastapi.responses import FileResponse
-
-    from app import paths
-
-    service = TrainingScenarioService(db)
-    split = service.get_split_by_id(scenario_id, split_id, str(current_user["_id"]))
-
-    file_path = paths.DATA_DIR / split["file_path"]
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Split file not found")
-
-    return FileResponse(
-        path=file_path,
-        filename=file_path.name,
-        media_type="application/octet-stream",
-    )
-
-
-@router.get("/{scenario_id}/splits/download-all")
-def download_all_splits(
-    scenario_id: str,
-    file_format: str = Query("parquet", description="Format: parquet or csv"),
-    current_user: User = Depends(get_current_user),  # noqa: B008
-    db=Depends(get_db),  # noqa: B008
-):
-    """Download all split files (train/val/test) as a zip archive."""
-    import zipfile
-    from io import BytesIO
-
-    from fastapi import HTTPException
-    from fastapi.responses import StreamingResponse
-
-    from app import paths
-
-    service = TrainingScenarioService(db)
-    splits = service.get_scenario_splits(scenario_id, str(current_user["_id"]))
-
-    if not splits:
-        raise HTTPException(status_code=404, detail="No splits found for this scenario")
-
-    # Filter by requested format
-    filtered_splits = [s for s in splits if s["file_format"] == file_format]
-    if not filtered_splits:
-        raise HTTPException(status_code=404, detail=f"No {file_format} splits found")
-
-    # Create zip in memory
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for split in filtered_splits:
-            file_path = paths.DATA_DIR / split["file_path"]
-            if file_path.exists():
-                # Add file to zip with just the filename
-                zf.write(file_path, arcname=file_path.name)
-
-    zip_buffer.seek(0)
-
-    from datetime import datetime
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="scenario_{scenario_id}_{timestamp}_{file_format}.zip"'
-        },
     )
 
 
@@ -341,14 +343,15 @@ def get_ingestion_builds(
 
     Shows TrainingIngestionBuild data with resource status breakdown.
     """
-    service = TrainingScenarioService(db)
-    return service.get_ingestion_builds(
+    service = TrainingIngestionService(db)
+    response = service.get_ingestion_builds(
         scenario_id=scenario_id,
         user_id=str(current_user["_id"]),
         skip=skip,
         limit=limit,
         status_filter=status,
     )
+    return response.model_dump()
 
 
 @router.get("/{scenario_id}/enrichment-builds")
@@ -368,14 +371,15 @@ def get_enrichment_builds(
 
     Shows TrainingEnrichmentBuild data with extraction status and features.
     """
-    service = TrainingScenarioService(db)
-    return service.get_enrichment_builds(
+    service = TrainingProcessingService(db)
+    response = service.get_enrichment_builds(
         scenario_id=scenario_id,
         user_id=str(current_user["_id"]),
         skip=skip,
         limit=limit,
         extraction_status=extraction_status,
     )
+    return response.model_dump()
 
 
 @router.get("/{scenario_id}/enrichment-builds/{build_id}")
@@ -388,7 +392,7 @@ def get_enrichment_build_detail(
     """
     Get detailed view of an enrichment build.
     """
-    service = TrainingScenarioService(db)
+    service = TrainingProcessingService(db)
     return service.get_enrichment_build_detail(
         scenario_id=scenario_id,
         build_id=build_id,
@@ -426,7 +430,7 @@ def retry_ingestion(
     db=Depends(get_db),  # noqa: B008
 ):
     """Retry failed ingestion builds."""
-    service = TrainingScenarioService(db)
+    service = TrainingIngestionService(db)
     return service.retry_ingestion(scenario_id, str(current_user["_id"]))
 
 
@@ -437,7 +441,7 @@ def retry_processing(
     db=Depends(get_db),  # noqa: B008
 ):
     """Retry failed processing builds."""
-    service = TrainingScenarioService(db)
+    service = TrainingProcessingService(db)
     return service.retry_processing(scenario_id, str(current_user["_id"]))
 
 

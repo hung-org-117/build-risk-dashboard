@@ -112,6 +112,31 @@ export interface PreviewBuildsParams {
     limit?: number;
 }
 
+// Splitting Groups types (for Dynamic Group Discovery)
+export interface SplittingGroup {
+    value: string;
+    label: string;
+    count: number;
+    warning?: "small_sample";
+}
+
+export interface SplittingGroupsResponse {
+    group_by: string;
+    groups: SplittingGroup[];
+    total_builds: number;
+    error?: string;
+    valid_options?: string[];
+}
+
+export interface SplittingGroupsParams {
+    group_by: string;
+    date_start?: string;
+    date_end?: string;
+    languages?: string;
+    conclusions?: string;
+    ci_provider?: string;
+}
+
 // Dataset split types
 export interface TrainingDatasetSplitRecord {
     id: string;
@@ -270,6 +295,16 @@ export const trainingScenariosApi = {
      */
     previewBuilds: async (params: PreviewBuildsParams = {}): Promise<PreviewBuildsResponse> => {
         const response = await api.get<PreviewBuildsResponse>("/training-scenarios/preview-builds", {
+            params,
+        });
+        return response.data;
+    },
+
+    /**
+     * Get available groups for splitting strategies (Wizard Step 3 - LOO/LTO)
+     */
+    getSplittingGroups: async (params: SplittingGroupsParams): Promise<SplittingGroupsResponse> => {
+        const response = await api.get<SplittingGroupsResponse>("/training-scenarios/splitting-groups", {
             params,
         });
         return response.data;

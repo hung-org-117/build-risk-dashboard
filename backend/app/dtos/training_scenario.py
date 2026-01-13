@@ -1,13 +1,10 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
-from app.entities.training_scenario import (
-    GroupByDimension,
-    ScenarioStatus,
-    SplitStrategy,
-)
+
+from app.entities.training_scenario import ScenarioStatus
 
 
 class DataSourceConfigDTO(BaseModel):
@@ -30,62 +27,22 @@ class FeatureConfigDTO(BaseModel):
     extractor_configs: Dict[str, Any] = {}  # Per-language/framework extractor settings
 
 
-class SplittingConfigDTO(BaseModel):
-    strategy: SplitStrategy = SplitStrategy.STRATIFIED_WITHIN_GROUP
-    group_by: GroupByDimension = GroupByDimension.LANGUAGE
-    groups: List[str] = []
-    ratios: Dict[str, float] = {"train": 0.7, "val": 0.15, "test": 0.15}
-    stratify_by: str = "outcome"
-    test_groups: List[str] = []
-    val_groups: List[str] = []
-    train_groups: List[str] = []
-    reduce_label: Optional[int] = None
-    reduce_ratio: float = 0.5
-    novelty_group: Optional[str] = None
-    novelty_label: Optional[int] = None
-
-    @model_validator(mode="after")
-    def validate_strategy_config(self) -> "SplittingConfigDTO":
-        """Validate that required config fields are set for each strategy."""
-        if self.strategy == SplitStrategy.LEAVE_ONE_OUT:
-            if not self.test_groups:
-                raise ValueError(
-                    "leave_one_out strategy requires test_groups to be specified"
-                )
-        elif self.strategy == SplitStrategy.LEAVE_TWO_OUT:
-            if not self.test_groups or not self.val_groups:
-                raise ValueError(
-                    "leave_two_out strategy requires test_groups and val_groups"
-                )
-        elif self.strategy == SplitStrategy.IMBALANCED_TRAIN:
-            if self.reduce_label is None:
-                raise ValueError(
-                    "imbalanced_train strategy requires reduce_label (0 or 1)"
-                )
-        elif self.strategy == SplitStrategy.EXTREME_NOVELTY:
-            if self.novelty_group is None or self.novelty_label is None:
-                raise ValueError(
-                    "extreme_novelty strategy requires novelty_group and novelty_label"
-                )
-        return self
-
-
 class TrainingScenarioCreateDTO(BaseModel):
     name: str = Field(..., min_length=1)
     description: Optional[str] = None
     version: str = "1.0"
-    yaml_config: Optional[str] = None  # Optional - use if importing from YAML
 
-    # UI-based config (optional - ignored if yaml_config is provided)
+    # UI-based config
     data_source_config: Optional[DataSourceConfigDTO] = None
     feature_config: Optional[FeatureConfigDTO] = None
-    splitting_config: Optional[SplittingConfigDTO] = None
 
 
 class TrainingScenarioUpdateDTO(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    yaml_config: Optional[str] = None
+    # Config updates
+    data_source_config: Optional[DataSourceConfigDTO] = None
+    feature_config: Optional[FeatureConfigDTO] = None
 
 
 class TrainingScenarioResponse(BaseModel):
@@ -99,8 +56,7 @@ class TrainingScenarioResponse(BaseModel):
     # Configs (serialized)
     data_source_config: DataSourceConfigDTO
     feature_config: FeatureConfigDTO  # Includes scan_tool_config and extractor_configs
-    splitting_config: SplittingConfigDTO
-    yaml_config: str
+    yaml_config: Optional[str] = ""
 
     # Statistics
     builds_total: int = 0
@@ -114,11 +70,6 @@ class TrainingScenarioResponse(BaseModel):
     scans_completed: int = 0
     scans_failed: int = 0
 
-    # Split counts
-    train_count: int = 0
-    val_count: int = 0
-    test_count: int = 0
-
     # User info
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -128,7 +79,6 @@ class TrainingScenarioResponse(BaseModel):
     filtering_completed_at: Optional[datetime] = None
     ingestion_completed_at: Optional[datetime] = None
     processing_completed_at: Optional[datetime] = None
-    splitting_completed_at: Optional[datetime] = None
 
     # Flags
     feature_extraction_completed: bool = False
@@ -140,3 +90,62 @@ class TrainingScenarioListResponse(BaseModel):
     total: int
     skip: int
     limit: int
+
+
+class GroupInfo(BaseModel):
+    value: str
+    label: str
+    count: int
+    warning: Optional[str] = None
+
+
+class SplittingGroupsResponse(BaseModel):
+    group_by: str
+    groups: List[GroupInfo]
+    total_builds: int
+
+
+class TrainingIngestionBuildResponse(BaseModel):
+    id: str
+    ci_run_id: str
+    commit_sha: str
+    repo_full_name: str
+    status: str
+    resource_status: Dict[str, Any]
+    required_resources: List[str]
+    ingestion_error: Optional[str] = None
+    created_at: Optional[str] = None
+    ingested_at: Optional[str] = None
+
+
+class TrainingIngestionBuildListResponse(BaseModel):
+    items: List[TrainingIngestionBuildResponse]
+    total: int
+    page: int
+    size: int
+
+
+class TrainingEnrichmentBuildResponse(BaseModel):
+    id: str
+    raw_build_run_id: str
+    ci_run_id: str
+    commit_sha: str
+    repo_full_name: str
+    extraction_status: str
+    extraction_error: Optional[str] = None
+    feature_count: int
+    expected_feature_count: int
+    split_assignment: Optional[str] = None
+    created_at: Optional[str] = None
+    enriched_at: Optional[str] = None
+    # Details (optional/heavy)
+    features: Optional[Dict[str, Any]] = None
+    missing_resources: Optional[List[str]] = None
+    skipped_features: Optional[List[str]] = None
+
+
+class TrainingEnrichmentBuildListResponse(BaseModel):
+    items: List[TrainingEnrichmentBuildResponse]
+    total: int
+    page: int
+    size: int

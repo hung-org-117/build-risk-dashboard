@@ -26,9 +26,14 @@ class TrainingDatasetSplit(BaseEntity):
         collection = "training_dataset_splits"
 
     # Parent reference
-    scenario_id: PyObjectId = Field(
+    export_id: PyObjectId = Field(
         ...,
-        description="Reference to training_scenarios",
+        description="Reference to training_dataset_exports",
+    )
+    # Denormalized for query convenience
+    scenario_id: Optional[PyObjectId] = Field(
+        None,
+        description="Reference to training_scenarios (denormalized)",
     )
 
     # Split identification
@@ -68,7 +73,7 @@ class TrainingDatasetSplit(BaseEntity):
     )
     file_format: str = Field(
         default="parquet",
-        description="File format: parquet | csv | pickle",
+        description="File format: parquet | csv",
     )
 
     # Feature list (for reference/validation)

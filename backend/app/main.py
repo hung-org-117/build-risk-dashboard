@@ -24,6 +24,7 @@ from app.api import (
     statistics,
     templates,
     tokens,
+    training_exports,
     training_scenarios,
     user_settings,
     users,
@@ -100,6 +101,11 @@ app.include_router(
     training_scenarios.router,
     prefix="/api/training-scenarios",
     tags=["Training Scenarios"],
+)
+app.include_router(
+    training_exports.router,
+    prefix="/api/training-scenarios",
+    tags=["Training Exports"],
 )
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
 app.include_router(templates.router, prefix="/api", tags=["Templates"])

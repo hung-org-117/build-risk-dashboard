@@ -21,10 +21,7 @@ from bson import ObjectId
 from celery import chord, group
 
 from app.celery_app import celery_app
-from app.entities.training_ingestion_build import (
-    IngestionStatus,
-    TrainingIngestionBuild,
-)
+from app.entities.training_ingestion_build import IngestionStatus
 from app.entities.training_scenario import ScenarioStatus, TrainingScenario
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
@@ -134,8 +131,6 @@ def start_scenario_ingestion(
             return filter_result
 
         builds_total = filter_result["builds_total"]
-        ingestion_build_ids = filter_result["ingestion_build_ids"]
-        builds_by_repo = filter_result["builds_by_repo"]
 
         # Update status to INGESTING
         scenario_repo.update_one(
@@ -158,20 +153,37 @@ def start_scenario_ingestion(
             current_phase="Ingesting build data (clone, worktree, logs)",
         )
 
-        if not builds_by_repo:
-            # No ingestion needed
-            logger.info("[start_scenario_ingestion] No ingestion chains needed")
-            ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+        # Check if we have any work to do by querying the DB
+        ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
 
-            # Mark all as INGESTED
-            for build_id in ingestion_build_ids:
-                ingestion_build_repo.update_status(build_id, IngestionStatus.INGESTED)
+        # We need to know if there are any pending builds to ingest.
+        # We can check total count or distinct repos.
+        # Since we need repos later, let's get distinct repos now or just check count.
+        # But filter returned builds_total, so we can trust that for "is there work?".
+
+        if builds_total == 0:
+            # No ingestion needed
+
+            # Mark all as INGESTED (if any exist)
+            if builds_total > 0:
+                ingestion_build_repo.collection.update_many(
+                    {
+                        "scenario_id": ObjectId(scenario_id),
+                        "status": IngestionStatus.PENDING.value,
+                    },
+                    {
+                        "$set": {
+                            "status": IngestionStatus.INGESTED.value,
+                            "ingested_at": datetime.utcnow(),
+                        }
+                    },
+                )
 
             scenario_repo.update_one(
                 scenario_id,
                 {
                     "status": ScenarioStatus.INGESTED.value,
-                    "builds_ingested": len(ingestion_build_ids),
+                    "builds_ingested": builds_total,
                     "ingestion_completed_at": datetime.utcnow(),
                 },
             )
@@ -179,7 +191,7 @@ def start_scenario_ingestion(
                 scenario_id=scenario_id,
                 status=ScenarioStatus.INGESTED.value,
                 builds_total=builds_total,
-                builds_ingested=len(ingestion_build_ids),
+                builds_ingested=builds_total,
                 current_phase="Ingestion complete. Start processing when ready.",
             )
             return {
@@ -194,19 +206,48 @@ def start_scenario_ingestion(
         ingestion_chains = []
         repo_metadata = []
 
-        for raw_repo_id, repo_builds in builds_by_repo.items():
-            raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+        # New flow: Query DB for repos involved in this scenario
+        ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
+
+        # Find distinct raw_repo_ids for this scenario
+        distinct_repo_oids = ingestion_build_repo.collection.distinct(
+            "raw_repo_id", {"scenario_id": ObjectId(scenario_id)}
+        )
+
+        # Convert to strings for consistent handling
+        repos_to_process = [str(oid) for oid in distinct_repo_oids]
+
+        logger.info(
+            f"[start_scenario_ingestion] Found {len(repos_to_process)} repos with builds to ingest"
+        )
+
+        for raw_repo_id_str in repos_to_process:
+            raw_repo = raw_repo_repo.find_by_id(raw_repo_id_str)
             if not raw_repo:
                 logger.warning(
-                    f"[start_scenario_ingestion] Repo {raw_repo_id} not found, skipping"
+                    f"[start_scenario_ingestion] Repo {raw_repo_id_str} not found, skipping"
                 )
                 continue
 
             # Get build IDs and commit SHAs
-            build_ids = [b["ci_run_id"] for b in repo_builds if b.get("ci_run_id")]
-            commit_shas = list(
-                {b["commit_sha"] for b in repo_builds if b.get("commit_sha")}
+            # Query from DB for this repo and scenario
+            cursor = ingestion_build_repo.collection.find(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "raw_repo_id": ObjectId(raw_repo_id_str),
+                    "status": IngestionStatus.PENDING.value,
+                },
+                {"ci_run_id": 1, "commit_sha": 1},
             )
+
+            build_ids = []
+            commit_shas = set()
+            for doc in cursor:
+                if doc.get("ci_run_id"):
+                    build_ids.append(doc["ci_run_id"])
+                if doc.get("commit_sha"):
+                    commit_shas.add(doc["commit_sha"])
+            commit_shas = list(commit_shas)
 
             if not build_ids:
                 continue
@@ -215,7 +256,7 @@ def start_scenario_ingestion(
             ctx = TrainingPipelineContext(
                 scenario_id=scenario_id,
                 correlation_id=correlation_id,
-                _raw_repo_id=raw_repo_id,
+                _raw_repo_id=str(raw_repo.id),
                 _github_repo_id=raw_repo.github_repo_id,
                 _full_name=raw_repo.full_name,
             )
@@ -224,7 +265,7 @@ def start_scenario_ingestion(
             repo_chain = build_workflow_with_context(
                 tasks_by_level=tasks_by_level,
                 ctx=ctx,
-                raw_repo_id=raw_repo_id,
+                raw_repo_id=str(raw_repo.id),
                 github_repo_id=raw_repo.github_repo_id,
                 full_name=raw_repo.full_name,
                 build_ids=build_ids,
@@ -236,7 +277,7 @@ def start_scenario_ingestion(
                 ingestion_chains.append(repo_chain)
                 repo_metadata.append(
                     {
-                        "raw_repo_id": raw_repo_id,
+                        "raw_repo_id": str(raw_repo.id),
                         "full_name": raw_repo.full_name,
                         "builds": len(build_ids),
                         "commits": len(commit_shas),
@@ -245,15 +286,25 @@ def start_scenario_ingestion(
 
         if not ingestion_chains:
             # Mark all as INGESTED
-            ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
-            for build_id in ingestion_build_ids:
-                ingestion_build_repo.update_status(build_id, IngestionStatus.INGESTED)
+            # If using affected_repo_ids (new flow), we can just update many
+            ingestion_build_repo.collection.update_many(
+                {
+                    "scenario_id": ObjectId(scenario_id),
+                    "status": IngestionStatus.PENDING.value,
+                },
+                {
+                    "$set": {
+                        "status": IngestionStatus.INGESTED.value,
+                        "ingested_at": datetime.utcnow(),
+                    }
+                },
+            )
 
             scenario_repo.update_one(
                 scenario_id,
                 {
                     "status": ScenarioStatus.INGESTED.value,
-                    "builds_ingested": len(ingestion_build_ids),
+                    "builds_ingested": builds_total,
                     "ingestion_completed_at": datetime.utcnow(),
                 },
             )
@@ -316,8 +367,6 @@ def _filter_builds_for_scenario(
     Returns dict with:
         - status: "completed" or "error"
         - builds_total: number of builds found
-        - ingestion_build_ids: list of created IngestionBuild IDs
-        - builds_by_repo: dict mapping repo_id -> list of build info
     """
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
@@ -414,61 +463,69 @@ def _filter_builds_for_scenario(
         if date_filter:
             build_query["started_at"] = date_filter
 
-    builds = raw_build_run_repo.find_many(build_query)
+    # Using cursor for batch processing
+    batch_size = 1000
+    cursor = raw_build_run_repo.collection.find(build_query).batch_size(batch_size)
 
-    if not builds:
+    repo_cache = {str(r.id): r for r in repos}
+    required_resources = ["git_history", "git_worktree", "build_logs"]
+
+    ingestion_builds_buffer = []
+    total_found = 0
+    total_inserted = 0
+
+    for build_doc in cursor:
+        # Convert doc to entity-like dict/obj wrapper for safer access if needed,
+        # but direct dict access is faster for bulk operations.
+        # RawBuildRunRepository returns objects, but here we use raw cursor for speed.
+
+        # Mapping raw doc fields
+        raw_repo_id = build_doc.get("raw_repo_id")
+        repo_id_str = str(raw_repo_id)
+        repo = repo_cache.get(repo_id_str)
+
+        ingestion_build_dict = {
+            "scenario_id": ObjectId(scenario_id),
+            "raw_repo_id": raw_repo_id,
+            "raw_build_run_id": build_doc.get("_id"),
+            "ci_run_id": build_doc.get("ci_run_id") or "",
+            "commit_sha": build_doc.get("commit_sha") or "",
+            "repo_full_name": repo.full_name if repo else "",
+            "github_repo_id": repo.github_repo_id if repo else None,
+            "status": IngestionStatus.PENDING.value,
+            "required_resources": required_resources,
+            "resource_status": {},
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+
+        ingestion_builds_buffer.append(ingestion_build_dict)
+        total_found += 1
+
+        if len(ingestion_builds_buffer) >= batch_size:
+            ingestion_build_repo.collection.insert_many(ingestion_builds_buffer)
+            total_inserted += len(ingestion_builds_buffer)
+            ingestion_builds_buffer = []
+            logger.info(
+                f"{corr_prefix} [filter] Processed batch of {batch_size} builds"
+            )
+
+    # Insert remaining
+    if ingestion_builds_buffer:
+        ingestion_build_repo.collection.insert_many(ingestion_builds_buffer)
+        total_inserted += len(ingestion_builds_buffer)
+
+    if total_inserted == 0:
         logger.warning(f"{corr_prefix} [filter] No builds match filter criteria")
         return {"status": "error", "error": "No builds match filter criteria"}
 
-    logger.info(f"{corr_prefix} [filter] Found {len(builds)} matching builds")
-
-    # Create IngestionBuild records and group by repo
-    repo_cache = {str(r.id): r for r in repos}
-    builds_by_repo: Dict[str, List[Dict[str, Any]]] = {}
-    ingestion_build_ids = []
-    required_resources = ["git_history", "git_worktree", "build_logs"]
-
-    for build in builds:
-        repo = repo_cache.get(str(build.raw_repo_id))
-        repo_id = str(build.raw_repo_id)
-
-        # Create IngestionBuild record
-        ingestion_build = TrainingIngestionBuild(
-            scenario_id=ObjectId(scenario_id),
-            raw_repo_id=build.raw_repo_id,
-            raw_build_run_id=build.id,
-            ci_run_id=build.ci_run_id or "",
-            commit_sha=build.commit_sha or "",
-            repo_full_name=repo.full_name if repo else "",
-            github_repo_id=repo.github_repo_id if repo else None,
-            status=IngestionStatus.PENDING,
-            required_resources=required_resources,
-            resource_status={},
-        )
-
-        created = ingestion_build_repo.insert_one(ingestion_build)
-        ingestion_build_ids.append(str(created.id))
-
-        # Group for ingestion chains
-        build_info = {
-            "ingestion_build_id": str(created.id),
-            "ci_run_id": build.ci_run_id or "",
-            "commit_sha": build.commit_sha or "",
-        }
-
-        if repo_id not in builds_by_repo:
-            builds_by_repo[repo_id] = []
-        builds_by_repo[repo_id].append(build_info)
-
     logger.info(
-        f"{corr_prefix} [filter] Created {len(ingestion_build_ids)} ingestion build records"
+        f"{corr_prefix} [filter] Found and created {total_inserted} ingestion build records"
     )
 
     return {
         "status": "completed",
-        "builds_total": len(builds),
-        "ingestion_build_ids": ingestion_build_ids,
-        "builds_by_repo": builds_by_repo,
+        "builds_total": total_inserted,
     }
 
 

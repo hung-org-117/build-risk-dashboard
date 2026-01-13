@@ -99,7 +99,9 @@ STATUS_MAP = {"passed": 0, "failed": 1}
 
 
 class BayesianLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_layers=1, dropout=0.0, temporal_dropout=0.0):
+    def __init__(
+        self, input_dim, hidden_dim, num_layers=1, dropout=0.0, temporal_dropout=0.0
+    ):
         super().__init__()
         self.lstm = nn.LSTM(
             input_dim,
@@ -122,7 +124,9 @@ class BayesianLSTM(nn.Module):
         )
 
         max_len = h.size(1)
-        mask = torch.arange(max_len, device=lengths.device).unsqueeze(0) < lengths.unsqueeze(1)
+        mask = torch.arange(max_len, device=lengths.device).unsqueeze(
+            0
+        ) < lengths.unsqueeze(1)
         attn_scores = self.attn(h).squeeze(-1)
         attn_scores = attn_scores.masked_fill(~mask, -1e9)
         weights = torch.softmax(attn_scores, dim=1).unsqueeze(-1)
@@ -149,7 +153,13 @@ class BayesianMLP(nn.Module):
 
 class BayesianRiskModel(nn.Module):
     def __init__(
-        self, temporal_dim, static_dim, lstm_hidden_dim, lstm_layers, lstm_dropout, temporal_dropout
+        self,
+        temporal_dim,
+        static_dim,
+        lstm_hidden_dim,
+        lstm_layers,
+        lstm_dropout,
+        temporal_dropout,
     ):
         super().__init__()
 
@@ -163,7 +173,10 @@ class BayesianRiskModel(nn.Module):
         self.static = BayesianMLP(static_dim)
 
         self.classifier = nn.Sequential(
-            nn.Linear(lstm_hidden_dim + 64, 64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64, 3)
+            nn.Linear(lstm_hidden_dim + 64, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 3),
         )
 
     def forward(self, seq, static, lengths):
@@ -206,7 +219,14 @@ def load_bayesian_model(model_path, device):
     log1p_features = checkpoint.get("log1p_features", LOG1P_FEATURES)
     seq_len = checkpoint.get("seq_len", SEQ_LEN)
 
-    return model, temporal_features, static_features, log1p_features, seq_len, min_seq_len
+    return (
+        model,
+        temporal_features,
+        static_features,
+        log1p_features,
+        seq_len,
+        min_seq_len,
+    )
 
 
 RISK_LABELS = ["Low", "Medium", "High"]
@@ -246,7 +266,9 @@ def prepare_dataframe(df, temporal_features, static_features, log1p_features):
         sort_cols.append("tr_build_number")
 
     required_cols = (
-        temporal_features + static_features + [GROUP_COL, TIME_COL, BUILD_ID_COL, PREV_BUILD_COL]
+        temporal_features
+        + static_features
+        + [GROUP_COL, TIME_COL, BUILD_ID_COL, PREV_BUILD_COL]
     )
     used_cols = list(set(required_cols + sort_cols))
     missing = [c for c in required_cols if c not in df.columns]
@@ -269,7 +291,9 @@ def prepare_dataframe(df, temporal_features, static_features, log1p_features):
     for col in log1p_features:
         df[col] = np.log1p(df[col].clip(lower=0))
 
-    df[BUILD_ID_COL] = pd.to_numeric(df[BUILD_ID_COL], errors="coerce").fillna(-1).astype("int64")
+    df[BUILD_ID_COL] = (
+        pd.to_numeric(df[BUILD_ID_COL], errors="coerce").fillna(-1).astype("int64")
+    )
     df[PREV_BUILD_COL] = (
         pd.to_numeric(df[PREV_BUILD_COL], errors="coerce").fillna(-1).astype("int64")
     )
@@ -321,7 +345,9 @@ def build_sequences_from_prev(
             static = df.iloc[idx][static_features].values
             seq_len_actual = len(seq_indices)
             if seq_len_actual < seq_len:
-                pad = np.zeros((seq_len - seq_len_actual, seq.shape[1]), dtype=seq.dtype)
+                pad = np.zeros(
+                    (seq_len - seq_len_actual, seq.shape[1]), dtype=seq.dtype
+                )
                 seq = np.concatenate([seq, pad], axis=0)
             sequences.append(seq)
             statics.append(static)
@@ -375,7 +401,7 @@ if __name__ == "__main__":
     results = pd.DataFrame(
         {
             "tr_build_id": df.loc[indices, BUILD_ID_COL].values,
-            "gh_project_name": df.loc[indices, GROUP_COL].values,
+            "group": df.loc[indices, GROUP_COL].values,
             "gh_build_started_at": df.loc[indices, TIME_COL].values,
             "risk_prediction": pred_label,
             "prob_low": mean_prob[:, 0],

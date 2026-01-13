@@ -59,17 +59,20 @@ User creates Training Scenario with filters
 │  ✓ Sequential processing (temporal deps) │
 └──────────────────────────────────────────┘
        │
-       ▼ (User triggers manually)
+       ▼
+TrainingScenario (PROCESSED) - Ready for multiple exports
+       │
+       ▼ (User creates TrainingDatasetExport)
 ┌──────────────────────────────────────────┐
-│  PHASE 3: DATASET GENERATION             │
-│  ✓ Collect features from EnrichmentBuilds│
-│  ✓ Apply splitting strategy              │
+│  EXPORT: DATASET GENERATION              │
+│  ✓ Create TrainingDatasetExport entity   │
+│  ✓ Apply splitting strategy (per-export) │
 │  ✓ Generate train/val/test files         │
-│  ✓ Export to parquet/csv/pickle          │
+│  ✓ Export to parquet/csv                 │
 └──────────────────────────────────────────┘
        │
        ▼
-TrainingScenario (COMPLETED) + Dataset Splits Ready
+TrainingDatasetExport (COMPLETED) + Dataset Splits Ready
 ```
 
 ### Queue Architecture
@@ -105,13 +108,14 @@ TrainingScenario Status Flow:
                                 PROCESSED           FAILED
                                     │
                                     ▼
-                         (User triggers split/export)
-                                    │
-                                    ▼
-                         ┌─── SPLITTING ───┐
-                         │                 │
-                         ▼                 ▼
-                     COMPLETED          FAILED
+               TrainingScenario is DONE (PROCESSED = final state)
+
+TrainingDatasetExport Status Flow:
+
+    PENDING ──► GENERATING ──► COMPLETED
+                    │
+                    ▼
+                  FAILED
 ```
 
 ---
@@ -227,7 +231,6 @@ start_scenario_ingestion
 │   ├─ languages (from RawRepository.main_lang)
 │   ├─ conclusions (success, failure)
 │   ├─ ci_provider
-│   └─ conclusions (success, failure)
 │
 ├─ Create TrainingIngestionBuild for each matched build
 ├─ Update status → INGESTING
@@ -246,7 +249,6 @@ DataSourceConfig = {
     languages: ["python", "java"],      # Filter by main_lang
     date_start: "2024-01-01",
     date_end: "2024-12-31",
-    conclusions: ["success", "failure"],
     conclusions: ["success", "failure"],
     ci_provider: "all" | "github_actions" | "circleci",
 }
@@ -347,28 +349,41 @@ FeatureConfig = {
 
 ---
 
-## Phase 3: Dataset Generation
+## Export: Dataset Generation
 
-**File**: [backend/app/tasks/training_processing.py](backend/app/tasks/training_processing.py) (`generate_scenario_dataset`)
+**File**: [backend/app/tasks/training_export.py](backend/app/tasks/training_export.py) (`generate_export_dataset`)
 
-**Mục đích**: Split và export dataset thành train/val/test files
+**Mục đích**: Cho phép tạo nhiều dataset exports từ một scenario đã PROCESSED
 
-### 3.1 Tasks Overview
+### Export Architecture
+
+Mỗi `TrainingDatasetExport` có config riêng:
+- `splitting_config`: Cấu hình split strategy
+- `preprocessing_config`: Missing values, normalization
+- `output_config`: Formats (parquet, csv)
+
+### Tasks Overview
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `generate_scenario_dataset` | processing | 900s | Collect features, split, export |
+| `generate_export_dataset` | scenario_processing | 720s | Generate dataset for one export |
 
-### 3.2 Generation Flow
+### Generation Flow
 
 ```
-User clicks "Generate Dataset"
+User creates TrainingDatasetExport via API
        │
        ▼
-generate_scenario_dataset
+POST /training-scenarios/{id}/exports
 │
-├─ Validate status is PROCESSED
-├─ Update status → SPLITTING
+├─ Create TrainingDatasetExport entity (PENDING)
+└─ User triggers generation via POST /exports/{id}/generate
+       │
+       ▼
+generate_export_dataset (Celery task)
+│
+├─ Validate scenario is PROCESSED
+├─ Update export status → GENERATING
 │
 ├─ Collect features from EnrichmentBuilds
 │   ├─ Query all builds with extraction_status = COMPLETED
@@ -380,49 +395,68 @@ generate_scenario_dataset
 │   ├─ Label column (outcome: success/failure)
 │   └─ Metadata (repo, commit, build_id)
 │
-├─ Apply preprocessing:
-│   ├─ Handle missing values (drop_row | fill | skip_feature)
-│   └─ Normalize (z_score | min_max | robust | none)
-│
-├─ Apply splitting strategy:
+├─ Apply splitting strategy (from export config):
 │   ├─ stratified_within_group (default)
-│   ├─ leave_one_out
+│   ├─ leave_one_out / leave_two_out
 │   ├─ time_series_split
 │   └─ random_split
 │
-├─ Export files:
-│   ├─ train.parquet (70%)
-│   ├─ val.parquet (15%)
-│   └─ test.parquet (15%)
+├─ Export files to export-specific directory:
+│   ├─ train.parquet (based on ratios)
+│   ├─ val.parquet
+│   └─ test.parquet
 │
-├─ Create TrainingDatasetSplit records
+├─ Create TrainingDatasetSplit records (linked to export_id)
 │
-└─ Update status → COMPLETED
+└─ Update export status → COMPLETED
 ```
 
-### 3.3 Splitting Config
+### ExportSplittingConfig
 
 ```python
-SplittingConfig = {
+ExportSplittingConfig = {
     strategy: "stratified_within_group",
-    group_by: "repo_name" | "language" | "ci_provider",
+    group_by: "repo_language" | "time_of_day" | "percentage_of_builds_before",
     stratify_by: "outcome" | "conclusion",
     ratios: {
         train: 0.7,
         val: 0.15,
         test: 0.15,
     },
+    # For leave_one_out/leave_two_out strategies:
+    test_groups: ["python"],
+    val_groups: ["java"],
 }
 ```
 
-### 3.4 TrainingDatasetSplit
+### TrainingDatasetExport
 
 ```python
 {
     scenario_id: ObjectId,
+    name: str,
+    status: "pending" | "generating" | "completed" | "failed",
+    splitting_config: ExportSplittingConfig,
+    preprocessing_config: PreprocessingConfig,
+    output_config: OutputConfig,
+    # Statistics (after completion):
+    train_count: int,
+    val_count: int,
+    test_count: int,
+    feature_count: int,
+    generation_duration_seconds: float,
+}
+```
+
+### TrainingDatasetSplit
+
+```python
+{
+    export_id: ObjectId,      # Primary reference
+    scenario_id: ObjectId,    # Denormalized for convenience
     split_type: "train" | "val" | "test",
     file_path: str,
-    file_format: "parquet" | "csv" | "pickle",
+    file_format: "parquet" | "csv",
     file_size_bytes: int,
     record_count: int,
     feature_count: int,
@@ -430,6 +464,7 @@ SplittingConfig = {
     generated_at: datetime,
 }
 ```
+
 
 ---
 
@@ -469,9 +504,8 @@ SplittingConfig = {
 │ status              │     │ status              │
 │ data_source_config  │     │ resource_status     │
 │ feature_config      │     └─────────────────────┘
-│ splitting_config    │              │
-│ preprocessing_config│              │
-└─────────────────────┘              ▼
+└─────────────────────┘              │
+         │                           ▼
          │              ┌─────────────────────┐
          │              │TrainingEnrichmentBuild│
          │              │─────────────────────│
@@ -479,21 +513,24 @@ SplittingConfig = {
          │              │ ingestion_build_id  │
          │              │ feature_vector_id   │───► FeatureVector
          │              │ extraction_status   │
-         │              │ split_assignment    │   # train/val/test
-         │              │ group_value         │   # for leave-out strategies
          │              │ outcome             │   # 0=success, 1=failure
          │              │ build_started_at    │
          │              └─────────────────────┘
          │
          ▼
-┌─────────────────────┐
-│TrainingDatasetSplit │
-│─────────────────────│
-│ scenario_id         │
-│ split_type          │
-│ file_path           │
-│ record_count        │
-│ class_distribution  │
+┌─────────────────────┐     ┌─────────────────────┐
+│TrainingDatasetExport│     │TrainingDatasetSplit │
+│─────────────────────│     │─────────────────────│
+│ _id                 │◄────┤ export_id           │
+│ scenario_id         │     │ scenario_id         │
+│ name                │     │ split_type          │
+│ status              │     │ file_path           │
+│ splitting_config    │     │ record_count        │
+│ preprocessing_config│     │ class_distribution  │
+│ output_config       │     └─────────────────────┘
+│ train_count         │
+│ val_count           │
+│ test_count          │
 └─────────────────────┘
 ```
 
@@ -506,8 +543,12 @@ class ScenarioStatus(str, Enum):
     INGESTING = "ingesting"
     INGESTED = "ingested"
     PROCESSING = "processing"
-    PROCESSED = "processed"
-    SPLITTING = "splitting"
+    PROCESSED = "processed"  # Final state for scenario
+    FAILED = "failed"
+
+class ExportStatus(str, Enum):
+    PENDING = "pending"
+    GENERATING = "generating"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -593,7 +634,6 @@ class ExtractionStatus(str, Enum):
 │       ├── StepDataSource.tsx     # Step 1: Filter config
 │       ├── StepFeatures.tsx       # Step 2: Feature selection
 │       ├── StepSplitting.tsx      # Step 3: Split strategy
-│       ├── StepPreprocessing.tsx  # Step 4: Preprocessing
 │       └── WizardContext.tsx      # Wizard state management
 └── [scenarioId]/
     ├── layout.tsx             # Tabs navigation

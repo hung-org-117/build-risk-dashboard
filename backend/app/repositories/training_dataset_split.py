@@ -2,7 +2,7 @@
 Repository for DatasetSplit entity.
 
 Tracks generated dataset split files.
-Renamed from MLDatasetSplitRepository.
+Updated to use export_id as primary reference (supports multi-export).
 """
 
 from datetime import datetime
@@ -21,34 +21,52 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
     def __init__(self, db: Database):
         super().__init__(db, "training_dataset_splits", TrainingDatasetSplit)
 
-    def find_by_scenario(
+    def find_by_export(
         self,
-        scenario_id: str,
+        export_id: str,
     ) -> List[TrainingDatasetSplit]:
         """
-        Get all splits for a scenario.
+        Get all splits for an export.
 
         Args:
-            scenario_id: Scenario ID
+            export_id: Export ID
 
         Returns:
             List of dataset splits (train, validation, test)
         """
         return self.find_many(
-            {"scenario_id": self._to_object_id(scenario_id)},
+            {"export_id": self._to_object_id(export_id)},
             sort=[("split_type", 1)],
         )
 
-    def find_by_scenario_and_type(
+    def find_by_scenario(
         self,
         scenario_id: str,
+    ) -> List[TrainingDatasetSplit]:
+        """
+        Get all splits for a scenario (across all exports).
+
+        Args:
+            scenario_id: Scenario ID
+
+        Returns:
+            List of dataset splits
+        """
+        return self.find_many(
+            {"scenario_id": self._to_object_id(scenario_id)},
+            sort=[("generated_at", -1), ("split_type", 1)],
+        )
+
+    def find_by_export_and_type(
+        self,
+        export_id: str,
         split_type: str,
     ) -> Optional[TrainingDatasetSplit]:
         """
         Get a specific split by type.
 
         Args:
-            scenario_id: Scenario ID
+            export_id: Export ID
             split_type: Split type (train/validation/test/fold_N)
 
         Returns:
@@ -56,13 +74,14 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
         """
         return self.find_one(
             {
-                "scenario_id": self._to_object_id(scenario_id),
+                "export_id": self._to_object_id(export_id),
                 "split_type": split_type,
             }
         )
 
     def create_split(
         self,
+        export_id: str,
         scenario_id: str,
         split_type: str,
         record_count: int,
@@ -80,7 +99,8 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
         Create a new dataset split record.
 
         Args:
-            scenario_id: Parent scenario ID
+            export_id: Parent export ID
+            scenario_id: Parent scenario ID (denormalized)
             split_type: train/validation/test/fold_N
             record_count: Number of records in split
             feature_count: Number of features
@@ -88,7 +108,7 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
             group_distribution: Group distribution
             file_path: Relative path to file
             file_size_bytes: File size
-            file_format: parquet/csv/pickle
+            file_format: parquet/csv
             feature_names: List of feature column names
             generation_duration_seconds: Time to generate
             checksum_md5: Optional MD5 checksum
@@ -97,6 +117,7 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
             Created DatasetSplit
         """
         split = TrainingDatasetSplit(
+            export_id=self._to_object_id(export_id),
             scenario_id=self._to_object_id(scenario_id),
             split_type=split_type,
             record_count=record_count,
@@ -113,24 +134,28 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
         )
         return self.insert_one(split)
 
-    def get_total_records(self, scenario_id: str) -> int:
-        """Get total records across all splits for a scenario."""
+    def get_total_records(self, export_id: str) -> int:
+        """Get total records across all splits for an export."""
         pipeline = [
-            {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
+            {"$match": {"export_id": self._to_object_id(export_id)}},
             {"$group": {"_id": None, "total": {"$sum": "$record_count"}}},
         ]
         results = self.aggregate(pipeline)
         return results[0]["total"] if results else 0
 
-    def get_total_size_bytes(self, scenario_id: str) -> int:
-        """Get total file size across all splits."""
+    def get_total_size_bytes(self, export_id: str) -> int:
+        """Get total file size across all splits for an export."""
         pipeline = [
-            {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
+            {"$match": {"export_id": self._to_object_id(export_id)}},
             {"$group": {"_id": None, "total": {"$sum": "$file_size_bytes"}}},
         ]
         results = self.aggregate(pipeline)
         return results[0]["total"] if results else 0
 
+    def delete_by_export(self, export_id: str) -> int:
+        """Delete all splits for an export."""
+        return self.delete_many({"export_id": self._to_object_id(export_id)})
+
     def delete_by_scenario(self, scenario_id: str) -> int:
-        """Delete all splits for a scenario."""
+        """Delete all splits for a scenario (across all exports)."""
         return self.delete_many({"scenario_id": self._to_object_id(scenario_id)})

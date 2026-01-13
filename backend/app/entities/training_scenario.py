@@ -2,7 +2,7 @@
 TrainingScenario Entity - Training pipeline configuration and tracking.
 
 Stores YAML configuration and tracks scenario progress through phases:
-QUEUED → FILTERING → INGESTING → PROCESSING → SPLITTING → COMPLETED
+QUEUED → FILTERING → INGESTING → PROCESSING → PROCESSED
 
 This entity replaces both MLScenario and DatasetVersion, providing a unified
 training pipeline configuration.
@@ -25,34 +25,8 @@ class ScenarioStatus(str, Enum):
     INGESTING = "ingesting"  # Phase 1: Clone, worktree, logs
     INGESTED = "ingested"  # Phase 1 complete, user can review + trigger processing
     PROCESSING = "processing"  # Phase 2: Feature extraction + scans
-    PROCESSED = "processed"  # Phase 2 complete, user can trigger split/download
-    SPLITTING = "splitting"  # Phase 3: Applying split strategy
-    COMPLETED = "completed"  # All phases done, files ready
+    PROCESSED = "processed"  # Phase 2 complete. Ready for creating exports.
     FAILED = "failed"  # Error occurred
-
-
-class SplitStrategy(str, Enum):
-    """Available splitting strategies."""
-
-    RANDOM_SPLIT = "random_split"
-    TIME_SERIES_SPLIT = "time_series_split"
-    STRATIFIED_SPLIT = "stratified_split"
-    STRATIFIED_WITHIN_GROUP = "stratified_within_group"
-    LEAVE_ONE_OUT = "leave_one_out"
-    LEAVE_TWO_OUT = "leave_two_out"
-    IMBALANCED_TRAIN = "imbalanced_train"
-    EXTREME_NOVELTY = "extreme_novelty"
-
-
-class GroupByDimension(str, Enum):
-    """Available dimensions for grouping data."""
-
-    REPO_FULL_NAME = "repo_full_name"
-    REPO_LANGUAGE = "repo_language"
-    BUILD_CI_PROVIDER = "build_ci_provider"
-    PERCENTAGE_OF_BUILDS_BEFORE = "percentage_of_builds_before"
-    NUMBER_OF_BUILDS_BEFORE = "number_of_builds_before"
-    TIME_OF_DAY = "time_of_day"
 
 
 class DataSourceConfig(BaseEntity):
@@ -136,94 +110,6 @@ class FeatureConfig(BaseEntity):
     )
 
 
-class SplittingConfig(BaseEntity):
-    """Configuration for data splitting strategy."""
-
-    class Config:
-        extra = "allow"
-
-    strategy: SplitStrategy = Field(
-        default=SplitStrategy.STRATIFIED_WITHIN_GROUP,
-        description="Splitting strategy to apply",
-    )
-    group_by: GroupByDimension = Field(
-        default=GroupByDimension.REPO_LANGUAGE,
-        description="Dimension to group data by",
-    )
-    groups: List[str] = Field(
-        default_factory=list,
-        description="Group values (e.g., ['python', 'java', 'go'])",
-    )
-    ratios: Dict[str, float] = Field(
-        default_factory=lambda: {"train": 0.7, "val": 0.15, "test": 0.15},
-        description="Split ratios",
-    )
-    stratify_by: str = Field(
-        default="outcome",
-        description="Column to stratify by within groups",
-    )
-
-    # Leave-out strategy specific
-    test_groups: List[str] = Field(default_factory=list)
-    val_groups: List[str] = Field(default_factory=list)
-    train_groups: List[str] = Field(default_factory=list)
-
-    # Imbalanced train specific
-    reduce_label: Optional[int] = None
-    reduce_ratio: float = Field(
-        default=0.5,
-        description="Ratio to reduce (e.g., 0.5 = reduce 50%)",
-    )
-
-    # Extreme novelty specific
-    novelty_group: Optional[str] = None
-    novelty_label: Optional[int] = None
-
-    @model_validator(mode="after")
-    def validate_strategy_config(self) -> "SplittingConfig":
-        """Validate that required config fields are set for each strategy."""
-        # Strategies that require ratios
-        ratio_strategies = {
-            SplitStrategy.RANDOM_SPLIT,
-            SplitStrategy.TIME_SERIES_SPLIT,
-            SplitStrategy.STRATIFIED_SPLIT,
-            SplitStrategy.STRATIFIED_WITHIN_GROUP,
-            SplitStrategy.IMBALANCED_TRAIN,
-        }
-
-        # Validate ratio-based strategies have ratios
-        if self.strategy in ratio_strategies:
-            if not self.ratios:
-                raise ValueError(f"{self.strategy.value} strategy requires ratios")
-            total = sum(self.ratios.values())
-            if abs(total - 1.0) > 0.01:
-                raise ValueError(f"Ratios must sum to 1.0, got {total:.2f}")
-
-        # Strategy-specific validations
-        if self.strategy == SplitStrategy.LEAVE_ONE_OUT:
-            if not self.test_groups:
-                raise ValueError(
-                    "leave_one_out strategy requires test_groups to be specified"
-                )
-        elif self.strategy == SplitStrategy.LEAVE_TWO_OUT:
-            if not self.test_groups or not self.val_groups:
-                raise ValueError(
-                    "leave_two_out strategy requires test_groups and val_groups"
-                )
-        elif self.strategy == SplitStrategy.IMBALANCED_TRAIN:
-            if self.reduce_label is None:
-                raise ValueError(
-                    "imbalanced_train strategy requires reduce_label (0 or 1)"
-                )
-        elif self.strategy == SplitStrategy.EXTREME_NOVELTY:
-            if self.novelty_group is None or self.novelty_label is None:
-                raise ValueError(
-                    "extreme_novelty strategy requires novelty_group and novelty_label"
-                )
-
-        return self
-
-
 class TrainingScenario(BaseEntity):
     """
     Training pipeline configuration and tracking.
@@ -252,7 +138,6 @@ class TrainingScenario(BaseEntity):
     feature_config: FeatureConfig = Field(
         default_factory=FeatureConfig
     )  # Includes scan_tool_config and extractor_configs
-    splitting_config: SplittingConfig = Field(default_factory=SplittingConfig)
 
     # Pipeline status
     status: ScenarioStatus = Field(
@@ -310,12 +195,6 @@ class TrainingScenario(BaseEntity):
         default=False,
         description="All scans done (completed + failed = total)",
     )
-
-    # Split statistics
-    train_count: int = 0
-    val_count: int = 0
-    test_count: int = 0
-
     # User tracking
     created_by: Optional[PyObjectId] = None
 
@@ -326,5 +205,3 @@ class TrainingScenario(BaseEntity):
     ingestion_completed_at: Optional[datetime] = None
     processing_started_at: Optional[datetime] = None
     processing_completed_at: Optional[datetime] = None
-    splitting_started_at: Optional[datetime] = None
-    splitting_completed_at: Optional[datetime] = None

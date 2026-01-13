@@ -17,17 +17,17 @@ Each dimension supports:
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedShuffleSplit
 
-from app.entities.training_scenario import (
-    GroupByDimension,
-    SplitStrategy,
-    SplittingConfig,
-)
+from app.entities.enums import GroupByDimension, SplitStrategy
+from app.entities.training_dataset_export import ExportSplittingConfig
+
+# Alias for backwards compatibility
+SplittingConfig = ExportSplittingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -630,7 +630,10 @@ class SplittingStrategyService:
         group_by_str = str(group_by) if not isinstance(group_by, str) else group_by
 
         # Handle language grouping (with lowercase normalization)
-        if group_by_str == "repo_language" or group_by == GroupByDimension.LANGUAGE:
+        if (
+            group_by_str == "repo_language"
+            or group_by == GroupByDimension.REPO_LANGUAGE
+        ):
             return self._prepare_language_column(df)
 
         elif (
@@ -649,7 +652,7 @@ class SplittingStrategyService:
             return self._create_time_of_day_bins(df)
 
         else:
-            # Use column directly if exists (repo_full_name, build_ci_provider, etc.)
+            # Use column directly if exists
             if group_by_str in df.columns:
                 return group_by_str
             raise ValueError(f"Unknown grouping dimension: {group_by}")
@@ -776,3 +779,74 @@ class SplittingStrategyService:
             "class_distribution": {str(k): v for k, v in class_dist.items()},
             "positive_rate": positive / total if total > 0 else 0.0,
         }
+
+    def get_available_groups(
+        self,
+        df: pd.DataFrame,
+        group_by: GroupByDimension,
+    ) -> Dict[str, Any]:
+        """
+        Get available groups with counts for LOO/LTO strategy selection.
+
+        Args:
+            df: DataFrame with data (after filtering)
+            group_by: Grouping dimension
+
+        Returns:
+            Dict with groups list and metadata
+        """
+        # Create group column
+        group_column = self._prepare_group_column(df, group_by)
+
+        # Get unique groups with counts
+        group_counts = df[group_column].value_counts().to_dict()
+
+        # Build groups list with metadata
+        groups = []
+        for value, count in sorted(group_counts.items(), key=lambda x: -x[1]):
+            group_info = {
+                "value": str(value),
+                "label": self._get_group_label(group_by, value),
+                "count": count,
+            }
+            # Add warning for small samples
+            if count < 50:
+                group_info["warning"] = "small_sample"
+
+            groups.append(group_info)
+
+        return {
+            "group_by": str(group_by),
+            "groups": groups,
+            "total_builds": len(df),
+        }
+
+    def _get_group_label(self, group_by: GroupByDimension, value: str) -> str:
+        """Get human-readable label for a group value."""
+        group_by_str = str(group_by) if not isinstance(group_by, str) else group_by
+
+        # Language labels
+        if group_by_str == "repo_language":
+            return str(value).title() if value else "Unknown"
+
+        # Time of day labels
+        if group_by_str == "time_of_day":
+            time_map = {
+                "night": "Night (00:00-06:00)",
+                "morning": "Morning (06:00-12:00)",
+                "afternoon": "Afternoon (12:00-18:00)",
+                "evening": "Evening (18:00-24:00)",
+            }
+            return time_map.get(str(value).lower(), str(value))
+
+        # Quartile bin labels
+        if group_by_str in ("percentage_of_builds_before", "number_of_builds_before"):
+            bin_map = {
+                "bin_1": "Q1: 0-25%",
+                "bin_2": "Q2: 25-50%",
+                "bin_3": "Q3: 50-75%",
+                "bin_4": "Q4: 75-100%",
+            }
+            return bin_map.get(str(value).lower(), str(value))
+
+        return str(value)

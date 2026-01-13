@@ -473,21 +473,22 @@ export enum TestFramework {
 
 export type SourceLanguage = string;
 
+/**
+ * Source languages supported by the backend.
+ * Synced with: backend/app/tasks/pipeline/feature_dag/languages/registry.py
+ */
 export const SOURCE_LANGUAGE_PRESETS: SourceLanguage[] = [
   "python",
-  "ruby",
   "java",
   "javascript",
   "typescript",
   "go",
-  "php",
-  "c++",
-  "c#",
+  "ruby",
+  "cpp",
 ];
 
 export enum CIProvider {
   GITHUB_ACTIONS = "github_actions",
-  GITLAB_CI = "gitlab_ci",
   CIRCLECI = "circleci",
   TRAVIS_CI = "travis_ci",
 }
@@ -495,7 +496,6 @@ export enum CIProvider {
 // Human-readable labels for CI providers
 export const CIProviderLabels: Record<CIProvider, string> = {
   [CIProvider.GITHUB_ACTIONS]: "GitHub Actions",
-  [CIProvider.GITLAB_CI]: "GitLab CI",
   [CIProvider.CIRCLECI]: "CircleCI",
   [CIProvider.TRAVIS_CI]: "Travis CI",
 };

@@ -1,13 +1,13 @@
 """
-EnrichmentBuild Entity - Tracks builds through processing and split assignment.
+EnrichmentBuild Entity - Tracks builds through processing.
 
-This entity tracks builds through feature extraction and split assignment.
+This entity tracks builds through feature extraction.
 Unified from DatasetEnrichmentBuild and MLScenarioEnrichmentBuild.
 
 Key design principles:
 - References FeatureVector for feature storage (single source of truth)
-- Tracks extraction status and split assignment
-- Stores outcome for stratification
+- Tracks extraction status
+- Stores outcome for stratification (computed at export time for each export)
 """
 
 from datetime import datetime
@@ -24,8 +24,7 @@ class TrainingEnrichmentBuild(BaseEntity):
     Tracks a build through the processing/enrichment pipeline.
 
     Features are stored in FeatureVector entity, referenced by feature_vector_id.
-    Split assignment is set during the splitting phase.
-    Unified from DatasetEnrichmentBuild and MLScenarioEnrichmentBuild.
+    Split assignment is computed at export time (per TrainingDatasetExport).
     """
 
     class Config:
@@ -65,18 +64,6 @@ class TrainingEnrichmentBuild(BaseEntity):
     )
     extraction_error: Optional[str] = None
     enriched_at: Optional[datetime] = None
-
-    # Split assignment (set during Phase 4: Splitting)
-    split_assignment: Optional[str] = Field(
-        None,
-        description="Split assignment: train | validation | test | null",
-    )
-
-    # Group value (for leave-out strategies)
-    group_value: Optional[str] = Field(
-        None,
-        description="Group value for this build (e.g., 'backend', 'morning')",
-    )
 
     # Label (from RawBuildRun.conclusion, used for stratification)
     outcome: Optional[int] = Field(

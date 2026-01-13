@@ -96,10 +96,6 @@ export function ScanSelectionPanel({
 
                         {enabledTools.sonarqube ? (
                             <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400 px-1">
-                                    <BarChart3 className="h-4 w-4" />
-                                    Select Metrics
-                                </div>
                                 <ScanMetricsSelector
                                     selectedSonarMetrics={selectedSonarMetrics}
                                     selectedTrivyMetrics={[]}
@@ -143,10 +139,6 @@ export function ScanSelectionPanel({
 
                         {enabledTools.trivy ? (
                             <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-sm font-medium text-green-600 dark:text-green-400 px-1">
-                                    <Shield className="h-4 w-4" />
-                                    Select Metrics
-                                </div>
                                 <ScanMetricsSelector
                                     selectedSonarMetrics={[]}
                                     selectedTrivyMetrics={selectedTrivyMetrics}

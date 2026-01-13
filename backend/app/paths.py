@@ -154,7 +154,7 @@ def get_training_dataset_split_path(
     Args:
         scenario_id: TrainingScenario ID
         split_type: train | validation | test | fold_N
-        format: parquet | csv | pickle
+        format: parquet | csv
 
     Returns:
         Path like: training_datasets/{scenario_id}/train.parquet

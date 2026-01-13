@@ -25,6 +25,8 @@ from .dataset_template import DatasetTemplate
 # Shared enums
 from .enums import (
     ExtractionStatus,
+    GroupByDimension,
+    SplitStrategy,
     TestFramework,
 )
 from .export_job import ExportFormat, ExportJob, ExportStatus
@@ -49,6 +51,10 @@ from .raw_build_run import RawBuildRun
 from .raw_repository import RawRepository
 from .source_build import SourceBuild, SourceBuildStatus
 from .source_repo_stats import SourceRepoStats
+from .training_dataset_export import (
+    ExportSplittingConfig,
+    TrainingDatasetExport,
+)
 from .training_dataset_split import TrainingDatasetSplit
 from .training_enrichment_build import TrainingEnrichmentBuild
 from .training_ingestion_build import (
@@ -62,10 +68,7 @@ from .training_ingestion_build import (
 from .training_scenario import (
     DataSourceConfig,
     FeatureConfig,
-    GroupByDimension,
     ScenarioStatus,
-    SplitStrategy,
-    SplittingConfig,
     TrainingScenario,
 )
 from .user import User
@@ -88,7 +91,8 @@ __all__ = [
     "ScenarioStatus",
     "DataSourceConfig",
     "FeatureConfig",
-    "SplittingConfig",
+    "TrainingDatasetExport",
+    "ExportSplittingConfig",
     "SplitStrategy",
     "GroupByDimension",
     # Ingestion & Enrichment

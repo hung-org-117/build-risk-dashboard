@@ -8,26 +8,20 @@ This module handles the processing phase of training scenario (user-triggered):
 4. process_single_enrichment - Process single build for feature extraction
 5. finalize_scenario_processing - Finalize after all builds processed
 6. reprocess_failed_builds - Retry FAILED enrichment builds
-7. split_scenario_dataset - Apply splitting strategy and export files
 
-Scan dispatch tasks:
-8. dispatch_scenario_scans - Dispatch scans for unique commits
-9. process_scan_batch - Process scan batch
-10. finalize_scan_dispatch - Finalize scan dispatch
+Note: Dataset generation tasks moved to app.tasks.training_export module.
 """
 
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
 from bson import ObjectId
 from celery import chain
 
 from app import paths
 from app.celery_app import celery_app
 from app.entities.enums import ExtractionStatus
-from app.entities.training_enrichment_build import TrainingEnrichmentBuild
 from app.entities.training_ingestion_build import (
     IngestionStatus,
     TrainingIngestionBuild,
@@ -35,7 +29,6 @@ from app.entities.training_ingestion_build import (
 from app.entities.training_scenario import ScenarioStatus, TrainingScenario
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
-from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
 from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
@@ -836,261 +829,7 @@ def reprocess_failed_builds(
 
 
 # ============================================================================
-# SPLITTING PHASE
-# ============================================================================
-
-
-@celery_app.task(
-    bind=True,
-    base=SafeTask,
-    name="app.tasks.training_processing.generate_scenario_dataset",
-    queue="scenario_processing",
-    soft_time_limit=600,
-    time_limit=720,
-)
-def generate_scenario_dataset(
-    self: SafeTask,
-    scenario_id: str,
-    correlation_id: str = "",
-) -> Dict[str, Any]:
-    """
-    Generate dataset - User-triggered split and export.
-
-    Args:
-        scenario_id: Scenario ID
-        preprocessing_config: Optional override for preprocessing settings
-        output_config: Optional override for output settings
-        correlation_id: Correlation ID for logging
-
-    Validates that feature extraction is complete, then:
-    - Collects features + scan_metrics from completed builds
-    - Applies splitting strategy (train/val/test)
-    - Exports to parquet/csv files
-    """
-
-    def mark_failed(e: Exception):
-        handler = _create_scenario_failure_handler(scenario_id, self.db)
-        handler("failed", str(e))
-        # Notify failure
-        from app.services.notification_service import notify_dataset_enrichment_failed
-
-        notify_dataset_enrichment_failed(
-            db=self.db,
-            scenario_id=scenario_id,
-            error_message=str(e),
-            completed_count=0,
-            failed_count=0,
-        )
-
-    def _work(state: TaskState) -> Dict[str, Any]:
-        import uuid
-
-        nonlocal correlation_id
-
-        if not correlation_id:
-            correlation_id = str(uuid.uuid4())
-
-        corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(
-            f"{corr_prefix} [generate_dataset] Starting for scenario {scenario_id}"
-        )
-
-        scenario_repo = TrainingScenarioRepository(self.db)
-        enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
-        split_repo = TrainingDatasetSplitRepository(self.db)
-
-        scenario = scenario_repo.find_by_id(scenario_id)
-        if not scenario:
-            return {"status": "error", "error": "Scenario not found"}
-
-        # Validate status - must be PROCESSED (feature extraction complete)
-        if scenario.status not in [
-            ScenarioStatus.PROCESSED.value,
-            ScenarioStatus.COMPLETED.value,
-        ]:
-            return {
-                "status": "error",
-                "error": f"Cannot generate dataset: status is {scenario.status}, expected PROCESSED",
-            }
-
-        # Update status to SPLITTING
-        scenario_repo.update_one(
-            scenario_id,
-            {
-                "status": ScenarioStatus.SPLITTING.value,
-                "splitting_started_at": datetime.utcnow(),
-            },
-        )
-
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.SPLITTING.value,
-            current_phase="Generating dataset (splitting and exporting)...",
-        )
-
-        from app.services.splitting_strategy_service import SplittingStrategyService
-
-        # Get completed enrichment builds
-        enrichment_builds = enrichment_build_repo.get_completed_with_features(
-            scenario_id
-        )
-
-        if not enrichment_builds:
-            logger.warning(f"{corr_prefix} No completed builds to split")
-            scenario_repo.update_one(
-                scenario_id,
-                {
-                    "status": ScenarioStatus.FAILED.value,
-                    "error_message": "No completed builds to split",
-                },
-            )
-            return {"status": "error", "error": "No completed builds"}
-
-        # Build DataFrame from enrichment builds
-        raw_repo_repo = RawRepositoryRepository(self.db)
-        raw_repo_ids = list({str(eb.raw_repo_id) for eb in enrichment_builds})
-        raw_repos = {
-            str(r.id): r
-            for r in [raw_repo_repo.find_by_id(rid) for rid in raw_repo_ids]
-            if r is not None
-        }
-
-        df = _build_split_dataframe(enrichment_builds, raw_repos, self.db)
-
-        # Apply splitting strategy
-        splitting_service = SplittingStrategyService()
-        splitting_config = scenario.splitting_config
-        if isinstance(splitting_config, dict):
-            from app.entities.training_scenario import SplittingConfig
-
-            splitting_config = SplittingConfig(**splitting_config)
-
-        result = splitting_service.apply_split(
-            df=df,
-            config=splitting_config,
-            label_column="outcome",
-        )
-
-        # Assign splits to enrichment builds
-        id_list = df["id"].tolist()
-        assignments = {
-            "train": [id_list[i] for i in result.train_indices],
-            "validation": [id_list[i] for i in result.val_indices],
-            "test": [id_list[i] for i in result.test_indices],
-        }
-        enrichment_build_repo.assign_splits(scenario_id, assignments)
-
-        # Create output directory
-        output_dir = paths.get_ml_dataset_dir(scenario_id)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Export split files in BOTH parquet and CSV formats
-        EXPORT_FORMATS = ["parquet", "csv"]
-        split_stats = {}
-
-        for split_type, indices in [
-            ("train", result.train_indices),
-            ("validation", result.val_indices),
-            ("test", result.test_indices),
-        ]:
-            if not indices:
-                continue
-
-            split_df = df.loc[indices]
-            split_stats[split_type] = {"count": len(split_df)}
-
-            # Export in each format
-            for fmt in EXPORT_FORMATS:
-                file_path = paths.get_training_dataset_split_path(
-                    scenario_id, split_type, fmt
-                )
-
-                start_time = datetime.utcnow()
-                if fmt == "parquet":
-                    split_df.to_parquet(file_path, index=False)
-                else:  # csv
-                    split_df.to_csv(file_path, index=False)
-
-                duration = (datetime.utcnow() - start_time).total_seconds()
-                file_size = file_path.stat().st_size
-                class_dist = split_df["outcome"].value_counts().to_dict()
-
-                split_repo.create_split(
-                    scenario_id=scenario_id,
-                    split_type=split_type,
-                    record_count=len(split_df),
-                    feature_count=len(split_df.columns),
-                    class_distribution={str(k): v for k, v in class_dist.items()},
-                    group_distribution={},
-                    file_path=str(file_path.relative_to(paths.DATA_DIR)),
-                    file_size_bytes=file_size,
-                    file_format=fmt,
-                    feature_names=list(split_df.columns),
-                    generation_duration_seconds=duration,
-                )
-
-                split_stats[split_type][fmt] = file_size
-
-        # Update scenario - COMPLETED
-        scenario_repo.update_one(
-            scenario_id,
-            {
-                "status": ScenarioStatus.COMPLETED.value,
-                "train_count": len(result.train_indices),
-                "val_count": len(result.val_indices),
-                "test_count": len(result.test_indices),
-                "splitting_completed_at": datetime.utcnow(),
-            },
-        )
-
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.COMPLETED.value,
-            builds_total=scenario.builds_total,
-            builds_ingested=scenario.builds_ingested,
-            builds_features_extracted=scenario.builds_features_extracted,
-            train_count=len(result.train_indices),
-            val_count=len(result.val_indices),
-            test_count=len(result.test_indices),
-            current_phase="Dataset generation completed",
-        )
-
-        # Send completion notification
-        from app.services.notification_service import (
-            notify_dataset_enrichment_completed,
-        )
-
-        notify_dataset_enrichment_completed(
-            db=self.db,
-            user_id=scenario.created_by,
-            dataset_name=scenario.name,
-            scenario_id=scenario_id,
-            builds_features_extracted=scenario.builds_features_extracted or 0,
-            builds_total=scenario.builds_total or 0,
-        )
-
-        logger.info(
-            f"{corr_prefix} Completed: train={len(result.train_indices)}, "
-            f"val={len(result.val_indices)}, test={len(result.test_indices)}"
-        )
-
-        return {
-            "status": "completed",
-            "train_count": len(result.train_indices),
-            "val_count": len(result.val_indices),
-            "test_count": len(result.test_indices),
-            "split_stats": split_stats,
-        }
-
-    return self.run_safe(
-        job_id=scenario_id,
-        work=_work,
-        mark_failed_fn=mark_failed,
-    )
-
-
-# ============================================================================
-# SCAN DISPATCH TASKS
+# HELPER FUNCTIONS
 # ============================================================================
 
 
@@ -1338,91 +1077,6 @@ def finalize_scan_dispatch(
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-
-
-def _build_split_dataframe(
-    enrichment_builds: List[TrainingEnrichmentBuild],
-    raw_repos: Dict[str, Any],
-    db,
-) -> pd.DataFrame:
-    """
-    Build DataFrame from enrichment builds with features.
-
-    Uses batch loading for FeatureVectors when dataset exceeds threshold
-    to avoid N+1 query problem.
-    """
-    from app.config import settings
-    from app.repositories.feature_vector import FeatureVectorRepository
-
-    fv_repo = FeatureVectorRepository(db)
-    total_builds = len(enrichment_builds)
-
-    # Determine if batch loading should be used
-    use_batch = total_builds > settings.DATASET_EXPORT_BATCH_THRESHOLD
-    batch_size = settings.DATASET_EXPORT_FEATURE_VECTOR_BATCH_SIZE
-
-    if use_batch:
-        logger.info(
-            f"Using batch loading for {total_builds} builds "
-            f"(threshold={settings.DATASET_EXPORT_BATCH_THRESHOLD})"
-        )
-
-    # Pre-load FeatureVectors in batches for large datasets
-    feature_vectors_cache: Dict[str, Any] = {}
-    if use_batch:
-        fv_ids = [
-            str(eb.feature_vector_id)
-            for eb in enrichment_builds
-            if eb.feature_vector_id
-        ]
-        # Batch load
-        for i in range(0, len(fv_ids), batch_size):
-            batch_ids = fv_ids[i : i + batch_size]
-            fvs = fv_repo.find_by_ids(batch_ids)
-            for fv in fvs:
-                feature_vectors_cache[str(fv.id)] = fv
-
-            if i % (batch_size * 5) == 0 and i > 0:
-                logger.info(f"Loaded {i}/{len(fv_ids)} FeatureVectors...")
-
-    data = []
-    for idx, eb in enumerate(enrichment_builds):
-        raw_repo = raw_repos.get(str(eb.raw_repo_id))
-        primary_language = (
-            raw_repo.main_lang if raw_repo and raw_repo.main_lang else "other"
-        )
-
-        row_data = {
-            "id": str(eb.id),
-            "outcome": eb.outcome or 0,
-            "repo_full_name": eb.repo_full_name,
-            "primary_language": primary_language.lower(),
-            "build_started_at": eb.build_started_at,
-        }
-
-        if eb.feature_vector_id:
-            fv_id_str = str(eb.feature_vector_id)
-            # Use cache for batch mode, individual query otherwise
-            if use_batch:
-                fv = feature_vectors_cache.get(fv_id_str)
-            else:
-                fv = fv_repo.find_by_id(fv_id_str)
-
-            if fv:
-                if fv.features:
-                    row_data.update(fv.features)
-                if fv.scan_metrics:
-                    row_data.update(fv.scan_metrics)
-
-        data.append(row_data)
-
-        # Progress log for large datasets
-        if use_batch and idx % 1000 == 0 and idx > 0:
-            logger.info(f"Built {idx}/{total_builds} rows...")
-
-    df = pd.DataFrame(data)
-    df.index = range(len(df))
-    return df
 
 
 def _expand_feature_patterns(patterns: List[str]) -> List[str]:
