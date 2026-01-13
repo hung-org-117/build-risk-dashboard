@@ -165,7 +165,7 @@ export default function OverviewPage() {
           dashboardApi.getSummary(),
           dashboardApi.getLayout(),
           dashboardApi.getAvailableWidgets(),
-          dashboardApi.getRecentBuilds(10),
+          dashboardApi.getRecentBuilds(50),
         ]);
 
         if (!isActive) {
@@ -705,29 +705,19 @@ export default function OverviewPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
               <CardDescription className="text-xs truncate">
-                Model Pipeline Status
+                Build Risk Evaluation
               </CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
               <div className="flex flex-col items-center min-w-0">
                 <FolderGit2 className="h-5 w-5 text-slate-500 mb-1" />
-                <div className="text-xl font-bold text-slate-600">{pipelineStats?.total_repos ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Total</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <Loader2 className="h-5 w-5 text-blue-500 mb-1" />
-                <div className="text-xl font-bold text-blue-600">{pipelineStats?.fetching_repos ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Fetching</div>
+                <div className="text-xl font-bold text-slate-600">{pipelineStats?.imported_repos ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Imported</div>
               </div>
               <div className="flex flex-col items-center min-w-0">
                 <Database className="h-5 w-5 text-purple-500 mb-1" />
-                <div className="text-xl font-bold text-purple-600">{pipelineStats?.ingesting_repos ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Ingesting</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <Activity className="h-5 w-5 text-amber-500 mb-1" />
-                <div className="text-xl font-bold text-amber-600">{pipelineStats?.processing_repos ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Processing</div>
+                <div className="text-xl font-bold text-purple-600">{pipelineStats?.ingested_repos_distinct ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Ingested</div>
               </div>
               <div className="flex flex-col items-center min-w-0">
                 <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
@@ -749,34 +739,24 @@ export default function OverviewPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
               <CardDescription className="text-xs truncate">
-                Training Scenario Pipeline
+                Dataset Enrichment
               </CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
               <div className="flex flex-col items-center min-w-0">
                 <Rocket className="h-5 w-5 text-blue-500 mb-1" />
                 <div className="text-xl font-bold text-blue-600">{enrichmentStats?.active_scenarios ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Active</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <Clock className="h-5 w-5 text-slate-500 mb-1" />
-                <div className="text-xl font-bold text-slate-600">{enrichmentStats?.queued_scenarios ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Queued</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <Loader2 className="h-5 w-5 text-amber-500 mb-1" />
-                <div className="text-xl font-bold text-amber-600">{enrichmentStats?.processing_scenarios ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Processing</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
-                <div className="text-xl font-bold text-green-600">{enrichmentStats?.completed_scenarios ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Completed</div>
+                <div className="text-[10px] text-muted-foreground truncate">Scenarios</div>
               </div>
               <div className="flex flex-col items-center min-w-0">
                 <Layers className="h-5 w-5 text-indigo-500 mb-1" />
-                <div className="text-xl font-bold text-indigo-600">{enrichmentStats?.total_enriched_builds ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Enriched</div>
+                <div className="text-xl font-bold text-indigo-600">{enrichmentStats?.total_datasets ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Datasets</div>
+              </div>
+              <div className="flex flex-col items-center min-w-0">
+                <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
+                <div className="text-xl font-bold text-green-600">{enrichmentStats?.exported_datasets ?? 0}</div>
+                <div className="text-[10px] text-muted-foreground truncate">Exported</div>
               </div>
             </CardContent>
           </Card>

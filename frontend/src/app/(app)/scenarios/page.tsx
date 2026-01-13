@@ -274,7 +274,7 @@ export default function ScenariosPage() {
                 <TabsList>
                     <TabsTrigger value="scenarios" className="flex items-center gap-2">
                         <TrendingUp className="w-4 h-4" />
-                        Training Scenarios
+                        Dataset Enrichment
                         <Badge variant="secondary">{total}</Badge>
                     </TabsTrigger>
                     <TabsTrigger value="sources" className="flex items-center gap-2">
