@@ -653,6 +653,8 @@ export interface DatasetEnrichmentStats {
   processing_scenarios: number;
   completed_scenarios: number;
   total_enriched_builds: number;
+  total_datasets: number;
+  exported_datasets: number;
 }
 
 export interface ModelPipelineStats {
@@ -661,6 +663,8 @@ export interface ModelPipelineStats {
   ingesting_repos: number;
   processing_repos: number;
   processed_repos: number;
+  imported_repos: number;
+  ingested_repos_distinct: number;
 }
 
 export interface MonitoringSummary {

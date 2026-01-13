@@ -34,16 +34,22 @@ class DatasetEnrichmentStats(BaseModel):
     processing_scenarios: int = 0  # Actively processing scenarios
     completed_scenarios: int = 0  # Completed scenarios
     total_enriched_builds: int = 0  # Total source builds processed
+    # New: dataset export stats
+    total_datasets: int = 0  # Total dataset exports initialized
+    exported_datasets: int = 0  # Dataset exports completed
 
 
 class ModelPipelineStats(BaseModel):
     """Stats for Model Pipeline (Repo Imports) (Admin only)."""
 
-    total_repos: int = 0  # Total imported repositories
+    total_repos: int = 0  # Total repositories configured
     fetching_repos: int = 0  # Repos currently fetching
     ingesting_repos: int = 0  # Repos currently ingesting
     processing_repos: int = 0  # Repos currently processing
     processed_repos: int = 0  # Repos fully processed with predictions
+    # New: explicit counts for import/ingest/processed
+    imported_repos: int = 0  # Repositories successfully imported
+    ingested_repos_distinct: int = 0  # Repositories with ingested builds
 
 
 class MonitoringSummary(BaseModel):

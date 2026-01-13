@@ -182,8 +182,8 @@ def get_available_widgets(
             WidgetDefinition(
                 widget_id="model_pipeline_summary",
                 widget_type="card",
-                title="Model Pipeline",
-                description="Repo import pipeline status (fetching/ingesting/processing)",
+                title="Build Risk Evaluation",
+                description="Repository pipeline status (Imported/Ingested/Processed)",
                 default_w=2,
                 default_h=1,
             ),
@@ -193,8 +193,8 @@ def get_available_widgets(
             WidgetDefinition(
                 widget_id="training_scenario_summary",
                 widget_type="card",
-                title="Training Scenarios",
-                description="Training scenario pipeline status",
+                title="Dataset Enrichment",
+                description="Scenarios and dataset exports",
                 default_w=2,
                 default_h=1,
             ),

@@ -334,12 +334,20 @@ class DashboardService:
 
         total_enriched_builds = self.db[self.SOURCE_BUILDS_COLLECTION].count_documents({})
 
+        # Dataset export stats
+        total_datasets = self.db["training_dataset_exports"].count_documents({})
+        exported_datasets = self.db["training_dataset_exports"].count_documents(
+            {"status": "completed"}
+        )
+
         return DatasetEnrichmentStats(
             active_scenarios=group.get("total_scenarios", 0),
             queued_scenarios=group.get("queued_count", 0),
             processing_scenarios=group.get("processing_count", 0),
             completed_scenarios=group.get("completed_count", 0),
             total_enriched_builds=total_enriched_builds,
+            total_datasets=total_datasets,
+            exported_datasets=exported_datasets,
         )
 
     def _calculate_model_pipeline_stats(self) -> ModelPipelineStats:
@@ -366,12 +374,23 @@ class DashboardService:
         result = list(self.db[self.MODEL_REPO_CONFIGS_COLLECTION].aggregate(pipeline))
         group = result[0] if result else {}
 
+        # New: explicit import/ingest metrics
+        imported_repos = self.db["repositories"].count_documents({"status": "imported"})
+        # Distinct count of raw_repo_ids that have ingested builds
+        ingested_repos_distinct = len(
+            list(
+                self.db["raw_build_runs"].distinct("raw_repo_id")
+            )
+        )
+
         return ModelPipelineStats(
             total_repos=group.get("total_repos", 0),
             fetching_repos=group.get("fetching_count", 0),
             ingesting_repos=group.get("ingesting_count", 0),
             processing_repos=group.get("processing_count", 0),
             processed_repos=group.get("processed_count", 0),
+            imported_repos=imported_repos,
+            ingested_repos_distinct=ingested_repos_distinct,
         )
 
     def _calculate_monitoring_stats(self) -> MonitoringSummary:
