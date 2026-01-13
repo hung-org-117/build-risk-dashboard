@@ -51,6 +51,17 @@ interface ExportConfig {
     strategy: string;
     group_by: string;
     ratios: { train: number; val: number; test: number };
+    // Dynamic binning
+    num_bins: number;
+    time_slots: number;
+    // L1GO/L2GO specific
+    test_groups: string[];
+    val_groups: string[];
+    // Extreme Novelty specific
+    novelty_group: string | null;
+    novelty_label: number;
+    // Imbalanced Train specific
+    imbalance_reduction_rate: number;
     // Output
     format: "parquet" | "csv";
     include_metadata: boolean;
@@ -62,6 +73,13 @@ const DEFAULT_CONFIG: ExportConfig = {
     strategy: "stratified_within_group",
     group_by: "repo_language",
     ratios: { train: 0.7, val: 0.15, test: 0.15 },
+    num_bins: 4,
+    time_slots: 4,
+    test_groups: [],
+    val_groups: [],
+    novelty_group: null,
+    novelty_label: 1,
+    imbalance_reduction_rate: 0.5,
     format: "parquet",
     include_metadata: true,
 };
@@ -69,6 +87,25 @@ const DEFAULT_CONFIG: ExportConfig = {
 // =============================================================================
 // Constants
 // =============================================================================
+
+// Strategy value constants - use these instead of inline strings
+const STRATEGY = {
+    STRATIFIED_WITHIN_GROUP: "stratified_within_group",
+    RANDOM_SPLIT: "random_split",
+    TIME_SERIES_SPLIT: "time_series_split",
+    LEAVE_ONE_OUT: "leave_one_out",
+    LEAVE_TWO_OUT: "leave_two_out",
+    EXTREME_NOVELTY: "extreme_novelty",
+    IMBALANCED_TRAIN: "imbalanced_train",
+} as const;
+
+// Group by dimension constants
+const GROUP_BY = {
+    REPO_LANGUAGE: "repo_language",
+    TIME_OF_DAY: "time_of_day",
+    PERCENTAGE_OF_BUILDS_BEFORE: "percentage_of_builds_before",
+    NUMBER_OF_BUILDS_BEFORE: "number_of_builds_before",
+} as const;
 
 const MISSING_VALUES_OPTIONS = [
     { value: "drop_row", label: "Drop Row" },
@@ -87,8 +124,11 @@ const NORMALIZATION_OPTIONS = [
 const STRATEGY_OPTIONS = [
     { value: "stratified_within_group", label: "Stratified Within Group" },
     { value: "random_split", label: "Random Split" },
-    { value: "leave_one_out", label: "Leave One Out" },
-    { value: "leave_two_out", label: "Leave Two Out" },
+    { value: "time_series_split", label: "Time Series Split" },
+    { value: "leave_one_out", label: "Leave-One-Group-Out (L1GO)" },
+    { value: "leave_two_out", label: "Leave-Two-Groups-Out (L2GO)" },
+    { value: "extreme_novelty", label: "Extreme Novelty (Zero-Shot)" },
+    { value: "imbalanced_train", label: "Imbalanced Train (Robustness)" },
 ];
 
 const GROUP_BY_OPTIONS = [
@@ -96,6 +136,11 @@ const GROUP_BY_OPTIONS = [
     { value: "time_of_day", label: "Time of Day" },
     { value: "percentage_of_builds_before", label: "% of Builds Before" },
     { value: "number_of_builds_before", label: "# of Builds Before" },
+];
+
+const LABEL_OPTIONS = [
+    { value: 0, label: "Success (0)" },
+    { value: 1, label: "Failure (1)" },
 ];
 
 // =============================================================================
@@ -112,6 +157,11 @@ export default function ScenarioExportPage() {
     const [loading, setLoading] = useState(true);
     const [generating, setGenerating] = useState(false);
     const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
+    const [groupsPreview, setGroupsPreview] = useState<{
+        groups: Array<{ value: string; label: string; count: number; warning?: string }>;
+        total_builds: number;
+    } | null>(null);
+    const [loadingGroups, setLoadingGroups] = useState(false);
 
     const fetchScenario = useCallback(async () => {
         try {
@@ -133,6 +183,24 @@ export default function ScenarioExportPage() {
         }
     }, [scenarioId]);
 
+    const fetchGroupsPreview = useCallback(async () => {
+        if (!scenarioId) return;
+        setLoadingGroups(true);
+        try {
+            const data = await trainingScenariosApi.getGroupPreview(scenarioId, {
+                group_by: config.group_by,
+                num_bins: config.num_bins,
+                time_slots: config.time_slots,
+            });
+            setGroupsPreview(data);
+        } catch (err) {
+            console.error("Failed to fetch groups preview:", err);
+            setGroupsPreview(null);
+        } finally {
+            setLoadingGroups(false);
+        }
+    }, [scenarioId, config.group_by, config.num_bins, config.time_slots]);
+
     const loadData = useCallback(async () => {
         setLoading(true);
         await Promise.all([fetchScenario(), fetchSplits()]);
@@ -142,6 +210,13 @@ export default function ScenarioExportPage() {
     useEffect(() => {
         loadData();
     }, [loadData]);
+
+    // Fetch groups preview when group config changes
+    useEffect(() => {
+        if (scenario?.status === "processed") {
+            fetchGroupsPreview();
+        }
+    }, [scenario?.status, fetchGroupsPreview]);
 
     // Subscribe to SSE for real-time updates
     useEffect(() => {
@@ -169,7 +244,7 @@ export default function ScenarioExportPage() {
     const handleGenerateDataset = async () => {
         setGenerating(true);
         try {
-            // TODO: Pass config to backend when API is updated
+            // TODO: Pass full config to backend when API is updated
             await trainingScenariosApi.generateDataset(scenarioId);
             toast({ title: "Dataset generation started" });
             await fetchScenario();
@@ -195,6 +270,43 @@ export default function ScenarioExportPage() {
         }
         setConfig(prev => ({ ...prev, ratios: newRatios }));
     };
+
+    // Validation helper for strategies
+    const getConfigValidationError = (): string | null => {
+        const groupCount = groupsPreview?.groups?.length || 0;
+
+        if (config.strategy === STRATEGY.LEAVE_ONE_OUT && groupCount < 3) {
+            return `L1GO requires at least 3 groups. Current: ${groupCount}. Try different grouping.`;
+        }
+        if (config.strategy === STRATEGY.LEAVE_TWO_OUT && groupCount < 4) {
+            return `L2GO requires at least 4 groups. Current: ${groupCount}. Try different grouping.`;
+        }
+        if (config.strategy === STRATEGY.LEAVE_ONE_OUT && !config.test_groups?.length) {
+            return "Please select a Test group.";
+        }
+        if (config.strategy === STRATEGY.LEAVE_ONE_OUT && !config.val_groups?.length) {
+            return "Please select a Validation group.";
+        }
+        if (config.strategy === STRATEGY.LEAVE_TWO_OUT && config.test_groups?.length !== 2) {
+            return "Please select exactly 2 Test groups.";
+        }
+        if (config.strategy === STRATEGY.LEAVE_TWO_OUT && !config.val_groups?.length) {
+            return "Please select a Validation group.";
+        }
+        if (config.strategy === STRATEGY.EXTREME_NOVELTY && !config.novelty_group) {
+            return "Please select a Target group.";
+        }
+        return null;
+    };
+
+    const validationError = getConfigValidationError();
+    const requiresGroupSelection = (
+        [STRATEGY.LEAVE_ONE_OUT, STRATEGY.LEAVE_TWO_OUT, STRATEGY.EXTREME_NOVELTY, STRATEGY.STRATIFIED_WITHIN_GROUP] as string[]
+    ).includes(config.strategy);
+    const showNumBins = (
+        [GROUP_BY.PERCENTAGE_OF_BUILDS_BEFORE, GROUP_BY.NUMBER_OF_BUILDS_BEFORE] as string[]
+    ).includes(config.group_by);
+    const showTimeSlots = config.group_by === GROUP_BY.TIME_OF_DAY;
 
     if (loading) {
         return (
@@ -431,7 +543,7 @@ export default function ScenarioExportPage() {
                             <Label>Strategy</Label>
                             <Select
                                 value={config.strategy}
-                                onValueChange={(v) => updateConfig({ strategy: v })}
+                                onValueChange={(v) => updateConfig({ strategy: v, test_groups: [], val_groups: [], novelty_group: null })}
                             >
                                 <SelectTrigger>
                                     <SelectValue />
@@ -449,7 +561,7 @@ export default function ScenarioExportPage() {
                             <Label>Group By</Label>
                             <Select
                                 value={config.group_by}
-                                onValueChange={(v) => updateConfig({ group_by: v })}
+                                onValueChange={(v) => updateConfig({ group_by: v, test_groups: [], val_groups: [], novelty_group: null })}
                             >
                                 <SelectTrigger>
                                     <SelectValue />
@@ -465,51 +577,295 @@ export default function ScenarioExportPage() {
                         </div>
                     </div>
 
-                    {/* Ratios */}
-                    <div className="space-y-4 pt-4 border-t">
-                        <Label>Train / Validation / Test Ratios</Label>
-                        <div className="grid gap-4 md:grid-cols-3">
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Train</span>
-                                    <span className="text-sm font-medium">{(config.ratios.train * 100).toFixed(0)}%</span>
-                                </div>
-                                <Slider
-                                    value={[config.ratios.train * 100]}
-                                    onValueChange={([v]) => updateRatios("train", v / 100)}
-                                    min={10}
-                                    max={90}
-                                    step={5}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Validation</span>
-                                    <span className="text-sm font-medium">{(config.ratios.val * 100).toFixed(0)}%</span>
-                                </div>
-                                <Slider
-                                    value={[config.ratios.val * 100]}
-                                    onValueChange={([v]) => updateRatios("val", v / 100)}
-                                    min={5}
-                                    max={40}
-                                    step={5}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Test</span>
-                                    <span className="text-sm font-medium">{(config.ratios.test * 100).toFixed(0)}%</span>
-                                </div>
-                                <Slider
-                                    value={[config.ratios.test * 100]}
-                                    onValueChange={([v]) => updateRatios("test", v / 100)}
-                                    min={5}
-                                    max={40}
-                                    step={5}
-                                />
+                    {/* Dynamic Binning Options */}
+                    {(showNumBins || showTimeSlots) && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>Grouping Configuration</Label>
+                            <div className="grid gap-6 md:grid-cols-2">
+                                {showNumBins && (
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between">
+                                            <span className="text-sm text-muted-foreground">Number of Bins</span>
+                                            <span className="text-sm font-medium">{config.num_bins}</span>
+                                        </div>
+                                        <Slider
+                                            value={[config.num_bins]}
+                                            onValueChange={([v]) => updateConfig({ num_bins: v })}
+                                            min={2}
+                                            max={10}
+                                            step={1}
+                                        />
+                                    </div>
+                                )}
+                                {showTimeSlots && (
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between">
+                                            <span className="text-sm text-muted-foreground">Time Slots</span>
+                                            <span className="text-sm font-medium">{config.time_slots}</span>
+                                        </div>
+                                        <Slider
+                                            value={[config.time_slots]}
+                                            onValueChange={([v]) => updateConfig({ time_slots: v })}
+                                            min={2}
+                                            max={12}
+                                            step={1}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         </div>
-                    </div>
+                    )}
+
+                    {/* Group Preview Table */}
+                    {requiresGroupSelection && groupsPreview && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <div className="flex items-center justify-between">
+                                <Label>Available Groups ({groupsPreview.groups.length})</Label>
+                                <Button variant="ghost" size="sm" onClick={fetchGroupsPreview} disabled={loadingGroups}>
+                                    {loadingGroups ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                </Button>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Group</TableHead>
+                                            <TableHead className="text-right">Count</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {groupsPreview.groups.map(g => (
+                                            <TableRow key={g.value}>
+                                                <TableCell className="font-medium">{g.label || g.value}</TableCell>
+                                                <TableCell className="text-right">
+                                                    {g.count.toLocaleString()}
+                                                    {g.warning && <Badge variant="outline" className="ml-2 text-xs">Small</Badge>}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* L1GO Configuration */}
+                    {config.strategy === STRATEGY.LEAVE_ONE_OUT && groupsPreview && groupsPreview.groups.length >= 3 && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>L1GO Group Selection</Label>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">Test Group</span>
+                                    <Select
+                                        value={config.test_groups[0] || ""}
+                                        onValueChange={(v) => updateConfig({ test_groups: [v] })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select test group" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {groupsPreview.groups.filter(g => !config.val_groups.includes(g.value)).map(g => (
+                                                <SelectItem key={g.value} value={g.value}>
+                                                    {g.label || g.value} ({g.count})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">Validation Group</span>
+                                    <Select
+                                        value={config.val_groups[0] || ""}
+                                        onValueChange={(v) => updateConfig({ val_groups: [v] })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select validation group" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {groupsPreview.groups.filter(g => !config.test_groups.includes(g.value)).map(g => (
+                                                <SelectItem key={g.value} value={g.value}>
+                                                    {g.label || g.value} ({g.count})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* L2GO Configuration */}
+                    {config.strategy === STRATEGY.LEAVE_TWO_OUT && groupsPreview && groupsPreview.groups.length >= 4 && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>L2GO Group Selection</Label>
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">Test Groups (select 2)</span>
+                                    <div className="flex flex-wrap gap-2">
+                                        {groupsPreview.groups.filter(g => !config.val_groups.includes(g.value)).map(g => (
+                                            <Button
+                                                key={g.value}
+                                                variant={config.test_groups.includes(g.value) ? "default" : "outline"}
+                                                size="sm"
+                                                onClick={() => {
+                                                    const current = config.test_groups;
+                                                    if (current.includes(g.value)) {
+                                                        updateConfig({ test_groups: current.filter(x => x !== g.value) });
+                                                    } else if (current.length < 2) {
+                                                        updateConfig({ test_groups: [...current, g.value] });
+                                                    }
+                                                }}
+                                            >
+                                                {g.label || g.value}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">Validation Group</span>
+                                    <Select
+                                        value={config.val_groups[0] || ""}
+                                        onValueChange={(v) => updateConfig({ val_groups: [v] })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select validation group" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {groupsPreview.groups.filter(g => !config.test_groups.includes(g.value)).map(g => (
+                                                <SelectItem key={g.value} value={g.value}>
+                                                    {g.label || g.value} ({g.count})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Extreme Novelty Configuration */}
+                    {config.strategy === STRATEGY.EXTREME_NOVELTY && groupsPreview && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>Extreme Novelty Configuration</Label>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">Target Group</span>
+                                    <Select
+                                        value={config.novelty_group || ""}
+                                        onValueChange={(v) => updateConfig({ novelty_group: v })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select target group" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {groupsPreview.groups.map(g => (
+                                                <SelectItem key={g.value} value={g.value}>
+                                                    {g.label || g.value} ({g.count})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <span className="text-sm text-muted-foreground">Target Label (to isolate)</span>
+                                    <Select
+                                        value={String(config.novelty_label)}
+                                        onValueChange={(v) => updateConfig({ novelty_label: parseInt(v) })}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {LABEL_OPTIONS.map(opt => (
+                                                <SelectItem key={opt.value} value={String(opt.value)}>
+                                                    {opt.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Imbalanced Train Configuration */}
+                    {config.strategy === STRATEGY.IMBALANCED_TRAIN && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>Imbalanced Train Configuration</Label>
+                            <div className="space-y-2">
+                                <div className="flex justify-between">
+                                    <span className="text-sm text-muted-foreground">Label 1 Reduction Rate</span>
+                                    <span className="text-sm font-medium">{(config.imbalance_reduction_rate * 100).toFixed(0)}%</span>
+                                </div>
+                                <Slider
+                                    value={[config.imbalance_reduction_rate * 100]}
+                                    onValueChange={([v]) => updateConfig({ imbalance_reduction_rate: v / 100 })}
+                                    min={0}
+                                    max={90}
+                                    step={10}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Percentage of failure samples (Label 1) to remove from training set.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Ratios - show for non-LOO strategies */}
+                    {!([STRATEGY.LEAVE_ONE_OUT, STRATEGY.LEAVE_TWO_OUT] as string[]).includes(config.strategy) && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>Train / Validation / Test Ratios</Label>
+                            <div className="grid gap-4 md:grid-cols-3">
+                                <div className="space-y-2">
+                                    <div className="flex justify-between">
+                                        <span className="text-sm text-muted-foreground">Train</span>
+                                        <span className="text-sm font-medium">{(config.ratios.train * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <Slider
+                                        value={[config.ratios.train * 100]}
+                                        onValueChange={([v]) => updateRatios("train", v / 100)}
+                                        min={10}
+                                        max={90}
+                                        step={5}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex justify-between">
+                                        <span className="text-sm text-muted-foreground">Validation</span>
+                                        <span className="text-sm font-medium">{(config.ratios.val * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <Slider
+                                        value={[config.ratios.val * 100]}
+                                        onValueChange={([v]) => updateRatios("val", v / 100)}
+                                        min={5}
+                                        max={40}
+                                        step={5}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex justify-between">
+                                        <span className="text-sm text-muted-foreground">Test</span>
+                                        <span className="text-sm font-medium">{(config.ratios.test * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <Slider
+                                        value={[config.ratios.test * 100]}
+                                        onValueChange={([v]) => updateRatios("test", v / 100)}
+                                        min={5}
+                                        max={40}
+                                        step={5}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Validation Error */}
+                    {validationError && (
+                        <div className="p-3 border border-amber-500 bg-amber-50 dark:bg-amber-950/20 rounded-lg flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-500" />
+                            <span className="text-sm text-amber-700 dark:text-amber-400">{validationError}</span>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
 
@@ -556,7 +912,7 @@ export default function ScenarioExportPage() {
                         size="lg"
                         className="w-full bg-green-600 hover:bg-green-700"
                         onClick={handleGenerateDataset}
-                        disabled={generating}
+                        disabled={generating || !!validationError}
                     >
                         {generating ? (
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />

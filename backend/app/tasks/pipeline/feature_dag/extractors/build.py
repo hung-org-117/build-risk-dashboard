@@ -49,43 +49,16 @@ def build_trigger_sha(build_run: BuildRunInput) -> str:
 
 @tag(group="build")
 def build_status(build_run: BuildRunInput) -> str:
-    """
-    Normalized build status.
-
-    Maps workflow conclusion to standard status values:
-    - failure -> failed
-    - success -> passed
-    - cancelled -> cancelled
-    - errored -> errored
-    - other -> as-is or unknown
-    """
     conclusion = build_run.conclusion
     if not conclusion:
         return "unknown"
 
-    status_map = {
-        "failure": "failed",
-        "success": "passed",
-        "cancelled": "cancelled",
-        "errored": "errored",
-        "timed_out": "errored",
-        "action_required": "errored",
-    }
-    return status_map.get(conclusion, conclusion)
+    return conclusion
 
 
 @tag(group="build")
 def build_status_num(build_status: str) -> int:
-    """
-    Numeric build status for model input.
-
-    Maps:
-    - passed -> 0
-    - failed -> 1
-    - other -> -1
-    """
-    status_map = {"passed": 0, "failed": 1}
-    return status_map.get(build_status, -1)
+    return 0 if build_status == "passed" else 1
 
 
 @tag(group="build")

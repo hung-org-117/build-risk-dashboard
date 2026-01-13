@@ -116,6 +116,12 @@ def get_splitting_groups(
     group_by: str = Query(
         ..., description="Group by dimension: repo_language, time_of_day, etc."
     ),
+    num_bins: int = Query(
+        4, ge=2, le=10, description="Number of bins for numeric features"
+    ),
+    time_slots: int = Query(
+        4, ge=2, le=12, description="Number of time slots for time_of_day"
+    ),
     date_start: Optional[datetime] = None,
     date_end: Optional[datetime] = None,
     languages: Optional[str] = Query(None, description="Comma-separated languages"),
@@ -178,9 +184,71 @@ def get_splitting_groups(
             "valid_options": [e.value for e in GroupByDimension],
         }
 
-    # Get available groups
+    # Get available groups with dynamic binning
     splitting_service = SplittingStrategyService()
-    return splitting_service.get_available_groups(df, group_by_enum)
+    return splitting_service.get_available_groups(
+        df, group_by_enum, num_bins=num_bins, time_slots=time_slots
+    )
+
+
+@router.get("/{scenario_id}/group-preview")
+def get_scenario_group_preview(
+    scenario_id: str,
+    group_by: str = Query(
+        ..., description="Group by dimension: repo_language, time_of_day, etc."
+    ),
+    num_bins: int = Query(
+        4, ge=2, le=10, description="Number of bins for numeric features"
+    ),
+    time_slots: int = Query(
+        4, ge=2, le=12, description="Number of time slots for time_of_day"
+    ),
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+) -> Dict[str, Any]:
+    """
+    Get group distribution preview for export configuration.
+
+    This reads from the scenario's master_dataset.parquet if available,
+    showing how data would be grouped with the given configuration.
+    """
+    import pandas as pd
+
+    from app.entities.enums import GroupByDimension
+    from app.services import paths
+    from app.services.splitting_strategy_service import SplittingStrategyService
+
+    # Verify scenario access
+    service = TrainingScenarioService(db)
+    service.get_scenario(scenario_id, str(current_user["_id"]))
+
+    # Try to load master dataset
+    scenario_dir = paths.get_ml_dataset_dir(scenario_id)
+    master_file = scenario_dir / "master_dataset.parquet"
+
+    if not master_file.exists():
+        return {
+            "error": "Master dataset not yet materialized. Run dataset generation first.",
+            "groups": [],
+            "total_builds": 0,
+        }
+
+    df = pd.read_parquet(master_file)
+
+    # Validate group_by
+    try:
+        group_by_enum = GroupByDimension(group_by)
+    except ValueError:
+        return {
+            "error": f"Invalid group_by: {group_by}",
+            "valid_options": [e.value for e in GroupByDimension],
+        }
+
+    # Get group distribution with dynamic binning
+    splitting_service = SplittingStrategyService()
+    return splitting_service.get_available_groups(
+        df, group_by_enum, num_bins=num_bins, time_slots=time_slots
+    )
 
 
 @router.get("/{scenario_id}/splitting-groups")

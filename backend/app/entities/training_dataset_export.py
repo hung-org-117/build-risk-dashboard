@@ -84,6 +84,20 @@ class ExportSplittingConfig(BaseModel):
         description="Column to stratify by within groups",
     )
 
+    # Dynamic binning configuration
+    num_bins: int = Field(
+        default=4,
+        ge=2,
+        le=10,
+        description="Number of bins for numeric features (percentage/number of builds)",
+    )
+    time_slots: int = Field(
+        default=4,
+        ge=2,
+        le=12,
+        description="Number of time slots for time_of_day grouping (divides 24 hours)",
+    )
+
     # Leave-out strategy specific
     test_groups: List[str] = Field(default_factory=list)
     val_groups: List[str] = Field(default_factory=list)
@@ -92,10 +106,19 @@ class ExportSplittingConfig(BaseModel):
     # Imbalanced train specific
     reduce_label: Optional[int] = None
     reduce_ratio: float = Field(default=0.5)
+    imbalance_reduction_rate: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Percentage of Label 1 to drop from training set (Imbalanced Train)",
+    )
 
     # Extreme novelty specific
     novelty_group: Optional[str] = None
-    novelty_label: Optional[int] = None
+    novelty_label: Optional[int] = Field(
+        default=None,
+        description="Label to isolate: 0 (success) or 1 (failure). Based on build_status_num.",
+    )
 
 
 class TrainingDatasetExport(BaseEntity):

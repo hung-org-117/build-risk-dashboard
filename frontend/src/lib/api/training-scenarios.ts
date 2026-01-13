@@ -124,17 +124,27 @@ export interface SplittingGroupsResponse {
     group_by: string;
     groups: SplittingGroup[];
     total_builds: number;
+    num_bins?: number;
+    time_slots?: number;
     error?: string;
     valid_options?: string[];
 }
 
 export interface SplittingGroupsParams {
     group_by: string;
+    num_bins?: number;
+    time_slots?: number;
     date_start?: string;
     date_end?: string;
     languages?: string;
     conclusions?: string;
     ci_provider?: string;
+}
+
+export interface GroupPreviewParams {
+    group_by: string;
+    num_bins?: number;
+    time_slots?: number;
 }
 
 // Dataset split types
@@ -307,6 +317,21 @@ export const trainingScenariosApi = {
         const response = await api.get<SplittingGroupsResponse>("/training-scenarios/splitting-groups", {
             params,
         });
+        return response.data;
+    },
+
+    /**
+     * Get group preview for a scenario's master dataset
+     * Used in export page to dynamically configure grouping
+     */
+    getGroupPreview: async (
+        scenarioId: string,
+        params: GroupPreviewParams
+    ): Promise<SplittingGroupsResponse> => {
+        const response = await api.get<SplittingGroupsResponse>(
+            `/training-scenarios/${scenarioId}/group-preview`,
+            { params }
+        );
         return response.data;
     },
 
