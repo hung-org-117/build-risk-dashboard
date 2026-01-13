@@ -299,6 +299,7 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
                         "run_started_at": 1,
                         "duration_seconds": 1,
                         "language": "$repo.main_lang",
+                        "provider": 1,
                     }
                 },
             ]

@@ -92,6 +92,7 @@ def preview_builds(
                 ),
                 "duration_seconds": build.get("duration_seconds"),
                 "language": build.get("language") or "Unknown",
+                "ci_provider": build.get("provider") or "unknown",
             }
         )
 
@@ -114,6 +115,13 @@ def get_filter_options(
     Get dynamic filter options from raw data.
     Returns distinct languages and CI providers found in the database.
     """
+    # CI Provider human-readable labels
+    CI_PROVIDER_LABELS = {
+        "github_actions": "GitHub Actions",
+        "circleci": "CircleCI",
+        "travis_ci": "Travis CI",
+    }
+
     raw_build_repo = RawBuildRunRepository(db)
     # simple distinct queries on indexed fields
     providers = raw_build_repo.collection.distinct("provider")
@@ -127,7 +135,13 @@ def get_filter_options(
     languages = sorted([l for l in languages if l])
 
     return {
-        "providers": [{"value": p, "label": p} for p in providers],
+        "providers": [
+            {
+                "value": p,
+                "label": CI_PROVIDER_LABELS.get(p, p.replace("_", " ").title()),
+            }
+            for p in providers
+        ],
         "languages": [{"value": l, "label": l.title()} for l in languages],
     }
 
@@ -240,8 +254,8 @@ def get_scenario_group_preview(
     """
     import pandas as pd
 
+    from app import paths
     from app.entities.enums import GroupByDimension
-    from app.services import paths
     from app.services.splitting_strategy_service import SplittingStrategyService
 
     # Verify scenario access
@@ -249,7 +263,7 @@ def get_scenario_group_preview(
     service.get_scenario(scenario_id, str(current_user["_id"]))
 
     # Try to load master dataset
-    scenario_dir = paths.get_ml_dataset_dir(scenario_id)
+    scenario_dir = paths.get_training_dataset_dir(scenario_id)
     master_file = scenario_dir / "master_dataset.parquet"
 
     if not master_file.exists():

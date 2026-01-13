@@ -10,7 +10,7 @@ import {
     CheckCircle2,
     TrendingUp,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,7 @@ import { trainingScenariosApi } from "@/lib/api";
 import type { TrainingScenarioRecord, TrainingScenarioStatus } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import { useSSE } from "@/contexts/sse-context";
+import { BuildSourcesList } from "./_components/BuildSourcesList";
 
 const PAGE_SIZE = 20;
 
@@ -64,10 +65,29 @@ function getStatusBadge(status: TrainingScenarioStatus) {
 
 export default function ScenariosPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+
+    // Initialize tab from URL or default to 'scenarios'
+    const tabParam = searchParams.get("tab");
+    const initialTab = (tabParam === "scenarios" || tabParam === "sources") ? tabParam : "scenarios";
+
     const [scenarios, setScenarios] = useState<TrainingScenarioRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<"scenarios" | "sources">("scenarios");
+    const [activeTab, setActiveTab] = useState<"scenarios" | "sources">(initialTab);
+
+    // Sync tab state with URL changes
+    useEffect(() => {
+        const tab = searchParams.get("tab");
+        if (tab === "scenarios" || tab === "sources") {
+            setActiveTab(tab);
+        }
+    }, [searchParams]);
+
+    const handleTabChange = (value: string) => {
+        setActiveTab(value as "scenarios" | "sources");
+        router.push(`/scenarios?tab=${value}`);
+    };
 
     // Statistics
     const [stats, setStats] = useState({
@@ -270,12 +290,12 @@ export default function ScenariosPage() {
             </div>
 
             {/* Tabs */}
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "scenarios" | "sources")}>
-                <TabsList>
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="scenarios" className="flex items-center gap-2">
                         <TrendingUp className="w-4 h-4" />
                         Training Scenarios
-                        <Badge variant="secondary">{total}</Badge>
+                        <Badge variant="secondary" className="ml-1">{total}</Badge>
                     </TabsTrigger>
                     <TabsTrigger value="sources" className="flex items-center gap-2">
                         <Database className="w-4 h-4" />
@@ -390,14 +410,7 @@ export default function ScenariosPage() {
 
                 {/* Tab: Build Sources */}
                 <TabsContent value="sources">
-                    <div>
-                        <Button
-                            onClick={() => router.push("/scenarios/sources")}
-                            variant="outline"
-                        >
-                            Go to Build Sources
-                        </Button>
-                    </div>
+                    <BuildSourcesList />
                 </TabsContent>
             </Tabs>
         </div>

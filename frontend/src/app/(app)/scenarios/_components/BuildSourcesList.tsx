@@ -2,7 +2,6 @@
 
 import {
     Database,
-    Plus,
     MoreVertical,
     Trash2,
     Eye,
@@ -10,6 +9,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+
+import { api } from "@/lib/api/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,7 +67,7 @@ function getStatusBadge(status: string) {
     );
 }
 
-export default function BuildSourcesPage() {
+export function BuildSourcesList() {
     const router = useRouter();
     const [sources, setSources] = useState<BuildSourceRecord[]>([]);
     const [loading, setLoading] = useState(true);
@@ -76,19 +77,19 @@ export default function BuildSourcesPage() {
     const [stats, setStats] = useState({
         totalSources: 0,
         totalBuilds: 0,
-        found: 0,
-        notFound: 0,
     });
 
     const loadSources = useCallback(async (pageNumber = 1) => {
         setLoading(true);
         try {
-            const response = await fetch(
-                `/api/build-sources?skip=${(pageNumber - 1) * PAGE_SIZE}&limit=${PAGE_SIZE}`
-            );
-            if (!response.ok) throw new Error("Failed to load sources");
+            const response = await api.get<ListResponse>("/build-sources", {
+                params: {
+                    skip: (pageNumber - 1) * PAGE_SIZE,
+                    limit: PAGE_SIZE,
+                },
+            });
 
-            const data: ListResponse = await response.json();
+            const data = response.data;
             setSources(data.items || []);
             setTotal(data.total);
             setPage(pageNumber);
@@ -98,10 +99,8 @@ export default function BuildSourcesPage() {
                 const aggregated = data.items.reduce(
                     (acc, source) => ({
                         totalBuilds: acc.totalBuilds + source.rows,
-                        found: acc.found + source.validation_stats.found,
-                        notFound: acc.notFound + source.validation_stats.not_found,
                     }),
-                    { totalBuilds: 0, found: 0, notFound: 0 }
+                    { totalBuilds: 0 }
                 );
                 setStats({
                     totalSources: data.total,
@@ -124,10 +123,7 @@ export default function BuildSourcesPage() {
         if (!window.confirm("Are you sure you want to delete this source?")) return;
 
         try {
-            const response = await fetch(`/api/build-sources/${sourceId}`, {
-                method: "DELETE",
-            });
-            if (!response.ok) throw new Error("Failed to delete source");
+            await api.delete(`/build-sources/${sourceId}`);
 
             toast({
                 title: "Success",
@@ -146,10 +142,7 @@ export default function BuildSourcesPage() {
 
     const revalidateSource = useCallback(async (sourceId: string) => {
         try {
-            const response = await fetch(`/api/build-sources/${sourceId}/validate`, {
-                method: "POST",
-            });
-            if (!response.ok) throw new Error("Failed to revalidate source");
+            await api.post(`/build-sources/${sourceId}/validate`);
 
             toast({
                 title: "Success",
@@ -202,22 +195,7 @@ export default function BuildSourcesPage() {
             header: "Status",
             render: (item) => getStatusBadge(item.validation_status),
         },
-        {
-            key: "validation_stats",
-            header: "Results",
-            render: (item) => (
-                <div className="text-sm">
-                    <span className="text-green-600 font-semibold">
-                        {item.validation_stats.found}
-                    </span>
-                    <span className="text-muted-foreground"> / </span>
-                    <span className="text-red-600 font-semibold">
-                        {item.validation_stats.not_found}
-                    </span>
-                    <span className="text-muted-foreground"> found/not found</span>
-                </div>
-            ),
-        },
+
         {
             key: "created_at",
             header: "Uploaded",
@@ -239,20 +217,10 @@ export default function BuildSourcesPage() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem
-                            onClick={() => router.push(`/scenarios/sources/${item.id}`)}
-                        >
-                            <Eye className="w-4 h-4 mr-2" />
-                            View Details
-                        </DropdownMenuItem>
-                        {item.validation_status !== "validating" && (
-                            <DropdownMenuItem onClick={() => revalidateSource(item.id)}>
-                                <RefreshCw className="w-4 h-4 mr-2" />
-                                Re-validate
-                            </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                            onClick={() => deleteSource(item.id)}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                deleteSource(item.id);
+                            }}
                             className="text-red-600"
                         >
                             <Trash2 className="w-4 h-4 mr-2" />
@@ -266,22 +234,8 @@ export default function BuildSourcesPage() {
 
     return (
         <div className="space-y-6">
-            {/* Header */}
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-3xl font-bold">Build Sources</h1>
-                    <p className="text-muted-foreground">
-                        Manage uploaded CSV files with validated builds
-                    </p>
-                </div>
-                <Button onClick={() => router.push("/scenarios/upload")}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Upload New Source
-                </Button>
-            </div>
-
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex items-center justify-between">
@@ -308,33 +262,7 @@ export default function BuildSourcesPage() {
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-muted-foreground">Found</p>
-                                <p className="text-2xl font-bold text-green-600">
-                                    {stats.found.toLocaleString()}
-                                </p>
-                            </div>
-                            <Database className="w-8 h-8 text-green-500 opacity-50" />
-                        </div>
-                    </CardContent>
-                </Card>
 
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-muted-foreground">Not Found</p>
-                                <p className="text-2xl font-bold text-red-600">
-                                    {stats.notFound.toLocaleString()}
-                                </p>
-                            </div>
-                            <Database className="w-8 h-8 text-red-500 opacity-50" />
-                        </div>
-                    </CardContent>
-                </Card>
             </div>
 
             {/* Sources Table */}
@@ -356,21 +284,43 @@ export default function BuildSourcesPage() {
                         <div className="flex flex-col items-center justify-center py-8">
                             <Database className="w-12 h-12 text-muted-foreground opacity-50 mb-4" />
                             <p className="text-muted-foreground mb-4">No build sources yet</p>
+                            {/* NOTE: The 'Upload First Source' button below is optional if the parent page handles it, 
+                                but good to keep as a fallback or explicit call to action here. 
+                                It uses the same route as the parent button. */}
                             <Button onClick={() => router.push("/scenarios/upload")}>
-                                <Plus className="w-4 h-4 mr-2" />
-                                Upload First Source
+                                <div className="flex items-center">
+                                    {/* Plus icon is imported but previously was used with w-4 h-4 mr-2 */}
+                                    {/* Re-using the same icon setup as original file */}
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        className="w-4 h-4 mr-2"
+                                    >
+                                        <path d="M5 12h14"></path>
+                                        <path d="M12 5v14"></path>
+                                    </svg>
+                                    Upload First Source
+                                </div>
                             </Button>
                         </div>
                     ) : (
                         <DataTable
-                        columns={columns}
-                        data={sources}
-                        total={total}
-                        page={page}
-                        pageSize={PAGE_SIZE}
-                        onPageChange={loadSources}
-                        rowKey={(item) => item.id}
-                    />
+                            columns={columns}
+                            data={sources}
+                            total={total}
+                            page={page}
+                            pageSize={PAGE_SIZE}
+                            onPageChange={loadSources}
+                            onRowClick={(item) => router.push(`/scenarios/sources/${item.id}`)}
+                            rowKey={(item) => item.id}
+                        />
                     )}
                 </CardContent>
             </Card>

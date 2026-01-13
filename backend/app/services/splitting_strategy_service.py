@@ -6,18 +6,24 @@ This service handles:
 - Applying splitting strategies (delegated to strategies/ package)
 - Generating split statistics
 
-Strategy implementations are in app.services.strategies package.
-Grouping utilities are in app.services.strategies.grouping module.
+For CV strategies, use apply_cv() which returns a generator of folds.
+For single-split strategies, use apply_split() which returns a single SplitResult.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 import pandas as pd
 
 from app.entities.enums import GroupByDimension
 from app.entities.training_dataset_export import ExportSplittingConfig
-from app.services.strategies import SplitResult, SplittingStrategyFactory
+from app.services.strategies import (
+    CV_STRATEGIES,
+    CVFold,
+    CVGeneratorFactory,
+    SplitResult,
+    SplittingStrategyFactory,
+)
 from app.services.strategies.grouping import (
     create_equal_width_bins,
     create_language_column,
@@ -34,12 +40,16 @@ class SplittingStrategyService:
 
     Handles:
     - Creating group columns (bins for numeric features)
-    - Applying splitting strategies
+    - Applying splitting strategies (single-split or CV)
     - Generating split statistics
     """
 
     def __init__(self):
         pass
+
+    def is_cv_strategy(self, config: ExportSplittingConfig) -> bool:
+        """Check if the strategy requires CV (multi-fold) generation."""
+        return config.strategy in CV_STRATEGIES
 
     def apply_split(
         self,
@@ -48,7 +58,7 @@ class SplittingStrategyService:
         label_column: str = "outcome",
     ) -> SplitResult:
         """
-        Apply splitting strategy to a DataFrame.
+        Apply single-split strategy to a DataFrame.
 
         Args:
             df: DataFrame with feature data
@@ -57,12 +67,65 @@ class SplittingStrategyService:
 
         Returns:
             SplitResult with split indices and metadata
+
+        Raises:
+            ValueError: If strategy is a CV strategy
         """
+        if self.is_cv_strategy(config):
+            raise ValueError(
+                f"Strategy {config.strategy} is a CV strategy. Use apply_cv() instead."
+            )
+
         group_column = self._prepare_group_column(df, config)
         strategy = SplittingStrategyFactory.create(config)
         result = strategy.split(df, group_column, label_column)
         result.metadata["original_group_by"] = str(config.group_by)
         return result
+
+    def apply_cv(
+        self,
+        df: pd.DataFrame,
+        config: ExportSplittingConfig,
+        label_column: str = "outcome",
+    ) -> Iterator[CVFold]:
+        """
+        Apply CV strategy to a DataFrame, yielding multiple folds.
+
+        Args:
+            df: DataFrame with feature data
+            config: ExportSplittingConfig with CV strategy
+            label_column: Column name for outcome label
+
+        Yields:
+            CVFold objects for each iteration
+
+        Raises:
+            ValueError: If strategy is not a CV strategy
+        """
+        if not self.is_cv_strategy(config):
+            raise ValueError(
+                f"Strategy {config.strategy} is not a CV strategy. Use apply_split() instead."
+            )
+
+        group_column = self._prepare_group_column(df, config)
+        generator = CVGeneratorFactory.create(df, group_column, config, label_column)
+
+        for fold in generator:
+            fold.metadata["original_group_by"] = str(config.group_by)
+            yield fold
+
+    def get_cv_fold_count(
+        self,
+        df: pd.DataFrame,
+        config: ExportSplittingConfig,
+    ) -> int:
+        """Get total number of CV folds for preview."""
+        if not self.is_cv_strategy(config):
+            return 1
+
+        group_column = self._prepare_group_column(df, config)
+        generator = CVGeneratorFactory.create(df, group_column, config)
+        return len(generator)
 
     def _prepare_group_column(
         self,

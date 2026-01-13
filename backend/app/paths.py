@@ -33,9 +33,6 @@ SCAN_CONFIG_DIR = DATA_DIR / "scan-config"
 # Export job output files (CSV, JSON exports)
 EXPORTS_DIR = DATA_DIR / "exports"
 
-# Training Scenario configs (YAML files uploaded by users)
-TRAINING_SCENARIOS_DIR = DATA_DIR / "training_scenarios"
-
 # Training Dataset splits (generated parquet/csv files)
 TRAINING_DATASETS_DIR = DATA_DIR / "training_datasets"
 
@@ -50,7 +47,6 @@ def ensure_data_dirs() -> None:
         HAMILTON_CACHE_DIR,
         SCAN_CONFIG_DIR,
         EXPORTS_DIR,
-        TRAINING_SCENARIOS_DIR,
         TRAINING_DATASETS_DIR,
     ]:
         d.mkdir(parents=True, exist_ok=True)
@@ -126,18 +122,8 @@ def get_trivy_config_path(scenario_id: str, github_repo_id: int) -> Path:
 
 
 # =============================================================================
-# Training Scenario Path Helpers
+# Training Dataset Path Helpers
 # =============================================================================
-
-
-def get_training_scenario_dir(scenario_id: str) -> Path:
-    """Get directory for a scenario's config and metadata."""
-    return TRAINING_SCENARIOS_DIR / scenario_id
-
-
-def get_training_scenario_config_path(scenario_id: str) -> Path:
-    """Get YAML config file path for a scenario."""
-    return get_training_scenario_dir(scenario_id) / "config.yaml"
 
 
 def get_training_dataset_dir(scenario_id: str) -> Path:
@@ -162,19 +148,12 @@ def get_training_dataset_split_path(
     return get_training_dataset_dir(scenario_id) / f"{split_type}.{format}"
 
 
-def cleanup_training_scenario_files(scenario_id: str) -> None:
+def cleanup_training_dataset_files(scenario_id: str) -> None:
     """
-    Delete all files for a scenario (cleanup on scenario delete).
+    Delete all dataset files for a scenario (cleanup on scenario delete).
     """
     import shutil
 
-    # Cleanup config
-    config_dir = get_training_scenario_dir(scenario_id)
-    if config_dir.exists():
-        shutil.rmtree(config_dir, ignore_errors=True)
-        logger.info(f"Cleaned up training scenario config for {scenario_id}")
-
-    # Cleanup datasets
     dataset_dir = get_training_dataset_dir(scenario_id)
     if dataset_dir.exists():
         shutil.rmtree(dataset_dir, ignore_errors=True)

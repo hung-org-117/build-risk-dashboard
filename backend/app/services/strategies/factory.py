@@ -1,20 +1,27 @@
 """
 Splitting Strategy Factory - Creates strategy instances from config.
+
+For CV strategies (L1GO, L2GO, etc.), use CVGeneratorFactory instead.
+This factory handles non-CV strategies (random, stratified, time_series).
 """
 
 from app.entities.enums import SplitStrategy
 from app.entities.training_dataset_export import ExportSplittingConfig
 from app.services.strategies.base import BaseSplittingStrategy
-from app.services.strategies.extreme_novelty import ExtremeNoveltyStrategy
-from app.services.strategies.imbalanced_train import ImbalancedTrainStrategy
-from app.services.strategies.leave_one_out import LeaveOneOutStrategy
-from app.services.strategies.leave_two_out import LeaveTwoOutStrategy
 from app.services.strategies.random import RandomSplitStrategy
 from app.services.strategies.stratified import StratifiedSplitStrategy
 from app.services.strategies.stratified_within_group import (
     StratifiedWithinGroupStrategy,
 )
 from app.services.strategies.time_series import TimeSeriesSplitStrategy
+
+# CV strategies that require the CV generator (not single-split)
+CV_STRATEGIES = {
+    SplitStrategy.L1GO_CV,
+    SplitStrategy.L2GO_CV,
+    SplitStrategy.EXTREME_NOVELTY_CV,
+    SplitStrategy.IMBALANCED_KFOLD_CV,
+}
 
 
 class SplittingStrategyFactory:
@@ -25,11 +32,12 @@ class SplittingStrategyFactory:
         SplitStrategy.TIME_SERIES_SPLIT: TimeSeriesSplitStrategy,
         SplitStrategy.STRATIFIED_SPLIT: StratifiedSplitStrategy,
         SplitStrategy.STRATIFIED_WITHIN_GROUP: StratifiedWithinGroupStrategy,
-        SplitStrategy.LEAVE_ONE_OUT: LeaveOneOutStrategy,
-        SplitStrategy.LEAVE_TWO_OUT: LeaveTwoOutStrategy,
-        SplitStrategy.IMBALANCED_TRAIN: ImbalancedTrainStrategy,
-        SplitStrategy.EXTREME_NOVELTY: ExtremeNoveltyStrategy,
     }
+
+    @classmethod
+    def is_cv_strategy(cls, strategy: SplitStrategy) -> bool:
+        """Check if strategy is a CV strategy requiring multi-fold generation."""
+        return strategy in CV_STRATEGIES
 
     @classmethod
     def create(cls, config: ExportSplittingConfig) -> BaseSplittingStrategy:
@@ -43,9 +51,16 @@ class SplittingStrategyFactory:
             BaseSplittingStrategy instance
 
         Raises:
-            ValueError: If strategy type is unknown
+            ValueError: If strategy type is unknown or is a CV strategy
         """
         strategy_type = config.strategy
+
+        if cls.is_cv_strategy(strategy_type):
+            raise ValueError(
+                f"Strategy {strategy_type} is a CV strategy. "
+                f"Use CVGeneratorFactory.create() instead."
+            )
+
         strategy_class = cls.STRATEGY_MAP.get(strategy_type)
 
         if strategy_class is None:

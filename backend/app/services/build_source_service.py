@@ -197,11 +197,13 @@ class BuildSourceService:
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Any]:
-        """Get builds for a source."""
+    ) -> Tuple[List[Any], int]:
+        """Get builds for a source with total count."""
         from app.entities.source_build import SourceBuildStatus
 
         status_enum = SourceBuildStatus(status) if status else None
-        return self.source_build_repo.find_by_source(
+        builds = self.source_build_repo.find_by_source(
             source_id, status=status_enum, skip=skip, limit=limit
         )
+        total = self.source_build_repo.count_by_source(source_id, status=status_enum)
+        return builds, total

@@ -54,14 +54,14 @@ interface ExportConfig {
     // Dynamic binning
     num_bins: number;
     time_slots: number;
-    // L1GO/L2GO specific
-    test_groups: string[];
-    val_groups: string[];
+    // CV configuration
+    n_folds: number;
+    internal_val_ratio: number;
+    // Imbalanced K-Fold specific
+    imbalance_drop_rate: number;
+    imbalance_drop_label: number;
     // Extreme Novelty specific
-    novelty_group: string | null;
-    novelty_label: number;
-    // Imbalanced Train specific
-    imbalance_reduction_rate: number;
+    novelty_target_label: number;
     // Output
     format: "parquet" | "csv";
     include_metadata: boolean;
@@ -75,11 +75,11 @@ const DEFAULT_CONFIG: ExportConfig = {
     ratios: { train: 0.7, val: 0.15, test: 0.15 },
     num_bins: 4,
     time_slots: 4,
-    test_groups: [],
-    val_groups: [],
-    novelty_group: null,
-    novelty_label: 1,
-    imbalance_reduction_rate: 0.5,
+    n_folds: 5,
+    internal_val_ratio: 0.2,
+    imbalance_drop_rate: 0.5,
+    imbalance_drop_label: 1,
+    novelty_target_label: 1,
     format: "parquet",
     include_metadata: true,
 };
@@ -93,10 +93,10 @@ const STRATEGY = {
     STRATIFIED_WITHIN_GROUP: "stratified_within_group",
     RANDOM_SPLIT: "random_split",
     TIME_SERIES_SPLIT: "time_series_split",
-    LEAVE_ONE_OUT: "leave_one_out",
-    LEAVE_TWO_OUT: "leave_two_out",
-    EXTREME_NOVELTY: "extreme_novelty",
-    IMBALANCED_TRAIN: "imbalanced_train",
+    L1GO_CV: "l1go_cv",
+    L2GO_CV: "l2go_cv",
+    EXTREME_NOVELTY_CV: "extreme_novelty_cv",
+    IMBALANCED_KFOLD_CV: "imbalanced_kfold_cv",
 } as const;
 
 // Group by dimension constants
@@ -125,10 +125,10 @@ const STRATEGY_OPTIONS = [
     { value: "stratified_within_group", label: "Stratified Within Group" },
     { value: "random_split", label: "Random Split" },
     { value: "time_series_split", label: "Time Series Split" },
-    { value: "leave_one_out", label: "Leave-One-Group-Out (L1GO)" },
-    { value: "leave_two_out", label: "Leave-Two-Groups-Out (L2GO)" },
-    { value: "extreme_novelty", label: "Extreme Novelty (Zero-Shot)" },
-    { value: "imbalanced_train", label: "Imbalanced Train (Robustness)" },
+    { value: "l1go_cv", label: "L1GO Cross-Validation" },
+    { value: "l2go_cv", label: "L2GO Cross-Validation" },
+    { value: "extreme_novelty_cv", label: "Extreme Novelty CV" },
+    { value: "imbalanced_kfold_cv", label: "Imbalanced K-Fold CV" },
 ];
 
 const GROUP_BY_OPTIONS = [
@@ -275,34 +275,30 @@ export default function ScenarioExportPage() {
     const getConfigValidationError = (): string | null => {
         const groupCount = groupsPreview?.groups?.length || 0;
 
-        if (config.strategy === STRATEGY.LEAVE_ONE_OUT && groupCount < 3) {
-            return `L1GO requires at least 3 groups. Current: ${groupCount}. Try different grouping.`;
+        // CV strategies need minimum groups
+        if (config.strategy === STRATEGY.L1GO_CV && groupCount < 3) {
+            return `L1GO CV requires at least 3 groups. Current: ${groupCount}. Try different grouping.`;
         }
-        if (config.strategy === STRATEGY.LEAVE_TWO_OUT && groupCount < 4) {
-            return `L2GO requires at least 4 groups. Current: ${groupCount}. Try different grouping.`;
+        if (config.strategy === STRATEGY.L2GO_CV && groupCount < 4) {
+            return `L2GO CV requires at least 4 groups. Current: ${groupCount}. Try different grouping.`;
         }
-        if (config.strategy === STRATEGY.LEAVE_ONE_OUT && !config.test_groups?.length) {
-            return "Please select a Test group.";
-        }
-        if (config.strategy === STRATEGY.LEAVE_ONE_OUT && !config.val_groups?.length) {
-            return "Please select a Validation group.";
-        }
-        if (config.strategy === STRATEGY.LEAVE_TWO_OUT && config.test_groups?.length !== 2) {
-            return "Please select exactly 2 Test groups.";
-        }
-        if (config.strategy === STRATEGY.LEAVE_TWO_OUT && !config.val_groups?.length) {
-            return "Please select a Validation group.";
-        }
-        if (config.strategy === STRATEGY.EXTREME_NOVELTY && !config.novelty_group) {
-            return "Please select a Target group.";
-        }
+        // CV strategies don't require manual group selection - they iterate all groups automatically
         return null;
     };
 
     const validationError = getConfigValidationError();
+
+    // CV strategies show group preview but don't need manual selection
+    const isCVStrategy = [
+        STRATEGY.L1GO_CV,
+        STRATEGY.L2GO_CV,
+        STRATEGY.EXTREME_NOVELTY_CV
+    ].includes(config.strategy as any);
+
     const requiresGroupSelection = (
-        [STRATEGY.LEAVE_ONE_OUT, STRATEGY.LEAVE_TWO_OUT, STRATEGY.EXTREME_NOVELTY, STRATEGY.STRATIFIED_WITHIN_GROUP] as string[]
+        [STRATEGY.STRATIFIED_WITHIN_GROUP] as string[]
     ).includes(config.strategy);
+
     const showNumBins = (
         [GROUP_BY.PERCENTAGE_OF_BUILDS_BEFORE, GROUP_BY.NUMBER_OF_BUILDS_BEFORE] as string[]
     ).includes(config.group_by);
@@ -543,7 +539,7 @@ export default function ScenarioExportPage() {
                             <Label>Strategy</Label>
                             <Select
                                 value={config.strategy}
-                                onValueChange={(v) => updateConfig({ strategy: v, test_groups: [], val_groups: [], novelty_group: null })}
+                                onValueChange={(v) => updateConfig({ strategy: v })}
                             >
                                 <SelectTrigger>
                                     <SelectValue />
@@ -561,7 +557,7 @@ export default function ScenarioExportPage() {
                             <Label>Group By</Label>
                             <Select
                                 value={config.group_by}
-                                onValueChange={(v) => updateConfig({ group_by: v, test_groups: [], val_groups: [], novelty_group: null })}
+                                onValueChange={(v) => updateConfig({ group_by: v })}
                             >
                                 <SelectTrigger>
                                     <SelectValue />
@@ -616,11 +612,14 @@ export default function ScenarioExportPage() {
                         </div>
                     )}
 
-                    {/* Group Preview Table */}
-                    {requiresGroupSelection && groupsPreview && (
+                    {/* Group Preview Table - show for CV strategies */}
+                    {(isCVStrategy || requiresGroupSelection) && groupsPreview && (
                         <div className="space-y-4 pt-4 border-t">
                             <div className="flex items-center justify-between">
-                                <Label>Available Groups ({groupsPreview.groups.length})</Label>
+                                <Label>
+                                    Available Groups ({groupsPreview.groups.length})
+                                    {isCVStrategy && <span className="ml-2 text-xs text-muted-foreground">(CV will iterate all groups)</span>}
+                                </Label>
                                 <Button variant="ghost" size="sm" onClick={fetchGroupsPreview} disabled={loadingGroups}>
                                     {loadingGroups ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                                 </Button>
@@ -649,170 +648,96 @@ export default function ScenarioExportPage() {
                         </div>
                     )}
 
-                    {/* L1GO Configuration */}
-                    {config.strategy === STRATEGY.LEAVE_ONE_OUT && groupsPreview && groupsPreview.groups.length >= 3 && (
+                    {/* CV Configuration: Validation Ratio */}
+                    {isCVStrategy && (
                         <div className="space-y-4 pt-4 border-t">
-                            <Label>L1GO Group Selection</Label>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-2">
-                                    <span className="text-sm text-muted-foreground">Test Group</span>
-                                    <Select
-                                        value={config.test_groups[0] || ""}
-                                        onValueChange={(v) => updateConfig({ test_groups: [v] })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select test group" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {groupsPreview.groups.filter(g => !config.val_groups.includes(g.value)).map(g => (
-                                                <SelectItem key={g.value} value={g.value}>
-                                                    {g.label || g.value} ({g.count})
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <span className="text-sm text-muted-foreground">Validation Group</span>
-                                    <Select
-                                        value={config.val_groups[0] || ""}
-                                        onValueChange={(v) => updateConfig({ val_groups: [v] })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select validation group" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {groupsPreview.groups.filter(g => !config.test_groups.includes(g.value)).map(g => (
-                                                <SelectItem key={g.value} value={g.value}>
-                                                    {g.label || g.value} ({g.count})
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* L2GO Configuration */}
-                    {config.strategy === STRATEGY.LEAVE_TWO_OUT && groupsPreview && groupsPreview.groups.length >= 4 && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>L2GO Group Selection</Label>
+                            <Label>Cross-Validation Settings</Label>
                             <div className="space-y-4">
                                 <div className="space-y-2">
-                                    <span className="text-sm text-muted-foreground">Test Groups (select 2)</span>
-                                    <div className="flex flex-wrap gap-2">
-                                        {groupsPreview.groups.filter(g => !config.val_groups.includes(g.value)).map(g => (
-                                            <Button
-                                                key={g.value}
-                                                variant={config.test_groups.includes(g.value) ? "default" : "outline"}
-                                                size="sm"
-                                                onClick={() => {
-                                                    const current = config.test_groups;
-                                                    if (current.includes(g.value)) {
-                                                        updateConfig({ test_groups: current.filter(x => x !== g.value) });
-                                                    } else if (current.length < 2) {
-                                                        updateConfig({ test_groups: [...current, g.value] });
-                                                    }
-                                                }}
-                                            >
-                                                {g.label || g.value}
-                                            </Button>
-                                        ))}
+                                    <div className="flex justify-between">
+                                        <span className="text-sm text-muted-foreground">Internal Validation Ratio</span>
+                                        <span className="text-sm font-medium">{(config.internal_val_ratio * 100).toFixed(0)}%</span>
                                     </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <span className="text-sm text-muted-foreground">Validation Group</span>
-                                    <Select
-                                        value={config.val_groups[0] || ""}
-                                        onValueChange={(v) => updateConfig({ val_groups: [v] })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select validation group" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {groupsPreview.groups.filter(g => !config.test_groups.includes(g.value)).map(g => (
-                                                <SelectItem key={g.value} value={g.value}>
-                                                    {g.label || g.value} ({g.count})
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <Slider
+                                        value={[config.internal_val_ratio * 100]}
+                                        onValueChange={([v]) => updateConfig({ internal_val_ratio: v / 100 })}
+                                        min={5}
+                                        max={50}
+                                        step={5}
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                        Percentage of non-test data used for validation in each fold.
+                                    </p>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Extreme Novelty Configuration */}
-                    {config.strategy === STRATEGY.EXTREME_NOVELTY && groupsPreview && (
+                    {/* Extreme Novelty CV Configuration */}
+                    {config.strategy === STRATEGY.EXTREME_NOVELTY_CV && (
                         <div className="space-y-4 pt-4 border-t">
-                            <Label>Extreme Novelty Configuration</Label>
+                            <Label>Extreme Novelty Target Label</Label>
+                            <Select
+                                value={String(config.novelty_target_label)}
+                                onValueChange={(v) => updateConfig({ novelty_target_label: parseInt(v) })}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {LABEL_OPTIONS.map(opt => (
+                                        <SelectItem key={opt.value} value={String(opt.value)}>
+                                            {opt.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                                Label to isolate for zero-shot detection. CV will iterate through all groups.
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Imbalanced K-Fold CV Configuration */}
+                    {config.strategy === STRATEGY.IMBALANCED_KFOLD_CV && (
+                        <div className="space-y-4 pt-4 border-t">
+                            <Label>Imbalanced K-Fold Configuration</Label>
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
-                                    <span className="text-sm text-muted-foreground">Target Group</span>
-                                    <Select
-                                        value={config.novelty_group || ""}
-                                        onValueChange={(v) => updateConfig({ novelty_group: v })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select target group" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {groupsPreview.groups.map(g => (
-                                                <SelectItem key={g.value} value={g.value}>
-                                                    {g.label || g.value} ({g.count})
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <div className="flex justify-between">
+                                        <span className="text-sm text-muted-foreground">Number of Folds</span>
+                                        <span className="text-sm font-medium">{config.n_folds}</span>
+                                    </div>
+                                    <Slider
+                                        value={[config.n_folds]}
+                                        onValueChange={([v]) => updateConfig({ n_folds: v })}
+                                        min={2}
+                                        max={20}
+                                        step={1}
+                                    />
                                 </div>
                                 <div className="space-y-2">
-                                    <span className="text-sm text-muted-foreground">Target Label (to isolate)</span>
-                                    <Select
-                                        value={String(config.novelty_label)}
-                                        onValueChange={(v) => updateConfig({ novelty_label: parseInt(v) })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {LABEL_OPTIONS.map(opt => (
-                                                <SelectItem key={opt.value} value={String(opt.value)}>
-                                                    {opt.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <div className="flex justify-between">
+                                        <span className="text-sm text-muted-foreground">Label Drop Rate</span>
+                                        <span className="text-sm font-medium">{(config.imbalance_drop_rate * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <Slider
+                                        value={[config.imbalance_drop_rate * 100]}
+                                        onValueChange={([v]) => updateConfig({ imbalance_drop_rate: v / 100 })}
+                                        min={0}
+                                        max={90}
+                                        step={10}
+                                    />
                                 </div>
                             </div>
+                            <p className="text-xs text-muted-foreground">
+                                Percentage of failure samples (Label {config.imbalance_drop_label}) to remove from training set in each fold.
+                            </p>
                         </div>
                     )}
 
-                    {/* Imbalanced Train Configuration */}
-                    {config.strategy === STRATEGY.IMBALANCED_TRAIN && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>Imbalanced Train Configuration</Label>
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Label 1 Reduction Rate</span>
-                                    <span className="text-sm font-medium">{(config.imbalance_reduction_rate * 100).toFixed(0)}%</span>
-                                </div>
-                                <Slider
-                                    value={[config.imbalance_reduction_rate * 100]}
-                                    onValueChange={([v]) => updateConfig({ imbalance_reduction_rate: v / 100 })}
-                                    min={0}
-                                    max={90}
-                                    step={10}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Percentage of failure samples (Label 1) to remove from training set.
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Ratios - show for non-LOO strategies */}
-                    {!([STRATEGY.LEAVE_ONE_OUT, STRATEGY.LEAVE_TWO_OUT] as string[]).includes(config.strategy) && (
+                    {/* Ratios - show for non-CV strategies */}
+                    {!isCVStrategy && (
                         <div className="space-y-4 pt-4 border-t">
                             <Label>Train / Validation / Test Ratios</Label>
                             <div className="grid gap-4 md:grid-cols-3">

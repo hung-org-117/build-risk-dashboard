@@ -113,7 +113,7 @@ class TrainingExportService:
 
         # TODO: Cleanup physical files if implementation allows
         # Currently files are tracked in splits, which are deleted from DB,
-        # but cleanup_training_scenario_files handles scenario level.
+        # but cleanup_training_dataset_files handles scenario level.
         # Ideally, we should delete split files here too.
 
         return True
@@ -214,4 +214,48 @@ class TrainingExportService:
             path=file_path,
             filename=file_path.name,
             media_type="application/octet-stream",
+        )
+
+    def download_all_splits(
+        self, scenario_id: str, export_id: str
+    ) -> StreamingResponse:
+        """
+        Download all splits for an export as a zip file.
+
+        Creates an in-memory zip containing all split files with folder structure:
+        - Single-split: train.parquet, val.parquet, test.parquet
+        - CV: fold_id/train.parquet, fold_id/val.parquet, fold_id/test.parquet
+        """
+        # Validate export
+        export = self.export_repo.find_by_id(export_id)
+        if not export or str(export.scenario_id) != scenario_id:
+            raise HTTPException(status_code=404, detail="Export not found")
+
+        splits = self.split_repo.find_by_export(export_id)
+        if not splits:
+            raise HTTPException(status_code=404, detail="No splits found for export")
+
+        # Create in-memory zip
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for split in splits:
+                file_path = paths.DATA_DIR / split.file_path
+                if file_path.exists():
+                    # Extract relative path after export_id/
+                    # e.g., "training_datasets/scenario/export/fold_1/train.parquet"
+                    # -> "fold_1/train.parquet" or "train.parquet"
+                    rel_parts = split.file_path.split(f"{export_id}/")
+                    arcname = rel_parts[-1] if len(rel_parts) > 1 else file_path.name
+                    zf.write(file_path, arcname)
+
+        zip_buffer.seek(0)
+
+        # Generate filename
+        export_name = export.name.replace(" ", "_") if export.name else export_id[:8]
+        filename = f"export_{export_name}.zip"
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )

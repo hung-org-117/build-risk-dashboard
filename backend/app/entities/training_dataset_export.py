@@ -98,26 +98,36 @@ class ExportSplittingConfig(BaseModel):
         description="Number of time slots for time_of_day grouping (divides 24 hours)",
     )
 
-    # Leave-out strategy specific
-    test_groups: List[str] = Field(default_factory=list)
-    val_groups: List[str] = Field(default_factory=list)
-    train_groups: List[str] = Field(default_factory=list)
+    # Cross-Validation configuration
+    n_folds: int = Field(
+        default=5,
+        ge=2,
+        le=20,
+        description="Number of folds for K-Fold CV strategies",
+    )
+    internal_val_ratio: float = Field(
+        default=0.2,
+        ge=0.05,
+        le=0.5,
+        description="Validation ratio within train/val pool (CV strategies)",
+    )
 
-    # Imbalanced train specific
-    reduce_label: Optional[int] = None
-    reduce_ratio: float = Field(default=0.5)
-    imbalance_reduction_rate: float = Field(
+    # Imbalanced K-Fold specific
+    imbalance_drop_rate: float = Field(
         default=0.5,
         ge=0.0,
         le=1.0,
-        description="Percentage of Label 1 to drop from training set (Imbalanced Train)",
+        description="Percentage of Label 1 to drop from training set",
+    )
+    imbalance_drop_label: int = Field(
+        default=1,
+        description="Label to drop (0=success, 1=failure)",
     )
 
-    # Extreme novelty specific
-    novelty_group: Optional[str] = None
-    novelty_label: Optional[int] = Field(
-        default=None,
-        description="Label to isolate: 0 (success) or 1 (failure). Based on build_status_num.",
+    # Extreme Novelty specific
+    novelty_target_label: int = Field(
+        default=1,
+        description="Label to isolate for zero-shot detection (0=success, 1=failure)",
     )
 
 

@@ -79,6 +79,7 @@ export interface PreviewBuild {
     language?: string;
     run_started_at?: string;
     duration_seconds?: number;
+    ci_provider?: string;
 }
 
 export interface PreviewBuildStats {

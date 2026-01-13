@@ -39,7 +39,11 @@ class TrainingDatasetSplit(BaseEntity):
     # Split identification
     split_type: str = Field(
         ...,
-        description="Split type: train | validation | test | fold_N",
+        description="Split type: train | validation | test",
+    )
+    fold_id: Optional[str] = Field(
+        None,
+        description="Fold identifier for CV strategies (e.g., 'fold_0', 'l1go_fold_python')",
     )
 
     # Statistics

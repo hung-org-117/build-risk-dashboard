@@ -149,85 +149,154 @@ def generate_export_dataset(
         logger.info(f"{corr_prefix} Loaded master dataset with {len(df)} rows")
 
         # ======================================================================
-        # STEP 3: Apply Splitting
+        # STEP 3: Apply Splitting (Single-Split or CV)
         # ======================================================================
         splitting_service = SplittingStrategyService()
         splitting_config = export.splitting_config
 
-        result = splitting_service.apply_split(
-            df=df,
-            config=splitting_config,
-            label_column="outcome",
-        )
-
-        # ======================================================================
-        # STEP 4: Export to Files
-        # ======================================================================
-
         # Delete old splits for this export (if regenerating)
         split_repo.delete_by_export(export_id)
 
-        # Create output directory
-        output_dir = paths.get_ml_dataset_dir(scenario_id) / export_id
+        # Create base output directory
+        output_dir = paths.get_training_dataset_dir(scenario_id) / export_id
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine export formats from output config
         output_config = export.output_config
-        export_formats = output_config.formats if output_config.formats else ["parquet"]
+        export_formats = (
+            output_config.formats
+            if hasattr(output_config, "formats") and output_config.formats
+            else ["parquet"]
+        )
 
-        split_stats = {}
         start_time = datetime.utcnow()
+        total_train = 0
+        total_val = 0
+        total_test = 0
+        fold_count = 0
 
-        for split_type, indices in [
-            ("train", result.train_indices),
-            ("validation", result.val_indices),
-            ("test", result.test_indices),
-        ]:
-            if not indices:
-                continue
+        # Check if CV strategy
+        is_cv = splitting_service.is_cv_strategy(splitting_config)
 
-            split_df = df.loc[indices]
-            split_stats[split_type] = {"count": len(split_df)}
+        if is_cv:
+            # ====== CV MODE: Generate multiple folds ======
+            logger.info(f"{corr_prefix} Using CV strategy, generating multiple folds")
 
-            # Export in each format
-            for fmt in export_formats:
-                file_path = output_dir / f"{split_type}.{fmt}"
+            for fold in splitting_service.apply_cv(df, splitting_config, "outcome"):
+                fold_count += 1
+                fold_id = fold.fold_id
 
-                export_start = datetime.utcnow()
-                if fmt == "parquet":
-                    split_df.to_parquet(file_path, index=False)
-                else:  # csv
-                    split_df.to_csv(file_path, index=False)
+                # Create fold directory
+                fold_dir = output_dir / fold_id
+                fold_dir.mkdir(parents=True, exist_ok=True)
 
-                duration = (datetime.utcnow() - export_start).total_seconds()
-                file_size = file_path.stat().st_size
-                class_dist = split_df["outcome"].value_counts().to_dict()
+                # Export train/val/test for this fold
+                for split_type, indices in [
+                    ("train", fold.train_indices),
+                    ("validation", fold.val_indices),
+                    ("test", fold.test_indices),
+                ]:
+                    if not indices:
+                        continue
 
-                split_repo.create_split(
-                    export_id=export_id,
-                    scenario_id=scenario_id,
-                    split_type=split_type,
-                    record_count=len(split_df),
-                    feature_count=len(split_df.columns),
-                    class_distribution={str(k): v for k, v in class_dist.items()},
-                    group_distribution={},
-                    file_path=str(file_path.relative_to(paths.DATA_DIR)),
-                    file_size_bytes=file_size,
-                    file_format=fmt,
-                    feature_names=list(split_df.columns),
-                    generation_duration_seconds=duration,
-                )
+                    split_df = df.loc[indices]
 
-                split_stats[split_type][fmt] = file_size
+                    # Track totals (for last fold stats)
+                    if split_type == "train":
+                        total_train = len(split_df)
+                    elif split_type == "validation":
+                        total_val = len(split_df)
+                    else:
+                        total_test = len(split_df)
+
+                    # Export in each format
+                    for fmt in export_formats:
+                        file_path = fold_dir / f"{split_type}.{fmt}"
+
+                        if fmt == "parquet":
+                            split_df.to_parquet(file_path, index=False)
+                        else:
+                            split_df.to_csv(file_path, index=False)
+
+                        file_size = file_path.stat().st_size
+                        class_dist = split_df["outcome"].value_counts().to_dict()
+
+                        split_repo.create_split(
+                            export_id=export_id,
+                            scenario_id=scenario_id,
+                            split_type=split_type,
+                            fold_id=fold_id,
+                            record_count=len(split_df),
+                            feature_count=len(split_df.columns),
+                            class_distribution={
+                                str(k): v for k, v in class_dist.items()
+                            },
+                            group_distribution=fold.metadata,
+                            file_path=str(file_path.relative_to(paths.DATA_DIR)),
+                            file_size_bytes=file_size,
+                            file_format=fmt,
+                            feature_names=list(split_df.columns),
+                            generation_duration_seconds=0,
+                        )
+
+                logger.info(f"{corr_prefix} Generated fold {fold_count}: {fold_id}")
+
+        else:
+            # ====== SINGLE-SPLIT MODE ======
+            result = splitting_service.apply_split(df, splitting_config, "outcome")
+
+            for split_type, indices in [
+                ("train", result.train_indices),
+                ("validation", result.val_indices),
+                ("test", result.test_indices),
+            ]:
+                if not indices:
+                    continue
+
+                split_df = df.loc[indices]
+
+                if split_type == "train":
+                    total_train = len(split_df)
+                elif split_type == "validation":
+                    total_val = len(split_df)
+                else:
+                    total_test = len(split_df)
+
+                for fmt in export_formats:
+                    file_path = output_dir / f"{split_type}.{fmt}"
+
+                    if fmt == "parquet":
+                        split_df.to_parquet(file_path, index=False)
+                    else:
+                        split_df.to_csv(file_path, index=False)
+
+                    file_size = file_path.stat().st_size
+                    class_dist = split_df["outcome"].value_counts().to_dict()
+
+                    split_repo.create_split(
+                        export_id=export_id,
+                        scenario_id=scenario_id,
+                        split_type=split_type,
+                        fold_id=None,
+                        record_count=len(split_df),
+                        feature_count=len(split_df.columns),
+                        class_distribution={str(k): v for k, v in class_dist.items()},
+                        group_distribution={},
+                        file_path=str(file_path.relative_to(paths.DATA_DIR)),
+                        file_size_bytes=file_size,
+                        file_format=fmt,
+                        feature_names=list(split_df.columns),
+                        generation_duration_seconds=0,
+                    )
 
         total_duration = (datetime.utcnow() - start_time).total_seconds()
 
         # Mark export as completed
         export_repo.mark_completed(
             export_id=export_id,
-            train_count=len(result.train_indices),
-            val_count=len(result.val_indices),
-            test_count=len(result.test_indices),
+            train_count=total_train,
+            val_count=total_val,
+            test_count=total_test,
             feature_count=len(df.columns),
             generation_duration_seconds=total_duration,
         )
@@ -238,24 +307,27 @@ def generate_export_dataset(
             current_phase=f"Export '{export.name}' completed",
             extra_data={
                 "export_id": export_id,
-                "train_count": len(result.train_indices),
-                "val_count": len(result.val_indices),
-                "test_count": len(result.test_indices),
+                "is_cv": is_cv,
+                "fold_count": fold_count if is_cv else 1,
+                "train_count": total_train,
+                "val_count": total_val,
+                "test_count": total_test,
             },
         )
 
         logger.info(
-            f"{corr_prefix} Completed: train={len(result.train_indices)}, "
-            f"val={len(result.val_indices)}, test={len(result.test_indices)}"
+            f"{corr_prefix} Completed: folds={fold_count if is_cv else 1}, "
+            f"train={total_train}, val={total_val}, test={total_test}"
         )
 
         return {
             "status": "completed",
             "export_id": export_id,
-            "train_count": len(result.train_indices),
-            "val_count": len(result.val_indices),
-            "test_count": len(result.test_indices),
-            "split_stats": split_stats,
+            "is_cv": is_cv,
+            "fold_count": fold_count if is_cv else 1,
+            "train_count": total_train,
+            "val_count": total_val,
+            "test_count": total_test,
             "duration_seconds": total_duration,
         }
 
@@ -281,7 +353,7 @@ def _ensure_dataset_materialized(
     Returns:
         pd.DataFrame: The loaded dataset.
     """
-    scenario_dir = paths.get_ml_dataset_dir(scenario_id)
+    scenario_dir = paths.get_training_dataset_dir(scenario_id)
     master_file = scenario_dir / "master_dataset.parquet"
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 

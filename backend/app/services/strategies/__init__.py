@@ -3,14 +3,22 @@ Splitting Strategies Package
 
 This package provides modular splitting strategies for ML training datasets.
 Each strategy is in a separate file for better organization and maintainability.
+
+For CV strategies (L1GO, L2GO, etc.), use CVGeneratorFactory.
+For single-split strategies (random, stratified), use SplittingStrategyFactory.
 """
 
 from app.services.strategies.base import BaseSplittingStrategy, SplitResult
-from app.services.strategies.extreme_novelty import ExtremeNoveltyStrategy
-from app.services.strategies.factory import SplittingStrategyFactory
-from app.services.strategies.imbalanced_train import ImbalancedTrainStrategy
-from app.services.strategies.leave_one_out import LeaveOneOutStrategy
-from app.services.strategies.leave_two_out import LeaveTwoOutStrategy
+from app.services.strategies.cv_factory import CVGeneratorFactory
+from app.services.strategies.cv_generators import (
+    BaseCVGenerator,
+    CVFold,
+    ExtremeNoveltyCrossValidator,
+    ImbalancedKFoldCV,
+    L1GOCrossValidator,
+    L2GOCrossValidator,
+)
+from app.services.strategies.factory import CV_STRATEGIES, SplittingStrategyFactory
 from app.services.strategies.random import RandomSplitStrategy
 from app.services.strategies.stratified import StratifiedSplitStrategy
 from app.services.strategies.stratified_within_group import (
@@ -19,20 +27,23 @@ from app.services.strategies.stratified_within_group import (
 from app.services.strategies.time_series import TimeSeriesSplitStrategy
 
 __all__ = [
+    # Base classes
     "BaseSplittingStrategy",
     "SplitResult",
+    "BaseCVGenerator",
+    "CVFold",
+    # Single-split strategies
     "RandomSplitStrategy",
     "TimeSeriesSplitStrategy",
     "StratifiedSplitStrategy",
     "StratifiedWithinGroupStrategy",
-    "LeaveOneOutStrategy",
-    "LeaveTwoOutStrategy",
-    "ImbalancedTrainStrategy",
-    "ExtremeNoveltyStrategy",
+    # CV generators
+    "L1GOCrossValidator",
+    "L2GOCrossValidator",
+    "ExtremeNoveltyCrossValidator",
+    "ImbalancedKFoldCV",
+    # Factories
     "SplittingStrategyFactory",
-    # Grouping utilities
-    "create_language_column",
-    "create_equal_width_bins",
-    "create_time_slots",
-    "get_group_label",
+    "CVGeneratorFactory",
+    "CV_STRATEGIES",
 ]

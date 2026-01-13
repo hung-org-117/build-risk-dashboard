@@ -58,10 +58,10 @@ class SplitStrategy(str, Enum):
     TIME_SERIES_SPLIT = "time_series_split"
     STRATIFIED_SPLIT = "stratified_split"
     STRATIFIED_WITHIN_GROUP = "stratified_within_group"
-    LEAVE_ONE_OUT = "leave_one_out"
-    LEAVE_TWO_OUT = "leave_two_out"
-    IMBALANCED_TRAIN = "imbalanced_train"
-    EXTREME_NOVELTY = "extreme_novelty"
+    L1GO_CV = "l1go_cv"
+    L2GO_CV = "l2go_cv"
+    EXTREME_NOVELTY_CV = "extreme_novelty_cv"
+    IMBALANCED_KFOLD_CV = "imbalanced_kfold_cv"
 
 
 class GroupByDimension(str, Enum):

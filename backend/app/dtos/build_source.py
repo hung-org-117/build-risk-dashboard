@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.entities.build_source import (
-    ValidationStatus,
     SourceMapping,
     ValidationStats,
+    ValidationStatus,
 )
 
 
@@ -97,4 +97,14 @@ class SourceRepoStatsResponse(BaseModel):
     builds_found: int
     builds_not_found: int
     builds_filtered: int
+    builds_filtered: int
     validation_error: Optional[str]
+
+
+class PaginatedSourceBuildResponse(BaseModel):
+    """Paginated list of source builds."""
+
+    items: List[SourceBuildResponse]
+    total: int
+    skip: int
+    limit: int

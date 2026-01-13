@@ -15,7 +15,6 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 from pymongo.database import Database
 
-from app import paths
 from app.dtos.training_scenario import (
     SplittingGroupsResponse,
     TrainingScenarioCreateDTO,
@@ -122,11 +121,6 @@ class TrainingScenarioService:
         )
 
         created = self.scenario_repo.insert_one(scenario)
-
-        # Create scenario directory
-        scenario_dir = paths.get_training_scenario_dir(str(created.id))
-        scenario_dir.mkdir(parents=True, exist_ok=True)
-
         logger.info(f"Created TrainingScenario: {created.id} - {data.name}")
         return self._to_response(created)
 

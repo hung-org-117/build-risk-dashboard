@@ -67,6 +67,16 @@ function getConclusionBadge(conclusion: string) {
     );
 }
 
+const CI_PROVIDER_LABELS: Record<string, string> = {
+    github_actions: "GitHub Actions",
+    circleci: "CircleCI",
+    travis_ci: "Travis CI",
+};
+
+function getCIProviderLabel(provider: string): string {
+    return CI_PROVIDER_LABELS[provider] || provider.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export function StepDataSource() {
     const { state, updateDataSource, setPreviewStats, setPreviewRepos, setIsPreviewLoading, setStep } = useWizard();
     const { dataSource, previewStats, isPreviewLoading } = state;
@@ -352,7 +362,7 @@ export function StepDataSource() {
                                 <tr>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Repository</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Language</th>
-                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Branch</th>
+                                    <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">CI Provider</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Commit</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Conclusion</th>
                                     <th className="px-4 py-3 text-left font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900">Build Created</th>
@@ -385,7 +395,7 @@ export function StepDataSource() {
                                         <tr key={build.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
                                             <td className="px-4 py-3 font-medium">{build.repo_name}</td>
                                             <td className="px-4 py-3 text-muted-foreground">{build.language || "Unknown"}</td>
-                                            <td className="px-4 py-3 text-muted-foreground">{build.branch}</td>
+                                            <td className="px-4 py-3 text-muted-foreground">{getCIProviderLabel(build.ci_provider || "unknown")}</td>
                                             <td className="px-4 py-3 font-mono text-xs opacity-70">{build.commit_sha.substring(0, 7)}</td>
                                             <td className="px-4 py-3">{getConclusionBadge(build.conclusion)}</td>
                                             <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">

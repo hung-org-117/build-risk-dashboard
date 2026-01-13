@@ -94,6 +94,7 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
         feature_names: List[str],
         generation_duration_seconds: float,
         checksum_md5: Optional[str] = None,
+        fold_id: Optional[str] = None,
     ) -> TrainingDatasetSplit:
         """
         Create a new dataset split record.
@@ -101,7 +102,7 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
         Args:
             export_id: Parent export ID
             scenario_id: Parent scenario ID (denormalized)
-            split_type: train/validation/test/fold_N
+            split_type: train/validation/test
             record_count: Number of records in split
             feature_count: Number of features
             class_distribution: Label distribution
@@ -112,6 +113,7 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
             feature_names: List of feature column names
             generation_duration_seconds: Time to generate
             checksum_md5: Optional MD5 checksum
+            fold_id: Optional fold identifier for CV strategies
 
         Returns:
             Created DatasetSplit
@@ -120,6 +122,7 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
             export_id=self._to_object_id(export_id),
             scenario_id=self._to_object_id(scenario_id),
             split_type=split_type,
+            fold_id=fold_id,
             record_count=record_count,
             feature_count=feature_count,
             class_distribution=class_distribution,

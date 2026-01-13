@@ -115,3 +115,15 @@ def download_split(
     """Download a specific split file."""
     service = TrainingExportService(db)
     return service.download_split(scenario_id, export_id, split_id)
+
+
+@router.get("/{scenario_id}/exports/{export_id}/download")
+def download_all_splits(
+    scenario_id: str,
+    export_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Database = Depends(get_db),
+):
+    """Download all splits for an export as a zip file."""
+    service = TrainingExportService(db)
+    return service.download_all_splits(scenario_id, export_id)

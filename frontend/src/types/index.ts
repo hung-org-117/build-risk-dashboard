@@ -197,16 +197,19 @@ export interface FeatureConfig {
 export interface SplittingConfig {
   strategy: string;
   group_by: string;
-  groups: string[];
   ratios: Record<string, number>;
   stratify_by: string;
-  test_groups: string[];
-  val_groups: string[];
-  train_groups: string[];
-  reduce_label?: number;
-  reduce_ratio: number;
-  novelty_group?: string;
-  novelty_label?: number;
+  // Dynamic binning
+  num_bins: number;
+  time_slots: number;
+  // CV configuration
+  n_folds: number;
+  internal_val_ratio: number;
+  // Imbalanced K-Fold specific
+  imbalance_drop_rate: number;
+  imbalance_drop_label: number;
+  // Extreme Novelty specific
+  novelty_target_label: number;
 }
 
 export interface PreprocessingConfig {

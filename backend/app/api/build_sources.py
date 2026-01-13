@@ -9,6 +9,7 @@ from app.dtos.build_source import (
     BuildSourceListResponse,
     BuildSourceResponse,
     BuildSourceUpdate,
+    PaginatedSourceBuildResponse,
     SourceBuildResponse,
     SourceRepoStatsResponse,
 )
@@ -224,7 +225,7 @@ def get_source_repos(
     ]
 
 
-@router.get("/{source_id}/builds", response_model=list[SourceBuildResponse])
+@router.get("/{source_id}/builds", response_model=PaginatedSourceBuildResponse)
 def get_source_builds(
     source_id: str,
     status: Optional[str] = None,
@@ -234,8 +235,8 @@ def get_source_builds(
     service: BuildSourceService = Depends(get_build_source_service),
 ):
     """Get builds for a source with optional status filter."""
-    builds = service.get_builds(source_id, status=status, skip=skip, limit=limit)
-    return [
+    builds, total = service.get_builds(source_id, status=status, skip=skip, limit=limit)
+    items = [
         SourceBuildResponse(
             id=str(b.id),
             source_id=str(b.source_id),
@@ -249,3 +250,9 @@ def get_source_builds(
         )
         for b in builds
     ]
+    return PaginatedSourceBuildResponse(
+        items=items,
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
