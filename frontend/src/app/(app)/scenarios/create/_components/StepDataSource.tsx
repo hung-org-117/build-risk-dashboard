@@ -43,9 +43,7 @@ import type { PreviewBuild } from "@/lib/api/training-scenarios";
 import { formatDateTime } from "@/lib/utils";
 import {
     useWizard,
-    CI_PROVIDERS,
     BUILD_CONCLUSIONS,
-    SUPPORTED_LANGUAGES,
     type CIProviderKey,
 } from "./WizardContext";
 
@@ -78,7 +76,29 @@ export function StepDataSource() {
     const [hasApplied, setHasApplied] = useState(false);
     const [isFilterOpen, setIsFilterOpen] = useState(false);
 
+    // Dynamic Options State
+    const [ciProviders, setCiProviders] = useState<{ value: string; label: string }[]>([]);
+    const [supportedLanguages, setSupportedLanguages] = useState<{ value: string; label: string }[]>([]);
+    const [isLoadingOptions, setIsLoadingOptions] = useState(false);
+
     const PAGE_SIZE = 20;
+
+    // Fetch Filter Options on Mount
+    useEffect(() => {
+        const fetchOptions = async () => {
+            setIsLoadingOptions(true);
+            try {
+                const options = await trainingScenariosApi.getFilterOptions();
+                setCiProviders([{ value: "all", label: "All CI Providers" }, ...options.providers]);
+                setSupportedLanguages(options.languages);
+            } catch (err) {
+                console.error("Failed to load filter options:", err);
+            } finally {
+                setIsLoadingOptions(false);
+            }
+        };
+        fetchOptions();
+    }, []);
 
     const applyFilters = useCallback(async (pageNum = 1) => {
         setIsPreviewLoading(true);
@@ -220,17 +240,21 @@ export function StepDataSource() {
                                     <Select
                                         value={dataSource.ci_provider}
                                         onValueChange={(value) => updateDataSource({ ci_provider: value as CIProviderKey | "all" })}
+                                        disabled={isLoadingOptions}
                                     >
                                         <SelectTrigger>
-                                            <SelectValue />
+                                            <SelectValue placeholder={isLoadingOptions ? "Loading..." : "All Providers"} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="all">All Providers</SelectItem>
-                                            {CI_PROVIDERS.map((provider) => (
-                                                <SelectItem key={provider.value} value={provider.value}>
-                                                    {provider.label}
-                                                </SelectItem>
-                                            ))}
+                                            {ciProviders.length > 0 ? (
+                                                ciProviders.map((provider) => (
+                                                    <SelectItem key={provider.value} value={provider.value}>
+                                                        {provider.label}
+                                                    </SelectItem>
+                                                ))
+                                            ) : (
+                                                <SelectItem value="all">All Providers</SelectItem>
+                                            )}
                                         </SelectContent>
                                     </Select>
                                 </div>
@@ -241,21 +265,31 @@ export function StepDataSource() {
                                 <div className="space-y-2">
                                     <Label>Languages</Label>
                                     <div className="grid grid-cols-2 gap-2 p-2 border rounded-md min-h-[100px] max-h-[150px] overflow-y-auto">
-                                        {SUPPORTED_LANGUAGES.map((lang) => (
-                                            <div key={lang.value} className="flex items-center space-x-2">
-                                                <Checkbox
-                                                    id={`lang-${lang.value}`}
-                                                    checked={dataSource.languages.includes(lang.value)}
-                                                    onCheckedChange={() => handleLanguageToggle(lang.value)}
-                                                />
-                                                <label
-                                                    htmlFor={`lang-${lang.value}`}
-                                                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                                                >
-                                                    {lang.label}
-                                                </label>
+                                        {isLoadingOptions ? (
+                                            <div className="col-span-2 flex justify-center py-4">
+                                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                                             </div>
-                                        ))}
+                                        ) : supportedLanguages.length > 0 ? (
+                                            supportedLanguages.map((lang) => (
+                                                <div key={lang.value} className="flex items-center space-x-2">
+                                                    <Checkbox
+                                                        id={`lang-${lang.value}`}
+                                                        checked={dataSource.languages.includes(lang.value)}
+                                                        onCheckedChange={() => handleLanguageToggle(lang.value)}
+                                                    />
+                                                    <label
+                                                        htmlFor={`lang-${lang.value}`}
+                                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                                    >
+                                                        {lang.label}
+                                                    </label>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="col-span-2 text-sm text-center py-4 text-muted-foreground">
+                                                No languages found.
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -327,7 +361,7 @@ export function StepDataSource() {
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
                                 {isPreviewLoading ? (
                                     <tr>
-                                        <td colSpan={5} className="px-4 py-20 text-center">
+                                        <td colSpan={6} className="px-4 py-20 text-center">
                                             <div className="flex flex-col items-center gap-2">
                                                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
                                                 <p className="text-sm text-muted-foreground">Loading builds...</p>
@@ -336,7 +370,7 @@ export function StepDataSource() {
                                     </tr>
                                 ) : previewBuilds.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="px-4 py-20 text-center text-muted-foreground">
+                                        <td colSpan={6} className="px-4 py-20 text-center text-muted-foreground">
                                             <div className="flex flex-col items-center gap-2">
                                                 <Search className="h-8 w-8 opacity-20" />
                                                 <p>No builds found matching your filters.</p>

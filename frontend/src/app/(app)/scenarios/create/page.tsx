@@ -210,7 +210,7 @@ function WizardContent() {
     };
 
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
+        <div className="flex flex-col h-full overflow-hidden">
             {/* Header Area */}
             <div className="flex-shrink-0 px-6 py-4 border-b bg-background z-10">
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">

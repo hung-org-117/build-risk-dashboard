@@ -2,47 +2,13 @@
 
 import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from "react";
 
-// =============================================================================
-// Constants (moved from deleted splitting/constants.ts)
-// =============================================================================
-
-export const CI_PROVIDERS = [
-    { value: "all", label: "All CI Providers" },
-    { value: "github_actions", label: "GitHub Actions" },
-    { value: "circleci", label: "CircleCI" },
-    { value: "travis_ci", label: "Travis CI" },
-] as const;
-
 export const BUILD_CONCLUSIONS = [
     { value: "success", label: "Success" },
     { value: "failure", label: "Failure" },
 ] as const;
-
-export const SUPPORTED_LANGUAGES = [
-    { value: "python", label: "Python" },
-    { value: "javascript", label: "JavaScript" },
-    { value: "typescript", label: "TypeScript" },
-    { value: "java", label: "Java" },
-    { value: "go", label: "Go" },
-    { value: "ruby", label: "Ruby" },
-    { value: "rust", label: "Rust" },
-    { value: "c", label: "C" },
-    { value: "cpp", label: "C++" },
-    { value: "csharp", label: "C#" },
-    { value: "php", label: "PHP" },
-    { value: "swift", label: "Swift" },
-    { value: "kotlin", label: "Kotlin" },
-    { value: "scala", label: "Scala" },
-] as const;
-
-export type CIProviderKey = (typeof CI_PROVIDERS)[number]["value"];
+export type CIProviderKey = string;
 export type BuildConclusionKey = (typeof BUILD_CONCLUSIONS)[number]["value"];
-export type LanguageKey = (typeof SUPPORTED_LANGUAGES)[number]["value"];
-
-// =============================================================================
-// Types
-// =============================================================================
-
+export type LanguageKey = string;
 export interface DataSourceConfig {
     filter_by: "all" | "by_language" | "by_name";
     languages: string[];

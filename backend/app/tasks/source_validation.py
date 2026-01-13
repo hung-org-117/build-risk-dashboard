@@ -121,6 +121,24 @@ def publish_source_update(
         logger.error(f"Failed to publish source update: {e}")
 
 
+class SourceValidationTask(SafeTask):
+    """
+    Task for source validation with source update failure handling.
+    """
+
+    def get_entity_failure_handler(
+        self, args: tuple, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        # source_id can be in kwargs or the first arg
+        source_id = kwargs.get("source_id")
+        if not source_id and args:
+            source_id = args[0]
+
+        if source_id and isinstance(source_id, str):
+            return _create_source_failure_handler(self.redis, source_id)
+        return None
+
+
 # =============================================================================
 # Task 1: Orchestrator
 # =============================================================================
@@ -128,7 +146,7 @@ def publish_source_update(
 
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=SourceValidationTask,
     name="app.tasks.source_validation.validate_build_source_task",
     queue="source_validation",
     soft_time_limit=3600,
@@ -341,7 +359,7 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
 
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=SourceValidationTask,
     name="app.tasks.source_validation.validate_source_repo_chunk",
     queue="source_validation",
     soft_time_limit=600,
@@ -480,7 +498,7 @@ def validate_source_repo_chunk(
 
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=SourceValidationTask,
     name="app.tasks.source_validation.validate_source_builds_chunk",
     queue="source_validation",
     soft_time_limit=300,

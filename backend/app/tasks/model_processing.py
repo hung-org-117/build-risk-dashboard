@@ -438,11 +438,10 @@ def finalize_model_processing(
         )
 
         # Get counts from aggregated stats
-        success_count = aggregated_stats.get("completed", 0) + aggregated_stats.get(
-            "partial", 0
-        )
-        failed_count = aggregated_stats.get("failed", 0)
-        total_count = aggregated_stats.get("total", 0)
+        success_count = aggregated_stats.get("builds_features_extracted", 0)
+        failed_count = aggregated_stats.get("builds_processing_failed", 0)
+        pending_count = aggregated_stats.get("total_pending", 0)
+        total_count = success_count + failed_count + pending_count
 
         logger.info(
             f"{corr_prefix} Processing results from DB: "

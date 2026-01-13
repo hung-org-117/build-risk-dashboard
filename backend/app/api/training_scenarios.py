@@ -106,6 +106,32 @@ def preview_builds(
     }
 
 
+@router.get("/filter-options")
+def get_filter_options(
+    db=Depends(get_db),  # noqa: B008
+) -> Dict[str, Any]:
+    """
+    Get dynamic filter options from raw data.
+    Returns distinct languages and CI providers found in the database.
+    """
+    raw_build_repo = RawBuildRunRepository(db)
+    # simple distinct queries on indexed fields
+    providers = raw_build_repo.collection.distinct("provider")
+
+    # We need RawRepository for languages
+    raw_repo_collection = db["raw_repositories"]
+    languages = raw_repo_collection.distinct("main_lang")
+
+    # Filter out None/Empty and sort
+    providers = sorted([p for p in providers if p])
+    languages = sorted([l for l in languages if l])
+
+    return {
+        "providers": [{"value": p, "label": p} for p in providers],
+        "languages": [{"value": l, "label": l.title()} for l in languages],
+    }
+
+
 # ============================================================================
 # Splitting Groups Discovery (Wizard Step 3 - for LOO/LTO)
 # ============================================================================

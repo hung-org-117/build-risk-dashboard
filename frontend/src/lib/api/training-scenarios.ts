@@ -311,6 +311,16 @@ export const trainingScenariosApi = {
     },
 
     /**
+     * Get dynamic filter options (providers, languages)
+     */
+    getFilterOptions: async (): Promise<{ providers: { value: string; label: string }[]; languages: { value: string; label: string }[] }> => {
+        const response = await api.get<{ providers: { value: string; label: string }[]; languages: { value: string; label: string }[] }>(
+            "/training-scenarios/filter-options"
+        );
+        return response.data;
+    },
+
+    /**
      * Get available groups for splitting strategies (Wizard Step 3 - LOO/LTO)
      */
     getSplittingGroups: async (params: SplittingGroupsParams): Promise<SplittingGroupsResponse> => {

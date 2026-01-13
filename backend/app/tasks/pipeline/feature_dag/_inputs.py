@@ -214,7 +214,9 @@ class FeatureConfigInput:
         if scope in ("repo", "auto"):
             if self.current_repo_id and "repos" in self.feature_configs:
                 # Lookup by string(github_repo_id) to match frontend key format
-                repo_configs = self.feature_configs["repos"].get(str(self.current_repo_id), {})
+                repo_configs = self.feature_configs["repos"].get(
+                    str(self.current_repo_id), {}
+                )
                 if key in repo_configs:
                     return repo_configs[key]
 
@@ -226,7 +228,9 @@ class FeatureConfigInput:
         return default
 
     @classmethod
-    def from_entity(cls, config: Any, current_repo_id: Optional[int] = None) -> FeatureConfigInput:
+    def from_entity(
+        cls, config: Any, current_repo_id: Optional[int] = None
+    ) -> FeatureConfigInput:
         """
         Create from ModelRepoConfig, DatasetVersion entity, or direct feature_configs dict.
 
@@ -299,8 +303,8 @@ class BuildRunInput:
             branch=build_run.branch,
             commit_author=build_run.commit_author,
             conclusion=conclusion_str,
-            created_at=build_run.created_at,
-            completed_at=build_run.completed_at,
+            created_at=build_run.run_created_at,
+            completed_at=build_run.run_completed_at,
             duration_seconds=build_run.duration_seconds,
             raw_data=build_run.raw_data or {},
             ci_provider=build_run.provider.value,
@@ -405,7 +409,9 @@ def build_hamilton_inputs(
             )
             is_commit_available = True
         except subprocess.CalledProcessError:
-            logger.warning(f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}")
+            logger.warning(
+                f"Commit {effective_sha[:8]} not found in repo {raw_repo.full_name}"
+            )
 
     # Check worktree availability - try effective_sha first, then original_sha
     if is_commit_available and worktrees_base:

@@ -397,9 +397,6 @@ export default function BuildDetailPage() {
                                 )}
                             </div>
                         </CardTitle>
-                        <CardDescription>
-                            ML model prediction for this build
-                        </CardDescription>
                     </CardHeader>
                     <CardContent>
                         {build.prediction_error ? (

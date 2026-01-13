@@ -100,7 +100,7 @@ export default function AdminReposPage() {
         });
       });
 
-      if (data.status === "imported" || data.status === "failed") {
+      if (data.status === "ingested" || data.status === "processed" || data.status === "failed") {
         // Reload to get fresh data (stats, etc)
         loadRepositories(page);
       }
@@ -148,18 +148,16 @@ export default function AdminReposPage() {
         return <Badge variant="default" className="bg-cyan-500 hover:bg-cyan-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Fetching</Badge>;
       case "ingesting":
         return <Badge variant="default" className="bg-blue-500 hover:bg-blue-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Ingesting</Badge>;
-      case "ingestion_complete":
+      case "ingested":
         return <Badge variant="default" className="bg-green-500 hover:bg-green-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Ingested</Badge>;
-      case "ingestion_partial":
-        return <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">Ingestion Partial</Badge>;
       case "processing":
         return <Badge variant="default" className="bg-purple-500 hover:bg-purple-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Processing</Badge>;
-      case "partial":
-        return <Badge variant="default" className="bg-amber-500 hover:bg-amber-600">Partial</Badge>;
+      case "processed":
+        return <Badge variant="outline" className="border-green-500 text-green-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Processed</Badge>;
       case "failed":
         return <Badge variant="destructive">Failed</Badge>;
       default:
-        return <Badge variant="outline" className="border-green-500 text-green-600">Imported</Badge>;
+        return <Badge variant="secondary">{status}</Badge>;
     }
   };
 

@@ -173,7 +173,7 @@ class NotificationService:
                 self.create_notification(
                     user_id=admin.id,
                     notification_type=NotificationType.RATE_LIMIT_EXHAUSTED,
-                    title="🚨 All GitHub Tokens Exhausted",
+                    title="All GitHub Tokens Exhausted",
                     message=f"All {rate_limited}/{total_tokens} tokens are rate limited. "
                     f"Task '{task_name}' failed. Tokens reset at {reset_str}.",
                     link="/admin/settings",
@@ -564,7 +564,7 @@ def notify_rate_limit_exhausted(
         db=db,
         user_id=user_id,
         type=NotificationType.RATE_LIMIT_EXHAUSTED,
-        title="🚨 All GitHub Tokens Exhausted",
+        title="All GitHub Tokens Exhausted",
         message=f"All {exhausted_tokens}/{total_tokens} tokens are rate limited. GitHub API calls blocked until {reset_str}.",
         link="/admin/settings",
         metadata={
@@ -705,7 +705,7 @@ def notify_prediction_ready(
         db=db,
         user_id=user_id,
         type=NotificationType.BUILD_PREDICTION_READY,
-        title="🎯 Predictions Ready",
+        title="Predictions Completed",
         message=message,
         link=f"/my-repos/{repo_id}/builds",
         metadata={
@@ -920,7 +920,7 @@ def notify_pipeline_completed_to_admins(
                 db=db,
                 user_id=admin.id,
                 type=NotificationType.PIPELINE_COMPLETED,
-                title="✅ Pipeline Complete",
+                title="Risky Build Prediction Complete",
                 message=message,
                 link="/repositories",
                 metadata={
@@ -957,7 +957,7 @@ def notify_pipeline_failed_to_admins(
                 db=db,
                 user_id=admin.id,
                 type=NotificationType.PIPELINE_FAILED,
-                title="❌ Pipeline Failed",
+                title="Risky Build Prediction Failed",
                 message=f"{repo_name}: {error_message[:200]}",
                 link="/repositories",
                 metadata={
@@ -973,7 +973,7 @@ def notify_pipeline_failed_to_admins(
         db=db,
         notification_type="pipeline_failed",
         template_name="pipeline_failed",
-        subject=f"❌ Pipeline Failed: {repo_name}",
+        subject=f"Risky Build Prediction Failed: {repo_name}",
         context={
             "repo_name": repo_name,
             "error_message": error_message[:500],
