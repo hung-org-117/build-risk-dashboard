@@ -33,6 +33,9 @@ export interface Build {
   // Identity - using RawBuildRun._id
   id: string;
 
+  // Repository info
+  repo_name: string;
+
   // From RawBuildRun - always available after ingestion
   build_number?: number;
   build_id: string; // CI provider's build ID
@@ -675,6 +678,7 @@ export interface DashboardSummaryResponse {
   trends: DashboardTrendPoint[];
   repo_distribution: RepoDistributionEntry[];
   dataset_count: number;
+  active_repos: number;
   admin_extras?: AdminDashboardExtras | null;
 }
 

@@ -2,15 +2,16 @@
 
 ## 📋 Mục Lục
 1. [Tổng Quan Kiến Trúc](#tổng-quan-kiến-trúc)
-2. [Phase 0: Build Source Upload](#phase-0-build-source-upload)
-3. [Phase 1: Filtering & Ingestion](#phase-1-filtering--ingestion)
-4. [Phase 2: Processing & Feature Extraction](#phase-2-processing--feature-extraction)
-5. [Phase 3: Dataset Generation](#phase-3-dataset-generation)
-6. [Entities & Data Model](#entities--data-model)
-7. [API Endpoints](#api-endpoints)
-8. [Frontend UI Flow](#frontend-ui-flow)
-9. [Error Handling & Recovery](#error-handling--recovery)
-10. [WebSocket Real-time Updates](#websocket-real-time-updates)
+2. [Dashboard Statistics](#dashboard-statistics)
+3. [Phase 0: Build Source Upload](#phase-0-build-source-upload)
+4. [Phase 1: Filtering & Ingestion](#phase-1-filtering--ingestion)
+5. [Phase 2: Processing & Feature Extraction](#phase-2-processing--feature-extraction)
+6. [Phase 3: Dataset Generation](#phase-3-dataset-generation)
+7. [Entities & Data Model](#entities--data-model)
+8. [API Endpoints](#api-endpoints)
+9. [Frontend UI Flow](#frontend-ui-flow)
+10. [Error Handling & Recovery](#error-handling--recovery)
+11. [WebSocket Real-time Updates](#websocket-real-time-updates)
 
 ---
 
@@ -117,6 +118,24 @@ TrainingDatasetExport Status Flow:
                     ▼
                   FAILED
 ```
+
+---
+
+## Dashboard Statistics
+
+### Training Scenario Widget (Admin Only)
+
+The **Training Scenarios Summary** widget displays real-time status metrics for the entire TRAINING SCENARIO PIPELINE:
+
+| Metric | Meaning | Source Collection |
+|--------|---------|------------------|
+| **Active** | Total training scenarios created | `training_scenarios` (all records) |
+| **Queued** | Scenarios waiting to start ingestion | `training_scenarios` with status=QUEUED |
+| **Processing** | Scenarios currently extracting features or generating datasets | `training_scenarios` with status IN (FILTERING, INGESTING, PROCESSING, SPLITTING) |
+| **Completed** | Scenarios finished and ready for export | `training_scenarios` with status=COMPLETED |
+| **Enriched** | Total source builds that have been processed | `source_builds` (all records) |
+
+These metrics help admins track dataset preparation progress and manage training workflows.
 
 ---
 

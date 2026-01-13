@@ -68,6 +68,7 @@ class DashboardSummaryResponse(BaseModel):
     trends: List[DashboardTrendPoint]
     repo_distribution: List[RepoDistributionEntry]
     dataset_count: int = 0
+    active_repos: int = 0  # Count of public repositories
     # Admin-only extras (None for regular users)
     admin_extras: Optional[AdminDashboardExtras] = None
 

@@ -17,6 +17,9 @@ class BuildSummary(BaseModel):
     # Identity - using RawBuildRun._id as primary key
     id: str = Field(..., alias="_id")
 
+    # Repository info
+    repo_name: str = ""  # Full repository name (owner/repo) for display
+
     # From RawBuildRun - always available after ingestion
     build_number: Optional[int] = None
     build_id: str = ""  # CI provider's build ID (e.g., GitHub run ID)
@@ -246,9 +249,7 @@ class UnifiedBuildSummary(BaseModel):
 
     # Phase 3: Extraction (optional - only if ModelTrainingBuild exists)
     training_build_id: Optional[str] = None
-    extraction_status: Optional[str] = (
-        None  # pending, in_progress, completed, partial, failed
-    )
+    extraction_status: Optional[str] = None  # pending, in_progress, completed, partial, failed
     feature_count: int = 0
     extraction_error: Optional[str] = None
 

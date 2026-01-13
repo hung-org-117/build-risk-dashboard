@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/card";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/use-toast";
 import { useDebounce } from "@/hooks/use-debounce";
 import { trainingScenariosApi } from "@/lib/api";
@@ -66,6 +67,7 @@ export default function ScenariosPage() {
     const [scenarios, setScenarios] = useState<TrainingScenarioRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
+    const [activeTab, setActiveTab] = useState<"scenarios" | "sources">("scenarios");
 
     // Statistics
     const [stats, setStats] = useState({
@@ -245,135 +247,159 @@ export default function ScenariosPage() {
 
     return (
         <div className="space-y-6">
-            {/* Page Header with Action Buttons */}
+            {/* Page Header */}
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+                <div>
+                    <h1 className="text-3xl font-bold">Training Datasets</h1>
+                    <p className="text-muted-foreground">
+                        Manage data sources and training scenarios
+                    </p>
+                </div>
+                <Button
+                    onClick={() => {
+                        if (activeTab === "sources") {
+                            router.push("/scenarios/upload");
+                        } else {
+                            router.push("/scenarios/create");
+                        }
+                    }}
+                >
+                    <Plus className="h-4 w-4 mr-2" />
+                    {activeTab === "sources" ? "Upload New Source" : "Create Scenario"}
+                </Button>
+            </div>
+
+            {/* Tabs */}
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "scenarios" | "sources")}>
+                <TabsList>
+                    <TabsTrigger value="scenarios" className="flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4" />
+                        Training Scenarios
+                        <Badge variant="secondary">{total}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="sources" className="flex items-center gap-2">
+                        <Database className="w-4 h-4" />
+                        Build Sources
+                    </TabsTrigger>
+                </TabsList>
+
+                {/* Tab: Training Scenarios */}
+                <TabsContent value="scenarios" className="space-y-6">
+                    {/* Statistics Bar */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <Card>
+                            <CardContent className="pt-6">
+                                <div className="flex items-center gap-3">
+                                    <Database className="h-5 w-5 text-muted-foreground" />
+                                    <div>
+                                        <div className="text-2xl font-bold">{formatNumber(stats.totalBuilds)}</div>
+                                        <p className="text-xs text-muted-foreground">Total Raw Builds</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardContent className="pt-6">
+                                <div className="flex items-center gap-3">
+                                    <GitBranch className="h-5 w-5 text-muted-foreground" />
+                                    <div>
+                                        <div className="text-2xl font-bold">{formatNumber(stats.totalRepos)}</div>
+                                        <p className="text-xs text-muted-foreground">Repositories</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardContent className="pt-6">
+                                <div className="flex items-center gap-3">
+                                    <TrendingUp className="h-5 w-5 text-muted-foreground" />
+                                    <div>
+                                        <div className="text-2xl font-bold">{stats.successRate}%</div>
+                                        <p className="text-xs text-muted-foreground">Success Rate</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* Dataset Versions Table */}
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Dataset Versions</CardTitle>
+                                    <CardDescription>
+                                        Created dataset versions and their processing status
+                                    </CardDescription>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="relative w-64">
+                                        <Input
+                                            placeholder="Search versions..."
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            className="h-9"
+                                        />
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => loadScenarios(page, true)}
+                                        disabled={tableLoading}
+                                    >
+                                        <RefreshCw className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`} />
+                                        Refresh
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                            <DataTable
+                                columns={columns}
+                                data={scenarios}
+                                total={total}
+                                page={page}
+                                pageSize={PAGE_SIZE}
+                                loading={tableLoading}
+                                emptyMessage="No dataset versions yet."
+                                emptySubMessage="Create your first version using the button above."
+                                emptyIcon={<CheckCircle2 className="h-12 w-12 text-slate-300" />}
+                                itemName="versions"
+                                onPageChange={(p) => loadScenarios(p, true)}
+                                onRowClick={(scenario) => router.push(`/scenarios/${scenario.id}`)}
+                                rowKey={(scenario) => scenario.id}
+                                alwaysShowPagination={true}
+                                actions={(scenario) => (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDelete(scenario);
+                                        }}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                        <span className="sr-only">Delete</span>
+                                    </Button>
+                                )}
+                            />
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* Tab: Build Sources */}
+                <TabsContent value="sources">
                     <div>
-                        <h1 className="text-2xl font-bold">Dataset Enrichments</h1>
-                        <p className="text-sm text-muted-foreground">
-                            Build and manage training datasets from your build data
-                        </p>
+                        <Button
+                            onClick={() => router.push("/scenarios/sources")}
+                            variant="outline"
+                        >
+                            Go to Build Sources
+                        </Button>
                     </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <Button
-                        variant="outline"
-                        onClick={() => router.push("/scenarios/upload")}
-                    >
-                        Upload CSV
-                    </Button>
-                    <Button
-                        onClick={() => router.push("/scenarios/create")}
-                        className="bg-emerald-600 hover:bg-emerald-700"
-                    >
-                        <Plus className="h-4 w-4 mr-2" />
-                        New Version
-                    </Button>
-                </div>
-            </div>
-
-            {/* Statistics Bar */}
-            <div className="grid gap-4 md:grid-cols-3">
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                            <Database className="h-5 w-5 text-muted-foreground" />
-                            <div>
-                                <div className="text-2xl font-bold">{formatNumber(stats.totalBuilds)}</div>
-                                <p className="text-xs text-muted-foreground">Total Raw Builds</p>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                            <GitBranch className="h-5 w-5 text-muted-foreground" />
-                            <div>
-                                <div className="text-2xl font-bold">{formatNumber(stats.totalRepos)}</div>
-                                <p className="text-xs text-muted-foreground">Repositories</p>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center gap-3">
-                            <TrendingUp className="h-5 w-5 text-muted-foreground" />
-                            <div>
-                                <div className="text-2xl font-bold">{stats.successRate}%</div>
-                                <p className="text-xs text-muted-foreground">Success Rate</p>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Dataset Versions Table */}
-            <Card>
-                <CardHeader>
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <CardTitle>Dataset Versions</CardTitle>
-                            <CardDescription>
-                                Created dataset versions and their processing status
-                            </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="relative w-64">
-                                <Input
-                                    placeholder="Search versions..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="h-9"
-                                />
-                            </div>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => loadScenarios(page, true)}
-                                disabled={tableLoading}
-                            >
-                                <RefreshCw className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`} />
-                                Refresh
-                            </Button>
-                        </div>
-                    </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                    <DataTable
-                        columns={columns}
-                        data={scenarios}
-                        total={total}
-                        page={page}
-                        pageSize={PAGE_SIZE}
-                        loading={tableLoading}
-                        emptyMessage="No dataset versions yet."
-                        emptySubMessage="Create your first version using the button above."
-                        emptyIcon={<CheckCircle2 className="h-12 w-12 text-slate-300" />}
-                        itemName="versions"
-                        onPageChange={(p) => loadScenarios(p, true)}
-                        onRowClick={(scenario) => router.push(`/scenarios/${scenario.id}`)}
-                        rowKey={(scenario) => scenario.id}
-                        alwaysShowPagination={true}
-                        actions={(scenario) => (
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDelete(scenario);
-                                }}
-                            >
-                                <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Delete</span>
-                            </Button>
-                        )}
-                    />
-                </CardContent>
-            </Card>
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }
-

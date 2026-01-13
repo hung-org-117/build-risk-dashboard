@@ -2,15 +2,16 @@
 
 ## 📋 Mục Lục
 1. [Tổng Quan Kiến Trúc](#tổng-quan-kiến-trúc)
-2. [Phase 1: Import & Fetch](#phase-1-import--fetch)
-3. [Phase 2: Ingestion](#phase-2-ingestion)
-4. [Phase 3: Processing & Feature Extraction](#phase-3-processing--feature-extraction)
-5. [Phase 4: Prediction](#phase-4-prediction)
-6. [Entities & Data Model](#entities--data-model)
-7. [API Endpoints](#api-endpoints)
-8. [Frontend UI Flow](#frontend-ui-flow)
-9. [Error Handling & Recovery](#error-handling--recovery)
-10. [WebSocket Real-time Updates](#websocket-real-time-updates)
+2. [Dashboard Statistics](#dashboard-statistics)
+3. [Phase 1: Import & Fetch](#phase-1-import--fetch)
+4. [Phase 2: Ingestion](#phase-2-ingestion)
+5. [Phase 3: Processing & Feature Extraction](#phase-3-processing--feature-extraction)
+6. [Phase 4: Prediction](#phase-4-prediction)
+7. [Entities & Data Model](#entities--data-model)
+8. [API Endpoints](#api-endpoints)
+9. [Frontend UI Flow](#frontend-ui-flow)
+10. [Error Handling & Recovery](#error-handling--recovery)
+11. [WebSocket Real-time Updates](#websocket-real-time-updates)
 
 ---
 
@@ -103,6 +104,24 @@ ModelRepoConfig Status Flow:
                                                ▼
                                      (Retry / Re-sync available)
 ```
+
+---
+
+## Dashboard Statistics
+
+### Model Pipeline Widget (Admin Only)
+
+The **Model Pipeline Summary** widget displays real-time status metrics for the entire MODEL PIPELINE:
+
+| Metric | Meaning | Source Collection |
+|--------|---------|------------------|
+| **Total** | Total repositories imported into the system | `model_repo_configs` (all records) |
+| **Fetching** | Repos currently fetching builds from CI | `model_repo_configs` with status=FETCHING |
+| **Ingesting** | Repos currently downloading resources (git, logs) | `model_repo_configs` with status=INGESTING |
+| **Processing** | Repos currently extracting features | `model_repo_configs` with status=PROCESSING |
+| **Processed** | Repos with completed predictions | `model_repo_configs` with status=PROCESSED |
+
+These metrics help admins track the pipeline progress and identify bottlenecks.
 
 ---
 

@@ -356,7 +356,7 @@ export default function OverviewPage() {
     }
   };
 
-  const totalRepositories = summary?.repo_distribution?.length ?? 0;
+  const totalRepositories = summary?.active_repos ?? 0;
   const enabledWidgets = widgets.filter((w) => w.enabled);
 
   if (loading) {
@@ -510,7 +510,7 @@ export default function OverviewPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
               <CardDescription className="text-xs truncate">
-                Latest builds with risk level
+                Latest builds from public repositories
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0 overflow-auto flex-1">
@@ -518,8 +518,8 @@ export default function OverviewPage() {
                 <thead className="bg-slate-50 dark:bg-slate-900/40">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">Build</th>
+                    <th className="px-3 py-2 text-left font-semibold">Repo</th>
                     <th className="px-3 py-2 text-left font-semibold">Risk</th>
-                    <th className="px-3 py-2 text-left font-semibold">Branch</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -535,8 +535,11 @@ export default function OverviewPage() {
                         key={build.id}
                         className="transition hover:bg-slate-50 dark:hover:bg-slate-900/50"
                       >
-                        <td className="px-3 py-2 font-medium truncate max-w-[100px]">
-                          #{build.build_number || build.commit_sha?.slice(0, 7)}
+                        <td className="px-3 py-2 font-medium truncate max-w-[80px]">
+                          #{build.build_number || build.commit_sha?.slice(0, 7) || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground truncate max-w-[120px]" title={build.repo_name}>
+                          {build.repo_name || "—"}
                         </td>
                         <td className="px-3 py-2">
                           {build.predicted_label ? (
@@ -550,9 +553,6 @@ export default function OverviewPage() {
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground truncate max-w-[100px]">
-                          {build.branch}
                         </td>
                       </tr>
                     ))

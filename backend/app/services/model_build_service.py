@@ -89,9 +89,7 @@ class ModelBuildService:
             training_builds = list(training_cursor)
 
             if not training_builds:
-                return BuildListResponse(
-                    items=[], total=total, page=skip // limit + 1, size=limit
-                )
+                return BuildListResponse(items=[], total=total, page=skip // limit + 1, size=limit)
 
             raw_ids = [t["raw_build_run_id"] for t in training_builds]
             raw_cursor = self.db.raw_build_runs.find({"_id": {"$in": raw_ids}})
@@ -103,15 +101,12 @@ class ModelBuildService:
                 items.append(
                     BuildSummary(
                         _id=str(training["raw_build_run_id"]),
-                        build_number=training.get("build_number")
-                        or raw.get("build_number"),
+                        build_number=training.get("build_number") or raw.get("build_number"),
                         build_id=raw.get("build_id", ""),
                         conclusion=raw.get("conclusion", "unknown"),
-                        commit_sha=training.get("head_sha")
-                        or raw.get("commit_sha", ""),
+                        commit_sha=training.get("head_sha") or raw.get("commit_sha", ""),
                         branch=raw.get("branch", ""),
-                        created_at=training.get("build_created_at")
-                        or raw.get("run_created_at"),
+                        created_at=training.get("build_created_at") or raw.get("run_created_at"),
                         completed_at=raw.get("run_completed_at"),
                         duration_seconds=raw.get("duration_seconds"),
                         web_url=raw.get("web_url"),
@@ -150,9 +145,7 @@ class ModelBuildService:
             raw_builds = list(raw_cursor)
 
             if not raw_builds:
-                return BuildListResponse(
-                    items=[], total=total, page=skip // limit + 1, size=limit
-                )
+                return BuildListResponse(items=[], total=total, page=skip // limit + 1, size=limit)
 
             # Left join with model_training_builds
             raw_ids = [b["_id"] for b in raw_builds]
@@ -183,32 +176,20 @@ class ModelBuildService:
                         logs_expired=raw.get("logs_expired", False),
                         has_training_data=training is not None,
                         training_build_id=str(training["_id"]) if training else None,
-                        extraction_status=(
-                            training.get("extraction_status") if training else None
-                        ),
-                        feature_count=(
-                            training.get("feature_count", 0) if training else 0
-                        ),
-                        extraction_error=(
-                            training.get("extraction_error") if training else None
-                        ),
+                        extraction_status=(training.get("extraction_status") if training else None),
+                        feature_count=(training.get("feature_count", 0) if training else 0),
+                        extraction_error=(training.get("extraction_error") if training else None),
                         missing_resources=(
                             training.get("missing_resources", []) if training else []
                         ),
-                        predicted_label=(
-                            training.get("predicted_label") if training else None
-                        ),
+                        predicted_label=(training.get("predicted_label") if training else None),
                         prediction_confidence=(
                             training.get("prediction_confidence") if training else None
                         ),
                         prediction_status=(
-                            training.get("prediction_status", "pending")
-                            if training
-                            else None
+                            training.get("prediction_status", "pending") if training else None
                         ),
-                        prediction_error=(
-                            training.get("prediction_error") if training else None
-                        ),
+                        prediction_error=(training.get("prediction_error") if training else None),
                     )
                 )
 
@@ -276,18 +257,12 @@ class ModelBuildService:
             # Training enrichment
             has_training_data=training_dict is not None,
             training_build_id=str(training.id) if training else None,
-            extraction_status=(
-                training_dict.get("extraction_status") if training_dict else None
-            ),
+            extraction_status=(training_dict.get("extraction_status") if training_dict else None),
             feature_count=feature_count,
-            extraction_error=(
-                training_dict.get("extraction_error") if training_dict else None
-            ),
+            extraction_error=(training_dict.get("extraction_error") if training_dict else None),
             features=features,
             # Prediction results
-            predicted_label=(
-                training_dict.get("predicted_label") if training_dict else None
-            ),
+            predicted_label=(training_dict.get("predicted_label") if training_dict else None),
             prediction_confidence=(
                 training_dict.get("prediction_confidence") if training_dict else None
             ),
@@ -295,17 +270,11 @@ class ModelBuildService:
                 training_dict.get("prediction_uncertainty") if training_dict else None
             ),
             predicted_at=training_dict.get("predicted_at") if training_dict else None,
-            prediction_status=(
-                training_dict.get("prediction_status") if training_dict else None
-            ),
-            prediction_error=(
-                training_dict.get("prediction_error") if training_dict else None
-            ),
+            prediction_status=(training_dict.get("prediction_status") if training_dict else None),
+            prediction_error=(training_dict.get("prediction_error") if training_dict else None),
         )
 
-    def get_recent_builds(
-        self, limit: int = 10, current_user: dict = None
-    ) -> List[BuildSummary]:
+    def get_recent_builds(self, limit: int = 10, current_user: dict = None) -> List[BuildSummary]:
         """Get most recent builds across repos accessible to user.
 
         Only returns builds from IMPORTED repositories (status='imported').
@@ -313,9 +282,7 @@ class ModelBuildService:
         - User: sees only repos in their github_accessible_repos that are imported
         """
         user_role = current_user.get("role", "user") if current_user else "admin"
-        accessible_repos = (
-            current_user.get("github_accessible_repos", []) if current_user else []
-        )
+        accessible_repos = current_user.get("github_accessible_repos", []) if current_user else []
 
         # Build repository filter - MUST be imported repos
         repo_filter: dict = {"status": "imported"}
@@ -338,9 +305,7 @@ class ModelBuildService:
         # Query raw_build_runs filtered by imported repos
         query = {"raw_repo_id": {"$in": raw_repo_ids}}
 
-        raw_cursor = (
-            self.db.raw_build_runs.find(query).sort("run_created_at", -1).limit(limit)
-        )
+        raw_cursor = self.db.raw_build_runs.find(query).sort("run_created_at", -1).limit(limit)
         raw_builds = list(raw_cursor)
 
         if not raw_builds:
@@ -348,17 +313,23 @@ class ModelBuildService:
 
         # Get training data (predictions)
         raw_ids = [b["_id"] for b in raw_builds]
-        training_cursor = self.db.model_training_builds.find(
-            {"raw_build_run_id": {"$in": raw_ids}}
-        )
+        training_cursor = self.db.model_training_builds.find({"raw_build_run_id": {"$in": raw_ids}})
         training_map = {doc["raw_build_run_id"]: doc for doc in training_cursor}
+
+        # Get repo names for raw_repo_ids
+        raw_repo_cursor = self.db.raw_repositories.find(
+            {"_id": {"$in": raw_repo_ids}}, {"full_name": 1}
+        )
+        repo_map = {doc["_id"]: doc["full_name"] for doc in raw_repo_cursor}
 
         items = []
         for raw in raw_builds:
             training = training_map.get(raw["_id"])
+            repo_name = repo_map.get(raw.get("raw_repo_id"), "")
             items.append(
                 BuildSummary(
                     _id=str(raw["_id"]),
+                    repo_name=repo_name,
                     build_number=raw.get("build_number"),
                     build_id=raw.get("build_id", ""),
                     conclusion=raw.get("conclusion", "unknown"),
@@ -372,20 +343,12 @@ class ModelBuildService:
                     logs_expired=raw.get("logs_expired", False),
                     has_training_data=training is not None,
                     training_build_id=str(training["_id"]) if training else None,
-                    extraction_status=(
-                        training.get("extraction_status") if training else None
-                    ),
+                    extraction_status=(training.get("extraction_status") if training else None),
                     feature_count=training.get("feature_count", 0) if training else 0,
-                    extraction_error=(
-                        training.get("extraction_error") if training else None
-                    ),
-                    missing_resources=(
-                        training.get("missing_resources", []) if training else []
-                    ),
+                    extraction_error=(training.get("extraction_error") if training else None),
+                    missing_resources=(training.get("missing_resources", []) if training else []),
                     # Add prediction fields
-                    predicted_label=(
-                        training.get("predicted_label") if training else None
-                    ),
+                    predicted_label=(training.get("predicted_label") if training else None),
                     prediction_confidence=(
                         training.get("prediction_confidence") if training else None
                     ),
@@ -563,11 +526,7 @@ class ModelBuildService:
         raw_map = {doc["_id"]: doc for doc in raw_cursor}
 
         # Get FeatureVector data for skipped_features and missing_resources
-        fv_ids = [
-            t["feature_vector_id"]
-            for t in training_builds
-            if t.get("feature_vector_id")
-        ]
+        fv_ids = [t["feature_vector_id"] for t in training_builds if t.get("feature_vector_id")]
         fv_cursor = self.db.feature_vectors.find({"_id": {"$in": fv_ids}})
         fv_map = {doc["_id"]: doc for doc in fv_cursor}
 
@@ -579,20 +538,17 @@ class ModelBuildService:
             items.append(
                 TrainingBuildSummary(
                     _id=str(training["_id"]),
-                    build_number=training.get("build_number")
-                    or raw.get("build_number"),
+                    build_number=training.get("build_number") or raw.get("build_number"),
                     build_id=raw.get("ci_run_id", ""),
                     commit_sha=training.get("head_sha") or raw.get("commit_sha", ""),
                     branch=raw.get("branch", ""),
                     conclusion=raw.get("conclusion", "unknown"),
-                    created_at=training.get("build_created_at")
-                    or raw.get("run_created_at"),
+                    created_at=training.get("build_created_at") or raw.get("run_created_at"),
                     web_url=raw.get("web_url"),
                     extraction_status=training.get("extraction_status", "pending"),
                     extraction_error=training.get("extraction_error"),
                     extracted_at=training.get("extracted_at"),
-                    feature_count=fv.get("feature_count", 0)
-                    or len(fv.get("features", {})),
+                    feature_count=fv.get("feature_count", 0) or len(fv.get("features", {})),
                     skipped_features=fv.get("skipped_features", []),
                     missing_resources=fv.get("missing_resources", []),
                     predicted_label=training.get("predicted_label"),
@@ -667,9 +623,7 @@ class ModelBuildService:
         # Apply phase filter
         if phase_filter == "ingestion":
             # Only builds still in ingestion phase (not yet processed)
-            match_query["status"] = {
-                "$in": ["pending", "fetched", "ingesting", "ingested"]
-            }
+            match_query["status"] = {"$in": ["pending", "fetched", "ingesting", "ingested"]}
         elif phase_filter == "processing":
             # Only builds with processing data (has training_build)
             # This will be filtered after the join
@@ -727,18 +681,10 @@ class ModelBuildService:
 
         # Apply phase filter in pipeline if needed
         if phase_filter == "processing":
-            pipeline.append(
-                {"$match": {"training_build": {"$exists": True, "$ne": None}}}
-            )
+            pipeline.append({"$match": {"training_build": {"$exists": True, "$ne": None}}})
         elif phase_filter == "prediction":
             pipeline.append(
-                {
-                    "$match": {
-                        "training_build.prediction_status": {
-                            "$in": ["completed", "failed"]
-                        }
-                    }
-                }
+                {"$match": {"training_build.prediction_status": {"$in": ["completed", "failed"]}}}
             )
 
         # Count total before pagination (for accurate count with phase filter)
@@ -766,9 +712,7 @@ class ModelBuildService:
 
             # Convert resource_status dict to DTOs
             resource_status_map = {}
-            for resource_name, resource_data in build_doc.get(
-                "resource_status", {}
-            ).items():
+            for resource_name, resource_data in build_doc.get("resource_status", {}).items():
                 if isinstance(resource_data, dict):
                     resource_status_map[resource_name] = ResourceStatusDTO(
                         status=resource_data.get("status", "pending"),
@@ -780,8 +724,7 @@ class ModelBuildService:
                     _id=str(build_doc["_id"]),
                     build_number=raw_build.get("build_number"),
                     ci_run_id=raw_build.get("ci_run_id"),
-                    commit_sha=build_doc.get("commit_sha")
-                    or raw_build.get("commit_sha", ""),
+                    commit_sha=build_doc.get("commit_sha") or raw_build.get("commit_sha", ""),
                     branch=raw_build.get("branch", ""),
                     ci_conclusion=raw_build.get("conclusion", "unknown"),
                     created_at=raw_build.get("run_created_at"),
@@ -793,41 +736,27 @@ class ModelBuildService:
                     resource_status=resource_status_map,
                     required_resources=build_doc.get("required_resources", []),
                     # Phase 3: Extraction (optional)
-                    training_build_id=(
-                        str(training_build["_id"]) if training_build else None
-                    ),
+                    training_build_id=(str(training_build["_id"]) if training_build else None),
                     extraction_status=(
-                        training_build.get("extraction_status")
-                        if training_build
-                        else None
+                        training_build.get("extraction_status") if training_build else None
                     ),
                     feature_count=feature_vector.get("feature_count", 0)
                     or len(feature_vector.get("features", {})),
                     extraction_error=(
-                        training_build.get("extraction_error")
-                        if training_build
-                        else None
+                        training_build.get("extraction_error") if training_build else None
                     ),
                     # Phase 4: Prediction (optional)
                     prediction_status=(
-                        training_build.get("prediction_status")
-                        if training_build
-                        else None
+                        training_build.get("prediction_status") if training_build else None
                     ),
                     predicted_label=(
-                        training_build.get("predicted_label")
-                        if training_build
-                        else None
+                        training_build.get("predicted_label") if training_build else None
                     ),
                     prediction_confidence=(
-                        training_build.get("prediction_confidence")
-                        if training_build
-                        else None
+                        training_build.get("prediction_confidence") if training_build else None
                     ),
                     prediction_uncertainty=(
-                        training_build.get("prediction_uncertainty")
-                        if training_build
-                        else None
+                        training_build.get("prediction_uncertainty") if training_build else None
                     ),
                 )
             )

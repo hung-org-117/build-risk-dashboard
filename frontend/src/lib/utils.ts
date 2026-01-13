@@ -98,3 +98,49 @@ export const formatDateTime = (dateStr: string | null | undefined): string => {
     minute: "2-digit",
   });
 };
+
+/**
+ * Build source validation status configuration
+ */
+export const BUILD_SOURCE_STATUS_CONFIG = {
+  pending: { label: "Pending", variant: "outline" as const, className: "border-slate-400 text-slate-400" },
+  validating: { label: "Validating...", variant: "outline" as const, className: "border-blue-500 text-blue-500" },
+  completed: { label: "Completed", variant: "default" as const, className: "bg-emerald-600 text-white" },
+  failed: { label: "Failed", variant: "destructive" as const, className: "" },
+} as const;
+
+/**
+ * Source build status configuration
+ */
+export const SOURCE_BUILD_STATUS_CONFIG = {
+  found: {
+    label: "Found",
+    color: "text-green-600",
+  },
+  not_found: {
+    label: "Not Found",
+    color: "text-red-600",
+  },
+  filtered: {
+    label: "Filtered",
+    color: "text-orange-600",
+  },
+  pending: {
+    label: "Pending",
+    color: "text-slate-400",
+  },
+} as const;
+
+/**
+ * Get status configuration for build source validation
+ */
+export function getBuildSourceStatusConfig(status: string) {
+  return BUILD_SOURCE_STATUS_CONFIG[status as keyof typeof BUILD_SOURCE_STATUS_CONFIG] || BUILD_SOURCE_STATUS_CONFIG.pending;
+}
+
+/**
+ * Get status configuration for source build
+ */
+export function getSourceBuildStatusConfig(status: string) {
+  return SOURCE_BUILD_STATUS_CONFIG[status as keyof typeof SOURCE_BUILD_STATUS_CONFIG] || SOURCE_BUILD_STATUS_CONFIG.pending;
+}
