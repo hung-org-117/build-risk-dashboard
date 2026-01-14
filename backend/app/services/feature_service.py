@@ -83,7 +83,9 @@ class FeatureService:
         driver = self._build_pipeline_for_dag_only()
 
         # Build feature -> module mapping and get parent functions to exclude
-        feature_to_module, extract_field_parents = self._build_feature_to_module_mapping()
+        feature_to_module, extract_field_parents = (
+            self._build_feature_to_module_mapping()
+        )
 
         # Get all available variables (features) and their upstream dependencies
         all_variables = {v.name for v in driver.list_available_variables()}
@@ -168,7 +170,7 @@ class FeatureService:
         all_features = {
             f
             for f in all_variables
-            if not f.startswith("_") and f not in DEFAULT_FEATURES and f not in INPUT_RESOURCES
+            if not f.startswith("_") and f not in INPUT_RESOURCES
         }
 
         # Get feature info
@@ -248,7 +250,9 @@ class FeatureService:
             if not deps:
                 levels_map[node] = 0
             else:
-                max_dep_level = max((calc_level(d) for d in deps if d in node_features), default=-1)
+                max_dep_level = max(
+                    (calc_level(d) for d in deps if d in node_features), default=-1
+                )
                 levels_map[node] = max_dep_level + 1
             computing.discard(node)
             return levels_map[node]
@@ -262,7 +266,8 @@ class FeatureService:
             level_nodes[level].append(node)
 
         execution_levels = [
-            {"level": lvl, "nodes": sorted(nodes)} for lvl, nodes in sorted(level_nodes.items())
+            {"level": lvl, "nodes": sorted(nodes)}
+            for lvl, nodes in sorted(level_nodes.items())
         ]
 
         # Collect all unique resources
@@ -307,7 +312,9 @@ class FeatureService:
                     "label": node_name.replace("_", " ").title(),
                     "features": sorted(features),
                     "feature_count": len(features),
-                    "requires_resources": sorted(node_depends_on_resources.get(node_name, set())),
+                    "requires_resources": sorted(
+                        node_depends_on_resources.get(node_name, set())
+                    ),
                     "requires_features": sorted(node_feature_deps),
                     "level": levels_map.get(node_name, 0),
                 }
@@ -349,13 +356,16 @@ class FeatureService:
             "execution_levels": execution_levels,
             "total_features": sum(len(f) for f in node_features.values()),
             "total_nodes": len(node_features),
+            "default_features": sorted(list(DEFAULT_FEATURES)),
         }
 
     def get_features_by_node(self) -> Dict:
         """Get features grouped by extractor node."""
         feature_info = self._extract_feature_info()
         features = [
-            (name, info) for name, info in feature_info.items() if name not in DEFAULT_FEATURES
+            (name, info)
+            for name, info in feature_info.items()
+            if name not in DEFAULT_FEATURES
         ]
 
         by_node: Dict[str, List[Dict]] = defaultdict(list)
@@ -368,7 +378,9 @@ class FeatureService:
                     "display_name": info["display_name"],
                     "description": info["description"],
                     "data_type": info["data_type"],
-                    "depends_on_features": [d for d in info["depends_on"] if d in feature_info],
+                    "depends_on_features": [
+                        d for d in info["depends_on"] if d in feature_info
+                    ],
                     "extractor_node": node,
                 }
             )
@@ -427,7 +439,9 @@ class FeatureService:
     ) -> List[Dict]:
         """List all feature definitions with optional filters."""
         feature_info = self._extract_feature_info()
-        features = [info for name, info in feature_info.items() if name not in DEFAULT_FEATURES]
+        features = [
+            info for name, info in feature_info.items() if name not in DEFAULT_FEATURES
+        ]
 
         if extractor_node:
             features = [f for f in features if f["extractor_node"] == extractor_node]
@@ -438,13 +452,17 @@ class FeatureService:
         """Get a specific feature by name."""
         feature_info = self._extract_feature_info()
         if feature_name not in feature_info:
-            raise HTTPException(status_code=404, detail=f"Feature '{feature_name}' not found")
+            raise HTTPException(
+                status_code=404, detail=f"Feature '{feature_name}' not found"
+            )
         return feature_info[feature_name]
 
     def get_feature_summary(self) -> Dict:
         """Get summary statistics about available features."""
         feature_info = self._extract_feature_info()
-        features = [info for name, info in feature_info.items() if name not in DEFAULT_FEATURES]
+        features = [
+            info for name, info in feature_info.items() if name not in DEFAULT_FEATURES
+        ]
 
         by_category: dict = {}
         by_source: dict = {}

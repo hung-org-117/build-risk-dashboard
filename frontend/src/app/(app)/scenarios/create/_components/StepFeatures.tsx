@@ -110,6 +110,7 @@ export function StepFeatures() {
         extractorNodes,
         dagData,
         allFeatures,
+        defaultFeatures,
         loading,
         selectedFeatures,
         expandedNodes,
@@ -129,14 +130,17 @@ export function StepFeatures() {
         (featuresList: string[]) => {
             const currentSet = selectedFeatures;
             const newSet = new Set(featuresList);
+            // Don't deselect defaults
+            defaultFeatures.forEach(f => newSet.add(f));
+
             newSet.forEach((f) => {
                 if (!currentSet.has(f)) toggleFeature(f);
             });
             currentSet.forEach((f) => {
-                if (!newSet.has(f)) toggleFeature(f);
+                if (!newSet.has(f) && !defaultFeatures.includes(f)) toggleFeature(f);
             });
         },
-        [selectedFeatures, toggleFeature]
+        [selectedFeatures, toggleFeature, defaultFeatures]
     );
 
     // Scan metrics state
@@ -206,13 +210,24 @@ export function StepFeatures() {
                         <ResizablePanel defaultSize={60} minSize={40}>
                             <div className="flex flex-col h-full relative bg-slate-50/50 dark:bg-slate-950/50">
                                 {/* Toolbar */}
-                                <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
-                                    <div className="pointer-events-auto">
-                                        <TemplateSelector onApplyTemplate={applyTemplate} />
+                                <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-2 pointer-events-none">
+                                    <div className="flex items-center justify-between">
+                                        <div className="pointer-events-auto">
+                                            <TemplateSelector onApplyTemplate={applyTemplate} />
+                                        </div>
+                                        <div className="pointer-events-auto flex items-center gap-2 bg-background/80 backdrop-blur-sm p-1 rounded-lg shadow-sm">
+                                            <ViewToggle value={viewMode} onChange={setViewMode} />
+                                        </div>
                                     </div>
-                                    <div className="pointer-events-auto flex items-center gap-2 bg-background/80 backdrop-blur-sm p-1 rounded-lg shadow-sm">
-                                        <ViewToggle value={viewMode} onChange={setViewMode} />
-                                    </div>
+
+                                    {defaultFeatures.length > 0 && (
+                                        <div className="pointer-events-auto bg-blue-50/90 dark:bg-blue-900/40 backdrop-blur-sm border border-blue-200 dark:border-blue-800 p-2 rounded-md text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2 max-w-fit shadow-sm">
+                                            <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                                            <span>
+                                                {defaultFeatures.length} core features are automatically included (e.g. build_id, repo_name)
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Visualization Content */}

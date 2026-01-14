@@ -311,6 +311,66 @@ export default function EnrichmentBuildDetailPage() {
                 </Card>
             )}
 
+            {/* Extraction Issues */}
+            {((enrichment_build.missing_resources && enrichment_build.missing_resources.length > 0) ||
+                (enrichment_build.skipped_features && enrichment_build.skipped_features.length > 0)) && (
+                    <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-900/10">
+                        <CardHeader>
+                            <CardTitle className="text-amber-800 dark:text-amber-500 flex items-center gap-2">
+                                <AlertTriangle className="h-5 w-5" />
+                                Extraction Issues
+                            </CardTitle>
+                            <CardDescription>
+                                Issues encountered during feature extraction
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            {enrichment_build.missing_resources && enrichment_build.missing_resources.length > 0 && (
+                                <div>
+                                    <h4 className="font-medium text-sm mb-2 text-amber-800 dark:text-amber-500">
+                                        Missing Resources
+                                    </h4>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                        The following resources were unavailable, preventing some features from being extracted.
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {enrichment_build.missing_resources.map((res) => (
+                                            <Badge
+                                                key={res}
+                                                variant="outline"
+                                                className="border-amber-300 text-amber-700 bg-amber-100 dark:border-amber-800 dark:bg-amber-900/50"
+                                            >
+                                                {res}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {enrichment_build.skipped_features && enrichment_build.skipped_features.length > 0 && (
+                                <div>
+                                    <h4 className="font-medium text-sm mb-2 text-amber-800 dark:text-amber-500">
+                                        Skipped Features
+                                    </h4>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                        The following features could not be computed due to missing resources or errors.
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {enrichment_build.skipped_features.map((feat) => (
+                                            <Badge
+                                                key={feat}
+                                                variant="outline"
+                                                className="border-slate-300 text-slate-600 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"
+                                            >
+                                                {feat}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+
             {/* Extracted Features */}
             <Card>
                 <CardHeader>

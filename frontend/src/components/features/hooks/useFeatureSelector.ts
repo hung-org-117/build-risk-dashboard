@@ -17,6 +17,7 @@ export interface UseFeatureSelectorReturn {
     extractorNodes: NodeInfo[];
     dagData: FeatureDAGData | null;
     allFeatures: FeatureDefinition[];
+    defaultFeatures: string[];
     loading: boolean;
     error: string | null;
 
@@ -45,6 +46,7 @@ export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFe
     // State
     const [extractorNodes, setExtractorNodes] = useState<NodeInfo[]>([]);
     const [dagData, setDagData] = useState<FeatureDAGData | null>(null);
+    const [defaultFeatures, setDefaultFeatures] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +69,18 @@ export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFe
                 const nodes = Object.values(nodesRes.data.nodes);
                 setExtractorNodes(nodes);
                 setDagData(dagRes.data);
+
+                // Set defaults
+                const defaults = dagRes.data.default_features || [];
+                setDefaultFeatures(defaults);
+
+                // Merge defaults into selection if not already present
+                setSelectedFeatures(prev => {
+                    const next = new Set(prev);
+                    defaults.forEach(f => next.add(f));
+                    return next;
+                });
+
                 setError(null);
             } catch (err) {
                 console.error("Failed to load features:", err);
@@ -91,6 +105,9 @@ export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFe
 
     // Toggle single feature
     const toggleFeature = useCallback((featureName: string) => {
+        // Prevent toggling defaults
+        if (defaultFeatures.includes(featureName)) return;
+
         setSelectedFeatures((prev) => {
             const next = new Set(prev);
             if (next.has(featureName)) {
@@ -100,24 +117,27 @@ export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFe
             }
             return next;
         });
-    }, []);
+    }, [defaultFeatures]);
 
     // Toggle all features in a node
     const toggleNode = useCallback((nodeName: string, features: string[]) => {
         setSelectedFeatures((prev) => {
             const next = new Set(prev);
-            const allSelected = features.every((f) => prev.has(f));
+            const togglableFeatures = features.filter(f => !defaultFeatures.includes(f));
 
-            if (allSelected) {
-                // Deselect all
-                features.forEach((f) => next.delete(f));
+            // Check if all *togglable* features are selected
+            const allTogglableSelected = togglableFeatures.every((f) => prev.has(f));
+
+            if (allTogglableSelected) {
+                // Deselect all togglable
+                togglableFeatures.forEach((f) => next.delete(f));
             } else {
-                // Select all
-                features.forEach((f) => next.add(f));
+                // Select all togglable
+                togglableFeatures.forEach((f) => next.add(f));
             }
             return next;
         });
-    }, []);
+    }, [defaultFeatures]);
 
     // Expand/collapse helpers
     const toggleNodeExpand = useCallback((nodeName: string) => {
@@ -134,19 +154,19 @@ export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFe
 
     // Select all available (configured) features
     const selectAllAvailable = useCallback(() => {
-        const allAvailable: string[] = [];
+        const allAvailable: string[] = [...defaultFeatures];
         extractorNodes.forEach((node) => {
             if (node.is_configured) {
                 node.features.forEach((f) => allAvailable.push(f.name));
             }
         });
         setSelectedFeatures(new Set(allAvailable));
-    }, [extractorNodes]);
+    }, [extractorNodes, defaultFeatures]);
 
-    // Clear all selections
+    // Clear all selections (except defaults)
     const clearSelection = useCallback(() => {
-        setSelectedFeatures(new Set());
-    }, []);
+        setSelectedFeatures(new Set(defaultFeatures));
+    }, [defaultFeatures]);
 
     // Apply template features (filters to only valid features)
     const applyTemplate = useCallback(
@@ -211,6 +231,7 @@ export function useFeatureSelector(initialSelectedFeatures?: Set<string>): UseFe
         extractorNodes,
         dagData,
         allFeatures,
+        defaultFeatures,
         loading,
         error,
 

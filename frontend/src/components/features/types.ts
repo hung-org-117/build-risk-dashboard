@@ -32,6 +32,7 @@ export interface FeatureDAGData {
     execution_levels: ExecutionLevel[];
     total_features: number;
     total_nodes: number;
+    default_features: string[];
 }
 
 // Feature Definition Types

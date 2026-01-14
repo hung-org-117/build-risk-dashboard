@@ -30,7 +30,7 @@ import { useSSE } from "@/contexts/sse-context";
 import { useToast } from "@/components/ui/use-toast";
 
 import { ExtractionStatusBadge, TablePagination } from "@/components/builds";
-import { cn } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 
 // Removed statusColors in favor of ExtractionStatusBadge
 
@@ -91,14 +91,14 @@ export default function ProcessingBuildsPage() {
     }, [subscribe, scenarioId, fetchScenario, fetchBuilds]);
 
     // Retry handler
-    const handleRetryProcessing = async () => {
+    const handleRetry = async () => {
         setRetryLoading(true);
         try {
-            const result = await trainingScenariosApi.retryProcessing(scenarioId);
+            const result = await trainingScenariosApi.retryExtraction(scenarioId);
             toast({ title: result.message || "Retry started" });
             fetchBuilds();
         } catch (err) {
-            toast({ variant: "destructive", title: "Failed to retry processing" });
+            toast({ variant: "destructive", title: "Failed to retry extraction" });
         } finally {
             setRetryLoading(false);
         }
@@ -106,60 +106,42 @@ export default function ProcessingBuildsPage() {
 
     const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
 
-    // Calculate failed count from items or scenario stats
-    const failedCount = scenario
-        ? scenario.builds_ingested - scenario.builds_features_extracted
-        : 0;
-
-    // Determine available actions - can retry if processing is done and some builds failed
-    const canRetry = failedCount > 0 && ["processed", "completed"].includes(scenario?.status || "");
+    // Calculate failed count checking extraction_status
+    const failedBuildsCount = scenario ? (scenario.builds_features_extracted_failed || 0) + (scenario.builds_missing_resource || 0) : 0;
+    const hasFailedBuilds = failedBuildsCount > 0;
 
     return (
         <div className="space-y-4">
-            {/* Action Card */}
-            {canRetry && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle className="text-base">Processing Actions</CardTitle>
-                                <CardDescription>
-                                    {failedCount} builds failed feature extraction
-                                </CardDescription>
-                            </div>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleRetryProcessing}
-                                disabled={retryLoading}
-                            >
-                                {retryLoading ? (
-                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                    <RotateCcw className="h-4 w-4 mr-2" />
-                                )}
-                                Retry Failed ({failedCount})
-                            </Button>
-                        </div>
-                    </CardHeader>
-                </Card>
-            )}
-
-            {/* Header with refresh is now part of CardHeader */}
 
             <Card>
                 <CardHeader className="space-y-4">
                     <div className="flex flex-row items-center justify-between">
                         <div>
-                            <CardTitle>Processing Builds</CardTitle>
+                            <CardTitle>Extracted Features Builds</CardTitle>
                             <CardDescription>
                                 {data?.total ?? 0} builds found
                             </CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={fetchBuilds} disabled={loading}>
-                            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-                            Refresh
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={fetchBuilds} disabled={loading}>
+                                <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+                                Refresh
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleRetry}
+                                disabled={retryLoading || !hasFailedBuilds}
+                                className={cn(
+                                    "text-amber-600 border-amber-300 hover:bg-amber-50",
+                                    !hasFailedBuilds && "opacity-50"
+                                )}
+                            >
+                                <RefreshCw className={cn("h-4 w-4 mr-2", retryLoading && "animate-spin")} />
+                                Retry Failed Extraction
+                            </Button>
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -167,24 +149,24 @@ export default function ProcessingBuildsPage() {
                         <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
                             <thead className="bg-slate-50 dark:bg-slate-900/40">
                                 <tr>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Repository</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Commit</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Features</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Status</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Split</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Enriched At</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-900 dark:text-slate-100">Build ID</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-900 dark:text-slate-100">Commit</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-900 dark:text-slate-100">Repository</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-900 dark:text-slate-100">Status</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-900 dark:text-slate-100">Features</th>
+                                    <th className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">Enriched At</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                                 {loading ? (
                                     Array.from({ length: 5 }).map((_, i) => (
                                         <tr key={i}>
+                                            <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
+                                            <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
                                             <td className="px-4 py-3"><Skeleton className="h-4 w-40" /></td>
                                             <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
                                             <td className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
-                                            <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
-                                            <td className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
-                                            <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
+                                            <td className="px-4 py-3"><Skeleton className="h-4 w-32" /></td>
                                         </tr>
                                     ))
                                 ) : data?.items.length === 0 ? (
@@ -200,25 +182,29 @@ export default function ProcessingBuildsPage() {
                                             className="hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors cursor-pointer"
                                             onClick={() => router.push(`/scenarios/${scenarioId}/builds/processing/${build.id}`)}
                                         >
-                                            <td className="px-4 py-3 font-medium">{build.repo_full_name}</td>
-                                            <td className="px-4 py-3 font-mono text-xs">{build.commit_sha.slice(0, 7)}</td>
-                                            <td className="px-4 py-3 text-sm">
-                                                {build.feature_count}/{build.expected_feature_count}
+                                            <td className="px-4 py-3 font-mono text-xs">
+                                                {build.ci_run_id}
+                                            </td>
+                                            <td className="px-4 py-3 font-mono text-xs">
+                                                {build.commit_sha?.substring(0, 8)}
+                                            </td>
+                                            <td className="px-4 py-3 font-medium">
+                                                {build.repo_full_name}
                                             </td>
                                             <td className="px-4 py-3">
-                                                <ExtractionStatusBadge status={build.extraction_status as any} />
+                                                <ExtractionStatusBadge status={build.extraction_status} />
                                             </td>
                                             <td className="px-4 py-3">
-                                                {build.split_assignment ? (
-                                                    <Badge variant="outline">{build.split_assignment}</Badge>
-                                                ) : (
-                                                    <span className="text-muted-foreground">-</span>
-                                                )}
+                                                <span className={cn(
+                                                    "font-medium",
+                                                    build.feature_count !== build.expected_feature_count ? "text-amber-600" : "text-slate-600 dark:text-slate-400"
+                                                )}>
+                                                    {build.feature_count}
+                                                </span>
+                                                <span className="text-muted-foreground">/{build.expected_feature_count}</span>
                                             </td>
-                                            <td className="px-4 py-3 text-muted-foreground">
-                                                {build.enriched_at
-                                                    ? new Date(build.enriched_at).toLocaleDateString()
-                                                    : "-"}
+                                            <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
+                                                {formatDateTime(build.enriched_at)}
                                             </td>
                                         </tr>
                                     ))

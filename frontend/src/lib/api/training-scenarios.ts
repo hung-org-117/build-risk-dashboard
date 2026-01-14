@@ -187,7 +187,6 @@ export interface TrainingEnrichmentBuildRecord {
     extraction_error?: string;
     feature_count: number;
     expected_feature_count: number;
-    split_assignment?: string;
     created_at?: string;
     enriched_at?: string;
 }
@@ -652,9 +651,9 @@ export const trainingScenariosApi = {
     /**
      * Retry failed processing builds
      */
-    retryProcessing: async (scenarioId: string): Promise<{ message: string; retry_count: number }> => {
+    retryExtraction: async (scenarioId: string): Promise<{ message: string; retry_count: number }> => {
         const response = await api.post<{ message: string; retry_count: number }>(
-            `/training-scenarios/${scenarioId}/retry-processing`
+            `/training-scenarios/${scenarioId}/reprocess-failed-feature-extraction`
         );
         return response.data;
     },

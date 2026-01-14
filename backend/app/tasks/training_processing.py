@@ -718,12 +718,12 @@ def finalize_feature_extraction(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.training_processing.reprocess_failed_builds",
+    name="app.tasks.training_processing.reprocess_failed_feature_extraction",
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=360,
 )
-def reprocess_failed_builds(
+def reprocess_failed_feature_extraction(
     self: SafeTask,
     scenario_id: str,
 ) -> Dict[str, Any]:
@@ -908,7 +908,7 @@ def dispatch_scenario_scans(
 
             commits_to_scan[commit_key] = {
                 "raw_repo_id": str(build.raw_repo_id),
-                "github_repo_id": raw_repo.github_id,
+                "github_repo_id": raw_repo.github_repo_id,
                 "commit_sha": raw_run.commit_sha,
                 "repo_full_name": raw_repo.full_name,
             }

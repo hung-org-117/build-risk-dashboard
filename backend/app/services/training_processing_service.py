@@ -9,7 +9,7 @@ Handles Phase 2 of the Training Pipeline:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 from pymongo.database import Database
@@ -62,11 +62,18 @@ class TrainingProcessingService:
         res = start_scenario_processing.delay(scenario_id)
         return {"status": "queued", "task_id": res.id}
 
-    def retry_processing(self, scenario_id: str, user_id: str) -> Dict[str, Any]:
+    def reprocess_failed_feature_extraction(
+        self, scenario_id: str, user_id: str
+    ) -> Dict[str, Any]:
         """Retry failed processing builds."""
-        # Typically just re-triggering start_processing will pick up where it left off
-        # or re-process based on status. Refine logic if needed.
-        return self.start_processing(scenario_id, user_id)
+        from app.tasks.training_processing import reprocess_failed_feature_extraction
+
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
+        res = reprocess_failed_feature_extraction.delay(scenario_id)
+        return {"status": "queued", "task_id": res.id}
 
     def get_enrichment_builds(
         self,
@@ -92,43 +99,57 @@ class TrainingProcessingService:
             except ValueError:
                 pass
 
-        builds, total = self.enrichment_build_repo.find_by_scenario(
-            scenario_id=scenario_id,
-            extraction_status=status_enum,
-            skip=skip,
-            limit=limit,
+        builds_data, total = (
+            self.enrichment_build_repo.find_by_scenario_with_feature_counts(
+                scenario_id=scenario_id,
+                extraction_status=status_enum,
+                skip=skip,
+                limit=limit,
+            )
         )
+
+        from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
         # Get expected feature count from scenario
-        expected_features = (
-            len(scenario.feature_config.dag_features) if scenario.feature_config else 0
+        current_features = (
+            set(scenario.feature_config.dag_features)
+            if scenario.feature_config
+            else set()
         )
+        expected_features = len(current_features.union(DEFAULT_FEATURES))
 
         items = []
-        for build in builds:
+        for build in builds_data:
             items.append(
                 TrainingEnrichmentBuildResponse(
-                    id=str(build.id),
+                    id=str(
+                        build["id"]
+                    ),  # Aggregation returns _id but we projected id=_id
+                    # wait, pymongo returns _id as ObjectId usually.
+                    # My projection: "id": "$_id" makes an `id` field.
                     raw_build_run_id=(
-                        str(build.raw_build_run_id) if build.raw_build_run_id else ""
+                        str(build["raw_build_run_id"])
+                        if build.get("raw_build_run_id")
+                        else ""
                     ),
-                    ci_run_id=build.ci_run_id or "",
-                    commit_sha=build.commit_sha or "",
-                    repo_full_name=build.repo_full_name or "",
-                    extraction_status=(
-                        build.extraction_status.value
-                        if hasattr(build.extraction_status, "value")
-                        else build.extraction_status
-                    ),
-                    extraction_error=build.extraction_error,
-                    feature_count=build.feature_count or 0,
+                    ci_run_id=build.get("ci_run_id", ""),
+                    commit_sha=build.get("commit_sha", ""),
+                    repo_full_name=build.get("repo_full_name", ""),
+                    extraction_status=build.get("extraction_status", "pending"),
+                    extraction_error=build.get("extraction_error"),
+                    feature_count=build.get(
+                        "feature_count", 0
+                    ),  # From FeatureVector join
                     expected_feature_count=expected_features,
-                    split_assignment=build.split_assignment,
                     created_at=(
-                        build.created_at.isoformat() if build.created_at else None
+                        build["created_at"].isoformat()
+                        if build.get("created_at")
+                        else None
                     ),
                     enriched_at=(
-                        build.enriched_at.isoformat() if build.enriched_at else None
+                        build["enriched_at"].isoformat()
+                        if build.get("enriched_at")
+                        else None
                     ),
                 )
             )
@@ -151,7 +172,8 @@ class TrainingProcessingService:
         Returns combined data: build info, features, and audit log.
         """
         # Verify scenario exists
-        if not self.scenario_repo.find_by_id(scenario_id):
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
         build = self.enrichment_build_repo.find_by_id(build_id)
@@ -162,6 +184,23 @@ class TrainingProcessingService:
         raw_build = None
         if build.raw_build_run_id:
             raw_build = self.raw_build_run_repo.find_by_id(build.raw_build_run_id)
+
+        # Get features from FeatureVector if available
+        features = {}
+        feature_count = 0
+        missing_resources = []
+        skipped_features = []
+
+        if build.feature_vector_id:
+            from app.repositories.feature_vector import FeatureVectorRepository
+
+            feature_vector_repo = FeatureVectorRepository(self.db)
+            fv = feature_vector_repo.find_by_id(build.feature_vector_id)
+            if fv:
+                features = fv.features
+                feature_count = fv.feature_count
+                missing_resources = fv.missing_resources
+                skipped_features = fv.skipped_features
 
         # Get audit log
         audit_log = self.audit_log_repo.find_by_enrichment_build(build_id)
@@ -181,18 +220,21 @@ class TrainingProcessingService:
                     else build.extraction_status
                 ),
                 "extraction_error": build.extraction_error,
-                "feature_count": build.feature_count or 0,
-                "expected_feature_count": build.expected_feature_count or 0,
-                "split_assignment": build.split_assignment,
+                "feature_count": feature_count,
+                "expected_feature_count": (
+                    len(scenario.feature_config.dag_features)
+                    if scenario and scenario.feature_config
+                    else 0
+                ),
                 "created_at": (
                     build.created_at.isoformat() if build.created_at else None
                 ),
                 "enriched_at": (
                     build.enriched_at.isoformat() if build.enriched_at else None
                 ),
-                "features": build.features or {},
-                "missing_resources": build.missing_resources or [],
-                "skipped_features": build.skipped_features or [],
+                "features": features,
+                "missing_resources": missing_resources,
+                "skipped_features": skipped_features,
             },
             "raw_build_run": (
                 {

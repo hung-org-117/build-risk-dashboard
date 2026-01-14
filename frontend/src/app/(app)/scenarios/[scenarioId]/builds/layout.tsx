@@ -58,10 +58,9 @@ export default function BuildsLayout({ children }: { children: ReactNode }) {
 
     const basePath = `/scenarios/${scenarioId}/builds`;
 
-    const TabButton = ({ tab, label, icon: Icon, disabled, href }: {
+    const TabButton = ({ tab, label, disabled, href }: {
         tab: string;
         label: string;
-        icon: any;
         disabled?: boolean;
         href: string
     }) => {
@@ -80,7 +79,6 @@ export default function BuildsLayout({ children }: { children: ReactNode }) {
                 )}
             >
                 {disabled && <Lock className="h-3 w-3" />}
-                <Icon className="h-4 w-4" />
                 {label}
             </Link>
         );
@@ -99,18 +97,16 @@ export default function BuildsLayout({ children }: { children: ReactNode }) {
             {/* Sub-tabs Navigation */}
             <div className="flex items-center justify-between">
                 <div className="flex gap-1 rounded-lg bg-muted p-1">
-                    <TabButton tab="ingestion" label="Data Collection" icon={FileInput} href={`${basePath}/ingestion`} />
+                    <TabButton tab="ingestion" label="Data Collection" href={`${basePath}/ingestion`} />
                     <TabButton
                         tab="processing"
                         label="Feature Extraction"
-                        icon={FileOutput}
                         disabled={!canViewProcessing}
                         href={`${basePath}/processing`}
                     />
                     <TabButton
                         tab="scans"
                         label="Integration Scans"
-                        icon={Shield}
                         disabled={!canViewScans}
                         href={`${basePath}/scans`}
                     />

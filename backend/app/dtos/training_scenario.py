@@ -133,7 +133,6 @@ class TrainingEnrichmentBuildResponse(BaseModel):
     extraction_error: Optional[str] = None
     feature_count: int
     expected_feature_count: int
-    split_assignment: Optional[str] = None
     created_at: Optional[str] = None
     enriched_at: Optional[str] = None
     # Details (optional/heavy)

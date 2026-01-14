@@ -27,7 +27,6 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         self,
         scenario_id: str,
         extraction_status: Optional[ExtractionStatus] = None,
-        split_assignment: Optional[str] = None,
         skip: int = 0,
         limit: int = 0,
     ) -> tuple[list[TrainingEnrichmentBuild], int]:
@@ -37,7 +36,6 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         Args:
             scenario_id: Scenario ID
             extraction_status: Filter by extraction status
-            split_assignment: Filter by split (train/validation/test)
             skip: Pagination offset
             limit: Max results
 
@@ -49,8 +47,6 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         }
         if extraction_status:
             query["extraction_status"] = extraction_status.value
-        if split_assignment:
-            query["split_assignment"] = split_assignment
 
         return self.paginate(
             query,
@@ -190,37 +186,6 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
 
         return self.update_one(enrichment_build_id, updates)
 
-    def assign_splits(
-        self,
-        scenario_id: str,
-        assignments: Dict[str, List[str]],
-    ) -> int:
-        """
-        Bulk assign splits to enrichment builds.
-
-        Args:
-            scenario_id: Scenario ID
-            assignments: Dict mapping split type to list of enrichment_build_ids
-                        e.g., {"train": [id1, id2], "validation": [id3]}
-
-        Returns:
-            Total number of builds updated
-        """
-        total_updated = 0
-
-        for split_type, enrichment_build_ids in assignments.items():
-            if not enrichment_build_ids:
-                continue
-
-            object_ids = [self._to_object_id(bid) for bid in enrichment_build_ids]
-            result = self.collection.update_many(
-                {"_id": {"$in": object_ids}},
-                {"$set": {"split_assignment": split_type}},
-            )
-            total_updated += result.modified_count
-
-        return total_updated
-
     def get_completed_with_features(
         self,
         scenario_id: str,
@@ -280,25 +245,82 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         ]
         return list(self.collection.aggregate(pipeline))
 
+    def find_by_scenario_with_feature_counts(
+        self,
+        scenario_id: str,
+        extraction_status: Optional[ExtractionStatus] = None,
+        skip: int = 0,
+        limit: int = 0,
+    ) -> tuple[List[Dict[str, Any]], int]:
+        """
+        Get enrichment builds with feature counts from FeatureVector.
+        Used for list views to avoid frequent N+1 queries.
+        """
+        match_stage = {"scenario_id": self._to_object_id(scenario_id)}
+        if extraction_status:
+            match_stage["extraction_status"] = extraction_status.value
+
+        pipeline = [
+            {"$match": match_stage},
+            {"$sort": {"created_at": 1}},
+        ]
+
+        # Count total before skipping
+        count_pipeline = pipeline + [{"$count": "total"}]
+        total_res = list(self.collection.aggregate(count_pipeline))
+        total = total_res[0]["total"] if total_res else 0
+
+        # Apply pagination
+        if skip > 0:
+            pipeline.append({"$skip": skip})
+        if limit > 0:
+            pipeline.append({"$limit": limit})
+
+        # Lookup FeatureVector to get only feature_count
+        pipeline.extend(
+            [
+                {
+                    "$lookup": {
+                        "from": "feature_vectors",
+                        "localField": "feature_vector_id",
+                        "foreignField": "_id",
+                        "as": "fv",
+                    }
+                },
+                {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": True}},
+                {
+                    "$project": {
+                        # Include all original fields
+                        "id": "$_id",  # Alias _id to id for consistency
+                        "scenario_id": 1,
+                        "ingestion_build_id": 1,
+                        "raw_repo_id": 1,
+                        "raw_build_run_id": 1,
+                        "feature_vector_id": 1,
+                        "extraction_status": 1,
+                        "extraction_error": 1,
+                        "enriched_at": 1,
+                        "outcome": 1,
+                        "ci_run_id": 1,
+                        "commit_sha": 1,
+                        "repo_full_name": 1,
+                        "build_started_at": 1,
+                        "created_at": 1,
+                        # Joined fields
+                        "feature_count": {"$ifNull": ["$fv.feature_count", 0]},
+                    }
+                },
+            ]
+        )
+
+        results = list(self.collection.aggregate(pipeline))
+        return results, total
+
     def count_by_extraction_status(self, scenario_id: str) -> Dict[str, int]:
         """Get count of builds by extraction status."""
         pipeline = [
             {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
             {"$group": {"_id": "$extraction_status", "count": {"$sum": 1}}},
-        ]
-        results = self.aggregate(pipeline)
-        return {r["_id"]: r["count"] for r in results}
-
-    def count_by_split(self, scenario_id: str) -> Dict[str, int]:
-        """Get count of builds by split assignment."""
-        pipeline = [
-            {
-                "$match": {
-                    "scenario_id": self._to_object_id(scenario_id),
-                    "split_assignment": {"$ne": None},
-                }
-            },
-            {"$group": {"_id": "$split_assignment", "count": {"$sum": 1}}},
         ]
         results = self.aggregate(pipeline)
         return {r["_id"]: r["count"] for r in results}

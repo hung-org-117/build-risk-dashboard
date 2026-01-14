@@ -23,15 +23,20 @@ service = FeatureService()
 
 @router.get("/dag", response_model=DAGResponse)
 def get_feature_dag(
-    selected_features: Optional[List[str]] = Query(None, description="Filter to specific features"),
+    selected_features: Optional[List[str]] = Query(
+        None, description="Filter to specific features"
+    ),
 ):
     result = service.get_feature_dag(selected_features)
     return DAGResponse(
         nodes=[DAGNodeResponse(**n) for n in result["nodes"]],
         edges=[DAGEdgeResponse(**e) for e in result["edges"]],
-        execution_levels=[ExecutionLevelResponse(**l) for l in result["execution_levels"]],
+        execution_levels=[
+            ExecutionLevelResponse(**l) for l in result["execution_levels"]
+        ],
         total_features=result["total_features"],
         total_nodes=result["total_nodes"],
+        default_features=result["default_features"],
     )
 
 
@@ -155,7 +160,9 @@ def get_config_requirements(request: ConfigRequirementsRequest):
     from app.tasks.pipeline.feature_dag.log_parsers import LogParserRegistry
 
     # Collect requirements from features
-    requirements = collect_config_requirements(request.selected_features, HAMILTON_MODULES)
+    requirements = collect_config_requirements(
+        request.selected_features, HAMILTON_MODULES
+    )
 
     # Build response with enhanced options from registries
     fields = []

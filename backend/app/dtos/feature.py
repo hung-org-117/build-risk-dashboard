@@ -86,6 +86,7 @@ class DAGResponse(BaseModel):
     execution_levels: List[ExecutionLevelResponse]
     total_features: int
     total_nodes: int
+    default_features: List[str]
 
 
 # Config Requirements DTOs
@@ -98,7 +99,9 @@ class ConfigFieldSpec(BaseModel):
     required: bool
     description: str
     default: Optional[Any] = None
-    options: Optional[Any] = None  # Flexible: list, dict (grouped), or any structure for UI
+    options: Optional[Any] = (
+        None  # Flexible: list, dict (grouped), or any structure for UI
+    )
 
 
 class ConfigRequirementsRequest(BaseModel):

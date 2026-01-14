@@ -564,15 +564,17 @@ def retry_ingestion(
     return service.retry_ingestion(scenario_id, str(current_user["_id"]))
 
 
-@router.post("/{scenario_id}/retry-processing")
-def retry_processing(
+@router.post("/{scenario_id}/reprocess-failed-feature-extraction")
+def reprocess_failed_feature_extraction(
     scenario_id: str,
     current_user: User = Depends(get_current_user),  # noqa: B008
     db=Depends(get_db),  # noqa: B008
 ):
     """Retry failed processing builds."""
     service = TrainingProcessingService(db)
-    return service.retry_processing(scenario_id, str(current_user["_id"]))
+    return service.reprocess_failed_feature_extraction(
+        scenario_id, str(current_user["_id"])
+    )
 
 
 # ============================================================================
