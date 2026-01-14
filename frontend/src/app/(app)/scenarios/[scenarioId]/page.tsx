@@ -272,12 +272,6 @@ export default function ScenarioOverviewPage() {
                                     <span className="text-muted-foreground">Failed</span>
                                     <span className="font-medium text-red-600">{scenario.builds_features_extracted_failed || 0}</span>
                                 </div>
-                                <div className="flex justify-between p-2 bg-muted/40 rounded-md">
-                                    <span className="text-muted-foreground">Completed</span>
-                                    <span className={`font-medium ${scenario.feature_extraction_completed ? 'text-green-600' : 'text-yellow-600'}`}>
-                                        {scenario.feature_extraction_completed ? '✓ Yes' : '⏳ In Progress'}
-                                    </span>
-                                </div>
                             </div>
                         </div>
 
@@ -296,12 +290,6 @@ export default function ScenarioOverviewPage() {
                                 <div className="flex justify-between p-2 bg-red-50 dark:bg-red-950/30 rounded-md">
                                     <span className="text-muted-foreground">Failed</span>
                                     <span className="font-medium text-red-600">{scenario.scans_failed || 0}</span>
-                                </div>
-                                <div className="flex justify-between p-2 bg-muted/40 rounded-md">
-                                    <span className="text-muted-foreground">Completed</span>
-                                    <span className={`font-medium ${scenario.scan_extraction_completed ? 'text-green-600' : 'text-yellow-600'}`}>
-                                        {scenario.scan_extraction_completed ? '✓ Yes' : (scenario.scans_total > 0 ? '⏳ In Progress' : '—')}
-                                    </span>
                                 </div>
                             </div>
                         </div>

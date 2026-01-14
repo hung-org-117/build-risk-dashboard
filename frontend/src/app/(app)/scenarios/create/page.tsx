@@ -282,7 +282,10 @@ function WizardContent() {
                     dag_features: state.features.dag_features,
                     scan_metrics: state.features.scan_metrics,
                     scan_tool_config: state.scanConfigs,
-                    extractor_configs: state.featureConfigs.global,
+                    extractor_configs: {
+                        global: state.featureConfigs.global || {},
+                        repos: state.featureConfigs.repos || {},
+                    },
                 },
                 // No splitting_config - will be configured at export time
             };

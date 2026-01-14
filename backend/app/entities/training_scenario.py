@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.entities.base import BaseEntity, PyObjectId
 
@@ -29,7 +29,7 @@ class ScenarioStatus(str, Enum):
     FAILED = "failed"  # Error occurred
 
 
-class DataSourceConfig(BaseEntity):
+class DataSourceConfig(BaseModel):
     """Configuration for filtering builds from existing DB data."""
 
     class Config:
@@ -57,7 +57,7 @@ class DataSourceConfig(BaseEntity):
     )
 
 
-class FeatureConfig(BaseEntity):
+class FeatureConfig(BaseModel):
     """Configuration for feature selection."""
 
     class Config:
@@ -78,7 +78,7 @@ class FeatureConfig(BaseEntity):
     )
     extractor_configs: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Per-language/framework extractor settings",
+        description="Per-language/framework extractor settings: { global: {...}, repos: {...} }",
     )
 
 
