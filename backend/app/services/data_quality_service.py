@@ -22,8 +22,11 @@ from pymongo.database import Database
 from app.entities.data_quality import (
     DataQualityMetric,
     DataQualityReport,
+    MetricSource,
+    QualityEvaluationStatus,
     QualityIssue,
     QualityIssueSeverity,
+    ScanMetricsSummary,
 )
 from app.repositories.data_quality_repository import DataQualityRepository
 from app.repositories.feature_vector import FeatureVectorRepository
@@ -510,3 +513,242 @@ class DataQualityService:
             )
 
         return issues
+
+    # =========================================================================
+    # INCREMENTAL UPDATE METHODS (for real-time quality tracking)
+    # =========================================================================
+
+    def get_or_create_report(self, scenario_id: str) -> DataQualityReport:
+        """
+        Get existing report for scenario or create a new one.
+        Used for incremental updates during processing.
+        """
+        existing = self.quality_repo.find_by_scenario(scenario_id)
+        if existing:
+            return existing
+
+        # Create new report in RUNNING state
+        report = DataQualityReport(
+            scenario_id=ObjectId(scenario_id),
+            status=QualityEvaluationStatus.RUNNING,
+        )
+        report.started_at = (
+            report.started_at or __import__("datetime").datetime.utcnow()
+        )
+        self.quality_repo.insert_one(report)
+        return report
+
+    def update_feature_metrics_incremental(
+        self,
+        scenario_id: str,
+        feature_name: str,
+        value: any,
+        data_type: str = "unknown",
+    ) -> None:
+        """
+        Update quality metrics incrementally after a feature is extracted.
+        Called after each build's features are extracted.
+
+        Args:
+            scenario_id: Scenario ID
+            feature_name: Name of the extracted feature
+            value: The extracted value (can be None)
+            data_type: Data type of the feature
+        """
+        report = self.get_or_create_report(scenario_id)
+
+        # Find or create metric for this feature
+        metric = next(
+            (m for m in report.feature_metrics if m.feature_name == feature_name),
+            None,
+        )
+
+        if not metric:
+            metric = DataQualityMetric(
+                feature_name=feature_name,
+                source=MetricSource.FEATURE,
+                data_type=data_type,
+            )
+            report.feature_metrics.append(metric)
+
+        # Update counts
+        metric.total_values += 1
+        if value is None:
+            metric.null_count += 1
+
+        # Recalculate completeness
+        if metric.total_values > 0:
+            metric.completeness_pct = (
+                (metric.total_values - metric.null_count) / metric.total_values * 100
+            )
+
+        # Update in DB
+        self.quality_repo.update_one(
+            str(report.id),
+            {"feature_metrics": [m.dict() for m in report.feature_metrics]},
+        )
+
+    def update_scan_metrics_incremental(
+        self,
+        scenario_id: str,
+        scan_type: str,  # "trivy" or "sonarqube"
+        has_metrics: bool,
+    ) -> None:
+        """
+        Update scan metrics summary incrementally after a scan completes.
+        Called after each scan finishes.
+
+        Args:
+            scenario_id: Scenario ID
+            scan_type: Type of scan ("trivy" or "sonarqube")
+            has_metrics: Whether the scan produced metrics
+        """
+        report = self.get_or_create_report(scenario_id)
+        summary = report.scan_metrics_summary or ScanMetricsSummary()
+
+        if scan_type == "trivy":
+            summary.trivy_builds_scanned += 1
+            if has_metrics:
+                summary.trivy_builds_with_metrics += 1
+            if summary.trivy_builds_scanned > 0:
+                summary.trivy_coverage_pct = (
+                    summary.trivy_builds_with_metrics
+                    / summary.trivy_builds_scanned
+                    * 100
+                )
+        elif scan_type == "sonarqube":
+            summary.sonarqube_builds_scanned += 1
+            if has_metrics:
+                summary.sonarqube_builds_with_metrics += 1
+            if summary.sonarqube_builds_scanned > 0:
+                summary.sonarqube_coverage_pct = (
+                    summary.sonarqube_builds_with_metrics
+                    / summary.sonarqube_builds_scanned
+                    * 100
+                )
+
+        # Update in DB
+        self.quality_repo.update_one(
+            str(report.id),
+            {"scan_metrics_summary": summary.dict()},
+        )
+
+    def finalize_quality_report(self, scenario_id: str) -> DataQualityReport:
+        """
+        Finalize quality report after enrichment is complete.
+        Calculates final scores and marks report as COMPLETED.
+
+        Called from check_and_notify_enrichment_completed.
+        """
+        report = self.quality_repo.find_by_scenario(scenario_id)
+        if not report:
+            # If no report exists, run full evaluation
+            return self.evaluate_version(scenario_id)
+
+        # Get scenario for build counts
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if scenario:
+            report.total_builds = scenario.builds_total or 0
+            report.enriched_builds = scenario.builds_features_extracted or 0
+            report.failed_builds = scenario.builds_features_extracted_failed or 0
+            report.total_features = len(scenario.feature_config.dag_features or [])
+
+            # Calculate coverage score
+            if report.total_builds > 0:
+                report.coverage_score = (
+                    report.enriched_builds / report.total_builds * 100
+                )
+
+            # Populate scan metrics summary from scenario stats
+            scans_total = scenario.scans_total or 0
+            scans_completed = scenario.scans_completed or 0
+
+            # Get scan tool config to determine which tools are configured
+            scan_config = scenario.feature_config.scan_tool_config or {}
+            trivy_configured = "trivy" in scan_config
+            sonarqube_configured = "sonarqube" in scan_config
+
+            scan_summary = ScanMetricsSummary()
+
+            # Estimate per-tool based on configured tools
+            # Each commit can have Trivy and/or SonarQube scans
+            if trivy_configured and sonarqube_configured:
+                # Both configured - split counts evenly (approximation)
+                half_total = scans_total // 2
+                half_completed = scans_completed // 2
+                scan_summary.trivy_builds_scanned = half_total
+                scan_summary.trivy_builds_with_metrics = half_completed
+                scan_summary.sonarqube_builds_scanned = scans_total - half_total
+                scan_summary.sonarqube_builds_with_metrics = (
+                    scans_completed - half_completed
+                )
+            elif trivy_configured:
+                scan_summary.trivy_builds_scanned = scans_total
+                scan_summary.trivy_builds_with_metrics = scans_completed
+            elif sonarqube_configured:
+                scan_summary.sonarqube_builds_scanned = scans_total
+                scan_summary.sonarqube_builds_with_metrics = scans_completed
+
+            # Calculate coverage percentages
+            if scan_summary.trivy_builds_scanned > 0:
+                scan_summary.trivy_coverage_pct = (
+                    scan_summary.trivy_builds_with_metrics
+                    / scan_summary.trivy_builds_scanned
+                    * 100
+                )
+            if scan_summary.sonarqube_builds_scanned > 0:
+                scan_summary.sonarqube_coverage_pct = (
+                    scan_summary.sonarqube_builds_with_metrics
+                    / scan_summary.sonarqube_builds_scanned
+                    * 100
+                )
+
+            report.scan_metrics_summary = scan_summary
+
+        # Calculate completeness score from feature metrics
+        report.completeness_score = self._calculate_completeness_score(
+            report.feature_metrics
+        )
+
+        # Calculate validity score
+        report.validity_score = self._calculate_validity_score(report.feature_metrics)
+
+        # Calculate overall quality score
+        quality_score = (
+            self.COMPLETENESS_WEIGHT * report.completeness_score
+            + self.VALIDITY_WEIGHT * report.validity_score
+            + self.CONSISTENCY_WEIGHT * report.consistency_score
+            + self.COVERAGE_WEIGHT * report.coverage_score
+        )
+
+        report.mark_completed(quality_score)
+
+        # Update in DB
+        self.quality_repo.update_one(
+            str(report.id),
+            {
+                "status": (
+                    report.status.value
+                    if hasattr(report.status, "value")
+                    else report.status
+                ),
+                "quality_score": report.quality_score,
+                "completeness_score": report.completeness_score,
+                "validity_score": report.validity_score,
+                "consistency_score": report.consistency_score,
+                "coverage_score": report.coverage_score,
+                "total_builds": report.total_builds,
+                "enriched_builds": report.enriched_builds,
+                "failed_builds": report.failed_builds,
+                "total_features": report.total_features,
+                "scan_metrics_summary": report.scan_metrics_summary.dict(),
+                "completed_at": report.completed_at,
+            },
+        )
+
+        logger.info(
+            f"Quality report finalized for scenario {scenario_id}: "
+            f"score={quality_score:.1f}"
+        )
+
+        return report

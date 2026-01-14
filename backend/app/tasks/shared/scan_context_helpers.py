@@ -97,6 +97,11 @@ def check_and_mark_scans_completed(db: Database, context_id: str) -> bool:
             if not getattr(scenario, "scan_extraction_completed", False):
                 scenario_repo.mark_scan_extraction_completed(context_id)
                 logger.info(f"TrainingScenario {context_id} scan extraction completed")
+
+                # Publish SSE update for scan completion
+                from app.tasks.shared.events import publish_scenario_update
+
+                publish_scenario_update(scenario)
             return True
         return False
 

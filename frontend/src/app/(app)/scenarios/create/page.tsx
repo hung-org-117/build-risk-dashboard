@@ -57,16 +57,17 @@ function StepReview() {
                     <CardContent>
                         <div className="space-y-4">
                             <div className="grid gap-2">
-                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</span>
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name <span className="text-red-500">*</span></span>
                                 <Input
                                     value={state.name}
                                     onChange={(e) => setName(e.target.value)}
                                     placeholder="Enter scenario name"
                                     className="font-medium"
+                                    required
                                 />
                             </div>
                             <div className="grid gap-2">
-                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description <span className="text-muted-foreground/70 lowercase font-normal">(optional)</span></span>
                                 <Textarea
                                     value={state.description}
                                     onChange={(e) => setDescription(e.target.value)}
@@ -117,8 +118,10 @@ function StepReview() {
                             {/* CI Provider */}
                             <div className="grid gap-1">
                                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">CI Provider</span>
-                                <div className="text-sm font-medium capitalize">
-                                    {state.dataSource.ci_provider === "all" ? "All Providers" : state.dataSource.ci_provider}
+                                <div className="text-sm text-muted-foreground">
+                                    {state.dataSource.ci_providers.length === 0
+                                        ? "All Providers"
+                                        : state.dataSource.ci_providers.map(p => p.replace('_', ' ')).join(", ")}
                                 </div>
                             </div>
 
@@ -133,7 +136,7 @@ function StepReview() {
                                             {state.dataSource.date_end ? new Date(state.dataSource.date_end).toLocaleDateString() : "Now"}
                                         </span>
                                     ) : (
-                                        <span className="text-muted-foreground italic">All time</span>
+                                        <span className="text-muted-foreground">All time</span>
                                     )}
                                 </div>
                             </div>
@@ -142,15 +145,19 @@ function StepReview() {
                             <div className="grid gap-1">
                                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Conclusions</span>
                                 <div className="flex gap-1 flex-wrap">
-                                    {state.dataSource.conclusions?.map(c => (
-                                        <Badge
-                                            key={c}
-                                            variant="outline"
-                                            className={c === 'success' ? "border-green-200 text-green-700 bg-green-50" : "border-red-200 text-red-700 bg-red-50"}
-                                        >
-                                            {c}
-                                        </Badge>
-                                    ))}
+                                    {state.dataSource.conclusions.length === 0 ? (
+                                        <Badge variant="outline" className="text-muted-foreground">All Outcomes</Badge>
+                                    ) : (
+                                        state.dataSource.conclusions.map(c => (
+                                            <Badge
+                                                key={c}
+                                                variant="outline"
+                                                className={c === 'success' ? "border-green-200 text-green-700 bg-green-50" : "border-red-200 text-red-700 bg-red-50"}
+                                            >
+                                                {c}
+                                            </Badge>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -261,7 +268,7 @@ function WizardContent() {
         setIsSubmitting(true);
         try {
             const payload = {
-                name: state.name || `Scenario ${new Date().toISOString().split('T')[0]}`,
+                name: state.name,
                 description: state.description,
                 data_source_config: {
                     languages: state.dataSource.languages,
@@ -269,7 +276,7 @@ function WizardContent() {
                     date_start: state.dataSource.date_start || undefined,
                     date_end: state.dataSource.date_end || undefined,
                     conclusions: state.dataSource.conclusions,
-                    ci_provider: state.dataSource.ci_provider,
+                    ci_providers: state.dataSource.ci_providers,
                 },
                 feature_config: {
                     dag_features: state.features.dag_features,
@@ -312,7 +319,10 @@ function WizardContent() {
             const hasScans = state.features.scan_metrics.sonarqube.length > 0 || state.features.scan_metrics.trivy.length > 0;
             return hasFeatures || hasScans;
         }
-        return true; // Step 3 (Review) always valid
+        if (state.step === 3) {
+            return !!state.name && state.name.trim().length > 0;
+        }
+        return false;
     };
 
     const handleNextAction = () => {

@@ -137,7 +137,8 @@ class TrainingScenarioRepository(BaseRepository[TrainingScenario]):
         builds_ingested: Optional[int] = None,
         builds_features_extracted: Optional[int] = None,
         builds_missing_resource: Optional[int] = None,
-        builds_failed: Optional[int] = None,
+        builds_ingestion_failed: Optional[int] = None,
+        builds_features_extracted_failed: Optional[int] = None,
     ) -> Optional[TrainingScenario]:
         """Update scenario statistics counters."""
         updates: Dict[str, Any] = {"updated_at": datetime.utcnow()}
@@ -150,8 +151,12 @@ class TrainingScenarioRepository(BaseRepository[TrainingScenario]):
             updates["builds_features_extracted"] = builds_features_extracted
         if builds_missing_resource is not None:
             updates["builds_missing_resource"] = builds_missing_resource
-        if builds_failed is not None:
-            updates["builds_failed"] = builds_failed
+        if builds_ingestion_failed is not None:
+            updates["builds_ingestion_failed"] = builds_ingestion_failed
+        if builds_features_extracted_failed is not None:
+            updates["builds_features_extracted_failed"] = (
+                builds_features_extracted_failed
+            )
 
         return self.update_one(scenario_id, updates)
 

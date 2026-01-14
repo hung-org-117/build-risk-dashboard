@@ -92,7 +92,7 @@ This will start:
    - API: http://localhost:8000
    - API Docs: http://localhost:8000/api/docs
 
-6. Run Celery worker (in a separate terminal):
+6. Run Celery worker (in a separate terminal):x
    ```bash
    cd backend
    uv run celery -A app.celery_app worker --loglevel=info

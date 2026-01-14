@@ -60,7 +60,8 @@ class TrainingScenarioResponse(BaseModel):
     builds_ingested: int = 0
     builds_features_extracted: int = 0
     builds_missing_resource: int = 0
-    builds_failed: int = 0
+    builds_ingestion_failed: int = 0
+    builds_features_extracted_failed: int = 0
 
     # Scan Stats
     scans_total: int = 0

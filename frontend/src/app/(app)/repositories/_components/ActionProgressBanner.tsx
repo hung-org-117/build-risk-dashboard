@@ -20,6 +20,7 @@ interface ActionProgressBannerProps {
             with_prediction?: number;
             pending_prediction?: number;
         };
+
     } | null;
     syncLoading?: boolean;
     processingLoading?: boolean;

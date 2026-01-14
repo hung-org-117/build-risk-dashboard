@@ -42,18 +42,19 @@ def _create_scenario_failure_handler(scenario_id: str, db):
     def handler(status: str, error_message: str) -> None:
         try:
             scenario_repo = TrainingScenarioRepository(db)
-            scenario_repo.update_one(
-                scenario_id,
+            # Update status to FAILED and publish
+            scenario = scenario_repo.find_one_and_update(
+                {"_id": ObjectId(scenario_id)},
                 {
-                    "status": ScenarioStatus.FAILED.value,
-                    "error_message": error_message,
+                    "$set": {
+                        "status": ScenarioStatus.FAILED.value,
+                        "error_message": error_message,
+                    }
                 },
+                return_updated=True,
             )
-            publish_scenario_update(
-                scenario_id=scenario_id,
-                status=ScenarioStatus.FAILED.value,
-                error=error_message,
-            )
+            if scenario:
+                publish_scenario_update(scenario, error=error_message)
         except Exception as e:
             logger.warning(f"Failed to update scenario {scenario_id}: {e}")
 
@@ -132,26 +133,25 @@ def start_scenario_ingestion(
 
         builds_total = filter_result["builds_total"]
 
-        # Update status to INGESTING
-        scenario_repo.update_one(
-            scenario_id,
+        # Update status to INGESTING and publish
+        scenario = scenario_repo.find_one_and_update(
+            {"_id": ObjectId(scenario_id)},
             {
-                "status": ScenarioStatus.INGESTING.value,
-                "filtering_started_at": datetime.utcnow(),
-                "ingestion_started_at": datetime.utcnow(),
-                "builds_total": builds_total,
-                "current_task_id": self.request.id,
-                "error_message": None,
+                "$set": {
+                    "status": ScenarioStatus.INGESTING.value,
+                    "filtering_started_at": datetime.utcnow(),
+                    "ingestion_started_at": datetime.utcnow(),
+                    "builds_total": builds_total,
+                    "current_task_id": self.request.id,
+                    "error_message": None,
+                }
             },
+            return_updated=True,
         )
 
         # Publish SSE event for UI update
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.INGESTING.value,
-            builds_total=builds_total,
-            current_phase="Ingesting build data (clone, worktree, logs)",
-        )
+        if scenario:
+            publish_scenario_update(scenario)
 
         # Check if we have any work to do by querying the DB
         ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
@@ -176,21 +176,19 @@ def start_scenario_ingestion(
                     },
                 )
 
-            scenario_repo.update_one(
-                scenario_id,
+            scenario = scenario_repo.find_one_and_update(
+                {"_id": ObjectId(scenario_id)},
                 {
-                    "status": ScenarioStatus.INGESTED.value,
-                    "builds_ingested": builds_total,
-                    "ingestion_completed_at": datetime.utcnow(),
+                    "$set": {
+                        "status": ScenarioStatus.INGESTED.value,
+                        "builds_ingested": builds_total,
+                        "ingestion_completed_at": datetime.utcnow(),
+                    }
                 },
+                return_updated=True,
             )
-            publish_scenario_update(
-                scenario_id=scenario_id,
-                status=ScenarioStatus.INGESTED.value,
-                builds_total=builds_total,
-                builds_ingested=builds_total,
-                current_phase="Ingestion complete. Start processing when ready.",
-            )
+            if scenario:
+                publish_scenario_update(scenario)
             return {
                 "status": "completed",
                 "message": "Ingestion complete. Start processing when ready.",
@@ -638,15 +636,19 @@ def aggregate_scenario_ingestion(
         total_builds = ingested + missing_resource + failed
 
         # Update scenario
-        scenario_repo.update_one(
-            scenario_id,
+        # Update scenario atomically and get result
+        scenario = scenario_repo.find_one_and_update(
+            {"_id": ObjectId(scenario_id)},
             {
-                "status": ScenarioStatus.INGESTED.value,
-                "builds_ingested": ingested,
-                "builds_missing_resource": missing_resource,
-                "builds_failed": failed,
-                "ingestion_completed_at": now,
+                "$set": {
+                    "status": ScenarioStatus.INGESTED.value,
+                    "builds_ingested": ingested,
+                    "builds_missing_resource": missing_resource,
+                    "builds_ingestion_failed": failed,
+                    "ingestion_completed_at": now,
+                }
             },
+            return_updated=True,
         )
 
         # Build status message
@@ -662,23 +664,17 @@ def aggregate_scenario_ingestion(
 
         logger.info(f"{corr_prefix} [aggregate_ingestion] {msg}")
 
-        # Publish event for frontend
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.INGESTED.value,
-            builds_total=total_builds,
-            builds_ingested=ingested,
-            builds_missing_resource=missing_resource,
-            builds_failed=failed,
-            current_phase=msg,
-        )
+        # Final update
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if scenario:
+            publish_scenario_update(scenario)
 
         return {
             "status": "completed",
             "final_status": ScenarioStatus.INGESTED.value,
             "builds_ingested": ingested,
             "builds_missing_resource": missing_resource,
-            "builds_failed": failed,
+            "builds_ingestion_failed": failed,
         }
 
     return self.run_safe(
@@ -754,35 +750,36 @@ def handle_scenario_chord_error(
 
     if ingested_count > 0:
         # Some builds made it through
-        scenario_repo.update_one(
-            scenario_id,
+        # Some builds made it through
+        scenario = scenario_repo.find_one_and_update(
+            {"_id": ObjectId(scenario_id)},
             {
-                "status": ScenarioStatus.INGESTED.value,
-                "builds_ingested": ingested_count,
-                "builds_failed": failed_count,
-                "ingestion_completed_at": now,
+                "$set": {
+                    "status": ScenarioStatus.INGESTED.value,
+                    "builds_ingested": ingested_count,
+                    "builds_ingestion_failed": failed_count,
+                    "ingestion_completed_at": now,
+                }
             },
+            return_updated=True,
         )
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.INGESTED.value,
-            builds_ingested=ingested_count,
-            builds_failed=failed_count,
-        )
+        if scenario:
+            publish_scenario_update(scenario)
     else:
         # No builds made it
-        scenario_repo.update_one(
-            scenario_id,
+        # No builds made it
+        scenario = scenario_repo.find_one_and_update(
+            {"_id": ObjectId(scenario_id)},
             {
-                "status": ScenarioStatus.FAILED.value,
-                "error_message": error_msg,
+                "$set": {
+                    "status": ScenarioStatus.FAILED.value,
+                    "error_message": error_msg,
+                }
             },
+            return_updated=True,
         )
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.FAILED.value,
-            error=error_msg,
-        )
+        if scenario:
+            publish_scenario_update(scenario, error=error_msg)
 
     return {
         "status": "handled",

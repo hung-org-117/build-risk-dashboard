@@ -131,17 +131,22 @@ class TrainingScenario(BaseEntity):
         default=0,
         description="Builds with ingestion completed",
     )
-    builds_features_extracted: int = Field(
-        default=0,
-        description="Builds with feature extraction completed",
-    )
     builds_missing_resource: int = Field(
         default=0,
         description="Builds with missing resources (not retryable)",
     )
-    builds_failed: int = Field(
+    builds_ingestion_failed: int = Field(
         default=0,
-        description="Builds that failed (retryable)",
+        description="Builds that failed during ingestion (timeout, network). Retryable.",
+    )
+
+    builds_features_extracted: int = Field(
+        default=0,
+        description="Builds with feature extraction completed",
+    )
+    builds_features_extracted_failed: int = Field(
+        default=0,
+        description="Builds that failed during feature extraction. Retryable.",
     )
 
     # Scan tracking

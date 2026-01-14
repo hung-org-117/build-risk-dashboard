@@ -31,6 +31,14 @@ class QualityIssueSeverity(str, Enum):
     ERROR = "error"
 
 
+class MetricSource(str, Enum):
+    """Source of the metric data."""
+
+    FEATURE = "feature"  # DAG-extracted features
+    TRIVY = "trivy"  # Trivy scan metrics
+    SONARQUBE = "sonarqube"  # SonarQube scan metrics
+
+
 class QualityIssue(BaseModel):
     """A quality issue detected during evaluation."""
 
@@ -41,10 +49,27 @@ class QualityIssue(BaseModel):
     details: Optional[Dict[str, Any]] = None
 
 
+class ScanMetricsSummary(BaseModel):
+    """Summary of scan metrics coverage and quality."""
+
+    # Trivy scan metrics
+    trivy_builds_scanned: int = 0
+    trivy_builds_with_metrics: int = 0
+    trivy_coverage_pct: float = 0.0
+    trivy_metrics_count: int = 0  # Number of unique Trivy metric keys
+
+    # SonarQube scan metrics
+    sonarqube_builds_scanned: int = 0
+    sonarqube_builds_with_metrics: int = 0
+    sonarqube_coverage_pct: float = 0.0
+    sonarqube_metrics_count: int = 0  # Number of unique SonarQube metric keys
+
+
 class DataQualityMetric(BaseModel):
-    """Quality metrics for a single feature."""
+    """Quality metrics for a single feature or scan metric."""
 
     feature_name: str
+    source: MetricSource = MetricSource.FEATURE  # NEW: source of this metric
     data_type: str  # "integer", "float", "boolean", "string", "list"
 
     # Completeness metrics
@@ -101,6 +126,9 @@ class DataQualityReport(BaseEntity):
 
     # Detailed metrics per feature
     feature_metrics: List[DataQualityMetric] = Field(default_factory=list)
+
+    # Scan metrics summary (Trivy + SonarQube)
+    scan_metrics_summary: ScanMetricsSummary = Field(default_factory=ScanMetricsSummary)
 
     # Summary statistics
     total_builds: int = 0

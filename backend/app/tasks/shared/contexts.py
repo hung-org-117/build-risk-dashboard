@@ -6,6 +6,7 @@ This module provides context classes for each pipeline type:
 - TrainingPipelineContext: For Training Scenario pipeline
 """
 
+from app.repositories import TrainingScenarioRepository
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -199,7 +200,11 @@ class TrainingPipelineContext:
     def publish_status(self, status: str, message: str, **kwargs) -> None:
         from app.tasks.shared.events import publish_scenario_update
 
-        publish_scenario_update(self.scenario_id, status, message, **kwargs)
+        # Re-fetch scenario to get latest state for entity-based update
+        scenario_repo = TrainingScenarioRepository(self.db)
+        scenario = scenario_repo.find_by_id(self.scenario_id)
+        if scenario:
+            publish_scenario_update(scenario)
 
     def publish_build_update(self, build_id: str, status: str, **kwargs) -> None:
         from app.tasks.shared.events import publish_ingestion_build_update

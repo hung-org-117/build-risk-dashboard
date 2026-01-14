@@ -1072,6 +1072,16 @@ def check_and_notify_enrichment_completed(
             builds_features_extracted=scenario.builds_features_extracted,
             builds_total=scenario.builds_total,
         )
+
+        # Finalize quality report after enrichment is complete
+        try:
+            from app.services.data_quality_service import DataQualityService
+
+            quality_service = DataQualityService(db)
+            quality_service.finalize_quality_report(scenario_id)
+        except Exception as e:
+            logger.warning(f"Failed to finalize quality report for {scenario_id}: {e}")
+
         return True
 
     return False

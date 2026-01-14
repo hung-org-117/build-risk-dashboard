@@ -34,7 +34,8 @@ export interface TrainingScenarioRecord {
     builds_ingested: number;
     builds_features_extracted: number;
     builds_missing_resource: number;
-    builds_failed: number;
+    builds_ingestion_failed: number;
+    builds_features_extracted_failed: number;
 
     // Scan tracking
     scans_total: number;
@@ -104,7 +105,7 @@ export interface PreviewBuildsParams {
     date_end?: string;
     languages?: string;
     conclusions?: string;
-    ci_provider?: string;
+    ci_providers?: string;
     exclude_bots?: boolean;
     skip?: number;
     limit?: number;
@@ -303,6 +304,72 @@ export interface TrainingExportListResponse {
     limit: number;
 }
 
+// Data Quality Types
+export type MetricSource = "feature" | "trivy" | "sonarqube";
+
+export interface ScanMetricsSummary {
+    trivy_builds_scanned: number;
+    trivy_builds_with_metrics: number;
+    trivy_coverage_pct: number;
+    trivy_metrics_count: number;
+    sonarqube_builds_scanned: number;
+    sonarqube_builds_with_metrics: number;
+    sonarqube_coverage_pct: number;
+    sonarqube_metrics_count: number;
+}
+
+export interface DataQualityMetric {
+    feature_name: string;
+    source: MetricSource;
+    data_type: string;
+    total_values: number;
+    null_count: number;
+    completeness_pct: number;
+    min_value?: number;
+    max_value?: number;
+    mean_value?: number;
+    std_dev?: number;
+    unique_count?: number;
+    empty_string_count: number;
+    expected_range?: [number, number];
+    expected_values?: string[];
+    out_of_range_count: number;
+    invalid_value_count: number;
+    validity_pct: number;
+    issues: string[];
+}
+
+export interface QualityIssue {
+    severity: "info" | "warning" | "error";
+    category: string;
+    feature_name?: string;
+    message: string;
+    details?: Record<string, any>;
+}
+
+export interface DataQualityReport {
+    id: string;
+    scenario_id: string;
+    quality_score: number;
+    completeness_score: number;
+    validity_score: number;
+    consistency_score: number;
+    coverage_score: number;
+    feature_metrics: DataQualityMetric[];
+    scan_metrics_summary?: ScanMetricsSummary;
+    total_builds: number;
+    enriched_builds: number;
+    partial_builds: number;
+    failed_builds: number;
+    total_features: number;
+    features_with_issues: number;
+    issues: QualityIssue[];
+    status: "pending" | "running" | "completed" | "failed";
+    error_message?: string;
+    started_at?: string;
+    completed_at?: string;
+}
+
 // Create scenario payload
 export interface CreateTrainingScenarioPayload {
     name: string;
@@ -314,7 +381,7 @@ export interface CreateTrainingScenarioPayload {
         date_start?: string;
         date_end?: string;
         conclusions?: string[];
-        ci_provider?: string;
+        ci_providers?: string[];
     };
     feature_config?: {
         dag_features?: string[];
@@ -620,5 +687,22 @@ export const trainingScenariosApi = {
             { params }
         );
         return response.data;
+    },
+
+    /**
+     * Get data quality report
+     */
+    getAnalysis: async (scenarioId: string): Promise<DataQualityReport | null> => {
+        try {
+            const response = await api.get<DataQualityReport>(
+                `/training-scenarios/${scenarioId}/quality-report`
+            );
+            return response.data;
+        } catch (error: any) {
+            if (error.response?.status === 404) {
+                return null;
+            }
+            throw error;
+        }
     },
 };

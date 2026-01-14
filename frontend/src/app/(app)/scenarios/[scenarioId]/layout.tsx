@@ -17,6 +17,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Database, BarChart3, Home, Lock } from "lucide-react";
 import { trainingScenariosApi, TrainingScenarioRecord } from "@/lib/api/training-scenarios";
 import { useSSE } from "@/contexts/sse-context";
+import { ScenarioActionProgressBanner } from "./_components/ScenarioActionProgressBanner";
 
 // Status config
 const getStatusConfig = (status: string) => {
@@ -78,10 +79,16 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                         ? {
                             ...prev,
                             status: data.status || prev.status,
+                            builds_total: data.builds_total ?? prev.builds_total,
                             builds_ingested: data.builds_ingested ?? prev.builds_ingested,
                             builds_features_extracted: data.builds_features_extracted ?? prev.builds_features_extracted,
-                            scans_completed: data.scans_completed ?? prev.scans_completed,
+                            builds_ingestion_failed: (data as any).builds_ingestion_failed ?? prev.builds_ingestion_failed,
+                            builds_features_extracted_failed: (data as any).builds_features_extracted_failed ?? prev.builds_features_extracted_failed,
                             scans_total: data.scans_total ?? prev.scans_total,
+                            scans_completed: data.scans_completed ?? prev.scans_completed,
+                            scans_failed: (data as any).scans_failed ?? prev.scans_failed,
+                            feature_extraction_completed: (data as any).feature_extraction_completed ?? prev.feature_extraction_completed,
+                            scan_extraction_completed: (data as any).scan_extraction_completed ?? prev.scan_extraction_completed,
                         }
                         : prev
                 );
@@ -178,6 +185,9 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                     </TabsTrigger>
                 </TabsList>
             </Tabs>
+
+            {/* Progress Banner (shown across all tabs during active operations) */}
+            <ScenarioActionProgressBanner scenario={scenario} />
 
             {/* Page Content */}
             {children}

@@ -237,22 +237,70 @@ export default function ScenarioOverviewPage() {
                 </CardHeader>
                 <CardContent>
                     <div className="grid md:grid-cols-3 gap-8">
-                        {/* Build Stats Column */}
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-2">
-                                <h4 className="font-semibold">Build Stats</h4>
+                        {/* Ingestion Stats */}
+                        <div className="space-y-3">
+                            <h4 className="font-semibold text-sm">Ingestion</h4>
+                            <div className="space-y-2 text-sm">
+                                <div className="flex justify-between p-2 bg-muted/40 rounded-md">
+                                    <span className="text-muted-foreground">Total Builds</span>
+                                    <span className="font-medium">{scenario.builds_total || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Ingested</span>
+                                    <span className="font-medium text-green-600">{scenario.builds_ingested || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-red-50 dark:bg-red-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Failed</span>
+                                    <span className="font-medium text-red-600">{scenario.builds_ingestion_failed || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-yellow-50 dark:bg-yellow-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Missing Resource</span>
+                                    <span className="font-medium text-yellow-600">{scenario.builds_missing_resource || 0}</span>
+                                </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div className="p-3 bg-muted/40 rounded-md">
-                                    <span className="block text-muted-foreground text-xs mb-1">Success</span>
-                                    <span className="text-lg font-medium text-green-600">
-                                        {scenario.builds_ingested - scenario.builds_failed}
+                        </div>
+
+                        {/* Feature Extraction Stats */}
+                        <div className="space-y-3">
+                            <h4 className="font-semibold text-sm">Feature Extraction</h4>
+                            <div className="space-y-2 text-sm">
+                                <div className="flex justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Extracted</span>
+                                    <span className="font-medium text-green-600">{scenario.builds_features_extracted || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-red-50 dark:bg-red-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Failed</span>
+                                    <span className="font-medium text-red-600">{scenario.builds_features_extracted_failed || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-muted/40 rounded-md">
+                                    <span className="text-muted-foreground">Completed</span>
+                                    <span className={`font-medium ${scenario.feature_extraction_completed ? 'text-green-600' : 'text-yellow-600'}`}>
+                                        {scenario.feature_extraction_completed ? '✓ Yes' : '⏳ In Progress'}
                                     </span>
                                 </div>
-                                <div className="p-3 bg-muted/40 rounded-md">
-                                    <span className="block text-muted-foreground text-xs mb-1">Failed</span>
-                                    <span className="text-lg font-medium text-red-600">
-                                        {scenario.builds_failed}
+                            </div>
+                        </div>
+
+                        {/* Scan Metrics Stats */}
+                        <div className="space-y-3">
+                            <h4 className="font-semibold text-sm">Scan Metrics</h4>
+                            <div className="space-y-2 text-sm">
+                                <div className="flex justify-between p-2 bg-muted/40 rounded-md">
+                                    <span className="text-muted-foreground">Total Scans</span>
+                                    <span className="font-medium">{scenario.scans_total || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Completed</span>
+                                    <span className="font-medium text-green-600">{scenario.scans_completed || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-red-50 dark:bg-red-950/30 rounded-md">
+                                    <span className="text-muted-foreground">Failed</span>
+                                    <span className="font-medium text-red-600">{scenario.scans_failed || 0}</span>
+                                </div>
+                                <div className="flex justify-between p-2 bg-muted/40 rounded-md">
+                                    <span className="text-muted-foreground">Completed</span>
+                                    <span className={`font-medium ${scenario.scan_extraction_completed ? 'text-green-600' : 'text-yellow-600'}`}>
+                                        {scenario.scan_extraction_completed ? '✓ Yes' : (scenario.scans_total > 0 ? '⏳ In Progress' : '—')}
                                     </span>
                                 </div>
                             </div>

@@ -96,52 +96,51 @@ def publish_build_status(repo_id: str, build_id: str, status: str) -> bool:
 
 
 def publish_scenario_update(
-    scenario_id: str,
-    status: str,
-    builds_total: int = 0,
-    builds_ingested: int = 0,
-    builds_features_extracted: int = 0,
-    builds_failed: int = 0,
-    builds_missing_resource: int = 0,
-    scans_total: int = 0,
-    scans_completed: int = 0,
-    scans_failed: int = 0,
-    feature_extraction_completed: bool = False,
-    scan_extraction_completed: bool = False,
-    current_phase: Optional[str] = None,
+    scenario,
     error: Optional[str] = None,
 ) -> bool:
     """
-    Publish ML scenario progress update for real-time UI updates.
+    Publish full scenario state from TrainingScenario entity for real-time UI updates.
 
     Args:
-        scenario_id: MLScenario ID
-        status: Status value (queued, filtering, ingesting, processing, splitting, completed, failed)
-        builds_total: Total builds matching filter criteria
-        builds_ingested: Builds with ingestion completed
-        builds_features_extracted: Builds with feature extraction completed
-        builds_failed: Builds that failed (retryable)
-        builds_missing_resource: Builds with missing resources (not retryable)
-        scans_total: Total scans to run (commits × tools)
-        scans_completed: Completed scans
-        scans_failed: Failed scans
-        feature_extraction_completed: All DAG features extracted
-        scan_extraction_completed: All scans done
-        current_phase: Current phase name for display
+        scenario: TrainingScenario entity instance (required)
         error: Optional error message
 
     Returns:
         True if published successfully, False otherwise
     """
+    # Extract values from entity
+    scenario_id = str(scenario.id)
+    status = (
+        scenario.status.value if hasattr(scenario.status, "value") else scenario.status
+    )
+    builds_total = getattr(scenario, "builds_total", 0) or 0
+    builds_ingested = getattr(scenario, "builds_ingested", 0) or 0
+    builds_features_extracted = getattr(scenario, "builds_features_extracted", 0) or 0
+    builds_ingestion_failed = getattr(scenario, "builds_ingestion_failed", 0) or 0
+    builds_features_extracted_failed = (
+        getattr(scenario, "builds_features_extracted_failed", 0) or 0
+    )
+    builds_missing_resource = getattr(scenario, "builds_missing_resource", 0) or 0
+    scans_total = getattr(scenario, "scans_total", 0) or 0
+    scans_completed = getattr(scenario, "scans_completed", 0) or 0
+    scans_failed = getattr(scenario, "scans_failed", 0) or 0
+    feature_extraction_completed = getattr(
+        scenario, "feature_extraction_completed", False
+    )
+    scan_extraction_completed = getattr(scenario, "scan_extraction_completed", False)
+
     # Calculate progress percentages
     ingestion_progress = (
         round((builds_ingested / builds_total) * 100, 1) if builds_total > 0 else 0
     )
-    processing_progress = (
+    # Feature extraction progress (based on builds with features extracted)
+    feature_extraction_progress = (
         round((builds_features_extracted / builds_total) * 100, 1)
         if builds_total > 0
         else 0
     )
+    # Scan progress (based on scans completed)
     scan_progress = (
         round((scans_completed / scans_total) * 100, 1) if scans_total > 0 else 0
     )
@@ -152,17 +151,17 @@ def publish_scenario_update(
         "builds_total": builds_total,
         "builds_ingested": builds_ingested,
         "builds_features_extracted": builds_features_extracted,
-        "builds_failed": builds_failed,
+        "builds_ingestion_failed": builds_ingestion_failed,
+        "builds_features_extracted_failed": builds_features_extracted_failed,
         "builds_missing_resource": builds_missing_resource,
         "ingestion_progress": ingestion_progress,
-        "processing_progress": processing_progress,
+        "feature_extraction_progress": feature_extraction_progress,
+        "scan_progress": scan_progress,
         "scans_total": scans_total,
         "scans_completed": scans_completed,
         "scans_failed": scans_failed,
-        "scan_progress": scan_progress,
         "feature_extraction_completed": feature_extraction_completed,
         "scan_extraction_completed": scan_extraction_completed,
-        "current_phase": current_phase or status,
     }
     if error:
         payload["error"] = error

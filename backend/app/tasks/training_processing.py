@@ -6,7 +6,7 @@ This module handles the processing phase of training scenario (user-triggered):
 2. dispatch_scans_and_processing - Dispatch scans (async) + feature extraction
 3. dispatch_enrichment_batches - Create EnrichmentBuild + dispatch sequential chain
 4. process_single_enrichment - Process single build for feature extraction
-5. finalize_scenario_processing - Finalize after all builds processed
+5. finalize_feature_extraction - Finalize after all feature extraction completed
 6. reprocess_failed_builds - Retry FAILED enrichment builds
 
 Note: Dataset generation tasks moved to app.tasks.training_export module.
@@ -65,11 +65,7 @@ def _create_scenario_failure_handler(scenario_id: str, db):
     return handler
 
 
-# ============================================================================
 # PHASE 2: PROCESSING (User-Triggered)
-# ============================================================================
-
-
 @celery_app.task(
     bind=True,
     base=SafeTask,
@@ -112,21 +108,21 @@ def start_scenario_processing(
                 "error": f"Cannot start processing: status is {scenario.status}, expected INGESTED",
             }
 
-        # Update status to PROCESSING
-        scenario_repo.update_one(
-            scenario_id,
+        # Update status to PROCESSING atomically and get updated document
+        scenario = scenario_repo.find_one_and_update(
+            {"_id": ObjectId(scenario_id)},
             {
-                "status": ScenarioStatus.PROCESSING.value,
-                "processing_started_at": datetime.utcnow(),
-                "current_task_id": self.request.id,
+                "$set": {
+                    "status": ScenarioStatus.PROCESSING.value,
+                    "processing_started_at": datetime.utcnow(),
+                    "current_task_id": self.request.id,
+                }
             },
+            return_updated=True,
         )
 
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.PROCESSING.value,
-            current_phase="Starting feature extraction...",
-        )
+        if scenario:
+            publish_scenario_update(scenario)
 
         # Dispatch scans and processing
         dispatch_scans_and_processing.delay(
@@ -194,7 +190,7 @@ def dispatch_scans_and_processing(
             scan_metrics_config.get("trivy")
         )
 
-        # Dispatch scans (fire-and-forget, parallel to processing)
+        # Dispatch scans
         if has_scans:
             logger.info(f"{corr_prefix} Dispatching scans in parallel")
             dispatch_scenario_scans.delay(
@@ -368,7 +364,7 @@ def dispatch_enrichment_batches(
         # Chain: B1 → B2 → ... → finalize
         workflow = chain(
             *processing_tasks,
-            finalize_scenario_processing.si(
+            finalize_feature_extraction.si(
                 scenario_id=scenario_id,
                 created_count=len(enrichment_build_ids),
                 correlation_id=correlation_id,
@@ -387,12 +383,7 @@ def dispatch_enrichment_batches(
             f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing"
         )
 
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.PROCESSING.value,
-            builds_total=scenario.builds_total,
-            current_phase=f"Extracting features from {len(processing_tasks)} builds",
-        )
+        publish_scenario_update(scenario)
 
         return {
             "status": "dispatched",
@@ -467,7 +458,7 @@ def handle_processing_chain_error(
             {
                 "status": ScenarioStatus.PROCESSED.value,
                 "builds_features_extracted": completed_count,
-                "builds_failed": failed_count,
+                "builds_features_extracted_failed": failed_count,
                 "processing_completed_at": now,
                 "feature_extraction_completed": True,
             },
@@ -633,29 +624,29 @@ def process_single_enrichment(
             ExtractionStatus.FAILED,
             error_message=error_msg,
         )
-        scenario_repo.increment_counter(scenario_id, "builds_failed")
+        scenario_repo.increment_counter(scenario_id, "builds_features_extracted_failed")
         raise
 
 
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.training_processing.finalize_scenario_processing",
+    name="app.tasks.training_processing.finalize_feature_extraction",
     queue="scenario_processing",
     soft_time_limit=60,
     time_limit=120,
 )
-def finalize_scenario_processing(
+def finalize_feature_extraction(
     self: SafeTask,
     scenario_id: str,
     created_count: int = 0,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """
-    Finalize processing after all builds extracted.
+    Finalize feature extraction phase after all builds have been processed.
 
-    Marks scenario as PROCESSED. User can trigger split/download when ready.
-    Does NOT auto-dispatch split - user decides when to generate dataset.
+    Marks feature_extraction_completed=True. Scenario stays in PROCESSED status.
+    Scans may still be running in parallel.
     """
 
     def mark_failed(e: Exception):
@@ -677,47 +668,45 @@ def finalize_scenario_processing(
         total = completed + partial + failed
 
         # Update scenario - mark as PROCESSED (user triggers split manually)
-        scenario_repo.update_one(
-            scenario_id,
+
+        # Publish update to UI
+        # Use atomic find_one_and_update to update status and get the final document
+        updated_scenario = scenario_repo.find_one_and_update(
+            {"_id": ObjectId(scenario_id)},
             {
-                "status": ScenarioStatus.PROCESSED.value,
-                "builds_features_extracted": completed + partial,
-                "builds_failed": failed,
-                "processing_completed_at": datetime.utcnow(),
-                "feature_extraction_completed": True,
+                "$set": {
+                    "status": ScenarioStatus.PROCESSED.value,
+                    "builds_features_extracted": completed + partial,
+                    "builds_features_extracted_failed": failed,
+                    "processing_completed_at": datetime.utcnow(),
+                    "feature_extraction_completed": True,
+                }
             },
+            return_updated=True,
         )
 
-        scenario = scenario_repo.find_by_id(scenario_id)
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            status=ScenarioStatus.PROCESSED.value,
-            builds_total=scenario.builds_total if scenario else total,
-            builds_ingested=scenario.builds_ingested if scenario else total,
-            builds_features_extracted=completed + partial,
-            builds_failed=failed,
-            current_phase="Feature extraction complete. Click 'Generate Dataset' when ready.",
-        )
+        if updated_scenario:
+            publish_scenario_update(updated_scenario)
 
-        logger.info(
-            f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
-            f"Waiting for user to trigger dataset generation."
-        )
+            logger.info(
+                f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
+            )
 
-        # Check if enrichment is fully complete (features + scans) and send notification
-        from app.services.notification_service import (
-            check_and_notify_enrichment_completed,
-        )
+            # Check if enrichment is fully complete (features + scans) and send notification
+            from app.services.notification_service import (
+                check_and_notify_enrichment_completed,
+            )
 
-        check_and_notify_enrichment_completed(self.db, scenario_id)
+            check_and_notify_enrichment_completed(self.db, scenario_id)
 
-        return {
-            "status": "completed",
-            "builds_features_extracted": completed + partial,
-            "builds_failed": failed,
-            "total": total,
-            "next_step": "User can now generate dataset via 'Generate Dataset' button",
-        }
+            return {
+                "status": "completed",
+                "builds_features_extracted": completed + partial,
+                "builds_features_extracted_failed": failed,
+                "total": total,
+            }
+
+        return {"status": "error", "error": "Scenario not found"}
 
     return self.run_safe(
         job_id=scenario_id,
@@ -805,7 +794,7 @@ def reprocess_failed_builds(
 
         workflow = chain(
             *processing_tasks,
-            finalize_scenario_processing.si(
+            finalize_feature_extraction.si(
                 scenario_id=scenario_id,
                 created_count=0,
                 correlation_id=correlation_id,

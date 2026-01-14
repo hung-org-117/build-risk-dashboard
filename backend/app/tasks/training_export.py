@@ -302,18 +302,9 @@ def generate_export_dataset(
         )
 
         # Publish update
-        publish_scenario_update(
-            scenario_id=scenario_id,
-            current_phase=f"Export '{export.name}' completed",
-            extra_data={
-                "export_id": export_id,
-                "is_cv": is_cv,
-                "fold_count": fold_count if is_cv else 1,
-                "train_count": total_train,
-                "val_count": total_val,
-                "test_count": total_test,
-            },
-        )
+        scenario = scenario_repo.find_by_id(scenario_id)
+        if scenario:
+            publish_scenario_update(scenario)
 
         logger.info(
             f"{corr_prefix} Completed: folds={fold_count if is_cv else 1}, "

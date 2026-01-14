@@ -241,7 +241,8 @@ export interface TrainingScenarioRecord {
   builds_ingested: number;
   builds_features_extracted: number;
   builds_missing_resource: number;
-  builds_failed: number;
+  builds_ingestion_failed: number;
+  builds_features_extracted_failed: number;
   scans_total: number;
   scans_completed: number;
   scans_failed: number;

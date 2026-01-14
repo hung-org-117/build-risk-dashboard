@@ -258,9 +258,9 @@ export default function IngestionBuildsPage() {
 
     const totalPages = data ? Math.ceil(data.total / pageSize) : 0;
 
-    // Calculate failed count
+    // Calculate failed count (ingestion + extraction + missing resource)
     const failedCount = scenario
-        ? (scenario.builds_failed || 0) + (scenario.builds_missing_resource || 0)
+        ? (scenario.builds_ingestion_failed || 0) + (scenario.builds_features_extracted_failed || 0) + (scenario.builds_missing_resource || 0)
         : 0;
 
     // Determine available actions
