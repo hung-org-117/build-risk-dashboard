@@ -5,35 +5,28 @@ import { useEffect, useState, useCallback } from "react";
 import {
     Card,
     CardContent,
-    CardDescription,
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
     Loader2,
     Database,
     CheckCircle2,
     AlertCircle,
-    Play,
-    RefreshCw,
-    FileDown,
+    XCircle,
 } from "lucide-react";
 import {
     trainingScenariosApi,
     TrainingScenarioRecord,
 } from "@/lib/api/training-scenarios";
-import { useToast } from "@/components/ui/use-toast";
 import { useSSE } from "@/contexts/sse-context";
 
-// Phase stepper component
+// Phase stepper component - Only 2 phases (Generate Dataset is separate)
 function ScenarioStepper({ status }: { status: string }) {
     const phases = [
         { key: "ingestion", label: "Ingestion", statuses: ["queued", "filtering", "ingesting", "ingested"] },
-        { key: "processing", label: "Processing", statuses: ["processing", "processed"] },
-        { key: "generation", label: "Generate", statuses: ["splitting", "completed"] },
+        { key: "processing", label: "Processing", statuses: ["processing", "processed", "splitting", "completed"] },
     ];
 
     const getPhaseStatus = (phaseStatuses: string[]) => {
@@ -94,12 +87,10 @@ function ScenarioStepper({ status }: { status: string }) {
 export default function ScenarioOverviewPage() {
     const params = useParams<{ scenarioId: string }>();
     const scenarioId = params.scenarioId;
-    const { toast } = useToast();
     const { subscribe } = useSSE();
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [loading, setLoading] = useState(true);
-    const [actionLoading, setActionLoading] = useState<string | null>(null);
 
     // Fetch scenario
     const fetchScenario = useCallback(async () => {
@@ -135,72 +126,7 @@ export default function ScenarioOverviewPage() {
         return () => unsubscribe();
     }, [subscribe, scenarioId]);
 
-    // Action handlers
-    const handleStartIngestion = async () => {
-        setActionLoading("ingestion");
-        try {
-            await trainingScenariosApi.startIngestion(scenarioId);
-            toast({ title: "Ingestion started" });
-            fetchScenario();
-        } catch (err) {
-            toast({ variant: "destructive", title: "Failed to start ingestion" });
-        } finally {
-            setActionLoading(null);
-        }
-    };
-
-    const handleStartProcessing = async () => {
-        setActionLoading("processing");
-        try {
-            await trainingScenariosApi.startProcessing(scenarioId);
-            toast({ title: "Processing started" });
-            fetchScenario();
-        } catch (err) {
-            toast({ variant: "destructive", title: "Failed to start processing" });
-        } finally {
-            setActionLoading(null);
-        }
-    };
-
-    const handleGenerateDataset = async () => {
-        setActionLoading("generate");
-        try {
-            await trainingScenariosApi.generateDataset(scenarioId);
-            toast({ title: "Dataset generation started" });
-            fetchScenario();
-        } catch (err) {
-            toast({ variant: "destructive", title: "Failed to generate dataset" });
-        } finally {
-            setActionLoading(null);
-        }
-    };
-
-    const handleRetryIngestion = async () => {
-        setActionLoading("retry-ingestion");
-        try {
-            const result = await trainingScenariosApi.retryIngestion(scenarioId);
-            toast({ title: result.message });
-            fetchScenario();
-        } catch (err) {
-            toast({ variant: "destructive", title: "Failed to retry ingestion" });
-        } finally {
-            setActionLoading(null);
-        }
-    };
-
-    const handleRetryProcessing = async () => {
-        setActionLoading("retry-processing");
-        try {
-            const result = await trainingScenariosApi.retryProcessing(scenarioId);
-            toast({ title: result.message });
-            fetchScenario();
-        } catch (err) {
-            toast({ variant: "destructive", title: "Failed to retry processing" });
-        } finally {
-            setActionLoading(null);
-        }
-    };
-
+    // Loading state
     if (loading || !scenario) {
         return (
             <div className="flex min-h-[400px] items-center justify-center">
@@ -209,7 +135,7 @@ export default function ScenarioOverviewPage() {
         );
     }
 
-    // Calculate progress
+    // Calculate progress percentages
     const ingestionProgress =
         scenario.builds_total > 0
             ? Math.round((scenario.builds_ingested / scenario.builds_total) * 100)
@@ -222,14 +148,6 @@ export default function ScenarioOverviewPage() {
         scenario.scans_total > 0
             ? Math.round((scenario.scans_completed / scenario.scans_total) * 100)
             : 0;
-
-    // Determine which actions are available
-    const canStartIngestion = scenario.status === "queued";
-    const canStartProcessing = scenario.status === "ingested";
-    const canGenerateDataset = scenario.status === "processed";
-    const hasFailedIngestion = scenario.builds_missing_resource > 0 || scenario.builds_failed > 0;
-    const canRetryIngestion = hasFailedIngestion && ["ingested", "processing", "processed"].includes(scenario.status);
-    const canRetryProcessing = scenario.status === "processed" && scenario.builds_features_extracted < scenario.builds_ingested;
 
     return (
         <div className="space-y-6">

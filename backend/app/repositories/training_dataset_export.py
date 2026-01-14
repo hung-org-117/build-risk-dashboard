@@ -165,6 +165,8 @@ class TrainingDatasetExportRepository(BaseRepository[TrainingDatasetExport]):
             },
         )
 
-    def delete_by_scenario(self, scenario_id: str) -> int:
+    def delete_by_scenario(self, scenario_id: str, session=None) -> int:
         """Delete all exports for a scenario."""
-        return self.delete_many({"scenario_id": self._to_object_id(scenario_id)})
+        return self.delete_many(
+            {"scenario_id": self._to_object_id(scenario_id)}, session=session
+        )

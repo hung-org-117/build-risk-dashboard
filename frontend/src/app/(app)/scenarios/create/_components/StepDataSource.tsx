@@ -8,6 +8,7 @@ import {
     Loader2,
     Search,
     X,
+    ChevronsUpDown,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -38,9 +39,22 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
 import { trainingScenariosApi } from "@/lib/api/training-scenarios";
 import type { PreviewBuild } from "@/lib/api/training-scenarios";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, cn } from "@/lib/utils";
 import {
     useWizard,
     BUILD_CONCLUSIONS,
@@ -92,6 +106,9 @@ export function StepDataSource() {
     const [buildSources, setBuildSources] = useState<{ id: string; name: string; builds_found: number }[]>([]);
     const [isLoadingOptions, setIsLoadingOptions] = useState(false);
 
+    // UI State for MultiSelect
+    const [openSourceCombobox, setOpenSourceCombobox] = useState(false);
+
     const PAGE_SIZE = 20;
 
     // Fetch Filter Options on Mount
@@ -141,6 +158,9 @@ export function StepDataSource() {
             }
             if (dataSource.ci_provider !== "all") {
                 params.ci_provider = dataSource.ci_provider;
+            }
+            if (dataSource.build_source_ids.length > 0) {
+                params.build_source_ids = dataSource.build_source_ids.join(",");
             }
 
             const response = await trainingScenariosApi.previewBuilds(params);
@@ -193,6 +213,7 @@ export function StepDataSource() {
             updateDataSource({ build_source_ids: [...current, sourceId] });
         }
     };
+
     return (
         <div className="flex flex-col h-full gap-4">
             {/* Stats Banner & Filter Trigger */}
@@ -229,48 +250,53 @@ export function StepDataSource() {
                         <Button variant="outline" className="gap-2 shrink-0">
                             <Filter className="h-4 w-4" />
                             Filters
-                            {/* Badge for active filters count?? functionality not implemented but nice to have visually if complex */}
+                            {dataSource.build_source_ids.length > 0 && (
+                                <Badge variant="secondary" className="ml-1 h-5 px-1.5 min-w-[1.25rem] text-[10px]">
+                                    {dataSource.build_source_ids.length}
+                                </Badge>
+                            )}
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
+                    <DialogContent className="max-w-3xl">
                         <DialogHeader>
                             <DialogTitle>Filter Builds</DialogTitle>
+                            <DialogDescription>
+                                Refine the build selection for your training set
+                            </DialogDescription>
                         </DialogHeader>
 
                         <div className="grid gap-6 py-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Date Range */}
+                            {/* Top Row: Dates and Provider */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                {/* Date Start */}
                                 <div className="space-y-2">
-                                    <Label>Date Range</Label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] uppercase text-muted-foreground">From</Label>
-                                            <Input
-                                                type="date"
-                                                value={dataSource.date_start}
-                                                onChange={(e) => updateDataSource({ date_start: e.target.value })}
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <Label className="text-[10px] uppercase text-muted-foreground">To</Label>
-                                            <Input
-                                                type="date"
-                                                value={dataSource.date_end}
-                                                onChange={(e) => updateDataSource({ date_end: e.target.value })}
-                                            />
-                                        </div>
-                                    </div>
+                                    <Label>From Date</Label>
+                                    <Input
+                                        type="date"
+                                        value={dataSource.date_start}
+                                        onChange={(e) => updateDataSource({ date_start: e.target.value })}
+                                        className="bg-background"
+                                    />
                                 </div>
-
-                                {/* CI Provider */}
+                                {/* Date End */}
                                 <div className="space-y-2">
-                                    <Label>Provider</Label>
+                                    <Label>To Date</Label>
+                                    <Input
+                                        type="date"
+                                        value={dataSource.date_end}
+                                        onChange={(e) => updateDataSource({ date_end: e.target.value })}
+                                        className="bg-background"
+                                    />
+                                </div>
+                                {/* Provider */}
+                                <div className="space-y-2">
+                                    <Label>CI Provider</Label>
                                     <Select
                                         value={dataSource.ci_provider}
                                         onValueChange={(value) => updateDataSource({ ci_provider: value as CIProviderKey | "all" })}
                                         disabled={isLoadingOptions}
                                     >
-                                        <SelectTrigger>
+                                        <SelectTrigger className="bg-background">
                                             <SelectValue placeholder={isLoadingOptions ? "Loading..." : "All Providers"} />
                                         </SelectTrigger>
                                         <SelectContent>
@@ -288,15 +314,13 @@ export function StepDataSource() {
                                 </div>
                             </div>
 
+                            {/* Middle Row: Languages and Status */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Languages */}
                                 <div className="space-y-2">
                                     <Label>Languages</Label>
-                                    <div className="grid grid-cols-2 gap-2 p-2 border rounded-md min-h-[100px] max-h-[150px] overflow-y-auto">
+                                    <div className="p-3 border rounded-md bg-slate-50/50 dark:bg-slate-900/20 max-h-[160px] overflow-y-auto space-y-2">
                                         {isLoadingOptions ? (
-                                            <div className="col-span-2 flex justify-center py-4">
-                                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                                            </div>
+                                            <div className="flex justify-center p-2"><Loader2 className="animate-spin h-4 w-4" /></div>
                                         ) : supportedLanguages.length > 0 ? (
                                             supportedLanguages.map((lang) => (
                                                 <div key={lang.value} className="flex items-center space-x-2">
@@ -307,24 +331,20 @@ export function StepDataSource() {
                                                     />
                                                     <label
                                                         htmlFor={`lang-${lang.value}`}
-                                                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                                        className="text-sm font-medium leading-none cursor-pointer select-none"
                                                     >
                                                         {lang.label}
                                                     </label>
                                                 </div>
                                             ))
                                         ) : (
-                                            <div className="col-span-2 text-sm text-center py-4 text-muted-foreground">
-                                                No languages found.
-                                            </div>
+                                            <div className="text-sm text-muted-foreground p-2">No languages available</div>
                                         )}
                                     </div>
                                 </div>
-
-                                {/* Status */}
                                 <div className="space-y-2">
                                     <Label>Build Status</Label>
-                                    <div className="flex flex-col gap-2 p-2 border rounded-md">
+                                    <div className="p-3 border rounded-md bg-slate-50/50 dark:bg-slate-900/20 max-h-[160px] overflow-y-auto space-y-2">
                                         {BUILD_CONCLUSIONS.map((c) => (
                                             <div key={c.value} className="flex items-center space-x-2">
                                                 <Checkbox
@@ -334,7 +354,7 @@ export function StepDataSource() {
                                                 />
                                                 <label
                                                     htmlFor={`conclusion-${c.value}`}
-                                                    className="text-sm font-medium leading-none cursor-pointer"
+                                                    className="text-sm font-medium leading-none cursor-pointer select-none"
                                                 >
                                                     {c.label}
                                                 </label>
@@ -344,36 +364,99 @@ export function StepDataSource() {
                                 </div>
                             </div>
 
-                            {/* Build Sources (optional filter) */}
+                            {/* Bottom Row: Data Source (Multi-Select Combobox) */}
                             {buildSources.length > 0 && (
-                                <div className="space-y-2 mt-6">
-                                    <Label>Filter by Data Source (Optional)</Label>
-                                    <p className="text-xs text-muted-foreground">
-                                        Select specific CSV uploads to include. Leave empty to use all available builds.
-                                    </p>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 border rounded-md max-h-[150px] overflow-y-auto">
-                                        {buildSources.map((source) => (
-                                            <div key={source.id} className="flex items-center space-x-2">
-                                                <Checkbox
-                                                    id={`source-${source.id}`}
-                                                    checked={dataSource.build_source_ids.includes(source.id)}
-                                                    onCheckedChange={() => handleBuildSourceToggle(source.id)}
-                                                />
-                                                <label
-                                                    htmlFor={`source-${source.id}`}
-                                                    className="text-sm font-medium leading-none cursor-pointer flex-1 truncate"
-                                                >
-                                                    {source.name} ({source.builds_found} builds)
-                                                </label>
-                                            </div>
-                                        ))}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <Label>Data Source (Optional)</Label>
+                                        <span className="text-xs text-muted-foreground">Select specific imports to filter by</span>
                                     </div>
+                                    <Popover open={openSourceCombobox} onOpenChange={setOpenSourceCombobox}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                role="combobox"
+                                                aria-expanded={openSourceCombobox}
+                                                className="w-full justify-between bg-background"
+                                            >
+                                                {dataSource.build_source_ids.length > 0
+                                                    ? `${dataSource.build_source_ids.length} source(s) selected`
+                                                    : "Select data sources..."}
+                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                            <Command>
+                                                <CommandInput placeholder="Search sources..." />
+                                                <CommandList>
+                                                    <CommandEmpty>No source found.</CommandEmpty>
+                                                    <CommandGroup>
+                                                        {buildSources.map((source) => (
+                                                            <CommandItem
+                                                                key={source.id}
+                                                                value={source.name}
+                                                                onSelect={() => {
+                                                                    handleBuildSourceToggle(source.id);
+                                                                }}
+                                                            >
+                                                                <Check
+                                                                    className={cn(
+                                                                        "mr-2 h-4 w-4",
+                                                                        dataSource.build_source_ids.includes(source.id)
+                                                                            ? "opacity-100"
+                                                                            : "opacity-0"
+                                                                    )}
+                                                                />
+                                                                <div className="flex flex-col">
+                                                                    <span>{source.name}</span>
+                                                                    <span className="text-xs text-muted-foreground">{source.builds_found} builds</span>
+                                                                </div>
+                                                            </CommandItem>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
+
+                                    {/* Selected Badges */}
+                                    {dataSource.build_source_ids.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                            {dataSource.build_source_ids.map(id => {
+                                                const src = buildSources.find(s => s.id === id);
+                                                return src ? (
+                                                    <Badge key={id} variant="secondary" className="pl-2 pr-1 py-1 flex items-center gap-1">
+                                                        {src.name}
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-4 w-4 rounded-full ml-1 hover:bg-slate-200 dark:hover:bg-slate-700"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleBuildSourceToggle(id);
+                                                            }}
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </Button>
+                                                    </Badge>
+                                                ) : null;
+                                            })}
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 text-xs text-muted-foreground"
+                                                onClick={() => updateDataSource({ build_source_ids: [] })}
+                                            >
+                                                Clear all
+                                            </Button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
 
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setIsFilterOpen(false)}>
+                        <DialogFooter className="gap-2 sm:gap-0">
+                            <Button variant="ghost" onClick={() => setIsFilterOpen(false)}>
                                 Cancel
                             </Button>
                             <Button onClick={() => applyFilters(1)} disabled={isPreviewLoading}>
@@ -386,7 +469,7 @@ export function StepDataSource() {
             </div>
 
             {/* Main Table Area */}
-            <Card className="flex-1 overflow-hidden flex flex-col">
+            <Card className="flex-1 overflow-hidden flex flex-col shadow-md">
                 <CardHeader className="py-4 border-b bg-slate-50/50 dark:bg-slate-900/50 flex-shrink-0">
                     <div className="flex items-center justify-between">
                         <div>
@@ -397,7 +480,6 @@ export function StepDataSource() {
                                     : "No builds loaded"}
                             </CardDescription>
                         </div>
-                        {/* Maybe pagination here later? */}
                     </div>
                 </CardHeader>
                 <CardContent className="p-0 flex-1 overflow-hidden">

@@ -226,3 +226,45 @@ def dispatch_scan_for_scenario_commit(
         "correlation_id": correlation_id,
         "results": results,
     }
+
+
+def get_failed_scans_for_tool(
+    db, tool_type: str, scenario_id: str
+) -> list[Dict[str, Any]]:
+    """
+    Get failed scans for a given tool type.
+
+    Args:
+        db: Database connection
+        tool_type: "trivy" or "sonarqube"
+        scenario_id: Training Scenario ID
+
+    Returns:
+        List of dicts with scan info for retry
+    """
+    from bson import ObjectId
+
+    from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+    from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
+    scans_to_retry = []
+
+    if tool_type == "trivy":
+        repo = TrivyCommitScanRepository(db)
+        failed_scans = repo.get_failed_by_scenario(ObjectId(scenario_id))
+    elif tool_type == "sonarqube":
+        repo = SonarCommitScanRepository(db)
+        failed_scans = repo.get_failed_by_scenario(ObjectId(scenario_id))
+    else:
+        return []
+
+    for scan in failed_scans:
+        scans_to_retry.append(
+            {
+                "scan_id": str(scan.id),
+                "commit_sha": scan.commit_sha,
+                "repo_full_name": scan.repo_full_name,
+                "raw_repo_id": str(scan.raw_repo_id),
+            }
+        )
+    return scans_to_retry

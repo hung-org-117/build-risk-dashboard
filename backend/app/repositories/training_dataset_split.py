@@ -159,6 +159,8 @@ class TrainingDatasetSplitRepository(BaseRepository[TrainingDatasetSplit]):
         """Delete all splits for an export."""
         return self.delete_many({"export_id": self._to_object_id(export_id)})
 
-    def delete_by_scenario(self, scenario_id: str) -> int:
+    def delete_by_scenario(self, scenario_id: str, session=None) -> int:
         """Delete all splits for a scenario (across all exports)."""
-        return self.delete_many({"scenario_id": self._to_object_id(scenario_id)})
+        return self.delete_many(
+            {"scenario_id": self._to_object_id(scenario_id)}, session=session
+        )

@@ -1,10 +1,24 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import {
+    AlertTriangle,
+    ArrowLeft,
+    CheckCircle2,
+    Clock,
+    ExternalLink,
+    GitCommit,
+    Loader2,
+    Search,
+    XCircle,
+    Box,
+    FileJson
+} from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
     Card,
     CardContent,
@@ -13,452 +27,357 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
-import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-    ArrowLeft,
-    CheckCircle2,
-    ChevronDown,
-    ChevronUp,
-    ExternalLink,
-    GitBranch,
-    GitCommit,
-    Loader2,
-    AlertCircle,
-    XCircle,
-    AlertTriangle,
-    Clock,
-    User,
-    Bot,
-    FileCode,
-} from "lucide-react";
-import {
-    type TrainingEnrichmentBuildDetail,
     trainingScenariosApi,
+    TrainingEnrichmentBuildDetail
 } from "@/lib/api/training-scenarios";
-import { formatDateTime } from "@/lib/utils";
-import { CIProviderLabels } from "@/types";
+import { cn, formatDateTime } from "@/lib/utils";
 
-const getCIProviderLabel = (provider: string): string => {
-    return CIProviderLabels[provider as keyof typeof CIProviderLabels] || provider;
-};
+function ExtractionStatusBadge({ status }: { status: string }) {
+    const s = status.toLowerCase();
 
-/** Format duration */
-const formatDuration = (seconds: number | null): string => {
-    if (seconds === null || seconds === undefined) return "—";
-    if (seconds < 60) return `${Math.round(seconds)}s`;
+    if (s === "completed") {
+        return (
+            <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                <CheckCircle2 className="h-3 w-3" /> Completed
+            </Badge>
+        );
+    }
+    if (s === "partial") {
+        return (
+            <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
+                <AlertTriangle className="h-3 w-3" /> Partial
+            </Badge>
+        );
+    }
+    if (s === "failed") {
+        return (
+            <Badge variant="destructive" className="gap-1">
+                <XCircle className="h-3 w-3" /> Failed
+            </Badge>
+        );
+    }
+    if (s === "pending" || s === "extracting") {
+        return (
+            <Badge variant="secondary" className="gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" /> {s === "pending" ? "Pending" : "Extracting"}
+            </Badge>
+        );
+    }
+    return <Badge variant="secondary">{status}</Badge>;
+}
+
+function formatDuration(startStr?: string, endStr?: string): string {
+    if (!startStr || !endStr) return "—";
+    const ms = new Date(endStr).getTime() - new Date(startStr).getTime();
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
     const mins = Math.floor(seconds / 60);
     const secs = Math.round(seconds % 60);
-    if (mins < 60) return `${mins}m ${secs}s`;
-    const hours = Math.floor(mins / 60);
-    const remainMins = mins % 60;
-    return `${hours}h ${remainMins}m`;
-};
+    return `${mins}m ${secs}s`;
+}
 
-/** Get status config */
-const getStatusConfig = (status: string) => {
-    const config: Record<string, { icon: typeof CheckCircle2; color: string; bgColor: string }> = {
-        success: { icon: CheckCircle2, color: "text-green-600", bgColor: "bg-green-100" },
-        completed: { icon: CheckCircle2, color: "text-green-600", bgColor: "bg-green-100" },
-        failure: { icon: XCircle, color: "text-red-600", bgColor: "bg-red-100" },
-        failed: { icon: XCircle, color: "text-red-600", bgColor: "bg-red-100" },
-        partial: { icon: AlertTriangle, color: "text-amber-600", bgColor: "bg-amber-100" },
-        skipped: { icon: AlertCircle, color: "text-gray-600", bgColor: "bg-gray-100" },
-        pending: { icon: Loader2, color: "text-blue-600", bgColor: "bg-blue-100" },
-    };
-    return config[status] || { icon: AlertCircle, color: "text-gray-600", bgColor: "bg-gray-100" };
-};
+function FeatureValue({ value }: { value: unknown }) {
+    if (value === null || value === undefined) {
+        return <span className="text-muted-foreground italic">null</span>;
+    }
 
-export default function BuildDetailPage() {
-    const params = useParams<{ scenarioId: string; buildId: string }>();
-    const { scenarioId, buildId } = params;
+    if (typeof value === "boolean") {
+        return (
+            <Badge variant={value ? "default" : "secondary"} className="font-mono">
+                {value ? "true" : "false"}
+            </Badge>
+        );
+    }
+
+    if (typeof value === "number") {
+        return <span className="font-mono">{value}</span>;
+    }
+
+    if (typeof value === "object") {
+        const jsonStr = JSON.stringify(value, null, 2);
+        return (
+            <div className="max-w-[400px] overflow-x-auto">
+                <pre className="font-mono text-xs whitespace-pre bg-slate-50 dark:bg-slate-900/50 rounded px-2 py-1">
+                    {jsonStr}
+                </pre>
+            </div>
+        );
+    }
+
+    const strValue = String(value);
+
+    if (strValue.length > 60 || strValue.includes("#")) {
+        return (
+            <div className="max-w-[400px] overflow-x-auto">
+                <code className="font-mono text-xs whitespace-nowrap bg-slate-50 dark:bg-slate-900/50 rounded px-2 py-1 block">
+                    {strValue}
+                </code>
+            </div>
+        );
+    }
+
+    return <span className="font-mono">{strValue}</span>;
+}
+
+export default function EnrichmentBuildDetailPage() {
+    const params = useParams();
     const router = useRouter();
+    const scenarioId = params.scenarioId as string;
+    const buildId = params.buildId as string;
 
-    const [data, setData] = useState<TrainingEnrichmentBuildDetail | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+    const [detail, setDetail] = useState<TrainingEnrichmentBuildDetail | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [featureSearch, setFeatureSearch] = useState("");
 
-    const fetchBuildDetail = useCallback(async () => {
-        if (!buildId) return;
-        setIsLoading(true);
-        setError(null);
-        try {
-            const response = await trainingScenariosApi.getEnrichmentBuildDetail(scenarioId, buildId);
-            setData(response);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load build details");
-        } finally {
-            setIsLoading(false);
+    useEffect(() => {
+        const loadDetail = async () => {
+            setLoading(true);
+            try {
+                const data = await trainingScenariosApi.getEnrichmentBuildDetail(scenarioId, buildId);
+                setDetail(data);
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        if (scenarioId && buildId) {
+            loadDetail();
         }
     }, [scenarioId, buildId]);
 
-    useEffect(() => {
-        fetchBuildDetail();
-    }, [fetchBuildDetail]);
+    const featureEntries = useMemo(() => {
+        if (!detail?.enrichment_build.features) return [];
+        return Object.entries(detail.enrichment_build.features)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .filter(([key]) =>
+                featureSearch === "" ||
+                key.toLowerCase().includes(featureSearch.toLowerCase())
+            );
+    }, [detail, featureSearch]);
 
-    const toggleNode = (nodeName: string) => {
-        setExpandedNodes((prev) => {
-            const next = new Set(prev);
-            if (next.has(nodeName)) {
-                next.delete(nodeName);
-            } else {
-                next.add(nodeName);
-            }
-            return next;
-        });
-    };
-
-    if (isLoading) {
+    if (loading) {
         return (
-            <div className="flex min-h-[400px] items-center justify-center">
+            <div className="flex min-h-[60vh] items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
         );
     }
 
-    if (error || !data) {
+    if (!detail) {
         return (
-            <div className="space-y-4 p-6">
-                <Button variant="ghost" size="sm" onClick={() => router.back()}>
-                    <ArrowLeft className="mr-2 h-4 w-4" />
+            <div className="space-y-6">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => router.back()}
+                    className="gap-2"
+                >
+                    <ArrowLeft className="h-4 w-4" />
                     Back
                 </Button>
-                <Card className="border-destructive">
-                    <CardContent className="pt-6">
-                        <p className="text-destructive">{error || "Build not found"}</p>
-                    </CardContent>
+                <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-900/20">
+                    <CardHeader>
+                        <CardTitle className="text-amber-700 dark:text-amber-300">
+                            Build Not Found
+                        </CardTitle>
+                        <CardDescription>The requested enrichment build could not be loaded.</CardDescription>
+                    </CardHeader>
                 </Card>
             </div>
         );
     }
 
-    // Adapt response structure if needed, assuming API returns flattened or structured similarly
-    // Assuming backend returns: { raw_build_run, enrichment_build, audit_log }
-    const { raw_build_run: rawBuild, enrichment_build: enrichment, audit_log: auditLog } = data;
-    const buildStatus = getStatusConfig(rawBuild.conclusion);
-    const extractionStatus = getStatusConfig(enrichment.extraction_status);
-    const ExtractionStatusIcon = extractionStatus.icon;
+    const { enrichment_build, raw_build_run, audit_log } = detail;
 
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <Link href={`/scenarios/${scenarioId}/builds/processing`}>
-                        <Button variant="ghost" size="sm">
-                            <ArrowLeft className="mr-2 h-4 w-4" />
-                            Back to Feature Extraction
-                        </Button>
-                    </Link>
-                    <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-2">
-                            Build #{rawBuild.ci_run_id.slice(-8)}
-                            {rawBuild.web_url && (
-                                <a
-                                    href={rawBuild.web_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-muted-foreground hover:text-foreground"
-                                >
-                                    <ExternalLink className="h-5 w-5" />
-                                </a>
-                            )}
-                        </h1>
-                        <p className="text-sm text-muted-foreground flex items-center gap-2">
-                            {rawBuild.repo_name}
-                            <span>•</span>
-                            {getCIProviderLabel(rawBuild.provider)}
-                        </p>
-                    </div>
+            <div className="flex items-center gap-4">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => router.push(`/scenarios/${scenarioId}/builds/processing`)}
+                    className="gap-2"
+                >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back to Builds
+                </Button>
+                <div className="flex-1">
+                    <h1 className="text-2xl font-bold tracking-tight">
+                        Feature Extraction Detail
+                    </h1>
+                    <p className="text-muted-foreground text-sm">
+                        Build <span className="font-mono">{raw_build_run.ci_run_id}</span> • {raw_build_run.commit_sha.substring(0, 7)}
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <ExtractionStatusBadge status={enrichment_build.extraction_status} />
+                    {raw_build_run.web_url && (
+                        <a
+                            href={raw_build_run.web_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                        >
+                            <ExternalLink className="h-4 w-4" />
+                            View on CI
+                        </a>
+                    )}
                 </div>
             </div>
 
-            {/* Enrichment Status */}
+            {/* Build Run Information */}
             <Card>
-                <CardHeader className="pb-3">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                        Enrichment Status
-                        <Badge className={`${extractionStatus.bgColor} ${extractionStatus.color}`}>
-                            <ExtractionStatusIcon className="mr-1 h-3 w-3" />
-                            {enrichment.extraction_status}
-                        </Badge>
-                    </CardTitle>
+                <CardHeader>
+                    <CardTitle>Build Context</CardTitle>
+                    <CardDescription>Source build and environment</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                            <span className="text-muted-foreground">Features Extracted:</span>
-                            <p className="font-medium text-lg">
-                                {enrichment.feature_count} / {enrichment.expected_feature_count}
-                            </p>
+                <CardContent className="space-y-6">
+                    {/* Commit Info */}
+                    <div className="rounded-lg border p-4 space-y-3">
+                        <div className="flex items-center gap-2 text-sm">
+                            <GitCommit className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-mono text-sm">{raw_build_run.commit_sha}</span>
+                            <Badge variant="secondary">{raw_build_run.branch}</Badge>
                         </div>
-                        <div>
-                            <span className="text-muted-foreground">Created At:</span>
-                            <p className="font-medium">{formatDateTime(enrichment.created_at)}</p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Box className="h-4 w-4" />
+                            <span className="font-medium text-foreground">{raw_build_run.repo_name}</span>
                         </div>
                     </div>
 
-                    {enrichment.missing_resources.length > 0 && (
-                        <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 p-3 text-sm">
-                            <p className="font-medium text-amber-800 dark:text-amber-200">Missing Resources:</p>
-                            <p className="text-amber-700 dark:text-amber-300">
-                                {enrichment.missing_resources.join(", ")}
+                    {/* Metadata Grid */}
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                        <div className="rounded-lg border p-4">
+                            <p className="text-xs text-muted-foreground">CI Build ID</p>
+                            <p className="font-mono text-sm mt-1 truncate" title={raw_build_run.ci_run_id}>
+                                {raw_build_run.ci_run_id}
                             </p>
                         </div>
-                    )}
-
-                    {enrichment.skipped_features.length > 0 && (
-                        <div>
-                            <span className="text-sm text-muted-foreground">Skipped Features:</span>
-                            <p className="text-sm font-medium">{enrichment.skipped_features.length} features</p>
+                        <div className="rounded-lg border p-4">
+                            <p className="text-xs text-muted-foreground">Provider</p>
+                            <p className="font-medium mt-1 capitalize">
+                                {raw_build_run.provider.replace("_", " ")}
+                            </p>
                         </div>
-                    )}
+                        <div className="rounded-lg border p-4">
+                            <p className="text-xs text-muted-foreground">Extracted At</p>
+                            <p className="font-medium mt-1 text-sm">
+                                {formatDateTime(enrichment_build.enriched_at)}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border p-4">
+                            <p className="text-xs text-muted-foreground">CI Conclusion</p>
+                            <p className="font-medium mt-1 capitalize">
+                                {raw_build_run.conclusion}
+                            </p>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
 
-                    {enrichment.extraction_error && (
-                        <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-3 text-sm">
-                            <p className="font-medium text-red-800 dark:text-red-200">Error:</p>
-                            <p className="text-red-700 dark:text-red-300">{enrichment.extraction_error}</p>
+            {/* Audit Log / Node Performance */}
+            {audit_log && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Clock className="h-5 w-5" />
+                            Extraction Performance
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-6">
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Total Duration</p>
+                                <p className="font-medium mt-1">{audit_log.duration_ms}ms</p>
+                            </div>
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Nodes Success</p>
+                                <p className="font-medium mt-1 text-green-600">{audit_log.nodes_succeeded}</p>
+                            </div>
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Nodes Failed</p>
+                                <p className="font-medium mt-1 text-red-600">{audit_log.nodes_failed}</p>
+                            </div>
+                            <div className="rounded-lg border p-4">
+                                <p className="text-xs text-muted-foreground">Skipped</p>
+                                <p className="font-medium mt-1 text-amber-600">{audit_log.nodes_skipped}</p>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Extracted Features */}
+            <Card>
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <CardTitle className="flex items-center gap-2">
+                                Extracted Features
+                            </CardTitle>
+                            <CardDescription>
+                                {enrichment_build.feature_count} features found
+                                {enrichment_build.expected_feature_count > 0 && ` / ${enrichment_build.expected_feature_count} expected`}
+                            </CardDescription>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {enrichment_build.extraction_error ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-900/20">
+                            <p className="text-sm text-red-700 dark:text-red-300">
+                                Extraction failed: {enrichment_build.extraction_error}
+                            </p>
+                        </div>
+                    ) : featureEntries.length > 0 ? (
+                        <div className="space-y-4">
+                            <div className="relative max-w-sm">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    placeholder="Search features..."
+                                    value={featureSearch}
+                                    onChange={(e) => setFeatureSearch(e.target.value)}
+                                    className="pl-9"
+                                />
+                            </div>
+                            <div className="rounded-lg border overflow-hidden max-h-[500px] overflow-y-auto relative">
+                                <table className="w-full text-sm relative">
+                                    <thead className="sticky top-0 z-10">
+                                        <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+                                            <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                                                Feature Name
+                                            </th>
+                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground bg-slate-50 dark:bg-slate-900">
+                                                Value
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {featureEntries.map(([key, value]) => (
+                                            <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
+                                                <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
+                                                    {key}
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <FeatureValue value={value} />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
+                            <p className="text-muted-foreground">No features to display.</p>
                         </div>
                     )}
                 </CardContent>
             </Card>
-
-            {/* Two Column Layout: Extracted Features + Extraction Logs */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Extracted Features */}
-                <Card className="flex flex-col">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2">
-                            <FileCode className="h-5 w-5" />
-                            Extracted Features
-                        </CardTitle>
-                        <CardDescription>
-                            {Object.keys(enrichment.features).length} features extracted
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="flex-1 overflow-hidden">
-                        <div className="rounded-md border h-[500px] overflow-y-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[200px] sticky top-0 bg-background">Feature</TableHead>
-                                        <TableHead className="sticky top-0 bg-background">Value</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {Object.entries(enrichment.features)
-                                        .sort(([a], [b]) => a.localeCompare(b))
-                                        .map(([key, value]) => (
-                                            <TableRow key={key}>
-                                                <TableCell className="font-medium text-xs">{key}</TableCell>
-                                                <TableCell className="font-mono text-sm">
-                                                    <ExpandableValue value={formatValue(value)} />
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Extraction Logs */}
-                <Card className="flex flex-col">
-                    <CardHeader className="pb-2">
-                        <CardTitle>Extraction Logs</CardTitle>
-                        {auditLog ? (
-                            <CardDescription className="flex items-center gap-2 flex-wrap">
-                                <span>Duration: {auditLog.duration_ms ? `${(auditLog.duration_ms / 1000).toFixed(2)}s` : "—"}</span>
-                                <span>•</span>
-                                <span className="text-green-600">{auditLog.nodes_succeeded} succeeded</span>
-                                {auditLog.nodes_failed > 0 && (
-                                    <>
-                                        <span>•</span>
-                                        <span className="text-red-600">{auditLog.nodes_failed} failed</span>
-                                    </>
-                                )}
-                                {auditLog.nodes_skipped > 0 && (
-                                    <>
-                                        <span>•</span>
-                                        <span className="text-gray-600">{auditLog.nodes_skipped} skipped</span>
-                                    </>
-                                )}
-                            </CardDescription>
-                        ) : (
-                            <CardDescription>No extraction logs available</CardDescription>
-                        )}
-                    </CardHeader>
-                    <CardContent className="flex-1 overflow-hidden">
-                        {auditLog ? (
-                            <div className="h-[500px] overflow-y-auto space-y-2">
-                                {auditLog.errors.length > 0 && (
-                                    <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
-                                        <p className="font-medium text-red-800 dark:text-red-200 mb-1 text-sm">Errors:</p>
-                                        <ul className="list-disc list-inside text-xs text-red-700 dark:text-red-300">
-                                            {auditLog.errors.map((err, i) => (
-                                                <li key={i}>{err}</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {auditLog.warnings.length > 0 && (
-                                    <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 p-3">
-                                        <p className="font-medium text-amber-800 dark:text-amber-200 mb-1 text-sm">Warnings:</p>
-                                        <ul className="list-disc list-inside text-xs text-amber-700 dark:text-amber-300">
-                                            {auditLog.warnings.map((warn, i) => (
-                                                <li key={i}>{warn}</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                <div className="space-y-1">
-                                    {auditLog.node_results.map((node) => (
-                                        <NodeResultRow
-                                            key={node.node_name}
-                                            node={node}
-                                            isExpanded={expandedNodes.has(node.node_name)}
-                                            onToggle={() => toggleNode(node.node_name)}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="h-[500px] flex items-center justify-center text-muted-foreground">
-                                No extraction logs available for this build
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-            </div>
-        </div>
-    );
-}
-
-// =============================================================================
-// Sub-components
-// =============================================================================
-
-interface NodeResultRowProps {
-    node: any; // Type should be NodeExecutionDetail but using any to simplify for now until type is imported
-    isExpanded: boolean;
-    onToggle: () => void;
-}
-
-function NodeResultRow({ node, isExpanded, onToggle }: NodeResultRowProps) {
-    const statusConfig = getStatusConfig(node.status);
-    const StatusIcon = statusConfig.icon;
-
-    return (
-        <Collapsible open={isExpanded} onOpenChange={onToggle}>
-            <CollapsibleTrigger className="w-full">
-                <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50 cursor-pointer">
-                    <div className="flex items-center gap-3">
-                        {isExpanded ? (
-                            <ChevronUp className="h-4 w-4" />
-                        ) : (
-                            <ChevronDown className="h-4 w-4" />
-                        )}
-                        <StatusIcon className={`h-4 w-4 ${statusConfig.color}`} />
-                        <span className="font-medium">{node.node_name}</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        {node.features_extracted.length > 0 && (
-                            <span>{node.features_extracted.length} features</span>
-                        )}
-                        {node.duration_ms > 0 && (
-                            <span>{node.duration_ms.toFixed(0)}ms</span>
-                        )}
-                        {node.skip_reason && (
-                            <Badge variant="secondary" className="text-xs">{node.skip_reason}</Badge>
-                        )}
-                    </div>
-                </div>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-                <div className="ml-8 mt-2 p-3 bg-muted/30 rounded-md text-sm space-y-2">
-                    {node.features_extracted.length > 0 && (
-                        <div>
-                            <span className="text-muted-foreground">Features: </span>
-                            <span className="font-mono text-xs">
-                                {node.features_extracted.join(", ")}
-                            </span>
-                        </div>
-                    )}
-                    {node.resources_used.length > 0 && (
-                        <div>
-                            <span className="text-muted-foreground">Resources: </span>
-                            <span>{node.resources_used.join(", ")}</span>
-                        </div>
-                    )}
-                    {node.error && (
-                        <div className="text-red-600">
-                            <span className="font-medium">Error: </span>
-                            {node.error}
-                        </div>
-                    )}
-                    {node.warning && (
-                        <div className="text-amber-600">
-                            <span className="font-medium">Warning: </span>
-                            {node.warning}
-                        </div>
-                    )}
-                    {node.retry_count > 0 && (
-                        <div className="text-muted-foreground">
-                            Retries: {node.retry_count}
-                        </div>
-                    )}
-                </div>
-            </CollapsibleContent>
-        </Collapsible>
-    );
-}
-
-function formatValue(value: unknown): string {
-    if (value === null || value === undefined) return "—";
-    if (typeof value === "boolean") return value ? "✓" : "✗";
-    if (typeof value === "number") {
-        if (Number.isInteger(value)) return value.toLocaleString();
-        return value.toFixed(2);
-    }
-    if (typeof value === "string") return value;
-    if (typeof value === "object") return JSON.stringify(value);
-    return String(value);
-}
-
-function ExpandableValue({ value }: { value: string }) {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const MAX_LENGTH = 50;
-
-    const isLong = value.length > MAX_LENGTH;
-
-    if (!isLong) {
-        return <span>{value}</span>;
-    }
-
-    return (
-        <div>
-            <span className={isExpanded ? "break-all" : "line-clamp-1"}>
-                {value}
-            </span>
-            <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="text-xs text-blue-600 hover:underline ml-1"
-            >
-                {isExpanded ? "Show less" : "Show more"}
-            </button>
         </div>
     );
 }

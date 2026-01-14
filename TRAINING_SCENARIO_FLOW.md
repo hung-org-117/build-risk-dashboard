@@ -5,7 +5,9 @@
 2. [Dashboard Statistics](#dashboard-statistics)
 3. [Phase 0: Build Source Upload](#phase-0-build-source-upload)
 4. [Phase 1: Filtering & Ingestion](#phase-1-filtering--ingestion)
-5. [Phase 2: Processing & Feature Extraction](#phase-2-processing--feature-extraction)
+5. [Phase 2: Processing](#phase-2-processing)
+   - [2.A: Feature Extraction](#2a-feature-extraction)
+   - [2.B: Scan Metrics Collection](#2b-scan-metrics-collection)
 6. [Phase 3: Dataset Generation](#phase-3-dataset-generation)
 7. [Entities & Data Model](#entities--data-model)
 8. [API Endpoints](#api-endpoints)
@@ -54,10 +56,18 @@ User creates Training Scenario with filters
        ▼ (User triggers manually)
 ┌──────────────────────────────────────────┐
 │  PHASE 2: PROCESSING                     │
-│  ✓ Dispatch scans (Trivy, SonarQube)     │
-│  ✓ Create TrainingEnrichmentBuild        │
-│  ✓ Extract features (Hamilton DAG)       │
-│  ✓ Sequential processing (temporal deps) │
+│  ┌────────────────────────────────────┐  │
+│  │ 2.A: FEATURE EXTRACTION            │  │
+│  │  ✓ Create TrainingEnrichmentBuild  │  │
+│  │  ✓ Extract features (Hamilton DAG) │  │
+│  │  ✓ Sequential (temporal deps)      │  │
+│  └────────────────────────────────────┘  │
+│  ┌────────────────────────────────────┐  │
+│  │ 2.B: SCAN METRICS COLLECTION       │  │
+│  │  ✓ Dispatch scans (Trivy/SonarQube)│  │
+│  │  ✓ Batch processing via chain      │  │
+│  │  ✓ Backfill metrics to builds      │  │
+│  └────────────────────────────────────┘  │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -287,11 +297,13 @@ DataSourceConfig = {
 
 ---
 
-## Phase 2: Processing & Feature Extraction
+## Phase 2: Processing
 
 **File**: [backend/app/tasks/training_processing.py](backend/app/tasks/training_processing.py)
 
-**Mục đích**: Extract features từ ingested builds
+**Mục đích**: Processing là phase song song gồm 2 sub-phases:
+- **2.A Feature Extraction**: Extract features từ builds sử dụng Hamilton DAG
+- **2.B Scan Metrics Collection**: Thu thập scan metrics từ Trivy/SonarQube
 
 ### 2.1 Tasks Overview
 
@@ -300,10 +312,14 @@ DataSourceConfig = {
 | `start_scenario_processing` | scenario_processing | 120s | User triggers Phase 2 |
 | `dispatch_scans_and_processing` | scenario_processing | 180s | Dispatch scans + feature extraction |
 | `dispatch_scenario_scans` | scenario_scanning | 600s | Fire-and-forget scan dispatch |
+| `process_scan_batch` | scenario_scanning | 300s | Process single batch of scan dispatches |
+| `finalize_scan_dispatch` | scenario_scanning | 180s | Finalize after all scan batches complete |
 | `dispatch_enrichment_batches` | scenario_processing | 240s | Create EnrichmentBuild, dispatch chain |
 | `process_single_enrichment` | scenario_processing | 600s | Extract features for 1 build (max_retries=2) |
 | `finalize_scenario_processing` | scenario_processing | 120s | Mark PROCESSED, notify users |
 | `reprocess_failed_builds` | scenario_processing | 360s | Retry failed builds |
+| `retry_failed_scenario_scans` | scenario_scanning | 600s | Retry failed scans (tool-specific, batch mode) |
+| `process_retry_scan_batch` | scenario_scanning | 300s | Process single batch of scan retries |
 | `handle_processing_chain_error` | scenario_processing | 120s | Error handler for chain failures |
 
 ### 2.2 Processing Flow
@@ -318,21 +334,22 @@ start_scenario_processing
 ├─ Update status → PROCESSING
 └─ dispatch_scans_and_processing
        │
-       ├─ dispatch_scenario_scans (async, fire & forget)
-       │   └─ Dispatch Trivy + SonarQube for unique commits
+       ├── [2.B] dispatch_scenario_scans (async, fire & forget)
+       │    └─ Collect unique commits → batch dispatch
+       │        └─ process_scan_batch → Trivy/SonarQube
        │
-       └─ dispatch_enrichment_batches
-           │
-           ├─ Create TrainingEnrichmentBuild for each INGESTED build
-           └─ chain(
-                  process_single_enrichment(build_1),
-                  process_single_enrichment(build_2),
-                  ...,
-                  finalize_scenario_processing
-              )
+       └── [2.A] dispatch_enrichment_batches
+            │
+            ├─ Create TrainingEnrichmentBuild per INGESTED build
+            └─ chain(
+                   process_single_enrichment(build_1),
+                   process_single_enrichment(build_2),
+                   ...,
+                   finalize_scenario_processing
+               )
 ```
 
-### 2.3 Sequential Processing (Temporal Features)
+### 2.A Feature Extraction (Sequential)
 
 Processing MUST be sequential (oldest → newest) for temporal features:
 
@@ -349,7 +366,54 @@ chain(
 )
 ```
 
-### 2.4 Feature Config
+### 2.B Scan Metrics Collection (Parallel Batches)
+
+Scans run as fire-and-forget parallel task:
+
+```
+dispatch_scenario_scans
+│
+├─ Collect unique commits from ingested builds
+├─ Split into batches (SCAN_COMMITS_PER_BATCH = 20)
+└─ chain(
+       process_scan_batch(batch_0),
+       process_scan_batch(batch_1),
+       ...,
+       finalize_scan_dispatch
+   )
+       │
+       └─ Each batch dispatches to scan queues:
+           ├─ start_trivy_scan_for_version_commit
+           └─ start_sonar_scan_for_version_commit
+```
+
+**Retry Failed Scans** (Tool-Specific):
+```
+retry_failed_scenario_scans (tool_type: "trivy" | "sonarqube")
+│
+├─ Find all FAILED scans for specified tool only
+├─ Split into batches (SCAN_COMMITS_PER_BATCH = 20)
+└─ chain(
+       process_retry_scan_batch(batch_0),
+       process_retry_scan_batch(batch_1),
+       ...
+   )
+       │
+       └─ For each scan in batch:
+           ├─ Check DB status (skip if COMPLETED)
+           ├─ [SonarQube only] Check server existence via API
+           │   └─ Skip if project already exists on SonarQube
+           ├─ Reset status → PENDING, increment retry_count
+           └─ Dispatch to tool-specific task:
+               ├─ start_trivy_scan_for_version_commit
+               └─ start_sonar_scan_for_version_commit
+```
+
+> [!NOTE]
+> SonarQube retry checks if project already exists on server via `_project_exists(component_key)` API call.
+> If project exists, scan is skipped to avoid duplicate analysis.
+
+### 2.C Feature Config
 
 > **Note:** Features are selected via UI from the Feature Graph. The UI displays explicit feature names grouped by category. Wildcard patterns (e.g., `build_*`) are NOT supported in the current UI flow.
 
@@ -672,7 +736,7 @@ class ExtractionStatus(str, Enum):
 |--------|----------|-------|
 | `GET` | `/training-scenarios/{id}/scan-status` | Get scan progress status |
 | `GET` | `/training-scenarios/{id}/commit-scans` | List commit scan results |
-| `POST` | `/training-scenarios/{id}/commit-scans/{commit_sha}/retry` | Retry failed scan |
+| `POST` | `/training-scenarios/{id}/retry-scans?tool_type=trivy\|sonarqube` | Retry failed scans for specific tool (required param) |
 
 ---
 
@@ -700,10 +764,29 @@ class ExtractionStatus(str, Enum):
     ├── layout.tsx             # Tabs navigation
     ├── page.tsx               # Overview/Dashboard
     ├── builds/                # Ingestion + Enrichment builds list
+    │   ├── ingestion/         # Ingestion phase builds
+    │   ├── processing/        # Processing phase builds
+    │   └── scans/             # Scan metrics (Trivy/SonarQube)
+    │       └── page.tsx       # Tabs for Trivy/SonarQube with separate retry buttons
     ├── analysis/              # Feature analysis & visualization
     └── export/                # Download splits
         └── page.tsx
 ```
+
+### Scans Page
+
+```
+/scenarios/{id}/builds/scans
+├── Header
+│   ├── [Retry SonarQube (N)] button  # Only shown if sonar failures > 0
+│   ├── [Retry Trivy (N)] button      # Only shown if trivy failures > 0
+│   └── [Refresh] button
+├── Tabs
+│   ├── SonarQube Tab
+│   │   └── Paginated table of sonar commit scans
+│   └── Trivy Tab
+│       └── Paginated table of trivy commit scans
+└── Scan Progress Badge (completed/total)
 
 ### Create Wizard Flow
 
@@ -765,7 +848,16 @@ Step 5: Review & Start
 |------------|--------|-----------|--------|
 | Feature extraction failed | FAILED | Yes | `reprocess_failed_builds` |
 | Hamilton DAG error | FAILED | Yes | `reprocess_failed_builds` |
-| Scan timeout | N/A | No | Scan runs async, skip backfill |
+
+### Scan Errors
+
+| Error Type | Status | Retryable | Action |
+|------------|--------|-----------|--------|
+| Trivy scan timeout | FAILED | Yes | `retry_failed_scenario_scans(tool_type="trivy")` |
+| Trivy CLI error | FAILED | Yes | `retry_failed_scenario_scans(tool_type="trivy")` |
+| SonarQube scan timeout | FAILED | Yes | `retry_failed_scenario_scans(tool_type="sonarqube")` |
+| SonarQube API error | FAILED | Yes | `retry_failed_scenario_scans(tool_type="sonarqube")` |
+| Project exists on server | N/A | **Skip** | Already exists, fetch metrics instead |
 
 ---
 
@@ -815,3 +907,4 @@ Training Scenario Pipeline là hệ thống 4-phase tạo dataset ML từ builds
 - **Train/Val/Test splits**: Cấu hình splitting strategy với ratios tùy chỉnh
 - **Sequential processing**: Temporal features yêu cầu xử lý tuần tự
 - **Async scans**: Trivy/SonarQube chạy song song, không block feature extraction
+- **Tool-specific retry**: Retry scans theo tool (Trivy/SonarQube riêng), check server existence cho SonarQube

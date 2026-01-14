@@ -13,20 +13,19 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useSSE } from "@/contexts/sse-context";
 import {
     CheckCircle2,
-    ChevronLeft,
+    ChevronDown,
     ChevronRight,
+    ChevronLeft,
+    ChevronRight as ChevronNext, // Renamed to avoid conflict
     Loader2,
     XCircle,
     Clock,
@@ -34,31 +33,20 @@ import {
     RotateCcw,
     Shield,
     BarChart3,
+    FileJson,
+    Activity
 } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+import {
+    trainingScenariosApi,
+    CommitScanRecord,
+    PaginatedResponse
+} from "@/lib/api/training-scenarios";
+import { TablePagination } from "@/components/builds";
+
 const ITEMS_PER_PAGE = 10;
 
-interface CommitScan {
-    id: string;
-    commit_sha: string;
-    repo_full_name: string;
-    status: string;
-    error_message: string | null;
-    builds_affected: number;
-    retry_count: number;
-    started_at: string | null;
-    completed_at: string | null;
-}
-
-interface ScanListResponse {
-    items: CommitScan[];
-    total: number;
-    skip: number;
-    limit: number;
-}
-
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
+function formatDuration(startedAt: string | undefined, completedAt: string | undefined): string {
     if (!startedAt || !completedAt) return "-";
     const diff = new Date(completedAt).getTime() - new Date(startedAt).getTime();
     if (diff < 1000) return `${diff}ms`;
@@ -75,11 +63,10 @@ export default function ScansPage() {
 
     const activeTab = searchParams.get("tab") || "sonarqube";
 
-    const [trivyData, setTrivyData] = useState<ScanListResponse | null>(null);
-    const [sonarData, setSonarData] = useState<ScanListResponse | null>(null);
+    const [trivyData, setTrivyData] = useState<PaginatedResponse<CommitScanRecord> | null>(null);
+    const [sonarData, setSonarData] = useState<PaginatedResponse<CommitScanRecord> | null>(null);
     const [loading, setLoading] = useState(true);
     const [retrying, setRetrying] = useState<string | null>(null);
-    const [retryAllLoading, setRetryAllLoading] = useState(false);
     const [sonarPage, setSonarPage] = useState(1);
     const [trivyPage, setTrivyPage] = useState(1);
     // Scan progress tracking
@@ -91,6 +78,19 @@ export default function ScansPage() {
     } | null>(null);
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Expandable row state
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+    const toggleRow = (id: string) => {
+        const newExpanded = new Set(expandedRows);
+        if (newExpanded.has(id)) {
+            newExpanded.delete(id);
+        } else {
+            newExpanded.add(id);
+        }
+        setExpandedRows(newExpanded);
+    };
+
     const handleTabChange = (value: string) => {
         const params = new URLSearchParams(searchParams.toString());
         params.set("tab", value);
@@ -101,39 +101,33 @@ export default function ScansPage() {
         if (!silent) setLoading(true);
 
         try {
-            let currentData: ScanListResponse | null = null;
+            let currentItems: CommitScanRecord[] = [];
 
             if (activeTab === "trivy") {
-                // Fetch trivy scans
-                const trivySkip = (trivyPage - 1) * ITEMS_PER_PAGE;
-                const url = `${API_BASE}/training-scenarios/${scenarioId}/commit-scans?tool_type=trivy&skip=${trivySkip}&limit=${ITEMS_PER_PAGE}`;
-                const trivyRes = await fetch(url, { credentials: "include" });
-
-                if (trivyRes.ok) {
-                    const data = await trivyRes.json();
-                    setTrivyData(data.trivy || null);
-                    currentData = data.trivy;
-                } else {
-                    console.error("Trivy fetch failed:", trivyRes.status, trivyRes.statusText);
+                const response = await trainingScenariosApi.getCommitScans(scenarioId, {
+                    tool_type: "trivy",
+                    skip: (trivyPage - 1) * ITEMS_PER_PAGE,
+                    limit: ITEMS_PER_PAGE,
+                });
+                if (response.trivy) {
+                    setTrivyData(response.trivy);
+                    currentItems = response.trivy.items;
                 }
             } else {
-                // Fetch sonarqube scans
-                const sonarSkip = (sonarPage - 1) * ITEMS_PER_PAGE;
-                const url = `${API_BASE}/training-scenarios/${scenarioId}/commit-scans?tool_type=sonarqube&skip=${sonarSkip}&limit=${ITEMS_PER_PAGE}`;
-                const sonarRes = await fetch(url, { credentials: "include" });
-
-                if (sonarRes.ok) {
-                    const data = await sonarRes.json();
-                    setSonarData(data.sonarqube || null);
-                    currentData = data.sonarqube;
-                } else {
-                    console.error("SonarQube fetch failed:", sonarRes.status, sonarRes.statusText);
+                const response = await trainingScenariosApi.getCommitScans(scenarioId, {
+                    tool_type: "sonarqube",
+                    skip: (sonarPage - 1) * ITEMS_PER_PAGE,
+                    limit: ITEMS_PER_PAGE,
+                });
+                if (response.sonarqube) {
+                    setSonarData(response.sonarqube);
+                    currentItems = response.sonarqube.items;
                 }
             }
 
-            // Check for running scans for polling using fresh data
-            const hasRunning = currentData?.items.some(
-                (s: any) => s.status === "scanning" || s.status === "pending"
+            // Check for running scans for polling
+            const hasRunning = currentItems.some(
+                (s) => s.status === "scanning" || s.status === "pending"
             );
 
             if (hasRunning && !pollingRef.current) {
@@ -213,50 +207,11 @@ export default function ScansPage() {
         };
     }, [scenarioId, fetchScans]);
 
-    // Subscribe to SSE for scenario scan progress updates
-    useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: any) => {
-            if (data.scenario_id === scenarioId) {
-                setScanProgress({
-                    scans_total: data.scans_total ?? 0,
-                    scans_completed: data.scans_completed ?? 0,
-                    scans_failed: data.scans_failed ?? 0,
-                    scan_extraction_completed: data.scan_extraction_completed ?? false,
-                });
-            }
-        });
-        return () => unsubscribe();
-    }, [subscribe, scenarioId]);
-
-    // Listen for SCAN_ERROR events
-    useEffect(() => {
-        const handleScanError = (event: CustomEvent<{
-            scenario_id?: string;
-            scan_id: string;
-            commit_sha: string;
-            tool_type: string;
-            error: string;
-            retry_count: number;
-        }>) => {
-            if (event.detail.scenario_id === scenarioId) {
-                fetchScans(true);
-            }
-        };
-
-        window.addEventListener("SCAN_ERROR", handleScanError as EventListener);
-        return () => {
-            window.removeEventListener("SCAN_ERROR", handleScanError as EventListener);
-        };
-    }, [scenarioId, fetchScans]);
-
-    const handleRetry = async (commitSha: string, toolType: string) => {
+    const handleRetry = async (commitSha: string, toolType: "trivy" | "sonarqube") => {
         setRetrying(`${toolType}-${commitSha}`);
         try {
-            await fetch(
-                `${API_BASE}/training-scenarios/${scenarioId}/commit-scans/${commitSha}/retry?tool_type=${toolType}`,
-                { method: "POST", credentials: "include" }
-            );
-            await fetchScans();
+            await trainingScenariosApi.retryCommitScan(scenarioId, commitSha, toolType);
+            await fetchScans(true);
         } catch (err) {
             console.error("Retry failed:", err);
         } finally {
@@ -267,29 +222,20 @@ export default function ScansPage() {
     // Calculate failed counts
     const trivyFailedCount = trivyData?.items?.filter(s => s.status === "failed").length || 0;
     const sonarFailedCount = sonarData?.items?.filter(s => s.status === "failed").length || 0;
-    const totalFailedCount = trivyFailedCount + sonarFailedCount;
 
-    // Retry all failed scans
-    const handleRetryAllFailed = async () => {
-        setRetryAllLoading(true);
+    // Tool-specific retry state
+    const [retryingTool, setRetryingTool] = useState<"trivy" | "sonarqube" | null>(null);
+
+    // Retry failed scans for a specific tool
+    const handleRetryTool = async (toolType: "trivy" | "sonarqube") => {
+        setRetryingTool(toolType);
         try {
-            const allFailed: { sha: string; tool: string }[] = [];
-            trivyData?.items?.forEach(s => s.status === "failed" && allFailed.push({ sha: s.commit_sha, tool: "trivy" }));
-            sonarData?.items?.forEach(s => s.status === "failed" && allFailed.push({ sha: s.commit_sha, tool: "sonarqube" }));
-
-            await Promise.allSettled(
-                allFailed.map(({ sha, tool }) =>
-                    fetch(
-                        `${API_BASE}/training-scenarios/${scenarioId}/commit-scans/${sha}/retry?tool_type=${tool}`,
-                        { method: "POST", credentials: "include" }
-                    )
-                )
-            );
-            await fetchScans();
+            await trainingScenariosApi.retryFailedScans(scenarioId, toolType);
+            await fetchScans(true);
         } catch (err) {
-            console.error("Retry all failed:", err);
+            console.error(`Retry ${toolType} failed:`, err);
         } finally {
-            setRetryAllLoading(false);
+            setRetryingTool(null);
         }
     };
 
@@ -309,8 +255,8 @@ export default function ScansPage() {
     };
 
     const renderScanTable = (
-        scanData: ScanListResponse | null,
-        toolType: string,
+        scanData: PaginatedResponse<CommitScanRecord> | null,
+        toolType: "trivy" | "sonarqube",
         currentPage: number,
         setPage: (page: number) => void
     ) => {
@@ -338,7 +284,7 @@ export default function ScansPage() {
         };
 
         return (
-            <div className="space-y-2">
+            <div className="space-y-4">
                 <div className="flex gap-2 text-xs text-muted-foreground mb-2">
                     <span>{stats.total} total</span>
                     <span>•</span>
@@ -346,81 +292,143 @@ export default function ScansPage() {
                     {stats.failed > 0 && <><span>•</span><span className="text-red-600">{stats.failed} failed (page)</span></>}
                     {stats.pending > 0 && <><span>•</span><span>{stats.pending} pending (page)</span></>}
                 </div>
-                <div className="border rounded-lg overflow-hidden">
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className="w-[100px]">Commit</TableHead>
-                                <TableHead className="w-[140px]">Status</TableHead>
-                                <TableHead className="w-[80px]">Builds</TableHead>
-                                <TableHead className="w-[100px]">Duration</TableHead>
-                                <TableHead className="w-[140px] text-right">Completed At</TableHead>
-                                <TableHead className="w-16"></TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {items.map((scan) => (
-                                <TableRow key={scan.id}>
-                                    <TableCell className="font-mono text-xs py-2">
-                                        {scan.commit_sha.substring(0, 7)}
-                                    </TableCell>
-                                    <TableCell className="py-2">{renderStatus(scan.status)}</TableCell>
-                                    <TableCell className="py-2">{scan.builds_affected}</TableCell>
-                                    <TableCell className="text-xs py-2">
-                                        {formatDuration(scan.started_at, scan.completed_at)}
-                                    </TableCell>
-                                    <TableCell className="text-xs py-2 text-right text-muted-foreground">
-                                        {formatDateTime(scan.completed_at)}
-                                    </TableCell>
-                                    <TableCell className="py-2">
-                                        {scan.status === "failed" && (
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                disabled={retrying === `${toolType}-${scan.commit_sha}`}
-                                                onClick={() => handleRetry(scan.commit_sha, toolType)}
-                                                className="h-8 w-8 p-0"
-                                            >
-                                                {retrying === `${toolType}-${scan.commit_sha}` ? (
-                                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                                ) : (
-                                                    <RotateCcw className="h-3 w-3" />
+                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+                        <thead className="bg-slate-50 dark:bg-slate-900/40">
+                            <tr>
+                                <th className="px-4 py-3 w-[50px]"></th>
+                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[100px]">Commit</th>
+                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[140px]">Status</th>
+                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[80px]">Builds</th>
+                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[100px]">Duration</th>
+                                <th className="px-4 py-3 text-right font-medium text-slate-500 w-[140px]">Completed At</th>
+                                <th className="px-4 py-3 w-16"></th>
+                            </tr>
+                        </thead>
+                        {items.map((scan) => {
+                            const isExpanded = expandedRows.has(scan.id);
+                            const hasDetails = (scan.metrics && Object.keys(scan.metrics).length > 0) ||
+                                (scan.scan_config && Object.keys(scan.scan_config).length > 0);
+
+                            return (
+                                <Collapsible
+                                    key={scan.id}
+                                    asChild
+                                    open={isExpanded}
+                                    onOpenChange={() => toggleRow(scan.id)}
+                                >
+                                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
+                                        <tr
+                                            className="group cursor-pointer"
+                                            onClick={(e) => {
+                                                // Don't navigate if clicking the toggle button or retry button
+                                                if ((e.target as HTMLElement).closest('button')) return;
+                                                router.push(`/scenarios/${scenarioId}/builds/scans/${scan.id}?tool_type=${toolType}`);
+                                            }}
+                                        >
+                                            <td className="px-4 py-3">
+                                                {hasDetails && (
+                                                    <CollapsibleTrigger asChild>
+                                                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                                                            {isExpanded ? (
+                                                                <ChevronDown className="h-4 w-4" />
+                                                            ) : (
+                                                                <ChevronRight className="h-4 w-4" />
+                                                            )}
+                                                        </Button>
+                                                    </CollapsibleTrigger>
                                                 )}
-                                            </Button>
-                                        )}
-                                    </TableCell>
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
+                                            </td>
+                                            <td className="px-4 py-3 font-mono text-xs">
+                                                {scan.commit_sha.substring(0, 7)}
+                                            </td>
+                                            <td className="px-4 py-3">{renderStatus(scan.status)}</td>
+                                            <td className="px-4 py-3">{scan.builds_affected}</td>
+                                            <td className="px-4 py-3 text-xs">
+                                                {formatDuration(scan.started_at, scan.completed_at)}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-right text-muted-foreground">
+                                                {formatDateTime(scan.completed_at)}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {scan.status === "failed" && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        disabled={retrying === `${toolType}-${scan.commit_sha}`}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleRetry(scan.commit_sha, toolType);
+                                                        }}
+                                                        className="h-8 w-8 p-0"
+                                                    >
+                                                        {retrying === `${toolType}-${scan.commit_sha}` ? (
+                                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="h-3 w-3" />
+                                                        )}
+                                                    </Button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                        <CollapsibleContent asChild>
+                                            <tr>
+                                                <td colSpan={7} className="p-0 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+                                                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                        {/* Metrics Panel */}
+                                                        {scan.metrics && (
+                                                            <div className="space-y-2">
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <Activity className="h-4 w-4 text-muted-foreground" />
+                                                                    <h4 className="text-sm font-semibold">Scan Metrics</h4>
+                                                                </div>
+                                                                <div className="bg-white dark:bg-slate-950 rounded-md border text-xs">
+                                                                    <table className="w-full">
+                                                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                                                            {Object.entries(scan.metrics).map(([key, value]) => (
+                                                                                <tr key={key}>
+                                                                                    <td className="px-3 py-2 font-medium text-slate-500">{key}</td>
+                                                                                    <td className="px-3 py-2 text-right font-mono">
+                                                                                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                                                                    </td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Config Panel */}
+                                                        {scan.scan_config && (
+                                                            <div className="space-y-2">
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <FileJson className="h-4 w-4 text-muted-foreground" />
+                                                                    <h4 className="text-sm font-semibold">Scan Configuration</h4>
+                                                                </div>
+                                                                <div className="bg-white dark:bg-slate-950 rounded-md border p-3 text-xs font-mono overflow-auto max-h-[200px]">
+                                                                    <pre>{JSON.stringify(scan.scan_config, null, 2)}</pre>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </CollapsibleContent>
+                                    </tbody>
+                                </Collapsible>
+                            );
+                        })}
+                    </table>
                 </div>
-                {/* Pagination */}
-                <div className="flex items-center justify-between pt-2">
-                    <p className="text-xs text-muted-foreground">
-                        Showing {items.length} of {total} scans
-                    </p>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setPage(Math.max(1, currentPage - 1))}
-                            disabled={currentPage === 1}
-                        >
-                            <ChevronLeft className="h-3 w-3" />
-                        </Button>
-                        <span className="text-xs text-muted-foreground">
-                            Page {currentPage} of {Math.max(1, totalPages)}
-                        </span>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
-                            disabled={currentPage >= totalPages || totalPages <= 1}
-                        >
-                            <ChevronRight className="h-3 w-3" />
-                        </Button>
-                    </div>
-                </div>
+                <TablePagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={total}
+                    pageSize={ITEMS_PER_PAGE}
+                    onPageChange={setPage}
+                    isLoading={loading}
+                />
             </div>
         );
     };
@@ -468,20 +476,36 @@ export default function ScansPage() {
                             </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleRetryAllFailed}
-                                disabled={retryAllLoading || totalFailedCount === 0}
-                                className={totalFailedCount === 0 ? "opacity-50" : ""}
-                            >
-                                {retryAllLoading ? (
-                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                ) : (
-                                    <RotateCcw className="h-4 w-4 mr-1" />
-                                )}
-                                Retry Failed ({totalFailedCount})
-                            </Button>
+                            {sonarFailedCount > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleRetryTool("sonarqube")}
+                                    disabled={retryingTool !== null}
+                                >
+                                    {retryingTool === "sonarqube" ? (
+                                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    ) : (
+                                        <BarChart3 className="h-4 w-4 mr-1 text-blue-600" />
+                                    )}
+                                    Retry SonarQube ({sonarFailedCount})
+                                </Button>
+                            )}
+                            {trivyFailedCount > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleRetryTool("trivy")}
+                                    disabled={retryingTool !== null}
+                                >
+                                    {retryingTool === "trivy" ? (
+                                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    ) : (
+                                        <Shield className="h-4 w-4 mr-1 text-green-600" />
+                                    )}
+                                    Retry Trivy ({trivyFailedCount})
+                                </Button>
+                            )}
                             <Button variant="outline" size="sm" onClick={() => fetchScans()}>
                                 <RefreshCw className="h-4 w-4 mr-1" />
                                 Refresh

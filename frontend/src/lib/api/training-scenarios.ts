@@ -251,6 +251,37 @@ export interface ScanStatusResponse {
     scans_pending: number;
 }
 
+export interface CommitScanRecord {
+    id: string;
+    scenario_id: string;
+    commit_sha: string;
+    repo_full_name: string;
+    raw_repo_id: string;
+    tool_type: "trivy" | "sonarqube";
+    status: "pending" | "scanning" | "completed" | "failed";
+    error_message?: string;
+    metrics?: Record<string, any>;
+    scan_config?: Record<string, any>;
+    builds_affected: number;
+    retry_count: number;
+    selected_metrics?: string[]; // Optional: list of metric keys to display in summary
+    started_at?: string;
+    completed_at?: string;
+    builds?: {
+        id: string;
+        ci_run_id: string;
+        ingestion_status: string;
+        build_number?: string | number;
+        web_url?: string;
+    }[];
+    created_at?: string;
+}
+
+export interface CommitScanListResponse {
+    trivy?: PaginatedResponse<CommitScanRecord>;
+    sonarqube?: PaginatedResponse<CommitScanRecord>;
+}
+
 // Create scenario payload
 export interface CreateTrainingScenarioPayload {
     name: string;
@@ -472,6 +503,50 @@ export const trainingScenariosApi = {
         return response.data;
     },
 
+    /**
+     * Get commit scans for a scenario (filtered by tool type)
+     */
+    getCommitScans: async (
+        scenarioId: string,
+        params?: { skip?: number; limit?: number; tool_type?: "trivy" | "sonarqube" }
+    ): Promise<CommitScanListResponse> => {
+        const response = await api.get<CommitScanListResponse>(
+            `/training-scenarios/${scenarioId}/commit-scans`,
+            { params }
+        );
+        return response.data;
+    },
+
+    /**
+     * Get commit scan detail
+     */
+    getCommitScanDetail: async (
+        scenarioId: string,
+        toolType: "trivy" | "sonarqube",
+        scanId: string
+    ): Promise<CommitScanRecord> => {
+        const response = await api.get<CommitScanRecord>(
+            `/training-scenarios/${scenarioId}/commit-scans/${toolType}/${scanId}`
+        );
+        return response.data;
+    },
+
+    /**
+     * Retry a specific commit scan
+     */
+    retryCommitScan: async (
+        scenarioId: string,
+        commitSha: string,
+        toolType: "trivy" | "sonarqube"
+    ): Promise<{ status: string }> => {
+        const response = await api.post<{ status: string }>(
+            `/training-scenarios/${scenarioId}/commit-scans/${commitSha}/retry`,
+            null,
+            { params: { tool_type: toolType } }
+        );
+        return response.data;
+    },
+
     // =========================================================================
     // Retry Actions
     // =========================================================================
@@ -492,6 +567,22 @@ export const trainingScenariosApi = {
     retryProcessing: async (scenarioId: string): Promise<{ message: string; retry_count: number }> => {
         const response = await api.post<{ message: string; retry_count: number }>(
             `/training-scenarios/${scenarioId}/retry-processing`
+        );
+        return response.data;
+    },
+
+    /**
+     * Retry failed scans for a specific tool type.
+     * Dispatches directly to the tool-specific scan task.
+     */
+    retryFailedScans: async (
+        scenarioId: string,
+        toolType: "trivy" | "sonarqube"
+    ): Promise<{ success: boolean; message: string }> => {
+        const response = await api.post<{ success: boolean; message: string }>(
+            `/training-scenarios/${scenarioId}/retry-scans`,
+            null,
+            { params: { tool_type: toolType } }
         );
         return response.data;
     },

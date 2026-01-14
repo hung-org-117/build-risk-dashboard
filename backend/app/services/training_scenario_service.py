@@ -265,35 +265,68 @@ class TrainingScenarioService:
         # Delete associated data
         logger.info(f"Starting cascading delete for scenario {scenario_id}...")
 
-        # 1. Delete Dataset Splits (most dependent)
-        splits_deleted = self.split_repo.delete_by_scenario(scenario_id)
-        logger.info(f"Deleted {splits_deleted} dataset splits")
+        with self.scenario_repo.transaction() as session:
+            # 1. Delete Dataset Splits (most dependent)
+            splits_deleted = self.split_repo.delete_by_scenario(
+                scenario_id, session=session
+            )
+            logger.info(f"Deleted {splits_deleted} dataset splits")
 
-        # 2. Delete Dataset Exports
-        exports_deleted = self.export_repo.delete_by_scenario(scenario_id)
-        logger.info(f"Deleted {exports_deleted} dataset exports")
+            # 2. Delete Dataset Exports
+            exports_deleted = self.export_repo.delete_by_scenario(
+                scenario_id, session=session
+            )
+            logger.info(f"Deleted {exports_deleted} dataset exports")
 
-        # 3. Delete Enrichment Builds
-        enrichment_deleted = self.enrichment_build_repo.delete_by_scenario(scenario_id)
-        logger.info(f"Deleted {enrichment_deleted} enrichment builds")
+            # 3. Delete Enrichment Builds
+            enrichment_deleted = self.enrichment_build_repo.delete_by_scenario(
+                scenario_id, session=session
+            )
+            logger.info(f"Deleted {enrichment_deleted} enrichment builds")
 
-        # 4. Delete Feature Vectors (Scoped to this scenario)
-        features_deleted = self.feature_vector_repo.delete_by_scenario(scenario_id)
-        logger.info(f"Deleted {features_deleted} feature vectors")
+            # 4. Delete Feature Vectors (Scoped to this scenario)
+            features_deleted = self.feature_vector_repo.delete_by_scenario(
+                scenario_id, session=session
+            )
+            logger.info(f"Deleted {features_deleted} feature vectors")
 
-        # 5. Delete Ingestion Builds
-        ingestion_deleted = self.ingestion_build_repo.delete_by_scenario(scenario_id)
-        logger.info(f"Deleted {ingestion_deleted} ingestion builds")
+            # 5. Delete Ingestion Builds
+            ingestion_deleted = self.ingestion_build_repo.delete_by_scenario(
+                scenario_id, session=session
+            )
+            logger.info(f"Deleted {ingestion_deleted} ingestion builds")
 
-        # 6. Delete Scans (Trivy & SonarQube)
-        trivy_deleted = self.trivy_scan_repo.delete_by_scenario(scenario_id)
-        sonar_deleted = self.sonar_scan_repo.delete_by_scenario(scenario_id)
-        logger.info(
-            f"Deleted {trivy_deleted} trivy scans and {sonar_deleted} sonar scans"
-        )
+            # 6. Delete Scans (Trivy & SonarQube)
+            # Check if repositories support session, otherwise call without
+            if (
+                hasattr(self.trivy_scan_repo.delete_by_scenario, "__code__")
+                and "session"
+                in self.trivy_scan_repo.delete_by_scenario.__code__.co_varnames
+            ):
+                trivy_deleted = self.trivy_scan_repo.delete_by_scenario(
+                    scenario_id, session=session
+                )
+            else:
+                trivy_deleted = self.trivy_scan_repo.delete_by_scenario(scenario_id)
 
-        # 7. Finally delete the Scenario
-        self.scenario_repo.delete(scenario_id)
+            if (
+                hasattr(self.sonar_scan_repo.delete_by_scenario, "__code__")
+                and "session"
+                in self.sonar_scan_repo.delete_by_scenario.__code__.co_varnames
+            ):
+                sonar_deleted = self.sonar_scan_repo.delete_by_scenario(
+                    scenario_id, session=session
+                )
+            else:
+                sonar_deleted = self.sonar_scan_repo.delete_by_scenario(scenario_id)
+
+            logger.info(
+                f"Deleted {trivy_deleted} trivy scans and {sonar_deleted} sonar scans"
+            )
+
+            # 7. Finally delete the Scenario
+            self.scenario_repo.delete_one(scenario_id, session=session)
+
         logger.info(f"Deleted TrainingScenario: {scenario_id} and all related entities")
         return True
 

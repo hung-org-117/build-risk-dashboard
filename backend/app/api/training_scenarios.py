@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database.mongo import Database, get_db
 from app.dtos.training_scenario import (
@@ -657,44 +657,116 @@ def get_commit_scans(
     return result
 
 
-@router.post("/{scenario_id}/commit-scans/{commit_sha}/retry")
-def retry_commit_scan(
+@router.get("/{scenario_id}/commit-scans/{tool_type}/{scan_id}")
+def get_commit_scan_detail(
     scenario_id: str,
-    commit_sha: str,
-    tool_type: str = Query(..., description="Tool to retry: trivy or sonarqube"),
+    tool_type: str,
+    scan_id: str,
     current_user: User = Depends(get_current_user),  # noqa: B008
     db=Depends(get_db),  # noqa: B008
 ) -> Dict[str, Any]:
-    """
-    Retry a failed commit scan.
-    """
+    """Get detailed information for a specific commit scan."""
     from bson import ObjectId
 
     from app.repositories.sonar_commit_scan import SonarCommitScanRepository
     from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 
+    if tool_type not in ("trivy", "sonarqube"):
+        raise HTTPException(status_code=400, detail=f"Invalid tool_type: {tool_type}")
+
     # Verify scenario access
     service = TrainingScenarioService(db)
     service.get_scenario(scenario_id, str(current_user["_id"]))
 
-    scenario_oid = ObjectId(scenario_id)
+    try:
+        oid = ObjectId(scan_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid scan ID")
 
+    scan = None
     if tool_type == "trivy":
-        repo = TrivyCommitScanRepository(db)
-        scan = repo.find_by_scenario_and_commit(scenario_oid, commit_sha)
-        if not scan:
-            return {"success": False, "message": "Scan not found"}
-        repo.increment_retry(scan.id)
-        # TODO: Dispatch scan task
-        return {"success": True, "message": "Trivy scan queued for retry"}
+        trivy_repo = TrivyCommitScanRepository(db)
+        scan = trivy_repo.find_one({"_id": oid})
+    else:
+        sonar_repo = SonarCommitScanRepository(db)
+        scan = sonar_repo.find_one({"_id": oid})
 
-    elif tool_type == "sonarqube":
-        repo = SonarCommitScanRepository(db)
-        scan = repo.find_by_scenario_and_commit(scenario_oid, commit_sha)
-        if not scan:
-            return {"success": False, "message": "Scan not found"}
-        repo.increment_retry(scan.id)
-        # TODO: Dispatch scan task
-        return {"success": True, "message": "SonarQube scan queued for retry"}
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
 
-    return {"success": False, "message": f"Unknown tool type: {tool_type}"}
+    if str(scan.scenario_id) != scenario_id:
+        raise HTTPException(
+            status_code=404, detail="Scan does not belong to this scenario"
+        )
+
+    # Fetch related builds
+    from app.repositories.training_ingestion_build import (
+        TrainingIngestionBuildRepository,
+    )
+
+    ingestion_repo = TrainingIngestionBuildRepository(db)
+    related_builds = ingestion_repo.find(
+        {"scenario_id": ObjectId(scenario_id), "commit_sha": scan.commit_sha}
+    )
+
+    builds_data = []
+    for b in related_builds:
+        builds_data.append(
+            {
+                "id": str(b.id),
+                "ci_run_id": b.ci_run_id,
+                "ingestion_status": b.ingestion_status,
+                "build_number": getattr(b, "build_number", None),
+                "web_url": getattr(b, "web_url", None),
+            }
+        )
+
+    return {
+        "id": str(scan.id),
+        "tool_type": tool_type,
+        "commit_sha": scan.commit_sha,
+        "repo_full_name": scan.repo_full_name,
+        "status": (scan.status.value if hasattr(scan.status, "value") else scan.status),
+        "error_message": scan.error_message,
+        "metrics": scan.metrics,
+        "scan_config": scan.scan_config,
+        "builds_affected": scan.builds_affected,
+        "retry_count": scan.retry_count,
+        "started_at": (scan.started_at.isoformat() if scan.started_at else None),
+        "completed_at": (scan.completed_at.isoformat() if scan.completed_at else None),
+        "builds": builds_data,
+    }
+
+
+@router.post("/{scenario_id}/retry-scans")
+def retry_failed_scans(
+    scenario_id: str,
+    tool_type: str = Query(..., description="Tool to retry: trivy or sonarqube"),
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+) -> Dict[str, Any]:
+    """
+    Retry failed scans for a specific tool type.
+
+    Dispatches directly to the tool-specific scan task.
+    Only retries scans that failed for the specified tool.
+    """
+    from app.tasks.training_processing import retry_failed_scenario_scans
+
+    if tool_type not in ("trivy", "sonarqube"):
+        raise HTTPException(status_code=400, detail=f"Invalid tool_type: {tool_type}")
+
+    # Verify scenario access
+    service = TrainingScenarioService(db)
+    service.get_scenario(scenario_id, str(current_user["_id"]))
+
+    # Dispatch the retry task for specific tool
+    retry_failed_scenario_scans.delay(
+        scenario_id=scenario_id,
+        tool_type=tool_type,
+    )
+
+    return {
+        "success": True,
+        "message": f"Retry task dispatched for failed {tool_type} scans",
+    }
