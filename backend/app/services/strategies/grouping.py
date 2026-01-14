@@ -29,6 +29,7 @@ def create_language_column(df: pd.DataFrame) -> str:
     """
     column_name = "_language"
 
+    # Use repo_language from DEFAULT_FEATURES (extracted by Hamilton DAG)
     if "repo_language" in df.columns:
         df[column_name] = df["repo_language"].str.lower().fillna("other")
     else:

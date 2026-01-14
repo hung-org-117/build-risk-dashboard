@@ -54,24 +54,33 @@ User creates Training Scenario with filters
 └──────────────────────────────────────────┘
        │
        ▼ (User triggers manually)
-┌──────────────────────────────────────────┐
-│  PHASE 2: PROCESSING                     │
-│  ┌────────────────────────────────────┐  │
-│  │ 2.A: FEATURE EXTRACTION            │  │
-│  │  ✓ Create TrainingEnrichmentBuild  │  │
-│  │  ✓ Extract features (Hamilton DAG) │  │
-│  │  ✓ Sequential (temporal deps)      │  │
-│  └────────────────────────────────────┘  │
-│  ┌────────────────────────────────────┐  │
-│  │ 2.B: SCAN METRICS COLLECTION       │  │
-│  │  ✓ Dispatch scans (Trivy/SonarQube)│  │
-│  │  ✓ Batch processing via chain      │  │
-│  │  ✓ Backfill metrics to builds      │  │
-│  └────────────────────────────────────┘  │
-└──────────────────────────────────────────┘
-       │
-       ▼
-TrainingScenario (PROCESSED) - Ready for multiple exports
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PHASE 2: PROCESSING (Parallel Workflows)                                │
+│                                                                          │
+│  ┌─────────────────────────────────┐   ┌─────────────────────────────────┐
+│  │ 2.A: FEATURE EXTRACTION         │   │ 2.B: SCAN METRICS (Optional)   │
+│  │  ✓ Create EnrichmentBuild       │   │  ✓ Dispatch scans (fire&forget)│
+│  │  ✓ Hamilton DAG extraction      │   │  ✓ Trivy/SonarQube parallel    │
+│  │  ✓ Sequential (temporal deps)   │   │  ✓ Backfill to FeatureVector   │
+│  │                                 │   │                                 │
+│  │  ⏱️ When done:                   │   │  ⏱️ Runs independently:         │
+│  │  → status = PROCESSED           │   │  → scan_extraction_completed   │
+│  │  → feature_extraction_completed │   │  → Metrics available gradually │
+│  └─────────────────────────────────┘   └─────────────────────────────────┘
+│               │                                    │                     │
+│               ▼                                    │                     │
+│     PROCESSED (features done)                      │                     │
+│     ✅ Analysis tab available                      │ (may still running) │
+│     ✅ Export tab available                        │                     │
+│               │◄───────────────────────────────────┘                     │
+│               │  (scans backfill to FeatureVector.scan_metrics)          │
+└───────────────│──────────────────────────────────────────────────────────┘
+                │
+                ▼
+TrainingScenario (PROCESSED) - Ready for Analysis & Export
+│
+├─ feature_extraction_completed = true  (required)
+└─ scan_extraction_completed = true/false (optional enrichment)
        │
        ▼ (User creates TrainingDatasetExport)
 ┌──────────────────────────────────────────┐
@@ -113,17 +122,41 @@ TrainingScenario Status Flow:
                   ▼                 (User triggers processing)
              (Retry available)                 │
                                                ▼
-                                    ┌─── PROCESSING ───┐
-                                    │                  │
-                                    ▼                  ▼
-                                PROCESSED           FAILED
-                                    │
-                                    ▼
-               TrainingScenario is DONE (PROCESSED = final state)
+                                          PROCESSING
+                                               │
+                           ┌───────────────────┴───────────────────┐
+                           │                                       │
+                    [Feature Extraction]                   [Scan Collection]
+                     (Sequential chain)                    (Fire & forget)
+                           │                                       │
+                           ▼                                       ▼
+                  feature_extraction_completed          scan_extraction_completed
+                           │                                       │
+                           ▼                                       │
+                       PROCESSED ◄─────────────────────────────────┘
+                           │              (scans may complete later)
+                           │
+                           ▼
+          ┌────────────────────────────────────────────┐
+          │ PROCESSED = feature_extraction_completed   │
+          │                                            │
+          │ ✅ Analysis tab: Available immediately     │
+          │ ✅ Export tab: Available immediately       │
+          │                                            │
+          │ 🔄 If scans still running:                 │
+          │    - Show progress indicator               │
+          │    - Export uses available scan_metrics    │
+          │    - Refresh to get updated metrics        │
+          └────────────────────────────────────────────┘
+
+Completion Flags (independent of status):
+
+    feature_extraction_completed: bool  # ✅ Required for PROCESSED
+    scan_extraction_completed: bool     # ℹ️ Optional enrichment
 
 TrainingDatasetExport Status Flow:
 
-    PENDING ──► GENERATING ──► COMPLETED
+    QUEUED ──► GENERATING ──► COMPLETED
                     │
                     ▼
                   FAILED
@@ -322,7 +355,9 @@ DataSourceConfig = {
 | `process_retry_scan_batch` | scenario_scanning | 300s | Process single batch of scan retries |
 | `handle_processing_chain_error` | scenario_processing | 120s | Error handler for chain failures |
 
-### 2.2 Processing Flow
+### 2.2 Processing Flow (Progressive Availability)
+
+> **Key Design**: Feature extraction determines PROCESSED status. Scans run independently and backfill metrics to `FeatureVector.scan_metrics` as they complete.
 
 ```
 User clicks "Start Processing"
@@ -334,19 +369,30 @@ start_scenario_processing
 ├─ Update status → PROCESSING
 └─ dispatch_scans_and_processing
        │
-       ├── [2.B] dispatch_scenario_scans (async, fire & forget)
-       │    └─ Collect unique commits → batch dispatch
-       │        └─ process_scan_batch → Trivy/SonarQube
-       │
-       └── [2.A] dispatch_enrichment_batches
-            │
-            ├─ Create TrainingEnrichmentBuild per INGESTED build
-            └─ chain(
-                   process_single_enrichment(build_1),
-                   process_single_enrichment(build_2),
-                   ...,
-                   finalize_scenario_processing
-               )
+       ├────────────────────────────────────────────────────────────┐
+       │                                                            │
+       ▼                                                            ▼
+[2.A] dispatch_enrichment_batches                    [2.B] dispatch_scenario_scans
+       │                                                   (async, fire & forget)
+       ├─ Create EnrichmentBuild per build                        │
+       └─ chain(                                                  │
+              process_single_enrichment(build_1),                 │
+              process_single_enrichment(build_2),                 │
+              ...,                                                │
+              finalize_feature_extraction                         │
+          )                                                       │
+              │                                                   │
+              ▼                                                   ▼
+    feature_extraction_completed = true          scan_extraction_completed = true
+    status = PROCESSED                           (when all scans done)
+              │                                           │
+              ▼                                           │
+    ┌─────────────────────────────────────────────────────┤
+    │  PROCESSED                                          │
+    │  ✅ Analysis tab: Shows features + partial scans    │
+    │  ✅ Export tab: Can export with available data      │
+    │  🔄 Scans continue backfilling in background        │
+    └─────────────────────────────────────────────────────┘
 ```
 
 ### 2.A Feature Extraction (Sequential)

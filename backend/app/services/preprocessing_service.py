@@ -18,7 +18,14 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 logger = logging.getLogger(__name__)
 
 # Metadata columns that should not be preprocessed
-METADATA_COLUMNS = frozenset(["id", "outcome", "repo_full_name", "primary_language"])
+# These are DEFAULT_FEATURES used for identification, grouping, and labels
+METADATA_COLUMNS = frozenset([
+    "build_id",           # CI run ID (identifier)
+    "build_status_num",   # Label: 0=passed, 1=failed
+    "repo_full_name",     # Repository identifier
+    "repo_language",      # Language for grouping
+    "build_started_at",   # Timestamp for time-based splits
+])
 
 
 @dataclass

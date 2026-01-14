@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Shield, BarChart3, AlertCircle } from "lucide-react";
+import { Loader2, Shield, BarChart3, AlertCircle, RefreshCw, Clock } from "lucide-react";
 import {
     trainingScenariosApi,
     TrainingScenarioRecord,
@@ -19,14 +19,18 @@ import {
 } from "@/lib/api/training-scenarios";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { useSSE } from "@/contexts/sse-context";
 
 export default function ScenarioAnalysisPage() {
     const params = useParams<{ scenarioId: string }>();
     const scenarioId = params.scenarioId;
+    const { subscribe } = useSSE();
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [qualityReport, setQualityReport] = useState<DataQualityReport | null>(null);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
 
     const fetchData = useCallback(async () => {
         try {
@@ -40,12 +44,43 @@ export default function ScenarioAnalysisPage() {
             console.error("Failed to fetch analysis data:", err);
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     }, [scenarioId]);
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await fetchData();
+    };
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    // Subscribe to SSE for real-time updates when scans complete
+    useEffect(() => {
+        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: { scenario_id?: string }) => {
+            if (data.scenario_id === scenarioId) {
+                fetchData();
+            }
+        });
+        return () => unsubscribe();
+    }, [subscribe, scenarioId, fetchData]);
+
+    // =============================================================================
+    // Derived State for Progressive Availability
+    // =============================================================================
+    
+    const isProcessing = scenario?.status === "processing";
+    const isProcessed = scenario?.status === "processed";
+    const featuresCompleted = scenario?.feature_extraction_completed ?? false;
+    const scansCompleted = scenario?.scan_extraction_completed ?? false;
+    
+    // Scan progress
+    const scansTotal = scenario?.scans_total ?? 0;
+    const scansFinished = (scenario?.scans_completed ?? 0) + (scenario?.scans_failed ?? 0);
+    const scansProgress = scansTotal > 0 ? Math.round((scansFinished / scansTotal) * 100) : 0;
+    const scansRunning = scansTotal > 0 && !scansCompleted;
 
     if (loading || !scenario) {
         return (
@@ -55,7 +90,55 @@ export default function ScenarioAnalysisPage() {
         );
     }
 
-    // If report not available, show empty state with message from API
+    // =============================================================================
+    // Case 1: Features not done yet (still PROCESSING or early states)
+    // =============================================================================
+    if (!featuresCompleted && !isProcessed) {
+        return (
+            <div className="space-y-6">
+                <h2 className="text-2xl font-bold tracking-tight">Dataset Analysis</h2>
+                <Card>
+                    <CardContent className="py-12">
+                        <div className="flex flex-col items-center gap-4 text-center">
+                            <div className="p-4 rounded-full bg-muted">
+                                {isProcessing ? (
+                                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                ) : (
+                                    <Clock className="h-8 w-8 text-muted-foreground" />
+                                )}
+                            </div>
+                            <div>
+                                <h3 className="font-semibold">
+                                    {isProcessing ? "Feature Extraction in Progress" : "Analysis Not Available"}
+                                </h3>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    {isProcessing 
+                                        ? `Extracting features... ${scenario.builds_features_extracted}/${scenario.builds_total} builds processed`
+                                        : "Start the processing phase to extract features and generate analysis."
+                                    }
+                                </p>
+                            </div>
+                            <Badge variant="outline" className="text-sm">
+                                Status: {scenario.status}
+                            </Badge>
+                            {isProcessing && (
+                                <Progress 
+                                    value={(scenario.builds_features_extracted / Math.max(scenario.builds_total, 1)) * 100} 
+                                    className="w-64 h-2" 
+                                />
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
+
+    // =============================================================================
+    // Case 2 & 3: Features done - show analysis (with or without complete scans)
+    // =============================================================================
+    
+    // If no quality report yet but features are done, show message
     if (!qualityReport?.available) {
         return (
             <div className="space-y-6">
@@ -67,14 +150,15 @@ export default function ScenarioAnalysisPage() {
                                 <AlertCircle className="h-8 w-8 text-muted-foreground" />
                             </div>
                             <div>
-                                <h3 className="font-semibold">Analysis Not Available</h3>
+                                <h3 className="font-semibold">Quality Report Pending</h3>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    {qualityReport?.message || "Complete the processing phase to view data quality analysis."}
+                                    {qualityReport?.message || "The quality report is being generated. Please refresh shortly."}
                                 </p>
                             </div>
-                            <Badge variant="outline" className="text-sm">
-                                Current status: {qualityReport?.scenario_status || scenario.status}
-                            </Badge>
+                            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+                                {refreshing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                                Refresh
+                            </Button>
                         </div>
                     </CardContent>
                 </Card>
@@ -84,7 +168,42 @@ export default function ScenarioAnalysisPage() {
 
     return (
         <div className="space-y-6">
-            <h2 className="text-2xl font-bold tracking-tight">Dataset Analysis</h2>
+            <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold tracking-tight">Dataset Analysis</h2>
+                <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+                    {refreshing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                    Refresh
+                </Button>
+            </div>
+
+            {/* Scan Progress Banner - shown when scans are still running */}
+            {scansRunning && (
+                <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/50">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                    <AlertTitle className="text-blue-800 dark:text-blue-200">Scans In Progress</AlertTitle>
+                    <AlertDescription className="text-blue-700 dark:text-blue-300">
+                        <div className="flex items-center justify-between mt-2">
+                            <span>
+                                Security and quality scans are still running ({scansFinished}/{scansTotal} completed).
+                                Scan metrics will be updated automatically.
+                            </span>
+                            <span className="font-medium">{scansProgress}%</span>
+                        </div>
+                        <Progress value={scansProgress} className="h-1.5 mt-2" />
+                    </AlertDescription>
+                </Alert>
+            )}
+
+            {/* All Complete Banner */}
+            {scansCompleted && featuresCompleted && (
+                <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/50">
+                    <Shield className="h-4 w-4 text-green-600" />
+                    <AlertTitle className="text-green-800 dark:text-green-200">Analysis Complete</AlertTitle>
+                    <AlertDescription className="text-green-700 dark:text-green-300">
+                        All features extracted and scans completed. Data is ready for export.
+                    </AlertDescription>
+                </Alert>
+            )}
 
             <Tabs defaultValue="quality" className="space-y-4">
                 <TabsList>
@@ -308,6 +427,27 @@ export default function ScenarioAnalysisPage() {
 
                 {/* Scan Metrics Tab */}
                 <TabsContent value="scans" className="space-y-4">
+                    {/* Show in-progress state when scans are running */}
+                    {scansRunning && !qualityReport?.scan_metrics_summary && (
+                        <Card>
+                            <CardContent className="py-12">
+                                <div className="flex flex-col items-center gap-4 text-center">
+                                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                    <div>
+                                        <h3 className="font-semibold">Scans In Progress</h3>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            {scansFinished}/{scansTotal} scans completed ({scansProgress}%)
+                                        </p>
+                                    </div>
+                                    <Progress value={scansProgress} className="w-64 h-2" />
+                                    <p className="text-xs text-muted-foreground">
+                                        Metrics will appear here as scans complete. Refresh to see updates.
+                                    </p>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+                    
                     {qualityReport?.scan_metrics_summary ? (
                         <>
                             {/* Scan Coverage Summary */}
@@ -440,11 +580,26 @@ export default function ScenarioAnalysisPage() {
                                 </Card>
                             )}
                         </>
-                    ) : (
-                        <div className="text-center py-12 text-muted-foreground border rounded-lg bg-muted/20">
-                            <p>No scan metrics available yet.</p>
-                        </div>
-                    )}
+                    ) : !scansRunning ? (
+                        <Card>
+                            <CardContent className="py-12">
+                                <div className="flex flex-col items-center gap-4 text-center">
+                                    <div className="p-4 rounded-full bg-muted">
+                                        <Shield className="h-8 w-8 text-muted-foreground" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold">No Scan Metrics Available</h3>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            {scansTotal === 0 
+                                                ? "No scans were configured for this scenario."
+                                                : "Scan metrics not available. Try refreshing the page."
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ) : null}
                 </TabsContent>
             </Tabs>
         </div>

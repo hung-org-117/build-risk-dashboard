@@ -15,7 +15,6 @@ The key difference from the old flow:
 """
 
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -26,9 +25,8 @@ import pyarrow.parquet as pq
 from app import paths
 from app.celery_app import celery_app
 from app.entities.enums import ExtractionStatus
-from app.entities.training_dataset_export import ExportStatus, TrainingDatasetExport
+from app.entities.training_dataset_export import ExportStatus
 from app.repositories.feature_vector import FeatureVectorRepository
-from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.training_dataset_export import TrainingDatasetExportRepository
 from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
@@ -163,11 +161,8 @@ def generate_export_dataset(
 
         # Determine export formats from output config
         output_config = export.output_config
-        export_formats = (
-            output_config.formats
-            if hasattr(output_config, "formats") and output_config.formats
-            else ["parquet"]
-        )
+        # OutputConfig has 'format' (singular), wrap in list for iteration
+        export_formats = [output_config.format] if output_config else ["parquet"]
 
         start_time = datetime.utcnow()
         total_train = 0
@@ -178,11 +173,14 @@ def generate_export_dataset(
         # Check if CV strategy
         is_cv = splitting_service.is_cv_strategy(splitting_config)
 
+        # Label column: build_status_num (0=passed, 1=failed)
+        label_column = "build_status_num"
+
         if is_cv:
             # ====== CV MODE: Generate multiple folds ======
             logger.info(f"{corr_prefix} Using CV strategy, generating multiple folds")
 
-            for fold in splitting_service.apply_cv(df, splitting_config, "outcome"):
+            for fold in splitting_service.apply_cv(df, splitting_config, label_column):
                 fold_count += 1
                 fold_id = fold.fold_id
 
@@ -219,7 +217,7 @@ def generate_export_dataset(
                             split_df.to_csv(file_path, index=False)
 
                         file_size = file_path.stat().st_size
-                        class_dist = split_df["outcome"].value_counts().to_dict()
+                        class_dist = split_df[label_column].value_counts().to_dict()
 
                         split_repo.create_split(
                             export_id=export_id,
@@ -243,7 +241,7 @@ def generate_export_dataset(
 
         else:
             # ====== SINGLE-SPLIT MODE ======
-            result = splitting_service.apply_split(df, splitting_config, "outcome")
+            result = splitting_service.apply_split(df, splitting_config, label_column)
 
             for split_type, indices in [
                 ("train", result.train_indices),
@@ -271,7 +269,7 @@ def generate_export_dataset(
                         split_df.to_csv(file_path, index=False)
 
                     file_size = file_path.stat().st_size
-                    class_dist = split_df["outcome"].value_counts().to_dict()
+                    class_dist = split_df[label_column].value_counts().to_dict()
 
                     split_repo.create_split(
                         export_id=export_id,
@@ -361,14 +359,6 @@ def _ensure_dataset_materialized(
 
     enrichment_build_repo = TrainingEnrichmentBuildRepository(db)
     feature_vector_repo = FeatureVectorRepository(db)
-    raw_repo_repo = RawRepositoryRepository(db)
-
-    # Pre-cache RawRepos (usually small number) for language lookup
-    # Find all repos involved in this scenario
-    # Optimization: Only fetch IDs first? No, we can just fetch all unique repo IDs from enrichment.
-    # But for streaming, we might not want to scan all first.
-    # Let's just fetch ALL raw repos (it's usually < 1000).
-    all_raw_repos = {str(r.id): r for r in raw_repo_repo.find_all()}
 
     # Stream Processing Configuration
     BATCH_SIZE = 1000
@@ -396,7 +386,6 @@ def _ensure_dataset_materialized(
                 _process_and_write_batch(
                     current_batch,
                     feature_vector_repo,
-                    all_raw_repos,
                     master_file,
                     writer_container=writer_container,
                 )
@@ -409,7 +398,6 @@ def _ensure_dataset_materialized(
             _process_and_write_batch(
                 current_batch,
                 feature_vector_repo,
-                all_raw_repos,
                 master_file,
                 writer_container=writer_container,
             )
@@ -444,13 +432,17 @@ def _ensure_dataset_materialized(
 def _process_and_write_batch(
     batch_docs: List[Dict],
     fv_repo: FeatureVectorRepository,
-    raw_repos: Dict[str, Any],
     file_path: Any,
     writer_container: Dict[str, Any],
 ):
     """
     Process a batch of enrichment docs, fetch features, and write to Parquet.
     Updates writer in writer_container if initialized.
+
+    Note: All data comes from FeatureVector.features (includes DEFAULT_FEATURES):
+    - build_id: CI run ID (identifier)
+    - build_status_num: 0=passed, 1=failed (label for classification)
+    - repo_full_name, repo_language, build_started_at, etc.
     """
     if not batch_docs:
         return
@@ -461,27 +453,19 @@ def _process_and_write_batch(
         for doc in batch_docs
         if doc.get("feature_vector_id")
     ]
-    fvs = fv_repo.find_by_ids(map(str, fv_ids))
+    fvs = fv_repo.find_by_ids(list(map(str, fv_ids)))
     fv_map = {str(fv.id): fv for fv in fvs}
 
     data = []
 
     for doc in batch_docs:
-        raw_repo_id = str(doc.get("raw_repo_id"))
-        raw_repo = raw_repos.get(raw_repo_id)
-        primary_language = (
-            raw_repo.main_lang if raw_repo and raw_repo.main_lang else "other"
-        )
+        # All features come from FeatureVector (including DEFAULT_FEATURES)
+        # - build_id: CI run ID (identifier)
+        # - build_status_num: 0=passed, 1=failed (outcome/label)
+        # - repo_full_name, repo_language, build_started_at, etc.
+        row_data = {}
 
-        row_data = {
-            "id": str(doc.get("_id")),
-            "outcome": doc.get("outcome", 0),
-            "repo_full_name": doc.get("repo_full_name", ""),
-            "primary_language": primary_language.lower(),
-            "build_started_at": doc.get("build_started_at"),
-        }
-
-        # Merge features
+        # Merge features from FeatureVector
         fv_id = doc.get("feature_vector_id")
         if fv_id:
             fv = fv_map.get(str(fv_id))
@@ -490,6 +474,10 @@ def _process_and_write_batch(
                     row_data.update(fv.features)
                 if fv.scan_metrics:
                     row_data.update(fv.scan_metrics)
+
+        # Skip rows without features
+        if not row_data:
+            continue
 
         data.append(row_data)
 

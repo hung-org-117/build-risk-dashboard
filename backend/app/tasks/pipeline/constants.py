@@ -12,6 +12,8 @@ DEFAULT_FEATURES = {
     "build_id",
     "repo_full_name",
     "build_ci_provider",
+    # Label (outcome): 0=passed, 1=failed
+    "build_status_num",
     # Grouping features for splitting
     "repo_language",
     "build_hour",
