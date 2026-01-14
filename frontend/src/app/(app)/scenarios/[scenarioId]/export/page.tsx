@@ -61,19 +61,11 @@ export default function ScenarioExportPage() {
     // Derived State
     // =============================================================================
 
-    const canGenerate = scenario?.status === "processed";
+    const canGenerate = scenario?.status === "processed" || scenario?.status === "completed";
     const hasExports = exports.length > 0;
     const latestExport = exports[0];
     const isExportGenerating = latestExport?.status === "generating";
     const isExportCompleted = latestExport?.status === "completed";
-
-    // Scan progress tracking
-    const featuresCompleted = scenario?.feature_extraction_completed ?? false;
-    const scansCompleted = scenario?.scan_extraction_completed ?? false;
-    const scansTotal = scenario?.scans_total ?? 0;
-    const scansFinished = (scenario?.scans_completed ?? 0) + (scenario?.scans_failed ?? 0);
-    const scansProgress = scansTotal > 0 ? Math.round((scansFinished / scansTotal) * 100) : 0;
-    const scansRunning = scansTotal > 0 && !scansCompleted;
 
     // =============================================================================
     // Data Fetching
@@ -94,7 +86,7 @@ export default function ScenarioExportPage() {
         try {
             const data = await trainingScenariosApi.listExports(scenarioId);
             setExports(data.items);
-            
+
             // If there's a completed export, fetch its splits
             const completedExport = data.items.find(e => e.status === "completed");
             if (completedExport) {
@@ -291,8 +283,8 @@ export default function ScenarioExportPage() {
     // Not ready for export (features not done)
     if (!canGenerate) {
         return (
-            <NotReadyState 
-                status={scenario?.status} 
+            <NotReadyState
+                status={scenario?.status}
                 isProcessing={scenario?.status === "processing"}
                 buildsExtracted={scenario?.builds_features_extracted}
                 buildsTotal={scenario?.builds_total}
@@ -325,34 +317,6 @@ export default function ScenarioExportPage() {
 
     return (
         <div className="space-y-6">
-            {/* Scan Progress Warning - shown when scans are still running */}
-            {scansRunning && (
-                <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/50">
-                    <AlertTriangle className="h-4 w-4 text-amber-600" />
-                    <AlertTitle className="text-amber-800 dark:text-amber-200">Scans Still Running</AlertTitle>
-                    <AlertDescription className="text-amber-700 dark:text-amber-300">
-                        <div className="mt-2 space-y-2">
-                            <p>
-                                Security/quality scans are still in progress ({scansFinished}/{scansTotal} completed).
-                                You can export now with available data, or wait for scans to complete for full metrics.
-                            </p>
-                            <Progress value={scansProgress} className="h-1.5" />
-                        </div>
-                    </AlertDescription>
-                </Alert>
-            )}
-
-            {/* All Complete Banner */}
-            {scansCompleted && featuresCompleted && (
-                <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/50">
-                    <Settings className="h-4 w-4 text-green-600" />
-                    <AlertTitle className="text-green-800 dark:text-green-200">Ready for Export</AlertTitle>
-                    <AlertDescription className="text-green-700 dark:text-green-300">
-                        All features extracted and scans completed. Dataset is ready with full metrics.
-                    </AlertDescription>
-                </Alert>
-            )}
-
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
