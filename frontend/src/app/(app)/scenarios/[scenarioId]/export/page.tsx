@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import {
     Card,
@@ -11,16 +11,6 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
     Table,
     TableBody,
@@ -29,10 +19,21 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { Download, Loader2, Play, RefreshCw, AlertTriangle, Settings } from "lucide-react";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Download, Loader2, Plus, RefreshCw, Trash2, AlertTriangle, Play, Eye } from "lucide-react";
 import {
     trainingScenariosApi,
-    TrainingDatasetSplitRecord,
+    TrainingExportRecord,
     TrainingScenarioRecord,
 } from "@/lib/api/training-scenarios";
 import { formatBytes } from "@/lib/utils";
@@ -40,128 +41,45 @@ import { toast } from "@/components/ui/use-toast";
 import { useSSE } from "@/contexts/sse-context";
 
 // =============================================================================
-// Types
+// Status Badge Component
 // =============================================================================
 
-interface ExportConfig {
-    // Preprocessing
-    missing_values_strategy: "drop_row" | "fill_mean" | "fill_median" | "fill_zero";
-    normalization: "none" | "z_score" | "min_max" | "robust";
-    // Splitting
-    strategy: string;
-    group_by: string;
-    ratios: { train: number; val: number; test: number };
-    // Dynamic binning
-    num_bins: number;
-    time_slots: number;
-    // CV configuration
-    n_folds: number;
-    internal_val_ratio: number;
-    // Imbalanced K-Fold specific
-    imbalance_drop_rate: number;
-    imbalance_drop_label: number;
-    // Extreme Novelty specific
-    novelty_target_label: number;
-    // Output
-    format: "parquet" | "csv";
-    include_metadata: boolean;
+function ExportStatusBadge({ status }: { status: string }) {
+    const variants: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+        queued: "outline",
+        generating: "secondary",
+        completed: "default",
+        failed: "destructive",
+    };
+    const labels: Record<string, string> = {
+        queued: "Queued",
+        generating: "Generating...",
+        completed: "Completed",
+        failed: "Failed",
+    };
+    return (
+        <Badge variant={variants[status] || "outline"}>
+            {status === "generating" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+            {labels[status] || status}
+        </Badge>
+    );
 }
 
-const DEFAULT_CONFIG: ExportConfig = {
-    missing_values_strategy: "drop_row",
-    normalization: "z_score",
-    strategy: "stratified_within_group",
-    group_by: "repo_language",
-    ratios: { train: 0.7, val: 0.15, test: 0.15 },
-    num_bins: 4,
-    time_slots: 4,
-    n_folds: 5,
-    internal_val_ratio: 0.2,
-    imbalance_drop_rate: 0.5,
-    imbalance_drop_label: 1,
-    novelty_target_label: 1,
-    format: "parquet",
-    include_metadata: true,
-};
-
 // =============================================================================
-// Constants
-// =============================================================================
-
-// Strategy value constants - use these instead of inline strings
-const STRATEGY = {
-    STRATIFIED_WITHIN_GROUP: "stratified_within_group",
-    RANDOM_SPLIT: "random_split",
-    TIME_SERIES_SPLIT: "time_series_split",
-    L1GO_CV: "l1go_cv",
-    L2GO_CV: "l2go_cv",
-    EXTREME_NOVELTY_CV: "extreme_novelty_cv",
-    IMBALANCED_KFOLD_CV: "imbalanced_kfold_cv",
-} as const;
-
-// Group by dimension constants
-const GROUP_BY = {
-    REPO_LANGUAGE: "repo_language",
-    TIME_OF_DAY: "time_of_day",
-    PERCENTAGE_OF_BUILDS_BEFORE: "percentage_of_builds_before",
-    NUMBER_OF_BUILDS_BEFORE: "number_of_builds_before",
-} as const;
-
-const MISSING_VALUES_OPTIONS = [
-    { value: "drop_row", label: "Drop Row" },
-    { value: "fill_mean", label: "Fill with Mean" },
-    { value: "fill_median", label: "Fill with Median" },
-    { value: "fill_zero", label: "Fill with Zero" },
-];
-
-const NORMALIZATION_OPTIONS = [
-    { value: "none", label: "None" },
-    { value: "z_score", label: "Z-Score (StandardScaler)" },
-    { value: "min_max", label: "Min-Max (0-1)" },
-    { value: "robust", label: "Robust (IQR)" },
-];
-
-const STRATEGY_OPTIONS = [
-    { value: "stratified_within_group", label: "Stratified Within Group" },
-    { value: "random_split", label: "Random Split" },
-    { value: "time_series_split", label: "Time Series Split" },
-    { value: "l1go_cv", label: "L1GO Cross-Validation" },
-    { value: "l2go_cv", label: "L2GO Cross-Validation" },
-    { value: "extreme_novelty_cv", label: "Extreme Novelty CV" },
-    { value: "imbalanced_kfold_cv", label: "Imbalanced K-Fold CV" },
-];
-
-const GROUP_BY_OPTIONS = [
-    { value: "repo_language", label: "Language" },
-    { value: "time_of_day", label: "Time of Day" },
-    { value: "percentage_of_builds_before", label: "% of Builds Before" },
-    { value: "number_of_builds_before", label: "# of Builds Before" },
-];
-
-const LABEL_OPTIONS = [
-    { value: 0, label: "Success (0)" },
-    { value: 1, label: "Failure (1)" },
-];
-
-// =============================================================================
-// Component
+// Main Component
 // =============================================================================
 
 export default function ScenarioExportPage() {
     const params = useParams<{ scenarioId: string }>();
+    const router = useRouter();
     const scenarioId = params.scenarioId;
     const { subscribe } = useSSE();
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
-    const [splits, setSplits] = useState<TrainingDatasetSplitRecord[]>([]);
+    const [exports, setExports] = useState<TrainingExportRecord[]>([]);
     const [loading, setLoading] = useState(true);
-    const [generating, setGenerating] = useState(false);
-    const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
-    const [groupsPreview, setGroupsPreview] = useState<{
-        groups: Array<{ value: string; label: string; count: number; warning?: string }>;
-        total_builds: number;
-    } | null>(null);
-    const [loadingGroups, setLoadingGroups] = useState(false);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [generatingId, setGeneratingId] = useState<string | null>(null);
 
     const fetchScenario = useCallback(async () => {
         try {
@@ -174,135 +92,77 @@ export default function ScenarioExportPage() {
         }
     }, [scenarioId]);
 
-    const fetchSplits = useCallback(async () => {
+    const fetchExports = useCallback(async () => {
         try {
-            const data = await trainingScenariosApi.getSplits(scenarioId);
-            setSplits(data);
+            const data = await trainingScenariosApi.listExports(scenarioId);
+            setExports(data.items);
         } catch (err) {
-            console.error("Failed to fetch splits:", err);
+            console.error("Failed to fetch exports:", err);
         }
     }, [scenarioId]);
 
-    const fetchGroupsPreview = useCallback(async () => {
-        if (!scenarioId) return;
-        setLoadingGroups(true);
-        try {
-            const data = await trainingScenariosApi.getGroupPreview(scenarioId, {
-                group_by: config.group_by,
-                num_bins: config.num_bins,
-                time_slots: config.time_slots,
-            });
-            setGroupsPreview(data);
-        } catch (err) {
-            console.error("Failed to fetch groups preview:", err);
-            setGroupsPreview(null);
-        } finally {
-            setLoadingGroups(false);
-        }
-    }, [scenarioId, config.group_by, config.num_bins, config.time_slots]);
-
     const loadData = useCallback(async () => {
         setLoading(true);
-        await Promise.all([fetchScenario(), fetchSplits()]);
+        await Promise.all([fetchScenario(), fetchExports()]);
         setLoading(false);
-    }, [fetchScenario, fetchSplits]);
+    }, [fetchScenario, fetchExports]);
 
     useEffect(() => {
         loadData();
     }, [loadData]);
-
-    // Fetch groups preview when group config changes
-    useEffect(() => {
-        if (scenario?.status === "processed") {
-            fetchGroupsPreview();
-        }
-    }, [scenario?.status, fetchGroupsPreview]);
 
     // Subscribe to SSE for real-time updates
     useEffect(() => {
         const unsubscribe = subscribe("SCENARIO_UPDATE", (data: { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
                 fetchScenario();
-                fetchSplits();
+                fetchExports();
             }
         });
         return () => unsubscribe();
-    }, [subscribe, scenarioId, fetchScenario, fetchSplits]);
+    }, [subscribe, scenarioId, fetchScenario, fetchExports]);
 
-    // Poll while generating
+    // Poll while any export is generating
     useEffect(() => {
-        if (!scenario || scenario.status !== "splitting") return;
+        const hasGenerating = exports.some(e => e.status === "generating");
+        if (!hasGenerating) return;
 
         const interval = setInterval(() => {
-            fetchScenario();
-            fetchSplits();
+            fetchExports();
         }, 3000);
 
         return () => clearInterval(interval);
-    }, [scenario?.status, fetchScenario, fetchSplits]);
+    }, [exports, fetchExports]);
 
-    const handleGenerateDataset = async () => {
-        setGenerating(true);
+    const handleDelete = async (exportId: string) => {
+        setDeletingId(exportId);
         try {
-            // TODO: Pass full config to backend when API is updated
-            await trainingScenariosApi.generateDataset(scenarioId);
-            toast({ title: "Dataset generation started" });
-            await fetchScenario();
+            await trainingScenariosApi.deleteExport(scenarioId, exportId);
+            toast({ title: "Export deleted" });
+            await fetchExports();
         } catch (err) {
-            console.error("Failed to generate dataset:", err);
-            toast({ variant: "destructive", title: "Failed to generate dataset" });
+            console.error("Failed to delete export:", err);
+            toast({ variant: "destructive", title: "Failed to delete export" });
         } finally {
-            setGenerating(false);
+            setDeletingId(null);
         }
     };
 
-    const updateConfig = (updates: Partial<ExportConfig>) => {
-        setConfig(prev => ({ ...prev, ...updates }));
+    const handleGenerate = async (exportId: string) => {
+        setGeneratingId(exportId);
+        try {
+            await trainingScenariosApi.generateExport(scenarioId, exportId);
+            toast({ title: "Dataset generation started" });
+            await fetchExports();
+        } catch (err) {
+            console.error("Failed to generate:", err);
+            toast({ variant: "destructive", title: "Failed to start generation" });
+        } finally {
+            setGeneratingId(null);
+        }
     };
 
-    const updateRatios = (key: "train" | "val" | "test", value: number) => {
-        const newRatios = { ...config.ratios, [key]: value };
-        // Auto-adjust other values to sum to 1
-        const total = newRatios.train + newRatios.val + newRatios.test;
-        if (total > 1) {
-            const other = key === "train" ? "val" : "train";
-            newRatios[other] = Math.max(0, newRatios[other] - (total - 1));
-        }
-        setConfig(prev => ({ ...prev, ratios: newRatios }));
-    };
-
-    // Validation helper for strategies
-    const getConfigValidationError = (): string | null => {
-        const groupCount = groupsPreview?.groups?.length || 0;
-
-        // CV strategies need minimum groups
-        if (config.strategy === STRATEGY.L1GO_CV && groupCount < 3) {
-            return `L1GO CV requires at least 3 groups. Current: ${groupCount}. Try different grouping.`;
-        }
-        if (config.strategy === STRATEGY.L2GO_CV && groupCount < 4) {
-            return `L2GO CV requires at least 4 groups. Current: ${groupCount}. Try different grouping.`;
-        }
-        // CV strategies don't require manual group selection - they iterate all groups automatically
-        return null;
-    };
-
-    const validationError = getConfigValidationError();
-
-    // CV strategies show group preview but don't need manual selection
-    const isCVStrategy = [
-        STRATEGY.L1GO_CV,
-        STRATEGY.L2GO_CV,
-        STRATEGY.EXTREME_NOVELTY_CV
-    ].includes(config.strategy as any);
-
-    const requiresGroupSelection = (
-        [STRATEGY.STRATIFIED_WITHIN_GROUP] as string[]
-    ).includes(config.strategy);
-
-    const showNumBins = (
-        [GROUP_BY.PERCENTAGE_OF_BUILDS_BEFORE, GROUP_BY.NUMBER_OF_BUILDS_BEFORE] as string[]
-    ).includes(config.group_by);
-    const showTimeSlots = config.group_by === GROUP_BY.TIME_OF_DAY;
+    const canCreateExport = scenario?.status === "processed" || scenario?.status === "completed";
 
     if (loading) {
         return (
@@ -312,17 +172,12 @@ export default function ScenarioExportPage() {
         );
     }
 
-    const canGenerate = scenario?.status === "processed";
-    const isGenerating = scenario?.status === "splitting" || generating;
-    const isCompleted = scenario?.status === "completed";
-    const hasSplits = splits.length > 0;
-
     // Not ready for export
-    if (!canGenerate && !isCompleted && !isGenerating) {
+    if (!canCreateExport) {
         return (
             <Card>
                 <CardHeader>
-                    <CardTitle>Export Dataset</CardTitle>
+                    <CardTitle>Dataset Exports</CardTitle>
                     <CardDescription>Complete processing phase first</CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -340,99 +195,154 @@ export default function ScenarioExportPage() {
         );
     }
 
-    // Show existing splits (completed)
-    if (hasSplits) {
-        const totalRecords = splits.reduce((sum, s) => sum + s.record_count, 0);
-        const totalSize = splits.reduce((sum, s) => sum + s.file_size_bytes, 0);
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle>Dataset Exports</CardTitle>
+                        <CardDescription>
+                            Create and manage dataset exports with different configurations
+                        </CardDescription>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => fetchExports()}>
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Refresh
+                        </Button>
+                        <Button onClick={() => router.push(`/scenarios/${scenarioId}/export/create`)}>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Create New Export
+                        </Button>
+                    </div>
+                </CardHeader>
+            </Card>
 
-        return (
-            <div className="space-y-6">
-                {/* Summary Card */}
+            {/* Export List */}
+            {exports.length === 0 ? (
                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <div>
-                            <CardTitle>Dataset Summary</CardTitle>
-                            <CardDescription>Generated splits ready for download</CardDescription>
-                        </div>
-                        <div className="flex gap-2">
-                            <Button variant="outline" size="sm" asChild>
-                                <a href={`/api/training-scenarios/${scenarioId}/splits/download-all?file_format=parquet`}>
-                                    <Download className="mr-2 h-4 w-4" />
-                                    All (Parquet)
-                                </a>
+                    <CardContent className="p-12">
+                        <div className="flex flex-col items-center gap-4 text-center">
+                            <div className="p-4 rounded-full bg-muted">
+                                <Download className="h-8 w-8 text-muted-foreground" />
+                            </div>
+                            <div>
+                                <h3 className="font-semibold">No Exports Yet</h3>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    Create your first dataset export with custom splitting and preprocessing configurations.
+                                </p>
+                            </div>
+                            <Button onClick={() => router.push(`/scenarios/${scenarioId}/export/create`)}>
+                                <Plus className="mr-2 h-4 w-4" />
+                                Create New Export
                             </Button>
-                            <Button variant="outline" size="sm" asChild>
-                                <a href={`/api/training-scenarios/${scenarioId}/splits/download-all?file_format=csv`}>
-                                    <Download className="mr-2 h-4 w-4" />
-                                    All (CSV)
-                                </a>
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => setSplits([])}>
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                                Regenerate
-                            </Button>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="grid gap-4 md:grid-cols-4">
-                            <div className="p-4 border rounded-lg">
-                                <p className="text-sm text-muted-foreground">Total Splits</p>
-                                <p className="text-2xl font-bold">{splits.length}</p>
-                            </div>
-                            <div className="p-4 border rounded-lg">
-                                <p className="text-sm text-muted-foreground">Total Records</p>
-                                <p className="text-2xl font-bold">{totalRecords.toLocaleString()}</p>
-                            </div>
-                            <div className="p-4 border rounded-lg">
-                                <p className="text-sm text-muted-foreground">Features</p>
-                                <p className="text-2xl font-bold">{splits[0]?.feature_count || 0}</p>
-                            </div>
-                            <div className="p-4 border rounded-lg">
-                                <p className="text-sm text-muted-foreground">Total Size</p>
-                                <p className="text-2xl font-bold">{formatBytes(totalSize)}</p>
-                            </div>
                         </div>
                     </CardContent>
                 </Card>
-
-                {/* Splits Table */}
+            ) : (
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Split Files</CardTitle>
-                    </CardHeader>
-                    <CardContent>
+                    <CardContent className="p-0">
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Split</TableHead>
-                                    <TableHead>Records</TableHead>
-                                    <TableHead>Features</TableHead>
-                                    <TableHead>Size</TableHead>
-                                    <TableHead>Format</TableHead>
-                                    <TableHead className="text-right">Action</TableHead>
+                                    <TableHead>Name</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Train</TableHead>
+                                    <TableHead className="text-right">Val</TableHead>
+                                    <TableHead className="text-right">Test</TableHead>
+                                    <TableHead className="text-right">Features</TableHead>
+                                    <TableHead>Created</TableHead>
+                                    <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {splits.map((split) => (
-                                    <TableRow key={split.id}>
-                                        <TableCell>
-                                            <Badge variant="outline" className="capitalize">
-                                                {split.split_type}
-                                            </Badge>
+                                {exports.map((exp) => (
+                                    <TableRow key={exp.id}>
+                                        <TableCell className="font-medium">
+                                            {exp.name || `Export ${exp.id.slice(0, 8)}`}
                                         </TableCell>
-                                        <TableCell>{split.record_count.toLocaleString()}</TableCell>
-                                        <TableCell>{split.feature_count}</TableCell>
-                                        <TableCell>{formatBytes(split.file_size_bytes)}</TableCell>
                                         <TableCell>
-                                            <Badge variant="secondary">{split.file_format.toUpperCase()}</Badge>
+                                            <ExportStatusBadge status={exp.status} />
+                                            {exp.error_message && (
+                                                <p className="text-xs text-destructive mt-1 truncate max-w-[200px]">
+                                                    {exp.error_message}
+                                                </p>
+                                            )}
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <Button size="sm" variant="outline" asChild>
-                                                <a href={`/api/training-scenarios/${scenarioId}/splits/${split.id}/download`}>
-                                                    <Download className="mr-2 h-4 w-4" />
-                                                    Download
-                                                </a>
-                                            </Button>
+                                            {exp.train_count > 0 ? exp.train_count.toLocaleString() : "-"}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            {exp.val_count > 0 ? exp.val_count.toLocaleString() : "-"}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            {exp.test_count > 0 ? exp.test_count.toLocaleString() : "-"}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            {exp.feature_count > 0 ? exp.feature_count : "-"}
+                                        </TableCell>
+                                        <TableCell className="text-muted-foreground text-sm">
+                                            {new Date(exp.created_at).toLocaleDateString()}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex gap-1 justify-end">
+                                                {/* Generate button for queued exports */}
+                                                {exp.status === "queued" && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => handleGenerate(exp.id)}
+                                                        disabled={generatingId === exp.id}
+                                                    >
+                                                        {generatingId === exp.id ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <Play className="h-4 w-4" />
+                                                        )}
+                                                    </Button>
+                                                )}
+
+                                                {/* Download button for completed exports */}
+                                                {exp.status === "completed" && (
+                                                    <Button size="sm" variant="outline" asChild>
+                                                        <a href={`/api/training-scenarios/${scenarioId}/exports/${exp.id}/download-all`}>
+                                                            <Download className="h-4 w-4" />
+                                                        </a>
+                                                    </Button>
+                                                )}
+
+                                                {/* Delete button */}
+                                                <AlertDialog>
+                                                    <AlertDialogTrigger asChild>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            disabled={deletingId === exp.id || exp.status === "generating"}
+                                                        >
+                                                            {deletingId === exp.id ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : (
+                                                                <Trash2 className="h-4 w-4 text-destructive" />
+                                                            )}
+                                                        </Button>
+                                                    </AlertDialogTrigger>
+                                                    <AlertDialogContent>
+                                                        <AlertDialogHeader>
+                                                            <AlertDialogTitle>Delete Export</AlertDialogTitle>
+                                                            <AlertDialogDescription>
+                                                                Are you sure you want to delete this export? This action cannot be undone.
+                                                            </AlertDialogDescription>
+                                                        </AlertDialogHeader>
+                                                        <AlertDialogFooter>
+                                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                            <AlertDialogAction onClick={() => handleDelete(exp.id)}>
+                                                                Delete
+                                                            </AlertDialogAction>
+                                                        </AlertDialogFooter>
+                                                    </AlertDialogContent>
+                                                </AlertDialog>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -440,414 +350,7 @@ export default function ScenarioExportPage() {
                         </Table>
                     </CardContent>
                 </Card>
-            </div>
-        );
-    }
-
-    // Generating state
-    if (isGenerating) {
-        return (
-            <Card>
-                <CardHeader>
-                    <CardTitle>Generating Dataset</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="p-8 border rounded-lg bg-muted/50 flex flex-col items-center gap-4">
-                        <Loader2 className="h-12 w-12 animate-spin text-purple-500" />
-                        <p className="text-muted-foreground text-center">
-                            Generating train/val/test splits...
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            This may take a few minutes depending on the number of builds.
-                        </p>
-                    </div>
-                </CardContent>
-            </Card>
-        );
-    }
-
-    // Configuration UI (ready to generate)
-    return (
-        <div className="space-y-6">
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Settings className="h-5 w-5" />
-                        Export Configuration
-                    </CardTitle>
-                    <CardDescription>
-                        Configure preprocessing, splitting, and output format
-                    </CardDescription>
-                </CardHeader>
-            </Card>
-
-            {/* Section 1: Preprocessing */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg">1. Preprocessing</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-6 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label>Missing Values Strategy</Label>
-                            <Select
-                                value={config.missing_values_strategy}
-                                onValueChange={(v) => updateConfig({ missing_values_strategy: v as any })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {MISSING_VALUES_OPTIONS.map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Normalization</Label>
-                            <Select
-                                value={config.normalization}
-                                onValueChange={(v) => updateConfig({ normalization: v as any })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {NORMALIZATION_OPTIONS.map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Section 2: Splitting Strategy */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg">2. Splitting Strategy</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    <div className="grid gap-6 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label>Strategy</Label>
-                            <Select
-                                value={config.strategy}
-                                onValueChange={(v) => updateConfig({ strategy: v })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {STRATEGY_OPTIONS.map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Group By</Label>
-                            <Select
-                                value={config.group_by}
-                                onValueChange={(v) => updateConfig({ group_by: v })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {GROUP_BY_OPTIONS.map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-
-                    {/* Dynamic Binning Options */}
-                    {(showNumBins || showTimeSlots) && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>Grouping Configuration</Label>
-                            <div className="grid gap-6 md:grid-cols-2">
-                                {showNumBins && (
-                                    <div className="space-y-2">
-                                        <div className="flex justify-between">
-                                            <span className="text-sm text-muted-foreground">Number of Bins</span>
-                                            <span className="text-sm font-medium">{config.num_bins}</span>
-                                        </div>
-                                        <Slider
-                                            value={[config.num_bins]}
-                                            onValueChange={([v]) => updateConfig({ num_bins: v })}
-                                            min={2}
-                                            max={10}
-                                            step={1}
-                                        />
-                                    </div>
-                                )}
-                                {showTimeSlots && (
-                                    <div className="space-y-2">
-                                        <div className="flex justify-between">
-                                            <span className="text-sm text-muted-foreground">Time Slots</span>
-                                            <span className="text-sm font-medium">{config.time_slots}</span>
-                                        </div>
-                                        <Slider
-                                            value={[config.time_slots]}
-                                            onValueChange={([v]) => updateConfig({ time_slots: v })}
-                                            min={2}
-                                            max={12}
-                                            step={1}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Group Preview Table - show for CV strategies */}
-                    {(isCVStrategy || requiresGroupSelection) && groupsPreview && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <div className="flex items-center justify-between">
-                                <Label>
-                                    Available Groups ({groupsPreview.groups.length})
-                                    {isCVStrategy && <span className="ml-2 text-xs text-muted-foreground">(CV will iterate all groups)</span>}
-                                </Label>
-                                <Button variant="ghost" size="sm" onClick={fetchGroupsPreview} disabled={loadingGroups}>
-                                    {loadingGroups ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                                </Button>
-                            </div>
-                            <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Group</TableHead>
-                                            <TableHead className="text-right">Count</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {groupsPreview.groups.map(g => (
-                                            <TableRow key={g.value}>
-                                                <TableCell className="font-medium">{g.label || g.value}</TableCell>
-                                                <TableCell className="text-right">
-                                                    {g.count.toLocaleString()}
-                                                    {g.warning && <Badge variant="outline" className="ml-2 text-xs">Small</Badge>}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* CV Configuration: Validation Ratio */}
-                    {isCVStrategy && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>Cross-Validation Settings</Label>
-                            <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Internal Validation Ratio</span>
-                                        <span className="text-sm font-medium">{(config.internal_val_ratio * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.internal_val_ratio * 100]}
-                                        onValueChange={([v]) => updateConfig({ internal_val_ratio: v / 100 })}
-                                        min={5}
-                                        max={50}
-                                        step={5}
-                                    />
-                                    <p className="text-xs text-muted-foreground">
-                                        Percentage of non-test data used for validation in each fold.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Extreme Novelty CV Configuration */}
-                    {config.strategy === STRATEGY.EXTREME_NOVELTY_CV && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>Extreme Novelty Target Label</Label>
-                            <Select
-                                value={String(config.novelty_target_label)}
-                                onValueChange={(v) => updateConfig({ novelty_target_label: parseInt(v) })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {LABEL_OPTIONS.map(opt => (
-                                        <SelectItem key={opt.value} value={String(opt.value)}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground">
-                                Label to isolate for zero-shot detection. CV will iterate through all groups.
-                            </p>
-                        </div>
-                    )}
-
-                    {/* Imbalanced K-Fold CV Configuration */}
-                    {config.strategy === STRATEGY.IMBALANCED_KFOLD_CV && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>Imbalanced K-Fold Configuration</Label>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Number of Folds</span>
-                                        <span className="text-sm font-medium">{config.n_folds}</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.n_folds]}
-                                        onValueChange={([v]) => updateConfig({ n_folds: v })}
-                                        min={2}
-                                        max={20}
-                                        step={1}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Label Drop Rate</span>
-                                        <span className="text-sm font-medium">{(config.imbalance_drop_rate * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.imbalance_drop_rate * 100]}
-                                        onValueChange={([v]) => updateConfig({ imbalance_drop_rate: v / 100 })}
-                                        min={0}
-                                        max={90}
-                                        step={10}
-                                    />
-                                </div>
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                                Percentage of failure samples (Label {config.imbalance_drop_label}) to remove from training set in each fold.
-                            </p>
-                        </div>
-                    )}
-
-                    {/* Ratios - show for non-CV strategies */}
-                    {!isCVStrategy && (
-                        <div className="space-y-4 pt-4 border-t">
-                            <Label>Train / Validation / Test Ratios</Label>
-                            <div className="grid gap-4 md:grid-cols-3">
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Train</span>
-                                        <span className="text-sm font-medium">{(config.ratios.train * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.ratios.train * 100]}
-                                        onValueChange={([v]) => updateRatios("train", v / 100)}
-                                        min={10}
-                                        max={90}
-                                        step={5}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Validation</span>
-                                        <span className="text-sm font-medium">{(config.ratios.val * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.ratios.val * 100]}
-                                        onValueChange={([v]) => updateRatios("val", v / 100)}
-                                        min={5}
-                                        max={40}
-                                        step={5}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Test</span>
-                                        <span className="text-sm font-medium">{(config.ratios.test * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.ratios.test * 100]}
-                                        onValueChange={([v]) => updateRatios("test", v / 100)}
-                                        min={5}
-                                        max={40}
-                                        step={5}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Validation Error */}
-                    {validationError && (
-                        <div className="p-3 border border-amber-500 bg-amber-50 dark:bg-amber-950/20 rounded-lg flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4 text-amber-500" />
-                            <span className="text-sm text-amber-700 dark:text-amber-400">{validationError}</span>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Section 3: Output Format */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg">3. Output Format</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-6 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label>File Format</Label>
-                            <Select
-                                value={config.format}
-                                onValueChange={(v) => updateConfig({ format: v as "parquet" | "csv" })}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="parquet">Parquet (recommended)</SelectItem>
-                                    <SelectItem value="csv">CSV</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="flex items-center gap-3 pt-6">
-                            <Checkbox
-                                id="include-metadata"
-                                checked={config.include_metadata}
-                                onCheckedChange={(v) => updateConfig({ include_metadata: !!v })}
-                            />
-                            <Label htmlFor="include-metadata" className="cursor-pointer">
-                                Include Metadata (repo, commit, build_id)
-                            </Label>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Generate Button */}
-            <Card>
-                <CardContent className="pt-6">
-                    <Button
-                        size="lg"
-                        className="w-full bg-green-600 hover:bg-green-700"
-                        onClick={handleGenerateDataset}
-                        disabled={generating || !!validationError}
-                    >
-                        {generating ? (
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        ) : (
-                            <Play className="mr-2 h-5 w-5" />
-                        )}
-                        Generate Dataset
-                    </Button>
-                </CardContent>
-            </Card>
+            )}
         </div>
     );
 }

@@ -283,17 +283,52 @@ export interface CommitScanListResponse {
 }
 
 // Export Types
+export interface ExportSplittingConfig {
+    strategy: string;
+    group_by: string;
+    ratios: { train: number; val: number; test: number };
+    num_bins: number;
+    time_slots: number;
+    n_folds: number;
+    internal_val_ratio: number;
+    imbalance_drop_rate: number;
+    imbalance_drop_label: number;
+    novelty_target_label: number;
+}
+
+export interface ExportPreprocessingConfig {
+    missing_values_strategy: string;
+    normalization: string;
+}
+
+export interface ExportOutputConfig {
+    format: string;
+    include_metadata: boolean;
+}
+
 export interface TrainingExportRecord {
     id: string;
     scenario_id: string;
     name: string;
-    status: "pending" | "generating" | "completed" | "failed";
+    status: "queued" | "generating" | "completed" | "failed";
+    splitting_config: ExportSplittingConfig;
+    preprocessing_config: ExportPreprocessingConfig;
+    output_config: ExportOutputConfig;
     train_count: number;
     val_count: number;
     test_count: number;
     feature_count: number;
-    created_at?: string;
-    completed_at?: string;
+    error_message?: string;
+    created_at: string;
+    generated_at?: string;
+    generation_duration_seconds?: number;
+}
+
+export interface TrainingExportCreateDTO {
+    name?: string;
+    splitting_config?: Partial<ExportSplittingConfig>;
+    preprocessing_config?: Partial<ExportPreprocessingConfig>;
+    output_config?: Partial<ExportOutputConfig>;
 }
 
 export interface TrainingExportListResponse {
@@ -347,23 +382,29 @@ export interface QualityIssue {
 }
 
 export interface DataQualityReport {
-    id: string;
-    scenario_id: string;
-    quality_score: number;
-    completeness_score: number;
-    validity_score: number;
-    consistency_score: number;
-    coverage_score: number;
-    feature_metrics: DataQualityMetric[];
+    // When report is not available
+    available: boolean;
+    message?: string;
+    scenario_status?: string;
+
+    // When report is available (only present when available=true)
+    id?: string;
+    scenario_id?: string;
+    quality_score?: number;
+    completeness_score?: number;
+    validity_score?: number;
+    consistency_score?: number;
+    coverage_score?: number;
+    feature_metrics?: DataQualityMetric[];
     scan_metrics_summary?: ScanMetricsSummary;
-    total_builds: number;
-    enriched_builds: number;
-    partial_builds: number;
-    failed_builds: number;
-    total_features: number;
-    features_with_issues: number;
-    issues: QualityIssue[];
-    status: "pending" | "running" | "completed" | "failed";
+    total_builds?: number;
+    enriched_builds?: number;
+    partial_builds?: number;
+    failed_builds?: number;
+    total_features?: number;
+    features_with_issues?: number;
+    issues?: QualityIssue[];
+    status?: "pending" | "running" | "completed" | "failed";
     error_message?: string;
     started_at?: string;
     completed_at?: string;
@@ -689,19 +730,78 @@ export const trainingScenariosApi = {
     },
 
     /**
+     * Create a new export
+     */
+    createExport: async (
+        scenarioId: string,
+        dto: TrainingExportCreateDTO
+    ): Promise<TrainingExportRecord> => {
+        const response = await api.post<TrainingExportRecord>(
+            `/training-scenarios/${scenarioId}/exports`,
+            dto
+        );
+        return response.data;
+    },
+
+    /**
+     * Get export details
+     */
+    getExport: async (
+        scenarioId: string,
+        exportId: string
+    ): Promise<TrainingExportRecord> => {
+        const response = await api.get<TrainingExportRecord>(
+            `/training-scenarios/${scenarioId}/exports/${exportId}`
+        );
+        return response.data;
+    },
+
+    /**
+     * Delete an export
+     */
+    deleteExport: async (
+        scenarioId: string,
+        exportId: string
+    ): Promise<{ success: boolean }> => {
+        const response = await api.delete<{ success: boolean }>(
+            `/training-scenarios/${scenarioId}/exports/${exportId}`
+        );
+        return response.data;
+    },
+
+    /**
+     * Trigger dataset generation for an export
+     */
+    generateExport: async (
+        scenarioId: string,
+        exportId: string
+    ): Promise<{ success: boolean; task_id: string; export_id: string }> => {
+        const response = await api.post<{ success: boolean; task_id: string; export_id: string }>(
+            `/training-scenarios/${scenarioId}/exports/${exportId}/generate`
+        );
+        return response.data;
+    },
+
+    /**
+     * Get splits for an export
+     */
+    getExportSplits: async (
+        scenarioId: string,
+        exportId: string
+    ): Promise<TrainingDatasetSplitRecord[]> => {
+        const response = await api.get<TrainingDatasetSplitRecord[]>(
+            `/training-scenarios/${scenarioId}/exports/${exportId}/splits`
+        );
+        return response.data;
+    },
+
+    /**
      * Get data quality report
      */
-    getAnalysis: async (scenarioId: string): Promise<DataQualityReport | null> => {
-        try {
-            const response = await api.get<DataQualityReport>(
-                `/training-scenarios/${scenarioId}/quality-report`
-            );
-            return response.data;
-        } catch (error: any) {
-            if (error.response?.status === 404) {
-                return null;
-            }
-            throw error;
-        }
+    getAnalysis: async (scenarioId: string): Promise<DataQualityReport> => {
+        const response = await api.get<DataQualityReport>(
+            `/training-scenarios/${scenarioId}/quality-report`
+        );
+        return response.data;
     },
 };

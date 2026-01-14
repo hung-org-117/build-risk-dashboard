@@ -203,7 +203,7 @@ export default function EnrichmentBuildDetailPage() {
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
-                    Back to Builds
+                    Back to Feature Extraction
                 </Button>
                 <div className="flex-1">
                     <h1 className="text-2xl font-bold tracking-tight">

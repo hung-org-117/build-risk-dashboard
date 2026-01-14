@@ -270,7 +270,21 @@ export default function ScansPage() {
         }
 
         if (!scanData || scanData.items.length === 0) {
-            return <p className="text-sm text-muted-foreground py-4">No scans</p>;
+            return (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="p-3 rounded-full bg-muted mb-3">
+                        {toolType === "trivy" ? (
+                            <Shield className="h-6 w-6 text-muted-foreground" />
+                        ) : (
+                            <BarChart3 className="h-6 w-6 text-muted-foreground" />
+                        )}
+                    </div>
+                    <p className="text-muted-foreground font-medium">No {toolType === "trivy" ? "Trivy" : "SonarQube"} scans yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                        Scans will be dispatched when you click &quot;Start Processing&quot;.
+                    </p>
+                </div>
+            );
         }
 
         const { items, total } = scanData;
@@ -323,7 +337,7 @@ export default function ScansPage() {
                                             onClick={(e) => {
                                                 // Don't navigate if clicking the toggle button or retry button
                                                 if ((e.target as HTMLElement).closest('button')) return;
-                                                router.push(`/scenarios/${scenarioId}/builds/scans/${scan.id}?tool_type=${toolType}`);
+                                                router.push(`/commit-scans/${scenarioId}/${toolType}/${scan.id}`);
                                             }}
                                         >
                                             <td className="px-4 py-3">

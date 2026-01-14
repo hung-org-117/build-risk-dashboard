@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
     ArrowLeft,
     CheckCircle2,
-    Clock,
-    FileJson,
     GitCommit,
     Loader2,
     XCircle,
@@ -30,7 +28,7 @@ import {
     trainingScenariosApi,
     CommitScanRecord
 } from "@/lib/api/training-scenarios";
-import { cn, formatDateTime } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
 
 function ScanStatusBadge({ status }: { status: string }) {
     const s = status.toLowerCase();
@@ -73,10 +71,9 @@ function formatDuration(startStr?: string, endStr?: string): string {
 export default function ScanDetailPage() {
     const params = useParams();
     const router = useRouter();
-    const searchParams = useSearchParams();
     const scenarioId = params.scenarioId as string;
+    const toolType = params.toolType as "trivy" | "sonarqube";
     const scanId = params.scanId as string;
-    const toolType = (searchParams.get("tool_type") || "sonarqube") as "trivy" | "sonarqube";
 
     const [scan, setScan] = useState<CommitScanRecord | null>(null);
     const [loading, setLoading] = useState(true);
@@ -95,17 +92,16 @@ export default function ScanDetailPage() {
     };
 
     useEffect(() => {
-        if (scenarioId && scanId) {
+        if (scenarioId && scanId && toolType) {
             loadScan();
         }
-    }, [scenarioId, scanId]);
+    }, [scenarioId, scanId, toolType]);
 
     const handleRetry = async () => {
         if (!scan) return;
         setRetrying(true);
         try {
             await trainingScenariosApi.retryCommitScan(scenarioId, scan.commit_sha, scan.tool_type);
-            // Reload after delay or wait for SSE? Reload for now.
             setTimeout(loadScan, 1000);
         } catch (err) {
             console.error(err);
@@ -128,11 +124,11 @@ export default function ScanDetailPage() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.back()}
+                    onClick={() => router.push(`/scenarios/${scenarioId}/builds/scans`)}
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
-                    Back
+                    Back to Scans
                 </Button>
                 <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-900/20">
                     <CardHeader>
@@ -146,11 +142,11 @@ export default function ScanDetailPage() {
         );
     }
 
-    const toolIcon = scan.tool_type === "trivy"
+    const toolIcon = toolType === "trivy"
         ? <Shield className="h-5 w-5 text-green-600" />
         : <BarChart3 className="h-5 w-5 text-blue-600" />;
 
-    const toolName = scan.tool_type === "trivy" ? "Trivy Security" : "SonarQube Analysis";
+    const toolName = toolType === "trivy" ? "Trivy Security" : "SonarQube Analysis";
 
     return (
         <div className="space-y-6">
@@ -159,11 +155,11 @@ export default function ScanDetailPage() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.push(`/scenarios/${scenarioId}/builds/scans?tab=${scan.tool_type}`)}
+                    onClick={() => router.push(`/scenarios/${scenarioId}/builds/scans`)}
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
-                    Back to Scans
+                    Back to Integration Scans
                 </Button>
                 <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -263,34 +259,13 @@ export default function ScanDetailPage() {
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50 dark:bg-slate-900/40">
                                     <tr className="border-b">
-                                        <th className="px-4 py-3 text-left font-medium text-slate-500">CI Run ID</th>
-                                        <th className="px-4 py-3 text-left font-medium text-slate-500">Build Number</th>
-                                        <th className="px-4 py-3 text-left font-medium text-slate-500">Ingestion Status</th>
-                                        <th className="px-4 py-3 text-left font-medium text-slate-500">Link</th>
+                                        <th className="px-4 py-3 text-left font-medium text-slate-500">Build ID</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y">
                                     {scan.builds.map((build) => (
                                         <tr key={build.id}>
                                             <td className="px-4 py-3 font-mono">{build.ci_run_id}</td>
-                                            <td className="px-4 py-3">{build.build_number || "-"}</td>
-                                            <td className="px-4 py-3">
-                                                <Badge variant="outline">{build.ingestion_status}</Badge>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {build.web_url ? (
-                                                    <a
-                                                        href={build.web_url}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="text-blue-600 hover:underline flex items-center gap-1"
-                                                    >
-                                                        View <ExternalLink className="h-3 w-3" />
-                                                    </a>
-                                                ) : (
-                                                    <span className="text-muted-foreground">-</span>
-                                                )}
-                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -304,62 +279,38 @@ export default function ScanDetailPage() {
                 </CardContent>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Metrics */}
-                <Card className="h-full">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <Activity className="h-5 w-5" />
-                            Scan Metrics
-                        </CardTitle>
-                        <CardDescription>Risk metrics collected by the tool</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {scan.metrics && Object.keys(scan.metrics).length > 0 ? (
-                            <div className="rounded-md border text-sm">
-                                <table className="w-full">
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {Object.entries(scan.metrics).map(([key, value]) => (
-                                            <tr key={key}>
-                                                <td className="px-4 py-3 font-medium text-slate-500 w-[50%]">{key}</td>
-                                                <td className="px-4 py-3 text-right font-mono text-foreground">
-                                                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
-                                <p className="text-muted-foreground">No metrics collected.</p>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-
-                {/* Configuration */}
-                <Card className="h-full">
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <FileJson className="h-5 w-5" />
-                            Configuration
-                        </CardTitle>
-                        <CardDescription>Tool configuration snapshot</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {scan.scan_config && Object.keys(scan.scan_config).length > 0 ? (
-                            <div className="bg-slate-950 text-slate-50 rounded-md border p-4 text-xs font-mono overflow-auto max-h-[400px]">
-                                <pre>{JSON.stringify(scan.scan_config, null, 2)}</pre>
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
-                                <p className="text-muted-foreground">No configuration available.</p>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-            </div>
+            {/* Scan Metrics */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Activity className="h-5 w-5" />
+                        Scan Metrics
+                    </CardTitle>
+                    <CardDescription>Risk metrics collected by the tool</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {scan.metrics && Object.keys(scan.metrics).length > 0 ? (
+                        <div className="rounded-md border text-sm">
+                            <table className="w-full">
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {Object.entries(scan.metrics).map(([key, value]) => (
+                                        <tr key={key}>
+                                            <td className="px-4 py-3 font-medium text-slate-500 w-[50%]">{key}</td>
+                                            <td className="px-4 py-3 text-right font-mono text-foreground">
+                                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
+                            <p className="text-muted-foreground">No metrics collected.</p>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

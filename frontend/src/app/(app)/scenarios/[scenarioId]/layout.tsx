@@ -5,16 +5,13 @@ import Link from "next/link";
 import { ReactNode, useState, useEffect } from "react";
 import {
     ArrowLeft,
-    Download,
     Loader2,
     CheckCircle2,
-    AlertCircle,
     XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Database, BarChart3, Home, Lock } from "lucide-react";
 import { trainingScenariosApi, TrainingScenarioRecord } from "@/lib/api/training-scenarios";
 import { useSSE } from "@/contexts/sse-context";
 import { ScenarioActionProgressBanner } from "./_components/ScenarioActionProgressBanner";
@@ -107,9 +104,6 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
 
     const statusConfig = getStatusConfig(scenario.status);
     const StatusIcon = statusConfig.icon;
-    const isProcessed = ["processed", "completed"].includes(scenario.status);
-    const canViewAnalysis = isProcessed;
-    const canViewExport = isProcessed;
 
     const basePath = `/scenarios/${scenarioId}`;
 
@@ -163,23 +157,13 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                             Builds
                         </Link>
                     </TabsTrigger>
-                    <TabsTrigger value="analysis" asChild disabled={!canViewAnalysis}>
-                        <Link
-                            href={canViewAnalysis ? `${basePath}/analysis` : "#"}
-                            className="gap-2"
-                            onClick={(e) => !canViewAnalysis && e.preventDefault()}
-                        >
-                            {!canViewAnalysis && <Lock className="h-3 w-3" />}
+                    <TabsTrigger value="analysis" asChild>
+                        <Link href={`${basePath}/analysis`} className="gap-2">
                             Analysis
                         </Link>
                     </TabsTrigger>
-                    <TabsTrigger value="export" asChild disabled={!canViewExport}>
-                        <Link
-                            href={canViewExport ? `${basePath}/export` : "#"}
-                            className="gap-2"
-                            onClick={(e) => !canViewExport && e.preventDefault()}
-                        >
-                            {!canViewExport && <Lock className="h-3 w-3" />}
+                    <TabsTrigger value="export" asChild>
+                        <Link href={`${basePath}/export`} className="gap-2">
                             Export
                         </Link>
                     </TabsTrigger>

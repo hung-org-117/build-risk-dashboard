@@ -10,6 +10,7 @@ from app.dtos.training_scenario import (
     TrainingScenarioResponse,
     TrainingScenarioUpdateDTO,
 )
+from app.dtos.training_export import ExportCreateDTO
 from app.entities.training_scenario import ScenarioStatus
 from app.entities.user import User
 from app.middleware.auth import get_current_user
@@ -35,8 +36,12 @@ def preview_builds(
     conclusions: Optional[str] = Query(
         None, description="Comma-separated conclusions (success,failure)"
     ),
-    ci_providers: Optional[str] = Query(None, description="Comma-separated CI providers"),
-    build_source_ids: Optional[str] = Query(None, description="Comma-separated build source IDs"),
+    ci_providers: Optional[str] = Query(
+        None, description="Comma-separated CI providers"
+    ),
+    build_source_ids: Optional[str] = Query(
+        None, description="Comma-separated build source IDs"
+    ),
     skip: int = 0,
     limit: int = 20,
     db=Depends(get_db),  # noqa: B008
@@ -86,10 +91,14 @@ def preview_builds(
                 "raw_repo_id": str(build.get("raw_repo_id")),
                 "repo_name": build.get("repo_name"),
                 "branch": build.get("branch"),
-                "commit_sha": (build.get("commit_sha", "")[:8] if build.get("commit_sha") else ""),
+                "commit_sha": (
+                    build.get("commit_sha", "")[:8] if build.get("commit_sha") else ""
+                ),
                 "conclusion": build.get("conclusion"),
                 "run_started_at": (
-                    build["run_started_at"].isoformat() if build.get("run_started_at") else None
+                    build["run_started_at"].isoformat()
+                    if build.get("run_started_at")
+                    else None
                 ),
                 "duration_seconds": build.get("duration_seconds"),
                 "language": build.get("language") or "Unknown",
@@ -167,9 +176,15 @@ def get_filter_options(
 
 @router.get("/splitting-groups")
 def get_splitting_groups(
-    group_by: str = Query(..., description="Group by dimension: repo_language, time_of_day, etc."),
-    num_bins: int = Query(4, ge=2, le=10, description="Number of bins for numeric features"),
-    time_slots: int = Query(4, ge=2, le=12, description="Number of time slots for time_of_day"),
+    group_by: str = Query(
+        ..., description="Group by dimension: repo_language, time_of_day, etc."
+    ),
+    num_bins: int = Query(
+        4, ge=2, le=10, description="Number of bins for numeric features"
+    ),
+    time_slots: int = Query(
+        4, ge=2, le=12, description="Number of time slots for time_of_day"
+    ),
     date_start: Optional[datetime] = None,
     date_end: Optional[datetime] = None,
     languages: Optional[str] = Query(None, description="Comma-separated languages"),
@@ -242,9 +257,15 @@ def get_splitting_groups(
 @router.get("/{scenario_id}/group-preview")
 def get_scenario_group_preview(
     scenario_id: str,
-    group_by: str = Query(..., description="Group by dimension: repo_language, time_of_day, etc."),
-    num_bins: int = Query(4, ge=2, le=10, description="Number of bins for numeric features"),
-    time_slots: int = Query(4, ge=2, le=12, description="Number of time slots for time_of_day"),
+    group_by: str = Query(
+        ..., description="Group by dimension: repo_language, time_of_day, etc."
+    ),
+    num_bins: int = Query(
+        4, ge=2, le=10, description="Number of bins for numeric features"
+    ),
+    time_slots: int = Query(
+        4, ge=2, le=12, description="Number of time slots for time_of_day"
+    ),
     current_user: User = Depends(get_current_user),  # noqa: B008
     db=Depends(get_db),  # noqa: B008
 ) -> Dict[str, Any]:
@@ -395,23 +416,35 @@ def get_quality_report(
     scenario_id: str,
     current_user: User = Depends(get_current_user),  # noqa: B008
     db=Depends(get_db),  # noqa: B008
-) -> Optional[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
     Get data quality report for a training scenario.
 
     Returns quality metrics including completeness, validity, consistency,
     and coverage scores along with per-feature metrics.
+    If no report exists yet, returns a structured response with available=false.
     """
     # First verify user has access to scenario
     service = TrainingScenarioService(db)
-    service.get_scenario(scenario_id, str(current_user["_id"]))
+    scenario = service.get_scenario(scenario_id, str(current_user["_id"]))
 
     # Get quality report
     quality_repo = DataQualityRepository(db)
     report = quality_repo.find_by_scenario(scenario_id)
 
     if not report:
-        return None
+        # Return structured response instead of null
+        # scenario is a Pydantic model, access attributes directly
+        scenario_status = scenario.status if hasattr(scenario, "status") else "unknown"
+        return {
+            "available": False,
+            "status": "pending",
+            "message": (
+                "Quality report not available yet. "
+                "Complete processing to generate the report."
+            ),
+            "scenario_status": scenario_status,
+        }
 
     # Serialize to dict - use mode="json" to convert ObjectId to string
     result = report.model_dump(mode="json")
@@ -421,6 +454,9 @@ def get_quality_report(
     # Convert scenario_id ObjectId to string if needed
     if "scenario_id" in result and result["scenario_id"]:
         result["scenario_id"] = str(result["scenario_id"])
+
+    # Add available flag
+    result["available"] = True
     return result
 
 
@@ -586,7 +622,9 @@ def reprocess_failed_feature_extraction(
 ):
     """Retry failed processing builds."""
     service = TrainingProcessingService(db)
-    return service.reprocess_failed_feature_extraction(scenario_id, str(current_user["_id"]))
+    return service.reprocess_failed_feature_extraction(
+        scenario_id, str(current_user["_id"])
+    )
 
 
 # ============================================================================
@@ -597,7 +635,9 @@ def reprocess_failed_feature_extraction(
 @router.get("/{scenario_id}/commit-scans")
 def get_commit_scans(
     scenario_id: str,
-    tool_type: Optional[str] = Query(None, description="Filter by tool: trivy or sonarqube"),
+    tool_type: Optional[str] = Query(
+        None, description="Filter by tool: trivy or sonarqube"
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     current_user: User = Depends(get_current_user),  # noqa: B008
@@ -623,19 +663,29 @@ def get_commit_scans(
     # Fetch Trivy scans
     if tool_type is None or tool_type == "trivy":
         trivy_repo = TrivyCommitScanRepository(db)
-        trivy_items, trivy_total = trivy_repo.list_by_scenario(scenario_oid, skip, limit)
+        trivy_items, trivy_total = trivy_repo.list_by_scenario(
+            scenario_oid, skip, limit
+        )
         result["trivy"] = {
             "items": [
                 {
                     "id": str(scan.id),
                     "commit_sha": scan.commit_sha,
                     "repo_full_name": scan.repo_full_name,
-                    "status": (scan.status.value if hasattr(scan.status, "value") else scan.status),
+                    "status": (
+                        scan.status.value
+                        if hasattr(scan.status, "value")
+                        else scan.status
+                    ),
                     "error_message": scan.error_message,
                     "builds_affected": scan.builds_affected,
                     "retry_count": scan.retry_count,
-                    "started_at": (scan.started_at.isoformat() if scan.started_at else None),
-                    "completed_at": (scan.completed_at.isoformat() if scan.completed_at else None),
+                    "started_at": (
+                        scan.started_at.isoformat() if scan.started_at else None
+                    ),
+                    "completed_at": (
+                        scan.completed_at.isoformat() if scan.completed_at else None
+                    ),
                 }
                 for scan in trivy_items
             ],
@@ -647,19 +697,29 @@ def get_commit_scans(
     # Fetch SonarQube scans
     if tool_type is None or tool_type == "sonarqube":
         sonar_repo = SonarCommitScanRepository(db)
-        sonar_items, sonar_total = sonar_repo.list_by_scenario(scenario_oid, skip, limit)
+        sonar_items, sonar_total = sonar_repo.list_by_scenario(
+            scenario_oid, skip, limit
+        )
         result["sonarqube"] = {
             "items": [
                 {
                     "id": str(scan.id),
                     "commit_sha": scan.commit_sha,
                     "repo_full_name": scan.repo_full_name,
-                    "status": (scan.status.value if hasattr(scan.status, "value") else scan.status),
+                    "status": (
+                        scan.status.value
+                        if hasattr(scan.status, "value")
+                        else scan.status
+                    ),
                     "error_message": scan.error_message,
                     "builds_affected": scan.builds_affected,
                     "retry_count": scan.retry_count,
-                    "started_at": (scan.started_at.isoformat() if scan.started_at else None),
-                    "completed_at": (scan.completed_at.isoformat() if scan.completed_at else None),
+                    "started_at": (
+                        scan.started_at.isoformat() if scan.started_at else None
+                    ),
+                    "completed_at": (
+                        scan.completed_at.isoformat() if scan.completed_at else None
+                    ),
                 }
                 for scan in sonar_items
             ],
@@ -709,7 +769,9 @@ def get_commit_scan_detail(
         raise HTTPException(status_code=404, detail="Scan not found")
 
     if str(scan.scenario_id) != scenario_id:
-        raise HTTPException(status_code=404, detail="Scan does not belong to this scenario")
+        raise HTTPException(
+            status_code=404, detail="Scan does not belong to this scenario"
+        )
 
     # Fetch related builds
     from app.repositories.training_ingestion_build import (
@@ -717,19 +779,20 @@ def get_commit_scan_detail(
     )
 
     ingestion_repo = TrainingIngestionBuildRepository(db)
-    related_builds = ingestion_repo.find(
+    related_builds = ingestion_repo.find_many(
         {"scenario_id": ObjectId(scenario_id), "commit_sha": scan.commit_sha}
     )
 
     builds_data = []
     for b in related_builds:
+        # Convert ingestion_status enum to string
+        status_value = b.status
+        if hasattr(status_value, "value"):
+            status_value = status_value.value
         builds_data.append(
             {
                 "id": str(b.id),
                 "ci_run_id": b.ci_run_id,
-                "ingestion_status": b.ingestion_status,
-                "build_number": getattr(b, "build_number", None),
-                "web_url": getattr(b, "web_url", None),
             }
         )
 
@@ -741,7 +804,6 @@ def get_commit_scan_detail(
         "status": (scan.status.value if hasattr(scan.status, "value") else scan.status),
         "error_message": scan.error_message,
         "metrics": scan.metrics,
-        "scan_config": scan.scan_config,
         "builds_affected": scan.builds_affected,
         "retry_count": scan.retry_count,
         "started_at": (scan.started_at.isoformat() if scan.started_at else None),
@@ -782,3 +844,125 @@ def retry_failed_scans(
         "success": True,
         "message": f"Retry task dispatched for failed {tool_type} scans",
     }
+
+
+# ============================================================================
+# Export CRUD
+# ============================================================================
+
+
+@router.get("/{scenario_id}/exports")
+def list_exports(
+    scenario_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """List all exports for a scenario."""
+    from app.dtos.training_export import ExportListResponse
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    exports, total = service.list_exports(scenario_id, skip=skip, limit=limit)
+    return ExportListResponse(items=exports, total=total, skip=skip, limit=limit)
+
+
+@router.post("/{scenario_id}/exports")
+def create_export(
+    scenario_id: str,
+    dto: ExportCreateDTO,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Create a new export for a scenario."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    return service.create_export(scenario_id, str(current_user["_id"]), dto)
+
+
+@router.get("/{scenario_id}/exports/{export_id}")
+def get_export(
+    scenario_id: str,
+    export_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Get export details."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    return service.get_export(scenario_id, export_id)
+
+
+@router.delete("/{scenario_id}/exports/{export_id}")
+def delete_export(
+    scenario_id: str,
+    export_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Delete an export."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    service.delete_export(scenario_id, export_id)
+    return {"success": True}
+
+
+@router.post("/{scenario_id}/exports/{export_id}/generate")
+def generate_export(
+    scenario_id: str,
+    export_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Trigger dataset generation for an export."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    return service.generate_export(scenario_id, export_id, str(current_user["_id"]))
+
+
+@router.get("/{scenario_id}/exports/{export_id}/splits")
+def get_export_splits(
+    scenario_id: str,
+    export_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Get splits for an export."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    return service.get_export_splits(scenario_id, export_id)
+
+
+@router.get("/{scenario_id}/exports/{export_id}/splits/{split_id}/download")
+def download_export_split(
+    scenario_id: str,
+    export_id: str,
+    split_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Download a split file."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    return service.download_split(scenario_id, export_id, split_id)
+
+
+@router.get("/{scenario_id}/exports/{export_id}/download-all")
+def download_all_export_splits(
+    scenario_id: str,
+    export_id: str,
+    current_user: User = Depends(get_current_user),  # noqa: B008
+    db=Depends(get_db),  # noqa: B008
+):
+    """Download all splits as zip."""
+    from app.services.training_export_service import TrainingExportService
+
+    service = TrainingExportService(db)
+    return service.download_all_splits(scenario_id, export_id)

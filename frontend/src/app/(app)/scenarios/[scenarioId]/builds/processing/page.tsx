@@ -171,8 +171,19 @@ export default function ProcessingBuildsPage() {
                                     ))
                                 ) : data?.items.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                                            No processing builds found
+                                        <td colSpan={6} className="px-4 py-12 text-center">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <p className="text-muted-foreground">
+                                                    {scenario && ["queued", "filtering", "ingesting", "ingested"].includes(scenario.status)
+                                                        ? "Feature extraction has not started yet."
+                                                        : "No builds have been processed yet."}
+                                                </p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {scenario && ["queued", "filtering", "ingesting", "ingested"].includes(scenario.status)
+                                                        ? "Complete ingestion and click \"Start Processing\" to begin feature extraction."
+                                                        : "Processing is in progress. Builds will appear here as they are processed."}
+                                                </p>
+                                            </div>
                                         </td>
                                     </tr>
                                 ) : (
@@ -180,7 +191,7 @@ export default function ProcessingBuildsPage() {
                                         <tr
                                             key={build.id}
                                             className="hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors cursor-pointer"
-                                            onClick={() => router.push(`/scenarios/${scenarioId}/builds/processing/${build.id}`)}
+                                            onClick={() => router.push(`/enrichment-builds/${scenarioId}/${build.id}`)}
                                         >
                                             <td className="px-4 py-3 font-mono text-xs">
                                                 {build.ci_run_id}
