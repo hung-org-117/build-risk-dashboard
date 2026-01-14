@@ -15,7 +15,7 @@ export interface DataSourceConfig {
     date_start: string;
     date_end: string;
     conclusions: string[];
-    ci_provider: CIProviderKey | "all";
+    ci_providers: string[];
 }
 
 export interface FeatureConfig {
@@ -84,8 +84,8 @@ const initialDataSource: DataSourceConfig = {
     build_source_ids: [],
     date_start: "",
     date_end: "",
-    conclusions: ["success", "failure"],
-    ci_provider: "all",
+    conclusions: [],
+    ci_providers: [],
 };
 
 const initialFeatures: FeatureConfig = {

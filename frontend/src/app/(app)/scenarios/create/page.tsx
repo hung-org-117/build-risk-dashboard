@@ -375,7 +375,6 @@ function WizardContent() {
                             ) : state.step === 3 ? (
                                 <>
                                     Start
-                                    <Save className="ml-2 h-4 w-4" />
                                 </>
                             ) : (
                                 <>

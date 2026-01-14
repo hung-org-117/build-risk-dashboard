@@ -220,7 +220,7 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         date_start: Optional[datetime] = None,
         date_end: Optional[datetime] = None,
         conclusions: Optional[List[str]] = None,
-        ci_provider: Optional[str] = None,
+        ci_providers: Optional[List[str]] = None,
         languages: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Build shared pipeline stages for filtering."""
@@ -237,11 +237,11 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
             if date_end:
                 match_stage["run_started_at"]["$lte"] = date_end
 
-        if conclusions:
+        if conclusions and "all" not in conclusions:
             match_stage["conclusion"] = {"$in": conclusions}
 
-        if ci_provider and ci_provider != "all":
-            match_stage["provider"] = ci_provider
+        if ci_providers and "all" not in ci_providers:
+            match_stage["provider"] = {"$in": ci_providers}
 
         if match_stage:
             pipeline.append({"$match": match_stage})
@@ -260,7 +260,7 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         pipeline.append({"$unwind": "$repo"})
 
         # 3. Filter by Language
-        if languages:
+        if languages and "all" not in languages:
             regex_list = [
                 re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages
             ]
@@ -273,93 +273,133 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         date_start: Optional[datetime] = None,
         date_end: Optional[datetime] = None,
         conclusions: Optional[List[str]] = None,
-        ci_provider: Optional[str] = None,
+        ci_providers: Optional[List[str]] = None,
         languages: Optional[List[str]] = None,
+        build_source_ids: Optional[List[str]] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Find paginated builds with language info."""
-        pipeline = self._build_preview_pipeline_base(
-            date_start, date_end, conclusions, ci_provider, languages
+
+        # Base pipeline (applied to RawBuildRun documents)
+        base_pipeline = self._build_preview_pipeline_base(
+            date_start, date_end, conclusions, ci_providers, languages
         )
 
-        pipeline.extend(
-            [
-                {"$sort": {"run_created_at": -1}},
-                {"$skip": skip},
-                {"$limit": limit},
+        # Pagination pipeline
+        pagination_stages = [
+            {"$sort": {"run_created_at": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {
+                "$project": {
+                    "_id": 1,
+                    "raw_repo_id": 1,
+                    "repo_name": 1,
+                    "branch": 1,
+                    "commit_sha": 1,
+                    "conclusion": 1,
+                    "run_started_at": 1,
+                    "duration_seconds": 1,
+                    "language": "$repo.main_lang",
+                    "provider": 1,
+                }
+            },
+        ]
+
+        if build_source_ids:
+            # Source-driven aggregation
+            source_oids = [ObjectId(sid) for sid in build_source_ids]
+            source_pipeline = [
+                {"$match": {"source_id": {"$in": source_oids}}},
                 {
-                    "$project": {
-                        "_id": 1,
-                        "raw_repo_id": 1,
-                        "repo_name": 1,
-                        "branch": 1,
-                        "commit_sha": 1,
-                        "conclusion": 1,
-                        "run_started_at": 1,
-                        "duration_seconds": 1,
-                        "language": "$repo.main_lang",
-                        "provider": 1,
+                    "$lookup": {
+                        "from": "raw_build_runs",
+                        "localField": "raw_run_id",
+                        "foreignField": "_id",
+                        "as": "build",
                     }
                 },
+                {"$unwind": "$build"},
+                {"$replaceRoot": {"newRoot": "$build"}},
             ]
-        )
-
-        return list(self.collection.aggregate(pipeline))
+            # Combine: Source selection -> Base filters -> Pagination
+            full_pipeline = source_pipeline + base_pipeline + pagination_stages
+            return list(self.db["source_builds"].aggregate(full_pipeline))
+        else:
+            # Standard aggregation on raw_build_runs
+            full_pipeline = base_pipeline + pagination_stages
+            return list(self.collection.aggregate(full_pipeline))
 
     def get_stats_with_filters(
         self,
         date_start: Optional[datetime] = None,
         date_end: Optional[datetime] = None,
         conclusions: Optional[List[str]] = None,
-        ci_provider: Optional[str] = None,
+        ci_providers: Optional[List[str]] = None,
         languages: Optional[List[str]] = None,
+        build_source_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Get aggregate stats for filtered builds."""
-        pipeline = self._build_preview_pipeline_base(
-            date_start, date_end, conclusions, ci_provider, languages
+
+        base_pipeline = self._build_preview_pipeline_base(
+            date_start, date_end, conclusions, ci_providers, languages
         )
 
-        pipeline.extend(
-            [
+        stats_grouping = [
+            {
+                "$group": {
+                    "_id": None,
+                    "total_builds": {"$sum": 1},
+                    "unique_repos": {
+                        "$addToSet": {
+                            "id": {"$toString": "$repo._id"},
+                            "full_name": "$repo.full_name",
+                        }
+                    },
+                    "success_count": {
+                        "$sum": {"$cond": [{"$eq": ["$conclusion", "success"]}, 1, 0]}
+                    },
+                    "failure_count": {
+                        "$sum": {"$cond": [{"$eq": ["$conclusion", "failure"]}, 1, 0]}
+                    },
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "total_builds": 1,
+                    "total_repos": {"$size": "$unique_repos"},
+                    "outcome_distribution": {
+                        "success": "$success_count",
+                        "failure": "$failure_count",
+                    },
+                    "repos": "$unique_repos",
+                }
+            },
+        ]
+
+        if build_source_ids:
+            source_oids = [ObjectId(sid) for sid in build_source_ids]
+            source_pipeline = [
+                {"$match": {"source_id": {"$in": source_oids}}},
                 {
-                    "$group": {
-                        "_id": None,
-                        "total_builds": {"$sum": 1},
-                        "unique_repos": {
-                            "$addToSet": {
-                                "id": {"$toString": "$repo._id"},
-                                "full_name": "$repo.full_name",
-                            }
-                        },
-                        "success_count": {
-                            "$sum": {
-                                "$cond": [{"$eq": ["$conclusion", "success"]}, 1, 0]
-                            }
-                        },
-                        "failure_count": {
-                            "$sum": {
-                                "$cond": [{"$eq": ["$conclusion", "failure"]}, 1, 0]
-                            }
-                        },
+                    "$lookup": {
+                        "from": "raw_build_runs",
+                        "localField": "raw_run_id",
+                        "foreignField": "_id",
+                        "as": "build",
                     }
                 },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "total_builds": 1,
-                        "total_repos": {"$size": "$unique_repos"},
-                        "outcome_distribution": {
-                            "success": "$success_count",
-                            "failure": "$failure_count",
-                        },
-                        "repos": "$unique_repos",
-                    }
-                },
+                {"$unwind": "$build"},
+                {"$replaceRoot": {"newRoot": "$build"}},
             ]
-        )
+            full_pipeline = source_pipeline + base_pipeline + stats_grouping
+            results = list(self.db["source_builds"].aggregate(full_pipeline))
+        else:
+            full_pipeline = base_pipeline + stats_grouping
+            results = list(self.collection.aggregate(full_pipeline))
 
-        results = list(self.collection.aggregate(pipeline))
         if results:
             return results[0]
 
@@ -369,3 +409,56 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
             "outcome_distribution": {"success": 0, "failure": 0},
             "repos": [],
         }
+
+    def find_builds_for_ingestion(
+        self,
+        raw_repo_ids: List[ObjectId],
+        build_source_ids: Optional[List[str]] = None,
+        date_start: Optional[datetime] = None,
+        date_end: Optional[datetime] = None,
+        conclusions: Optional[List[str]] = None,
+        ci_providers: Optional[List[str]] = None,
+        batch_size: int = 1000,
+    ) -> Any:
+        """
+        Find builds for ingestion with optimized query.
+        Returns an aggregation cursor (or find cursor) to iterate over.
+        """
+        match_stage = {"raw_repo_id": {"$in": raw_repo_ids}}
+
+        if date_start or date_end:
+            match_stage["run_started_at"] = {}
+            if date_start:
+                match_stage["run_started_at"]["$gte"] = date_start
+            if date_end:
+                match_stage["run_started_at"]["$lte"] = date_end
+
+        if conclusions and "all" not in conclusions:
+            match_stage["conclusion"] = {"$in": conclusions}
+
+        if ci_providers and "all" not in ci_providers:
+            match_stage["provider"] = {"$in": ci_providers}
+
+        if build_source_ids:
+            # Source-Driven Aggregation
+            source_oids = [ObjectId(sid) for sid in build_source_ids]
+            pipeline = [
+                {"$match": {"source_id": {"$in": source_oids}}},
+                {
+                    "$lookup": {
+                        "from": "raw_build_runs",
+                        "localField": "raw_run_id",
+                        "foreignField": "_id",
+                        "as": "build",
+                    }
+                },
+                {"$unwind": "$build"},
+                {"$replaceRoot": {"newRoot": "$build"}},
+                # Apply other filters on the resulting build documents
+                {"$match": match_stage},
+            ]
+            # Use db['source_builds'] for aggregation
+            return self.db["source_builds"].aggregate(pipeline, batchSize=batch_size)
+
+        # Standard Find if no sources specified
+        return self.collection.find(match_stage).batch_size(batch_size)

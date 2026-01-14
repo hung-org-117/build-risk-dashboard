@@ -17,22 +17,160 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
     RefreshCw,
     Play,
     RotateCcw,
     Loader2,
+    CheckCircle2,
+    XCircle,
+    Clock,
+    GitCommit,
+    Settings,
+    ExternalLink,
 } from "lucide-react";
 import {
     trainingScenariosApi,
     TrainingIngestionBuildRecord,
     PaginatedResponse,
     TrainingScenarioRecord,
-} from "@/lib/api/training-scenarios";
+}
+    from "@/lib/api/training-scenarios";
 import { useSSE } from "@/contexts/sse-context";
 import { useToast } from "@/components/ui/use-toast";
 
-import { IngestionStatusBadge, TablePagination } from "@/components/builds";
-import { cn } from "@/lib/utils";
+import { IngestionStatusBadge, TablePagination, ResourceStatusIndicator } from "@/components/builds";
+import { cn, formatTimestamp } from "@/lib/utils";
+
+function IngestionBuildRow({ build }: { build: TrainingIngestionBuildRecord }) {
+    const [expanded, setExpanded] = useState(false);
+    const hasResources = build.resource_status && Object.keys(build.resource_status).length > 0;
+
+    return (
+        <>
+            <tr
+                className={cn(
+                    "hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors border-b cursor-pointer",
+                    expanded && "bg-slate-50 dark:bg-slate-900/40"
+                )}
+                onClick={() => setExpanded(!expanded)}
+            >
+                <td className="px-4 py-3 w-[50px]">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setExpanded(!expanded);
+                        }}
+                    >
+                        {expanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                        ) : (
+                            <ChevronRight className="h-4 w-4" />
+                        )}
+                    </Button>
+                </td>
+                <td className="px-4 py-3">
+                    <span className="font-medium font-mono text-xs">
+                        {build.ci_run_id || "—"}
+                    </span>
+                </td>
+                <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 font-mono text-xs">
+                        <GitCommit className="h-3 w-3" />
+                        <span>{build.commit_sha.slice(0, 7)}</span>
+                    </div>
+                </td>
+                <td className="px-4 py-3 font-medium text-sm">{build.repo_full_name}</td>
+                <td className="px-4 py-3">
+                    <IngestionStatusBadge status={build.status as any} />
+                </td>
+                <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-sm">
+                    {formatTimestamp(build.created_at)}
+                </td>
+            </tr>
+            {expanded && (
+                <tr className="bg-slate-50 dark:bg-slate-900/20 shadow-inner">
+                    <td colSpan={6} className="px-4 py-4">
+                        <div className="space-y-6">
+                            {/* Commit Info & CI Info */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Commit Info */}
+                                <div>
+                                    <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
+                                        <GitCommit className="h-4 w-4" />
+                                        Commit Info
+                                    </h4>
+                                    <div className="space-y-1 text-sm text-muted-foreground">
+                                        <div>
+                                            <span className="text-muted-foreground">SHA: </span>
+                                            <span className="font-mono text-xs text-foreground">{build.commit_sha}</span>
+                                        </div>
+                                        {/* Missing details placeholders */}
+                                        <div>
+                                            <span className="text-muted-foreground">Repo: </span>
+                                            <span className="text-foreground">{build.repo_full_name}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* CI Build Info */}
+                                <div>
+                                    <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
+                                        <Settings className="h-4 w-4" />
+                                        CI Build Info
+                                    </h4>
+                                    <div className="space-y-1 text-sm text-muted-foreground">
+                                        <div>
+                                            <span className="text-muted-foreground">Run ID: </span>
+                                            <span className="text-foreground">{build.ci_run_id}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-muted-foreground">Provider: </span>
+                                            <span className="text-foreground">GitHub Actions</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Resources Collected */}
+                            {hasResources && (
+                                <div>
+                                    <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 mb-2">
+                                        Resources Collected
+                                    </h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {Object.entries(build.resource_status || {}).map(([resourceKey, resourceData]) => (
+                                            <ResourceStatusIndicator
+                                                key={resourceKey}
+                                                resourceName={resourceKey}
+                                                status={resourceData.status}
+                                                error={resourceData.error}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {build.ingestion_error && (
+                                <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                                    <p className="font-medium text-red-600 text-sm">
+                                        Ingestion Error:
+                                    </p>
+                                    <p className="text-red-700 text-xs mt-1">
+                                        {build.ingestion_error}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </td>
+                </tr>
+            )}
+        </>
+    );
+}
 
 // Removed statusColors in favor of IngestionStatusBadge
 
@@ -108,8 +246,8 @@ export default function IngestionBuildsPage() {
     const handleRetryIngestion = async () => {
         setActionLoading("retry");
         try {
-            const result = await trainingScenariosApi.retryIngestion(scenarioId);
-            toast({ title: result.message || "Retry started" });
+            await trainingScenariosApi.retryIngestion(scenarioId);
+            toast({ title: "Retry started" });
             fetchBuilds();
         } catch (err) {
             toast({ variant: "destructive", title: "Failed to retry ingestion" });
@@ -127,61 +265,11 @@ export default function IngestionBuildsPage() {
 
     // Determine available actions
     const canStartProcessing = scenario?.status === "ingested";
-    const canRetry = failedCount > 0 && ["ingested", "processing", "processed"].includes(scenario?.status || "");
+    // const canRetry = failedCount > 0 && ["ingested", "processing", "processed"].includes(scenario?.status || ""); // Original logic
+    const canRetry = failedCount > 0; // Simplified as per new instruction
 
     return (
         <div className="space-y-4">
-            {/* Action Card */}
-            {(canStartProcessing || canRetry) && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle className="text-base">Ingestion Actions</CardTitle>
-                                <CardDescription>
-                                    {canStartProcessing
-                                        ? "Ingestion complete. Start processing to extract features."
-                                        : `${failedCount} builds failed ingestion`}
-                                </CardDescription>
-                            </div>
-                            <div className="flex gap-2">
-                                {canRetry && (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleRetryIngestion}
-                                        disabled={actionLoading === "retry"}
-                                    >
-                                        {actionLoading === "retry" ? (
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        ) : (
-                                            <RotateCcw className="h-4 w-4 mr-2" />
-                                        )}
-                                        Retry Failed ({failedCount})
-                                    </Button>
-                                )}
-                                {canStartProcessing && (
-                                    <Button
-                                        size="sm"
-                                        onClick={handleStartProcessing}
-                                        disabled={actionLoading === "processing"}
-                                    >
-                                        {actionLoading === "processing" ? (
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        ) : (
-                                            <Play className="h-4 w-4 mr-2" />
-                                        )}
-                                        Start Processing
-                                    </Button>
-                                )}
-                            </div>
-                        </div>
-                    </CardHeader>
-                </Card>
-            )}
-
-            {/* Header with refresh is now part of CardHeader in new design, but we keep Action Card separate */}
-
             <Card>
                 <CardHeader className="space-y-4">
                     <div className="flex flex-row items-center justify-between">
@@ -191,10 +279,50 @@ export default function IngestionBuildsPage() {
                                 {data?.total ?? 0} builds found
                             </CardDescription>
                         </div>
-                        <Button variant="outline" size="sm" onClick={fetchBuilds} disabled={loading}>
-                            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-                            Refresh
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={fetchBuilds}
+                                disabled={loading}
+                            >
+                                <RefreshCw className={cn("h-4 w-4 mr-1", loading && "animate-spin")} />
+                                Refresh
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleRetryIngestion}
+                                disabled={actionLoading === "retry" || failedCount === 0}
+                                className={cn(
+                                    "text-amber-600 border-amber-300 hover:bg-amber-50",
+                                    failedCount === 0 && "opacity-50"
+                                )}
+                            >
+                                {actionLoading === "retry" ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                    <RotateCcw className="h-4 w-4 mr-2" />
+                                )}
+                                Retry Failed Ingestion {failedCount > 0 && `(${failedCount})`}
+                            </Button>
+
+                            {canStartProcessing && (
+                                <Button
+                                    size="sm"
+                                    onClick={handleStartProcessing}
+                                    disabled={actionLoading === "processing"}
+                                >
+                                    {actionLoading === "processing" ? (
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <Play className="h-4 w-4 mr-2" />
+                                    )}
+                                    Start Processing
+                                </Button>
+                            )}
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -202,45 +330,35 @@ export default function IngestionBuildsPage() {
                         <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
                             <thead className="bg-slate-50 dark:bg-slate-900/40">
                                 <tr>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Repository</th>
+                                    <th className="w-[50px]"></th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Build ID</th>
                                     <th className="px-4 py-3 text-left font-medium text-slate-500">Commit</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">CI Run ID</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Repository</th>
                                     <th className="px-4 py-3 text-left font-medium text-slate-500">Status</th>
-                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Created</th>
+                                    <th className="px-4 py-3 text-left font-medium text-slate-500">Created At</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                                 {loading ? (
                                     Array.from({ length: 5 }).map((_, i) => (
                                         <tr key={i}>
-                                            <td className="px-4 py-3"><Skeleton className="h-4 w-40" /></td>
+                                            <td className="px-4 py-3"><Skeleton className="h-4 w-4" /></td>
+                                            <td className="px-4 py-3"><Skeleton className="h-4 w-16" /></td>
                                             <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
-                                            <td className="px-4 py-3"><Skeleton className="h-4 w-32" /></td>
+                                            <td className="px-4 py-3"><Skeleton className="h-4 w-40" /></td>
                                             <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
                                             <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
                                         </tr>
                                     ))
                                 ) : data?.items.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                                        <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                                             No ingestion builds found
                                         </td>
                                     </tr>
                                 ) : (
                                     data?.items.map((build) => (
-                                        <tr key={build.id} className="hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
-                                            <td className="px-4 py-3 font-medium">{build.repo_full_name}</td>
-                                            <td className="px-4 py-3 font-mono text-xs">{build.commit_sha.slice(0, 7)}</td>
-                                            <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{build.ci_run_id}</td>
-                                            <td className="px-4 py-3">
-                                                <IngestionStatusBadge status={build.status as any} />
-                                            </td>
-                                            <td className="px-4 py-3 text-muted-foreground">
-                                                {build.created_at
-                                                    ? new Date(build.created_at).toLocaleDateString()
-                                                    : "-"}
-                                            </td>
-                                        </tr>
+                                        <IngestionBuildRow key={build.id} build={build} />
                                     ))
                                 )}
                             </tbody>

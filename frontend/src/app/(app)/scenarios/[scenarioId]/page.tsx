@@ -9,12 +9,18 @@ import {
     CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import {
     Loader2,
     Database,
     CheckCircle2,
     AlertCircle,
     XCircle,
+    Activity,
+    Filter,
+    Cpu,
 } from "lucide-react";
 import {
     trainingScenariosApi,
@@ -26,11 +32,18 @@ import { useSSE } from "@/contexts/sse-context";
 function ScenarioStepper({ status }: { status: string }) {
     const phases = [
         { key: "ingestion", label: "Ingestion", statuses: ["queued", "filtering", "ingesting", "ingested"] },
-        { key: "processing", label: "Processing", statuses: ["processing", "processed", "splitting", "completed"] },
+        { key: "processing", label: "Processing", statuses: ["processing", "processed"] },
     ];
 
     const getPhaseStatus = (phaseStatuses: string[]) => {
         if (status === "failed") return "failed";
+
+        // Special case: 'ingested' is the terminal state of Ingestion Phase
+        if (status === "ingested" && phaseStatuses.includes("ingested")) return "completed";
+
+        // Special case: 'processed' is the terminal state of Processing Phase
+        if (status === "processed" && phaseStatuses.includes("processed")) return "completed";
+
         const idx = phases.findIndex((p) => p.statuses.includes(status));
         const phaseIdx = phases.findIndex((p) => p.statuses === phaseStatuses);
 
@@ -40,12 +53,12 @@ function ScenarioStepper({ status }: { status: string }) {
     };
 
     return (
-        <div className="max-w-2xl mx-auto w-full">
-            <div className="flex items-center justify-between gap-4">
+        <div className="max-w-lg mx-auto w-full">
+            <div className="flex items-center justify-center gap-4">
                 {phases.map((phase, i) => {
                     const phaseStatus = getPhaseStatus(phase.statuses);
                     return (
-                        <div key={phase.key} className="flex items-center gap-2 flex-1">
+                        <div key={phase.key} className={`flex items-center gap-2 ${i < phases.length - 1 ? "flex-1" : "flex-none"}`}>
                             <div
                                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${phaseStatus === "completed"
                                     ? "bg-green-500 text-white"
@@ -91,12 +104,17 @@ export default function ScenarioOverviewPage() {
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [loading, setLoading] = useState(true);
+    const [exportsCount, setExportsCount] = useState(0);
 
     // Fetch scenario
     const fetchScenario = useCallback(async () => {
         try {
             const data = await trainingScenariosApi.get(scenarioId);
             setScenario(data);
+
+            // Fetch exports count
+            const exportsData = await trainingScenariosApi.listExports(scenarioId, { limit: 1 });
+            setExportsCount(exportsData.total);
         } catch (err) {
             console.error("Failed to fetch scenario:", err);
         } finally {
@@ -159,11 +177,10 @@ export default function ScenarioOverviewPage() {
             </Card>
 
             {/* Stats Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Builds</CardTitle>
-                        <Database className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{scenario.builds_total}</div>
@@ -173,7 +190,6 @@ export default function ScenarioOverviewPage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Ingested</CardTitle>
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{scenario.builds_ingested}</div>
@@ -184,7 +200,6 @@ export default function ScenarioOverviewPage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Extracted</CardTitle>
-                        <CheckCircle2 className="h-4 w-4 text-purple-500" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{scenario.builds_features_extracted}</div>
@@ -195,16 +210,122 @@ export default function ScenarioOverviewPage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Scans</CardTitle>
-                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">
                             {scenario.scans_completed}/{scenario.scans_total}
                         </div>
-                        <Progress value={scanProgress} className="mt-2" />
+                        <Progress value={scanProgress} className="mt-2" indicatorClassName="bg-orange-500" />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Datasets</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">{exportsCount}</div>
+                        <p className="text-xs text-muted-foreground mt-2">Generated datasets</p>
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Configuration Summary */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-lg">Configuration</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid md:grid-cols-3 gap-8">
+                        {/* Build Stats Column */}
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2">
+                                <h4 className="font-semibold">Build Stats</h4>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="p-3 bg-muted/40 rounded-md">
+                                    <span className="block text-muted-foreground text-xs mb-1">Success</span>
+                                    <span className="text-lg font-medium text-green-600">
+                                        {scenario.builds_ingested - scenario.builds_failed}
+                                    </span>
+                                </div>
+                                <div className="p-3 bg-muted/40 rounded-md">
+                                    <span className="block text-muted-foreground text-xs mb-1">Failed</span>
+                                    <span className="text-lg font-medium text-red-600">
+                                        {scenario.builds_failed}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Data Source Filters Column */}
+                        {(scenario as any).data_source_config && (
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <h4 className="font-semibold">Filters</h4>
+                                </div>
+                                <div className="space-y-3 text-sm border-l-2 pl-4 border-muted">
+                                    <div>
+                                        <span className="text-muted-foreground block text-xs">Languages</span>
+                                        <span className="font-medium">
+                                            {(scenario as any).data_source_config.languages && (scenario as any).data_source_config.languages.length > 0
+                                                ? (scenario as any).data_source_config.languages.join(", ")
+                                                : "All"}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span className="text-muted-foreground block text-xs">Date Range</span>
+                                        <span className="font-medium">
+                                            {(scenario as any).data_source_config.date_start
+                                                ? `${(scenario as any).data_source_config.date_start} - ${(scenario as any).data_source_config.date_end || "Now"}`
+                                                : "All Time"}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span className="text-muted-foreground block text-xs">Conclusions</span>
+                                        <div className="flex gap-1 flex-wrap mt-1">
+                                            {(scenario as any).data_source_config.conclusions && (scenario as any).data_source_config.conclusions.length > 0
+                                                ? (scenario as any).data_source_config.conclusions.map((c: string) => (
+                                                    <Badge key={c} variant="secondary" className="text-xs px-1 py-0">{c}</Badge>
+                                                ))
+                                                : <Badge variant="outline" className="text-xs">All</Badge>}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Feature Config Column */}
+                        {(scenario as any).feature_config && (
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <h4 className="font-semibold">Features & Tools</h4>
+                                </div>
+                                <div className="space-y-3 text-sm bg-muted/20 p-4 rounded-lg">
+                                    <div className="flex justify-between items-center border-b pb-2">
+                                        <span className="text-muted-foreground">DAG Features</span>
+                                        <Badge variant="default">{(scenario as any).feature_config.dag_features?.length || 0}</Badge>
+                                    </div>
+                                    <div className="space-y-2 pt-1">
+                                        <span className="text-muted-foreground block text-xs">Active Scan Tools</span>
+                                        <div className="flex gap-2">
+                                            {(scenario as any).feature_config.scan_metrics?.sonarqube ? (
+                                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">SonarQube</Badge>
+                                            ) : null}
+                                            {(scenario as any).feature_config.scan_metrics?.trivy ? (
+                                                <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200">Trivy</Badge>
+                                            ) : null}
+                                            {!(scenario as any).feature_config.scan_metrics?.sonarqube && !(scenario as any).feature_config.scan_metrics?.trivy && (
+                                                <span className="text-muted-foreground text-xs italic">No scan tools enabled</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* Split Summary (if completed) */}
 

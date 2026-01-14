@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pymongo.client_session import ClientSession
 from pymongo.database import Database
@@ -54,3 +54,8 @@ class SourceRepoStatsRepository(BaseRepository[SourceRepoStats]):
         return self.delete_many(
             {"source_id": self._to_object_id(source_id)}, session=session
         )
+
+    def get_distinct_repo_ids(self, source_ids: List[str]) -> List[Any]:
+        """Get distinct raw_repo_ids for multiple sources."""
+        sids = [self._to_object_id(sid) for sid in source_ids]
+        return self.collection.distinct("raw_repo_id", {"source_id": {"$in": sids}})

@@ -162,9 +162,6 @@ def start_scenario_ingestion(
         # But filter returned builds_total, so we can trust that for "is there work?".
 
         if builds_total == 0:
-            # No ingestion needed
-
-            # Mark all as INGESTED (if any exist)
             if builds_total > 0:
                 ingestion_build_repo.collection.update_many(
                     {
@@ -367,50 +364,53 @@ def _resolve_filter_config(scenario: TrainingScenario) -> Dict[str, Any]:
             else data_config.__dict__
         )
 
-    # Helper to get value from flat key or nested section
-    def get_cfg(key, section=None, subkey=None, default=None):
-        if key in config_dict and config_dict[key] is not None:
-            return config_dict[key]
-        if section and section in config_dict:
-            section_dict = config_dict[section]
-            if isinstance(section_dict, dict) and subkey in section_dict:
-                return section_dict[subkey]
-        return default
-
-    languages = get_cfg("languages", "repositories", "languages", [])
-    conclusions = get_cfg(
-        "conclusions", "builds", "conclusions", ["success", "failure"]
-    )
+    # Direct extraction from flat DTO/Dict
+    languages = config_dict.get("languages", [])
+    conclusions = config_dict.get("conclusions", [])
+    ci_providers = config_dict.get("ci_providers", [])
 
     date_start = config_dict.get("date_start")
     date_end = config_dict.get("date_end")
-
-    if not date_start and "builds" in config_dict:
-        builds_cfg = config_dict["builds"]
-        if isinstance(builds_cfg, dict) and "date_range" in builds_cfg:
-            date_range = builds_cfg["date_range"]
-            if isinstance(date_range, dict):
-                date_start = date_range.get("start")
-                date_end = date_range.get("end")
-
-    build_source_ids = get_cfg("build_source_ids", None, None, [])
+    build_source_ids = config_dict.get("build_source_ids", [])
 
     return {
         "languages": languages,
         "conclusions": conclusions,
+        "ci_providers": ci_providers,
         "date_start": date_start,
         "date_end": date_end,
         "build_source_ids": build_source_ids,
     }
 
 
-def _find_matching_repos(db, languages: List[str]) -> List[Any]:
-    """Find repositories matching language criteria."""
+def _find_matching_repos(
+    db, languages: List[str], build_source_ids: List[str] = None
+) -> List[Any]:
+    """Find repositories matching language and source criteria."""
     raw_repo_repo = RawRepositoryRepository(db)
     repo_query: Dict[str, Any] = {"is_private": False}
 
-    if languages:
-        repo_query["main_lang"] = {"$in": [lang.lower() for lang in languages]}
+    # If build sources are specified, restrict to repos in those sources
+    if build_source_ids:
+        from app.repositories.source_repo_stats import SourceRepoStatsRepository
+
+        # Use Repository optimization
+        repo_stats_repo = SourceRepoStatsRepository(db)
+        distinct_repo_ids = repo_stats_repo.get_distinct_repo_ids(build_source_ids)
+
+        if not distinct_repo_ids:
+            return []
+
+        repo_query["_id"] = {"$in": distinct_repo_ids}
+
+    if languages and "all" not in languages:
+        import re
+
+        # Support case-insensitive matching using Regex
+        regex_list = [
+            re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages
+        ]
+        repo_query["main_lang"] = {"$in": regex_list}
 
     return list(raw_repo_repo.find_many(repo_query))
 
@@ -425,46 +425,17 @@ def _process_ingestion_builds(
     repo_ids = [str(r.id) for r in repos]
     repo_cache = {str(r.id): r for r in repos}
 
-    # Build query
-    build_query: Dict[str, Any] = {
-        "raw_repo_id": {"$in": [ObjectId(rid) for rid in repo_ids]},
-    }
-
-    # Filter by build_source_ids if provided
-    if filters.get("build_source_ids"):
-        from app.repositories.source_build import SourceBuildRepository
-
-        source_build_repo = SourceBuildRepository(db)
-        raw_run_ids = source_build_repo.get_raw_run_ids_by_sources(
-            filters["build_source_ids"]
-        )
-        if not raw_run_ids:
-            return 0  # No builds match source filter
-        build_query["_id"] = {"$in": raw_run_ids}
-
-    if filters["conclusions"]:
-        build_query["conclusion"] = {"$in": filters["conclusions"]}
-
-    if filters["date_start"] or filters["date_end"]:
-        date_filter = {}
-        if filters["date_start"]:
-            start = filters["date_start"]
-            date_filter["$gte"] = (
-                start
-                if isinstance(start, datetime)
-                else datetime.fromisoformat(str(start))
-            )
-        if filters["date_end"]:
-            end = filters["date_end"]
-            date_filter["$lte"] = (
-                end if isinstance(end, datetime) else datetime.fromisoformat(str(end))
-            )
-        if date_filter:
-            build_query["started_at"] = date_filter
-
-    # Batch processing
+    # Use optimized repository method
     batch_size = 1000
-    cursor = raw_build_run_repo.collection.find(build_query).batch_size(batch_size)
+    cursor = raw_build_run_repo.find_builds_for_ingestion(
+        raw_repo_ids=[ObjectId(rid) for rid in repo_ids],
+        build_source_ids=filters.get("build_source_ids"),
+        date_start=filters.get("date_start"),
+        date_end=filters.get("date_end"),
+        conclusions=filters.get("conclusions"),
+        ci_providers=filters.get("ci_providers"),
+        batch_size=batch_size,
+    )
 
     ingestion_builds_buffer = []
     total_inserted = 0
@@ -522,7 +493,9 @@ def _filter_builds_for_scenario(
     filters = _resolve_filter_config(scenario)
 
     # 2. Find matching repositories
-    repos = _find_matching_repos(db, filters["languages"])
+    repos = _find_matching_repos(
+        db, filters["languages"], filters.get("build_source_ids")
+    )
 
     if not repos:
         logger.warning(f"{corr_prefix} [filter] No repos match filter criteria")

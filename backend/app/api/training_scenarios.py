@@ -35,7 +35,12 @@ def preview_builds(
     conclusions: Optional[str] = Query(
         None, description="Comma-separated conclusions (success,failure)"
     ),
-    ci_provider: Optional[str] = Query(None, description="CI provider filter"),
+    ci_providers: Optional[str] = Query(
+        None, description="Comma-separated CI providers"
+    ),
+    build_source_ids: Optional[str] = Query(
+        None, description="Comma-separated build source IDs"
+    ),
     skip: int = 0,
     limit: int = 20,
     db=Depends(get_db),  # noqa: B008
@@ -51,14 +56,17 @@ def preview_builds(
     # Parse comma-separated values
     conclusions_list = conclusions.split(",") if conclusions else None
     languages_list = languages.split(",") if languages else None
+    build_source_ids_list = build_source_ids.split(",") if build_source_ids else None
+    ci_providers_list = ci_providers.split(",") if ci_providers else None
 
     # 1. Fetch Builds (with Language join)
     builds_data = raw_build_run_repo.find_builds_with_filters(
         date_start=date_start,
         date_end=date_end,
         conclusions=conclusions_list,
-        ci_provider=ci_provider,
+        ci_providers=ci_providers_list,
         languages=languages_list,
+        build_source_ids=build_source_ids_list,
         skip=skip,
         limit=limit,
     )
@@ -68,8 +76,9 @@ def preview_builds(
         date_start=date_start,
         date_end=date_end,
         conclusions=conclusions_list,
-        ci_provider=ci_provider,
+        ci_providers=ci_providers_list,
         languages=languages_list,
+        build_source_ids=build_source_ids_list,
     )
 
     # Serialize builds
@@ -130,9 +139,22 @@ def get_filter_options(
     raw_repo_collection = db["raw_repositories"]
     languages = raw_repo_collection.distinct("main_lang")
 
-    # Filter out None/Empty and sort
-    providers = sorted([p for p in providers if p])
-    languages = sorted([l for l in languages if l])
+    # Filter out None/Empty, normalize to set to deduplicate case variations
+    unique_langs = set()
+    normalized_languages = []
+
+    for l in languages:
+        if not l:
+            continue
+        lower_l = l.lower()
+        if lower_l not in unique_langs:
+            unique_langs.add(lower_l)
+            # Use lowercase for value, Title Case for label
+            label = l.title() if l.islower() else l
+            normalized_languages.append({"value": lower_l, "label": label})
+
+    # Sort by label
+    normalized_languages.sort(key=lambda x: x["label"])
 
     return {
         "providers": [
@@ -142,7 +164,7 @@ def get_filter_options(
             }
             for p in providers
         ],
-        "languages": [{"value": l, "label": l.title()} for l in languages],
+        "languages": normalized_languages,
     }
 
 

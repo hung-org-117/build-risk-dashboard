@@ -282,6 +282,27 @@ export interface CommitScanListResponse {
     sonarqube?: PaginatedResponse<CommitScanRecord>;
 }
 
+// Export Types
+export interface TrainingExportRecord {
+    id: string;
+    scenario_id: string;
+    name: string;
+    status: "pending" | "generating" | "completed" | "failed";
+    train_count: number;
+    val_count: number;
+    test_count: number;
+    feature_count: number;
+    created_at?: string;
+    completed_at?: string;
+}
+
+export interface TrainingExportListResponse {
+    items: TrainingExportRecord[];
+    total: number;
+    skip: number;
+    limit: number;
+}
+
 // Create scenario payload
 export interface CreateTrainingScenarioPayload {
     name: string;
@@ -583,6 +604,20 @@ export const trainingScenariosApi = {
             `/training-scenarios/${scenarioId}/retry-scans`,
             null,
             { params: { tool_type: toolType } }
+        );
+        return response.data;
+    },
+
+    /**
+     * List exports for a scenario
+     */
+    listExports: async (
+        scenarioId: string,
+        params?: { skip?: number; limit?: number }
+    ): Promise<TrainingExportListResponse> => {
+        const response = await api.get<TrainingExportListResponse>(
+            `/training-scenarios/${scenarioId}/exports`,
+            { params }
         );
         return response.data;
     },

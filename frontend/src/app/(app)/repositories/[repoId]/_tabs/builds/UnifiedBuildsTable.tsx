@@ -322,7 +322,7 @@ export function UnifiedBuildsTable({
                                 <th className="px-4 py-3 text-left font-medium text-slate-500">Commit</th>
                                 <th className="px-4 py-3 text-center font-medium text-slate-500">Pipeline</th>
                                 <th className="px-4 py-3 text-left font-medium text-slate-500">Risk</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500">Time</th>
+                                <th className="px-4 py-3 text-left font-medium text-slate-500">Created At</th>
                             </tr>
                         </thead>
                         {builds.length === 0 ? (

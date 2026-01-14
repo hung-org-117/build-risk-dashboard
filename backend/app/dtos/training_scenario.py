@@ -12,8 +12,8 @@ class DataSourceConfigDTO(BaseModel):
 
     date_start: Optional[datetime] = None
     date_end: Optional[datetime] = None
-    conclusions: List[str] = ["success", "failure"]
-    ci_provider: str = "all"
+    conclusions: List[str] = []
+    ci_providers: List[str] = []
 
 
 class FeatureConfigDTO(BaseModel):

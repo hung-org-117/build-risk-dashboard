@@ -217,7 +217,7 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
         now = datetime.utcnow()
         query = {
             "scenario_id": self._to_object_id(scenario_id),
-            "raw_repo_id": raw_repo_id,
+            "raw_repo_id": self._to_object_id(raw_repo_id),
             "status": IngestionStatus.INGESTING.value,
         }
 
@@ -251,7 +251,7 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
         now = datetime.utcnow()
         query = {
             "scenario_id": self._to_object_id(scenario_id),
-            "raw_repo_id": raw_repo_id,
+            "raw_repo_id": self._to_object_id(raw_repo_id),
             "commit_sha": {"$in": commits},
             "status": IngestionStatus.INGESTING.value,
         }
@@ -286,7 +286,7 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
         now = datetime.utcnow()
         query = {
             "scenario_id": self._to_object_id(scenario_id),
-            "raw_repo_id": raw_repo_id,
+            "raw_repo_id": self._to_object_id(raw_repo_id),
             "ci_run_id": {"$in": ci_run_ids},
             "status": IngestionStatus.INGESTING.value,
         }

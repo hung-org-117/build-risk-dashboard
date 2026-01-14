@@ -134,8 +134,8 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                             className={`mr-1 h-3 w-3 ${["queued", "filtering", "ingesting", "processing", "splitting"].includes(
                                 scenario.status
                             )
-                                    ? "animate-spin"
-                                    : ""
+                                ? "animate-spin"
+                                : ""
                                 }`}
                         />
                         {scenario.status.charAt(0).toUpperCase() + scenario.status.slice(1)}
@@ -148,13 +148,11 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                 <TabsList className="grid w-full grid-cols-4 mb-4">
                     <TabsTrigger value="overview" asChild>
                         <Link href={basePath} className="gap-2">
-                            <Home className="h-4 w-4" />
                             Overview
                         </Link>
                     </TabsTrigger>
                     <TabsTrigger value="builds" asChild>
                         <Link href={`${basePath}/builds`} className="gap-2">
-                            <Database className="h-4 w-4" />
                             Builds
                         </Link>
                     </TabsTrigger>
@@ -165,7 +163,6 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                             onClick={(e) => !canViewAnalysis && e.preventDefault()}
                         >
                             {!canViewAnalysis && <Lock className="h-3 w-3" />}
-                            <BarChart3 className="h-4 w-4" />
                             Analysis
                         </Link>
                     </TabsTrigger>
@@ -176,7 +173,6 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                             onClick={(e) => !canViewExport && e.preventDefault()}
                         >
                             {!canViewExport && <Lock className="h-3 w-3" />}
-                            <Download className="h-4 w-4" />
                             Export
                         </Link>
                     </TabsTrigger>
