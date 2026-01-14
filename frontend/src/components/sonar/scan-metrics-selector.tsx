@@ -294,7 +294,7 @@ export function ScanMetricsSelector({
     const filteredTrivyMetrics = filterMetrics(availableMetrics.trivy.metrics);
 
     return (
-        <div className={cn("space-y-4", className)}>
+        <div className={cn("h-full flex flex-col", className)}>
             {/* Header - only show when displaying both tools */}
             {!showOnlyTool && (
                 <div className="flex items-center justify-between mb-4">
@@ -360,7 +360,7 @@ export function ScanMetricsSelector({
             {/* Tabs - only show when displaying both tools */}
             {showOnlyTool ? (
                 // Single tool view - no tabs
-                <div className="mt-2">
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                     <div className="flex justify-end gap-2 mb-2">
                         <Button
                             variant="ghost"
@@ -394,7 +394,7 @@ export function ScanMetricsSelector({
                         </Button>
                     </div>
                     {showOnlyTool === "sonarqube" && (
-                        <ScrollArea className="h-[300px] pr-4">
+                        <ScrollArea className="flex-1 pr-4">
                             <Accordion type="multiple" className="space-y-2">
                                 {Object.entries(filteredSonarMetrics).map(([category, metrics]) =>
                                     renderCategory(
@@ -414,7 +414,7 @@ export function ScanMetricsSelector({
                         </ScrollArea>
                     )}
                     {showOnlyTool === "trivy" && (
-                        <ScrollArea className="h-[300px] pr-4">
+                        <ScrollArea className="flex-1 pr-4">
                             <Accordion type="multiple" className="space-y-2">
                                 {Object.entries(filteredTrivyMetrics).map(([category, metrics]) =>
                                     renderCategory(
@@ -502,7 +502,7 @@ export function ScanMetricsSelector({
                     </div>
 
                     <TabsContent value="sonarqube" className="mt-4">
-                        <ScrollArea className="h-[400px] pr-4">
+                        <ScrollArea className="flex-1 pr-4">
                             <Accordion type="multiple" className="space-y-2">
                                 {Object.entries(filteredSonarMetrics).map(([category, metrics]) =>
                                     renderCategory(
@@ -523,7 +523,7 @@ export function ScanMetricsSelector({
                     </TabsContent>
 
                     <TabsContent value="trivy" className="mt-4">
-                        <ScrollArea className="h-[400px] pr-4">
+                        <ScrollArea className="flex-1 pr-4">
                             <Accordion type="multiple" className="space-y-2">
                                 {Object.entries(filteredTrivyMetrics).map(([category, metrics]) =>
                                     renderCategory(

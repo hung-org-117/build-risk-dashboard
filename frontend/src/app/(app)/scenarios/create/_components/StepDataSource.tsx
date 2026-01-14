@@ -89,6 +89,7 @@ export function StepDataSource() {
     // Dynamic Options State
     const [ciProviders, setCiProviders] = useState<{ value: string; label: string }[]>([]);
     const [supportedLanguages, setSupportedLanguages] = useState<{ value: string; label: string }[]>([]);
+    const [buildSources, setBuildSources] = useState<{ id: string; name: string; builds_found: number }[]>([]);
     const [isLoadingOptions, setIsLoadingOptions] = useState(false);
 
     const PAGE_SIZE = 20;
@@ -98,9 +99,17 @@ export function StepDataSource() {
         const fetchOptions = async () => {
             setIsLoadingOptions(true);
             try {
-                const options = await trainingScenariosApi.getFilterOptions();
+                const [options, sourcesResponse] = await Promise.all([
+                    trainingScenariosApi.getFilterOptions(),
+                    import('@/lib/api/build-sources').then(m => m.buildSourcesApi.list({ limit: 100 })),
+                ]);
                 setCiProviders([{ value: "all", label: "All CI Providers" }, ...options.providers]);
                 setSupportedLanguages(options.languages);
+                // Map build sources to simpler structure
+                setBuildSources(sourcesResponse.items
+                    .filter(s => s.validation_status === 'completed')
+                    .map(s => ({ id: s.id, name: s.name, builds_found: s.validation_stats.builds_found }))
+                );
             } catch (err) {
                 console.error("Failed to load filter options:", err);
             } finally {
@@ -173,6 +182,15 @@ export function StepDataSource() {
             updateDataSource({ conclusions: current.filter((c) => c !== conclusion) });
         } else {
             updateDataSource({ conclusions: [...current, conclusion] });
+        }
+    };
+
+    const handleBuildSourceToggle = (sourceId: string) => {
+        const current = dataSource.build_source_ids;
+        if (current.includes(sourceId)) {
+            updateDataSource({ build_source_ids: current.filter((id) => id !== sourceId) });
+        } else {
+            updateDataSource({ build_source_ids: [...current, sourceId] });
         }
     };
     return (
@@ -325,6 +343,33 @@ export function StepDataSource() {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Build Sources (optional filter) */}
+                            {buildSources.length > 0 && (
+                                <div className="space-y-2 mt-6">
+                                    <Label>Filter by Data Source (Optional)</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                        Select specific CSV uploads to include. Leave empty to use all available builds.
+                                    </p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 border rounded-md max-h-[150px] overflow-y-auto">
+                                        {buildSources.map((source) => (
+                                            <div key={source.id} className="flex items-center space-x-2">
+                                                <Checkbox
+                                                    id={`source-${source.id}`}
+                                                    checked={dataSource.build_source_ids.includes(source.id)}
+                                                    onCheckedChange={() => handleBuildSourceToggle(source.id)}
+                                                />
+                                                <label
+                                                    htmlFor={`source-${source.id}`}
+                                                    className="text-sm font-medium leading-none cursor-pointer flex-1 truncate"
+                                                >
+                                                    {source.name} ({source.builds_found} builds)
+                                                </label>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <DialogFooter>

@@ -3,15 +3,13 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-
 from app.entities.training_scenario import ScenarioStatus
 
 
 class DataSourceConfigDTO(BaseModel):
-    filter_by: str = "all"
     languages: List[str] = []
-    repo_names: List[str] = []
-    owners: List[str] = []
+    build_source_ids: List[str] = []
+
     date_start: Optional[datetime] = None
     date_end: Optional[datetime] = None
     conclusions: List[str] = ["success", "failure"]
@@ -21,7 +19,6 @@ class DataSourceConfigDTO(BaseModel):
 class FeatureConfigDTO(BaseModel):
     dag_features: List[str] = []
     scan_metrics: Dict[str, List[str]] = {}
-    exclude: List[str] = []
     # Tool configurations (editable via UI)
     scan_tool_config: Dict[str, Any] = {}  # SonarQube/Trivy tool settings
     extractor_configs: Dict[str, Any] = {}  # Per-language/framework extractor settings

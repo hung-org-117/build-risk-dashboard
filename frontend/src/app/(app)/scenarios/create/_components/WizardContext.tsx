@@ -10,9 +10,8 @@ export type CIProviderKey = string;
 export type BuildConclusionKey = (typeof BUILD_CONCLUSIONS)[number]["value"];
 export type LanguageKey = string;
 export interface DataSourceConfig {
-    filter_by: "all" | "by_language" | "by_name";
     languages: string[];
-    repo_names: string[];
+    build_source_ids: string[];
     date_start: string;
     date_end: string;
     conclusions: string[];
@@ -25,7 +24,6 @@ export interface FeatureConfig {
         sonarqube: string[];
         trivy: string[];
     };
-    exclude: string[];
 }
 
 export interface PreviewStats {
@@ -82,9 +80,8 @@ interface WizardContextValue {
 // =============================================================================
 
 const initialDataSource: DataSourceConfig = {
-    filter_by: "all",
     languages: [],
-    repo_names: [],
+    build_source_ids: [],
     date_start: "",
     date_end: "",
     conclusions: ["success", "failure"],
@@ -92,12 +89,11 @@ const initialDataSource: DataSourceConfig = {
 };
 
 const initialFeatures: FeatureConfig = {
-    dag_features: ["build_*", "git_*", "log_*", "repo_*", "history_*", "author_*"],
+    dag_features: [],
     scan_metrics: {
         sonarqube: [],
         trivy: [],
     },
-    exclude: [],
 };
 
 const initialState: WizardState = {

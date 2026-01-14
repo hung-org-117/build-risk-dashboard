@@ -70,38 +70,7 @@ export default function ScenarioAnalysisPage() {
 
     return (
         <div className="space-y-6">
-            {/* Summary Stats */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <BarChart3 className="h-5 w-5" />
-                        Dataset Summary
-                    </CardTitle>
-                    <CardDescription>
-                        Overview of extracted features and samples
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-4 md:grid-cols-4">
-                        <div className="p-4 border rounded-lg">
-                            <p className="text-sm text-muted-foreground">Total Samples</p>
-                            <p className="text-2xl font-bold">{scenario.builds_features_extracted}</p>
-                        </div>
-                        <div className="p-4 border rounded-lg">
-                            <p className="text-sm text-muted-foreground">Train Set</p>
-                            <p className="text-2xl font-bold">{scenario.train_count}</p>
-                        </div>
-                        <div className="p-4 border rounded-lg">
-                            <p className="text-sm text-muted-foreground">Validation Set</p>
-                            <p className="text-2xl font-bold">{scenario.val_count}</p>
-                        </div>
-                        <div className="p-4 border rounded-lg">
-                            <p className="text-sm text-muted-foreground">Test Set</p>
-                            <p className="text-2xl font-bold">{scenario.test_count}</p>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
+
 
             {/* Class Distribution */}
             <Card>

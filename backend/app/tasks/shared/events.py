@@ -103,9 +103,6 @@ def publish_scenario_update(
     builds_features_extracted: int = 0,
     builds_failed: int = 0,
     builds_missing_resource: int = 0,
-    train_count: int = 0,
-    val_count: int = 0,
-    test_count: int = 0,
     scans_total: int = 0,
     scans_completed: int = 0,
     scans_failed: int = 0,
@@ -125,9 +122,6 @@ def publish_scenario_update(
         builds_features_extracted: Builds with feature extraction completed
         builds_failed: Builds that failed (retryable)
         builds_missing_resource: Builds with missing resources (not retryable)
-        train_count: Number of samples in train split
-        val_count: Number of samples in validation split
-        test_count: Number of samples in test split
         scans_total: Total scans to run (commits × tools)
         scans_completed: Completed scans
         scans_failed: Failed scans
@@ -162,9 +156,6 @@ def publish_scenario_update(
         "builds_missing_resource": builds_missing_resource,
         "ingestion_progress": ingestion_progress,
         "processing_progress": processing_progress,
-        "train_count": train_count,
-        "val_count": val_count,
-        "test_count": test_count,
         "scans_total": scans_total,
         "scans_completed": scans_completed,
         "scans_failed": scans_failed,

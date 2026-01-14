@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from app.entities.base import BaseEntity, PyObjectId
 
@@ -35,22 +35,13 @@ class DataSourceConfig(BaseEntity):
     class Config:
         extra = "allow"
 
-    # Repository filters
-    filter_by: str = Field(
-        default="all",
-        description="Filter mode: all | by_language | by_name | by_owner",
-    )
     languages: List[str] = Field(
         default_factory=list,
-        description="Languages to include (if filter_by=by_language)",
+        description="Languages to include",
     )
-    repo_names: List[str] = Field(
+    build_source_ids: List[str] = Field(
         default_factory=list,
-        description="Repo full names to include (if filter_by=by_name)",
-    )
-    owners: List[str] = Field(
-        default_factory=list,
-        description="Owners/orgs to include (if filter_by=by_owner)",
+        description="Filter by builds from specific BuildSource(s)",
     )
 
     # Build filters
@@ -64,21 +55,6 @@ class DataSourceConfig(BaseEntity):
         default="all",
         description="CI provider filter: all | github_actions | circleci",
     )
-
-    @model_validator(mode="after")
-    def validate_filter_config(self) -> "DataSourceConfig":
-        """Validate that filter_by has corresponding values."""
-        if self.filter_by == "by_language" and not self.languages:
-            raise ValueError(
-                "filter_by='by_language' requires languages to be specified"
-            )
-        if self.filter_by == "by_name" and not self.repo_names:
-            raise ValueError("filter_by='by_name' requires repo_names to be specified")
-        if self.filter_by == "by_owner" and not self.owners:
-            raise ValueError("filter_by='by_owner' requires owners to be specified")
-        if self.date_start and self.date_end and self.date_start > self.date_end:
-            raise ValueError("date_start must be before date_end")
-        return self
 
 
 class FeatureConfig(BaseEntity):
@@ -94,10 +70,6 @@ class FeatureConfig(BaseEntity):
     scan_metrics: Dict[str, List[str]] = Field(
         default_factory=dict,
         description="Scan metrics: {sonarqube: [...], trivy: [...]}",
-    )
-    exclude: List[str] = Field(
-        default_factory=list,
-        description="Features to exclude (supports wildcards)",
     )
     # Tool configurations (editable via UI)
     scan_tool_config: Dict[str, Any] = Field(

@@ -43,10 +43,7 @@ export interface TrainingScenarioRecord {
     feature_extraction_completed: boolean;
     scan_extraction_completed: boolean;
 
-    // Split counts
-    train_count: number;
-    val_count: number;
-    test_count: number;
+
 
     // Config summaries (from nested configs)
     splitting_strategy?: string;
@@ -260,9 +257,8 @@ export interface CreateTrainingScenarioPayload {
     description?: string;
     yaml_config?: string;  // Optional - use if importing from YAML
     data_source_config?: {
-        filter_by?: string;
         languages?: string[];
-        repo_names?: string[];
+        build_source_ids?: string[];
         date_start?: string;
         date_end?: string;
         conclusions?: string[];
@@ -274,7 +270,6 @@ export interface CreateTrainingScenarioPayload {
             sonarqube?: string[];
             trivy?: string[];
         };
-        exclude?: string[];
         // Tool configurations (editable via UI)
         scan_tool_config?: Record<string, Record<string, unknown>>;
         extractor_configs?: Record<string, unknown>;

@@ -65,3 +65,20 @@ class SourceBuildRepository(BaseRepository[SourceBuild]):
         return self.delete_many(
             {"source_id": self._to_object_id(source_id)}, session=session
         )
+
+    def get_raw_run_ids_by_sources(self, source_ids: List[str]) -> List:
+        """
+        Get distinct raw_run_ids for builds from specified sources.
+
+        Only includes builds with status='found' and a valid raw_run_id.
+        Used for filtering builds by BuildSource in training scenarios.
+        """
+        source_oids = [self._to_object_id(sid) for sid in source_ids]
+        return self.collection.distinct(
+            "raw_run_id",
+            {
+                "source_id": {"$in": source_oids},
+                "status": SourceBuildStatus.FOUND.value,
+                "raw_run_id": {"$ne": None},
+            },
+        )

@@ -355,26 +355,8 @@ def start_scenario_ingestion(
     )
 
 
-def _filter_builds_for_scenario(
-    db,
-    scenario: TrainingScenario,
-    scenario_id: str,
-    correlation_id: str,
-) -> Dict[str, Any]:
-    """
-    Filter and create IngestionBuild records from RawRepository + RawBuildRun.
-
-    Returns dict with:
-        - status: "completed" or "error"
-        - builds_total: number of builds found
-    """
-    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-
-    ingestion_build_repo = TrainingIngestionBuildRepository(db)
-    raw_repo_repo = RawRepositoryRepository(db)
-    raw_build_run_repo = RawBuildRunRepository(db)
-
-    # Build query from data_source_config
+def _resolve_filter_config(scenario: TrainingScenario) -> Dict[str, Any]:
+    """Helper to resolve configuration dictionary from scenario."""
     data_config = scenario.data_source_config
     if isinstance(data_config, dict):
         config_dict = data_config
@@ -395,17 +377,11 @@ def _filter_builds_for_scenario(
                 return section_dict[subkey]
         return default
 
-    filter_by = get_cfg("filter_by", "repositories", "filter_by", "all")
     languages = get_cfg("languages", "repositories", "languages", [])
-    repo_names = get_cfg("repo_names", "repositories", "repo_names", [])
-    owners = get_cfg("owners", "repositories", "owners", [])
-
-    # Builds config
     conclusions = get_cfg(
         "conclusions", "builds", "conclusions", ["success", "failure"]
     )
 
-    # Date range handling
     date_start = config_dict.get("date_start")
     date_end = config_dict.get("date_end")
 
@@ -417,72 +393,86 @@ def _filter_builds_for_scenario(
                 date_start = date_range.get("start")
                 date_end = date_range.get("end")
 
-    # Query public repositories
+    build_source_ids = get_cfg("build_source_ids", None, None, [])
+
+    return {
+        "languages": languages,
+        "conclusions": conclusions,
+        "date_start": date_start,
+        "date_end": date_end,
+        "build_source_ids": build_source_ids,
+    }
+
+
+def _find_matching_repos(db, languages: List[str]) -> List[Any]:
+    """Find repositories matching language criteria."""
+    raw_repo_repo = RawRepositoryRepository(db)
     repo_query: Dict[str, Any] = {"is_private": False}
 
-    if filter_by == "by_language" and languages:
+    if languages:
         repo_query["main_lang"] = {"$in": [lang.lower() for lang in languages]}
-    elif filter_by == "by_name" and repo_names:
-        repo_query["full_name"] = {"$in": repo_names}
-    elif filter_by == "by_owner" and owners:
-        repo_query["$or"] = [{"full_name": {"$regex": f"^{o}/"}} for o in owners]
 
-    repos = raw_repo_repo.find_many(repo_query)
+    return list(raw_repo_repo.find_many(repo_query))
+
+
+def _process_ingestion_builds(
+    db, scenario_id: str, repos: List[Any], filters: Dict[str, Any], corr_prefix: str
+) -> int:
+    """Query builds and create ingestion records."""
+    ingestion_build_repo = TrainingIngestionBuildRepository(db)
+    raw_build_run_repo = RawBuildRunRepository(db)
+
     repo_ids = [str(r.id) for r in repos]
+    repo_cache = {str(r.id): r for r in repos}
 
-    if not repo_ids:
-        logger.warning(f"{corr_prefix} [filter] No repos match filter criteria")
-        return {"status": "error", "error": "No repositories match filter criteria"}
-
-    logger.info(f"{corr_prefix} [filter] Found {len(repo_ids)} matching repos")
-
-    # Query builds for these repos
+    # Build query
     build_query: Dict[str, Any] = {
         "raw_repo_id": {"$in": [ObjectId(rid) for rid in repo_ids]},
     }
 
-    # Filter by conclusion
-    if conclusions:
-        build_query["conclusion"] = {"$in": conclusions}
+    # Filter by build_source_ids if provided
+    if filters.get("build_source_ids"):
+        from app.repositories.source_build import SourceBuildRepository
 
-    # Filter by date range
-    if date_start or date_end:
+        source_build_repo = SourceBuildRepository(db)
+        raw_run_ids = source_build_repo.get_raw_run_ids_by_sources(
+            filters["build_source_ids"]
+        )
+        if not raw_run_ids:
+            return 0  # No builds match source filter
+        build_query["_id"] = {"$in": raw_run_ids}
+
+    if filters["conclusions"]:
+        build_query["conclusion"] = {"$in": filters["conclusions"]}
+
+    if filters["date_start"] or filters["date_end"]:
         date_filter = {}
-        if date_start:
+        if filters["date_start"]:
+            start = filters["date_start"]
             date_filter["$gte"] = (
-                date_start
-                if isinstance(date_start, datetime)
-                else datetime.fromisoformat(str(date_start))
+                start
+                if isinstance(start, datetime)
+                else datetime.fromisoformat(str(start))
             )
-        if date_end:
+        if filters["date_end"]:
+            end = filters["date_end"]
             date_filter["$lte"] = (
-                date_end
-                if isinstance(date_end, datetime)
-                else datetime.fromisoformat(str(date_end))
+                end if isinstance(end, datetime) else datetime.fromisoformat(str(end))
             )
         if date_filter:
             build_query["started_at"] = date_filter
 
-    # Using cursor for batch processing
+    # Batch processing
     batch_size = 1000
     cursor = raw_build_run_repo.collection.find(build_query).batch_size(batch_size)
 
-    repo_cache = {str(r.id): r for r in repos}
+    ingestion_builds_buffer = []
+    total_inserted = 0
     required_resources = ["git_history", "git_worktree", "build_logs"]
 
-    ingestion_builds_buffer = []
-    total_found = 0
-    total_inserted = 0
-
     for build_doc in cursor:
-        # Convert doc to entity-like dict/obj wrapper for safer access if needed,
-        # but direct dict access is faster for bulk operations.
-        # RawBuildRunRepository returns objects, but here we use raw cursor for speed.
-
-        # Mapping raw doc fields
         raw_repo_id = build_doc.get("raw_repo_id")
-        repo_id_str = str(raw_repo_id)
-        repo = repo_cache.get(repo_id_str)
+        repo = repo_cache.get(str(raw_repo_id))
 
         ingestion_build_dict = {
             "scenario_id": ObjectId(scenario_id),
@@ -500,20 +490,50 @@ def _filter_builds_for_scenario(
         }
 
         ingestion_builds_buffer.append(ingestion_build_dict)
-        total_found += 1
 
         if len(ingestion_builds_buffer) >= batch_size:
             ingestion_build_repo.collection.insert_many(ingestion_builds_buffer)
             total_inserted += len(ingestion_builds_buffer)
             ingestion_builds_buffer = []
-            logger.info(
-                f"{corr_prefix} [filter] Processed batch of {batch_size} builds"
-            )
 
-    # Insert remaining
     if ingestion_builds_buffer:
         ingestion_build_repo.collection.insert_many(ingestion_builds_buffer)
         total_inserted += len(ingestion_builds_buffer)
+
+    return total_inserted
+
+
+def _filter_builds_for_scenario(
+    db,
+    scenario: TrainingScenario,
+    scenario_id: str,
+    correlation_id: str,
+) -> Dict[str, Any]:
+    """
+    Filter and create IngestionBuild records from RawRepository + RawBuildRun.
+
+    Returns dict with:
+        - status: "completed" or "error"
+        - builds_total: number of builds found
+    """
+    corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
+
+    # 1. Resolve configuration
+    filters = _resolve_filter_config(scenario)
+
+    # 2. Find matching repositories
+    repos = _find_matching_repos(db, filters["languages"])
+
+    if not repos:
+        logger.warning(f"{corr_prefix} [filter] No repos match filter criteria")
+        return {"status": "error", "error": "No repositories match filter criteria"}
+
+    logger.info(f"{corr_prefix} [filter] Found {len(repos)} matching repos")
+
+    # 3. Process builds
+    total_inserted = _process_ingestion_builds(
+        db, scenario_id, repos, filters, corr_prefix
+    )
 
     if total_inserted == 0:
         logger.warning(f"{corr_prefix} [filter] No builds match filter criteria")

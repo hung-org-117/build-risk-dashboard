@@ -321,7 +321,7 @@ export function FeatureDAGVisualization({
 
     if (isLoading) {
         return (
-            <div className="h-[400px] flex items-center justify-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border">
+            <div className="h-full flex items-center justify-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border">
                 <div className="flex items-center gap-2 text-muted-foreground">
                     <Clock className="h-5 w-5 animate-spin" />
                     <span>Loading DAG...</span>
@@ -332,7 +332,7 @@ export function FeatureDAGVisualization({
 
     if (!dagData || dagData.nodes.length === 0) {
         return (
-            <div className="h-[400px] flex items-center justify-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border">
+            <div className="h-full flex items-center justify-center bg-slate-50 dark:bg-slate-900/50 rounded-xl border">
                 <span className="text-muted-foreground">No features available</span>
             </div>
         );

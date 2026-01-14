@@ -155,22 +155,6 @@ class TrainingScenarioRepository(BaseRepository[TrainingScenario]):
 
         return self.update_one(scenario_id, updates)
 
-    def update_split_counts(
-        self,
-        scenario_id: str,
-        train_count: int,
-        val_count: int,
-        test_count: int,
-    ) -> Optional[TrainingScenario]:
-        """Update scenario with final split counts after splitting phase."""
-        updates = {
-            "train_count": train_count,
-            "val_count": val_count,
-            "test_count": test_count,
-            "updated_at": datetime.utcnow(),
-        }
-        return self.update_one(scenario_id, updates)
-
     def increment_counter(
         self,
         scenario_id: str,

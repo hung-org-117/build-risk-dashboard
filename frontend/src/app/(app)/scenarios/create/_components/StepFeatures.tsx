@@ -115,6 +115,7 @@ export function StepFeatures() {
         expandedNodes,
         searchQuery,
         toggleFeature,
+        toggleNode,
         toggleNodeExpand,
         clearSelection,
         selectAllAvailable,
@@ -180,7 +181,7 @@ export function StepFeatures() {
         scanMetrics.trivy.length > 0;
 
     return (
-        <div className="space-y-6 h-full min-h-[500px] flex flex-col">
+        <div className="h-full flex flex-col overflow-hidden">
             {/* Toolbar / Tabs */}
             <div className="flex items-center justify-between gap-4 flex-shrink-0">
                 <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-[400px]">
@@ -200,11 +201,11 @@ export function StepFeatures() {
             {/* Content Area */}
             <div className="flex-1 border rounded-lg overflow-hidden bg-background shadow-sm">
                 {activeTab === "selection" ? (
-                    <ResizablePanelGroup direction="vertical" className="h-full w-full">
-                        {/* Top: Visualization (60%) */}
-                        <ResizablePanel defaultSize={60} minSize={30}>
+                    <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+                        {/* LEFT: Graph/List View - 60% */}
+                        <ResizablePanel defaultSize={60} minSize={40}>
                             <div className="flex flex-col h-full relative bg-slate-50/50 dark:bg-slate-950/50">
-                                {/* Vis Toolbar */}
+                                {/* Toolbar */}
                                 <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between pointer-events-none">
                                     <div className="pointer-events-auto">
                                         <TemplateSelector onApplyTemplate={applyTemplate} />
@@ -214,7 +215,7 @@ export function StepFeatures() {
                                     </div>
                                 </div>
 
-                                {/* Vis Content */}
+                                {/* Visualization Content */}
                                 <div className="flex-1 overflow-hidden pt-16">
                                     {loading ? (
                                         <div className="flex h-full items-center justify-center">
@@ -228,14 +229,14 @@ export function StepFeatures() {
                                             isLoading={loading}
                                         />
                                     ) : (
-                                        <div className="h-full overflow-y-auto p-4 md:p-6">
-                                            <div className="max-w-4xl mx-auto bg-background rounded-lg border shadow-sm">
+                                        <div className="h-full flex flex-col p-4">
+                                            <div className="flex-1 bg-background rounded-lg border shadow-sm overflow-hidden flex flex-col min-h-0">
                                                 <ListView
                                                     nodes={filteredNodes}
                                                     selectedFeatures={selectedFeatures}
                                                     expandedNodes={expandedNodes}
                                                     onToggleFeature={toggleFeature}
-                                                    onToggleNode={toggleNodeExpand}
+                                                    onToggleNode={toggleNode}
                                                     onToggleNodeExpand={toggleNodeExpand}
                                                     searchQuery={searchQuery}
                                                     onSearchChange={setSearchQuery}
@@ -249,11 +250,11 @@ export function StepFeatures() {
 
                         <ResizableHandle withHandle />
 
-                        {/* Bottom: Panels (40%) */}
-                        <ResizablePanel defaultSize={40} minSize={20}>
-                            <ResizablePanelGroup direction="horizontal">
-                                {/* Selected Features */}
-                                <ResizablePanel defaultSize={50} minSize={30}>
+                        {/* RIGHT: Selected Features + Scans - 40% */}
+                        <ResizablePanel defaultSize={40} minSize={25}>
+                            <ResizablePanelGroup direction="vertical" className="h-full">
+                                {/* Features Panel - 60% */}
+                                <ResizablePanel defaultSize={60} minSize={20}>
                                     <div className="h-full flex flex-col bg-background">
                                         <div className="px-4 py-2 border-b bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between flex-shrink-0">
                                             <div className="flex items-center gap-2 font-medium text-sm">
@@ -282,7 +283,7 @@ export function StepFeatures() {
                                                 </Button>
                                             </div>
                                         </div>
-                                        <div className="flex-1 overflow-y-auto">
+                                        <div className="flex-1 overflow-y-auto min-h-0">
                                             <SelectedFeaturesPanel
                                                 selectedFeatures={selectedFeatures}
                                                 allFeatures={allFeatures}
@@ -299,8 +300,8 @@ export function StepFeatures() {
 
                                 <ResizableHandle withHandle />
 
-                                {/* Scan Metrics */}
-                                <ResizablePanel defaultSize={50} minSize={30}>
+                                {/* Scans Panel - 40% */}
+                                <ResizablePanel defaultSize={40} minSize={20}>
                                     <div className="h-full flex flex-col bg-background">
                                         <div className="px-4 py-2 border-b bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between flex-shrink-0">
                                             <div className="flex items-center gap-2 font-medium text-sm">
@@ -320,7 +321,7 @@ export function StepFeatures() {
                                                 Clear All
                                             </Button>
                                         </div>
-                                        <div className="flex-1 overflow-y-auto p-4">
+                                        <div className="flex-1 overflow-y-auto p-4 min-h-0">
                                             <ScanSelectionPanel
                                                 selectedSonarMetrics={scanMetrics.sonarqube}
                                                 selectedTrivyMetrics={scanMetrics.trivy}

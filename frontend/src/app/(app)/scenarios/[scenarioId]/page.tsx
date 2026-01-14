@@ -47,44 +47,46 @@ function ScenarioStepper({ status }: { status: string }) {
     };
 
     return (
-        <div className="flex items-center justify-between gap-4">
-            {phases.map((phase, i) => {
-                const phaseStatus = getPhaseStatus(phase.statuses);
-                return (
-                    <div key={phase.key} className="flex items-center gap-2 flex-1">
-                        <div
-                            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${phaseStatus === "completed"
+        <div className="max-w-2xl mx-auto w-full">
+            <div className="flex items-center justify-between gap-4">
+                {phases.map((phase, i) => {
+                    const phaseStatus = getPhaseStatus(phase.statuses);
+                    return (
+                        <div key={phase.key} className="flex items-center gap-2 flex-1">
+                            <div
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${phaseStatus === "completed"
                                     ? "bg-green-500 text-white"
                                     : phaseStatus === "active"
                                         ? "bg-blue-500 text-white"
                                         : phaseStatus === "failed"
                                             ? "bg-red-500 text-white"
                                             : "bg-muted text-muted-foreground"
-                                }`}
-                        >
-                            {phaseStatus === "completed" ? (
-                                <CheckCircle2 className="h-4 w-4" />
-                            ) : phaseStatus === "active" ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                                i + 1
+                                    }`}
+                            >
+                                {phaseStatus === "completed" ? (
+                                    <CheckCircle2 className="h-4 w-4" />
+                                ) : phaseStatus === "active" ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    i + 1
+                                )}
+                            </div>
+                            <span
+                                className={`text-sm font-medium ${phaseStatus === "active" ? "text-primary" : "text-muted-foreground"
+                                    }`}
+                            >
+                                {phase.label}
+                            </span>
+                            {i < phases.length - 1 && (
+                                <div
+                                    className={`flex-1 h-0.5 ${phaseStatus === "completed" ? "bg-green-500" : "bg-muted"
+                                        }`}
+                                />
                             )}
                         </div>
-                        <span
-                            className={`text-sm font-medium ${phaseStatus === "active" ? "text-primary" : "text-muted-foreground"
-                                }`}
-                        >
-                            {phase.label}
-                        </span>
-                        {i < phases.length - 1 && (
-                            <div
-                                className={`flex-1 h-0.5 ${phaseStatus === "completed" ? "bg-green-500" : "bg-muted"
-                                    }`}
-                            />
-                        )}
-                    </div>
-                );
-            })}
+                    );
+                })}
+            </div>
         </div>
     );
 }
@@ -257,18 +259,18 @@ export default function ScenarioOverviewPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{scenario.builds_ingested}</div>
-                        <Progress value={ingestionProgress} className="mt-2" />
+                        <Progress value={ingestionProgress} className="mt-2" indicatorClassName="bg-green-500" />
                     </CardContent>
                 </Card>
 
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Processed</CardTitle>
+                        <CardTitle className="text-sm font-medium">Extracted</CardTitle>
                         <CheckCircle2 className="h-4 w-4 text-purple-500" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{scenario.builds_features_extracted}</div>
-                        <Progress value={processingProgress} className="mt-2" />
+                        <Progress value={processingProgress} className="mt-2" indicatorClassName="bg-purple-500" />
                     </CardContent>
                 </Card>
 
@@ -286,101 +288,8 @@ export default function ScenarioOverviewPage() {
                 </Card>
             </div>
 
-            {/* Action Buttons */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Actions</CardTitle>
-                    <CardDescription>Control the scenario pipeline</CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-wrap gap-3">
-                    {canStartIngestion && (
-                        <Button onClick={handleStartIngestion} disabled={actionLoading !== null}>
-                            {actionLoading === "ingestion" ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                                <Play className="mr-2 h-4 w-4" />
-                            )}
-                            Start Ingestion
-                        </Button>
-                    )}
-
-                    {canStartProcessing && (
-                        <Button onClick={handleStartProcessing} disabled={actionLoading !== null}>
-                            {actionLoading === "processing" ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                                <Play className="mr-2 h-4 w-4" />
-                            )}
-                            Start Processing
-                        </Button>
-                    )}
-
-                    {canGenerateDataset && (
-                        <Button onClick={handleGenerateDataset} disabled={actionLoading !== null}>
-                            {actionLoading === "generate" ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                                <FileDown className="mr-2 h-4 w-4" />
-                            )}
-                            Generate Dataset
-                        </Button>
-                    )}
-
-                    {canRetryIngestion && (
-                        <Button variant="outline" onClick={handleRetryIngestion} disabled={actionLoading !== null}>
-                            {actionLoading === "retry-ingestion" ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                            )}
-                            Retry Failed Ingestion
-                        </Button>
-                    )}
-
-                    {canRetryProcessing && (
-                        <Button variant="outline" onClick={handleRetryProcessing} disabled={actionLoading !== null}>
-                            {actionLoading === "retry-processing" ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                            )}
-                            Retry Failed Processing
-                        </Button>
-                    )}
-
-                    {!canStartIngestion && !canStartProcessing && !canGenerateDataset && !canRetryIngestion && !canRetryProcessing && (
-                        <p className="text-sm text-muted-foreground">
-                            {["ingesting", "processing", "splitting"].includes(scenario.status)
-                                ? "Pipeline is running..."
-                                : scenario.status === "completed"
-                                    ? "Pipeline completed. View splits in the Export tab."
-                                    : "No actions available."}
-                        </p>
-                    )}
-                </CardContent>
-            </Card>
-
             {/* Split Summary (if completed) */}
-            {scenario.status === "completed" && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Split Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex gap-4">
-                            <Badge variant="outline" className="text-sm">
-                                Train: {scenario.train_count}
-                            </Badge>
-                            <Badge variant="outline" className="text-sm">
-                                Validation: {scenario.val_count}
-                            </Badge>
-                            <Badge variant="outline" className="text-sm">
-                                Test: {scenario.test_count}
-                            </Badge>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
+
         </div>
     );
 }

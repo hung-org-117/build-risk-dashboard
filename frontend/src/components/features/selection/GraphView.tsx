@@ -23,15 +23,15 @@ export const GraphView = memo(function GraphView({
     const selectedArray = Array.from(selectedFeatures);
 
     return (
-        <div className="space-y-3">
+        <div className="h-full flex flex-col relative">
             <FeatureDAGVisualization
                 dagData={dagData}
                 selectedFeatures={selectedArray}
                 onFeaturesChange={onFeaturesChange}
                 isLoading={isLoading}
-                className="h-[450px]"
+                className="flex-1"
             />
-            <p className="text-center text-xs text-muted-foreground">
+            <p className="absolute bottom-2 left-0 right-0 text-center text-xs text-muted-foreground pointer-events-none">
                 💡 Click on an extractor node to select/deselect all its features.
                 Drag to pan, scroll to zoom.
             </p>

@@ -28,9 +28,15 @@ from app.entities.training_scenario import (
     ScenarioStatus,
     TrainingScenario,
 )
+from app.repositories.feature_vector import FeatureVectorRepository
 from app.repositories.raw_repository import RawRepositoryRepository
+from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+from app.repositories.training_dataset_export import TrainingDatasetExportRepository
+from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
+from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
+from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 from app.services.splitting_strategy_service import SplittingStrategyService
 
 logger = logging.getLogger(__name__)
@@ -42,8 +48,61 @@ class TrainingScenarioService:
     def __init__(self, db: Database):
         self.db = db
         self.scenario_repo = TrainingScenarioRepository(db)
-        # Used for get_splitting_group_values
+
+        # Repositories for cascading deletes & lookups
         self.enrichment_build_repo = TrainingEnrichmentBuildRepository(db)
+        self.ingestion_build_repo = TrainingIngestionBuildRepository(db)
+        self.export_repo = TrainingDatasetExportRepository(db)
+        self.split_repo = TrainingDatasetSplitRepository(db)
+        self.feature_vector_repo = FeatureVectorRepository(db)
+        self.trivy_scan_repo = TrivyCommitScanRepository(db)
+        self.sonar_scan_repo = SonarCommitScanRepository(db)
+
+    def _to_response(self, scenario: TrainingScenario) -> TrainingScenarioResponse:
+        """Convert TrainingScenario entity to TrainingScenarioResponse DTO."""
+        from app.dtos.training_scenario import DataSourceConfigDTO, FeatureConfigDTO
+
+        return TrainingScenarioResponse(
+            id=str(scenario.id),
+            name=scenario.name,
+            description=scenario.description,
+            version=scenario.version,
+            status=scenario.status,
+            error_message=scenario.error_message,
+            data_source_config=DataSourceConfigDTO(
+                languages=scenario.data_source_config.languages,
+                build_source_ids=getattr(
+                    scenario.data_source_config, "build_source_ids", []
+                ),
+                date_start=scenario.data_source_config.date_start,
+                date_end=scenario.data_source_config.date_end,
+                conclusions=scenario.data_source_config.conclusions,
+                ci_provider=scenario.data_source_config.ci_provider,
+            ),
+            feature_config=FeatureConfigDTO(
+                dag_features=scenario.feature_config.dag_features,
+                scan_metrics=scenario.feature_config.scan_metrics,
+                scan_tool_config=scenario.feature_config.scan_tool_config,
+                extractor_configs=scenario.feature_config.extractor_configs,
+            ),
+            yaml_config=scenario.yaml_config,
+            builds_total=scenario.builds_total,
+            builds_ingested=scenario.builds_ingested,
+            builds_features_extracted=scenario.builds_features_extracted,
+            builds_missing_resource=scenario.builds_missing_resource,
+            builds_failed=scenario.builds_failed,
+            scans_total=scenario.scans_total,
+            scans_completed=scenario.scans_completed,
+            scans_failed=scenario.scans_failed,
+            created_by=str(scenario.created_by) if scenario.created_by else None,
+            created_at=scenario.created_at,
+            updated_at=scenario.updated_at,
+            filtering_completed_at=scenario.filtering_completed_at,
+            ingestion_completed_at=scenario.ingestion_completed_at,
+            processing_completed_at=scenario.processing_completed_at,
+            feature_extraction_completed=scenario.feature_extraction_completed,
+            scan_extraction_completed=scenario.scan_extraction_completed,
+        )
 
     # =========================================================================
     # CRUD Operations
@@ -204,7 +263,37 @@ class TrainingScenarioService:
             )
 
         # Delete associated data
+        logger.info(f"Starting cascading delete for scenario {scenario_id}...")
 
+        # 1. Delete Dataset Splits (most dependent)
+        splits_deleted = self.split_repo.delete_by_scenario(scenario_id)
+        logger.info(f"Deleted {splits_deleted} dataset splits")
+
+        # 2. Delete Dataset Exports
+        exports_deleted = self.export_repo.delete_by_scenario(scenario_id)
+        logger.info(f"Deleted {exports_deleted} dataset exports")
+
+        # 3. Delete Enrichment Builds
+        enrichment_deleted = self.enrichment_build_repo.delete_by_scenario(scenario_id)
+        logger.info(f"Deleted {enrichment_deleted} enrichment builds")
+
+        # 4. Delete Feature Vectors (Scoped to this scenario)
+        features_deleted = self.feature_vector_repo.delete_by_scenario(scenario_id)
+        logger.info(f"Deleted {features_deleted} feature vectors")
+
+        # 5. Delete Ingestion Builds
+        ingestion_deleted = self.ingestion_build_repo.delete_by_scenario(scenario_id)
+        logger.info(f"Deleted {ingestion_deleted} ingestion builds")
+
+        # 6. Delete Scans (Trivy & SonarQube)
+        trivy_deleted = self.trivy_scan_repo.delete_by_scenario(scenario_id)
+        sonar_deleted = self.sonar_scan_repo.delete_by_scenario(scenario_id)
+        logger.info(
+            f"Deleted {trivy_deleted} trivy scans and {sonar_deleted} sonar scans"
+        )
+
+        # 7. Finally delete the Scenario
+        self.scenario_repo.delete(scenario_id)
         logger.info(f"Deleted TrainingScenario: {scenario_id} and all related entities")
         return True
 

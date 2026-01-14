@@ -237,15 +237,7 @@ export default function ScenariosPage() {
                 </span>
             ),
         },
-        {
-            key: "strategy",
-            header: "Strategy",
-            render: (scenario) => (
-                <span className="text-muted-foreground capitalize">
-                    {scenario.splitting_strategy?.replace(/_/g, " ") || "—"}
-                </span>
-            ),
-        },
+
         {
             key: "created",
             header: "Created",
@@ -276,6 +268,7 @@ export default function ScenariosPage() {
                     </p>
                 </div>
                 <Button
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
                     onClick={() => {
                         if (activeTab === "sources") {
                             router.push("/scenarios/upload");

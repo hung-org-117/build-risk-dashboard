@@ -10,9 +10,13 @@ import {
     Loader2,
     Save,
     ChevronLeft,
+    Shield,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
     Card,
     CardContent,
@@ -26,10 +30,11 @@ import { WizardProvider, useWizard } from "./_components/WizardContext";
 import { StepDataSource } from "./_components/StepDataSource";
 import { StepFeatures } from "./_components/StepFeatures";
 import { trainingScenariosApi } from "@/lib/api/training-scenarios";
+import { getApiErrorMessage } from "@/lib/api/client";
 
 // Step Review Component
 function StepReview() {
-    const { state } = useWizard();
+    const { state, setName, setDescription } = useWizard();
 
     // Stats for review
     const totalFeatures = state.features.dag_features.length;
@@ -39,51 +44,162 @@ function StepReview() {
     ].filter(Boolean);
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Review & Start</CardTitle>
-                <CardDescription>Review your configuration and start processing</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="rounded-lg border p-4">
-                    <h4 className="font-medium mb-2">Scenario Details</h4>
-                    <p className="text-sm text-muted-foreground">
-                        <span className="font-medium">Name:</span> {state.name || "Untitled"}<br />
-                        <span className="font-medium">Description:</span> {state.description || "None"}
-                    </p>
-                </div>
+        <div className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-2">
+                {/* Scenario Info */}
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <FileCheck className="h-4 w-4 text-primary" />
+                            Scenario Details
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-4">
+                            <div className="grid gap-2">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</span>
+                                <Input
+                                    value={state.name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    placeholder="Enter scenario name"
+                                    className="font-medium"
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</span>
+                                <Textarea
+                                    value={state.description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="Describe the purpose of this dataset..."
+                                    className="resize-none h-24"
+                                />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
 
-                <div className="rounded-lg border p-4">
-                    <h4 className="font-medium mb-2">Data Source</h4>
-                    <p className="text-sm text-muted-foreground">
-                        {state.previewStats?.total_builds.toLocaleString() || 0} builds from{" "}
-                        {state.previewStats?.total_repos.toLocaleString() || 0} repositories
-                    </p>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                        {state.dataSource.languages?.length ? (
-                            <div>Languages: {state.dataSource.languages.join(", ")}</div>
-                        ) : null}
+                {/* Data Source Configuration */}
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <Database className="h-4 w-4 text-blue-500" />
+                            Data Source
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid gap-1">
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Scope</span>
+                            <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-sm py-1 px-3">
+                                    {state.previewStats?.total_builds.toLocaleString() || 0} Builds
+                                </Badge>
+                                <span className="text-sm text-muted-foreground">from</span>
+                                <Badge variant="outline" className="text-sm py-1 px-3">
+                                    {state.previewStats?.total_repos.toLocaleString() || 0} Repositories
+                                </Badge>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-4 pt-2 border-t">
+                            {/* Environment / Repos */}
+                            <div className="grid gap-1">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                    Languages
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                    {state.dataSource.languages?.map(lang => (
+                                        <Badge key={lang} variant="secondary" className="text-xs capitalize">{lang}</Badge>
+                                    ))}
+                                    {(!state.dataSource.languages?.length) && <span className="text-sm text-muted-foreground">All Languages</span>}
+                                </div>
+                            </div>
+
+                            {/* CI Provider */}
+                            <div className="grid gap-1">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">CI Provider</span>
+                                <div className="text-sm font-medium capitalize">
+                                    {state.dataSource.ci_provider === "all" ? "All Providers" : state.dataSource.ci_provider}
+                                </div>
+                            </div>
+
+                            {/* Date Range */}
+                            <div className="grid gap-1">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Date Range</span>
+                                <div className="text-sm">
+                                    {state.dataSource.date_start ? (
+                                        <span className="font-medium">
+                                            {new Date(state.dataSource.date_start).toLocaleDateString()}
+                                            {" - "}
+                                            {state.dataSource.date_end ? new Date(state.dataSource.date_end).toLocaleDateString() : "Now"}
+                                        </span>
+                                    ) : (
+                                        <span className="text-muted-foreground italic">All time</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Conclusions */}
+                            <div className="grid gap-1">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Conclusions</span>
+                                <div className="flex gap-1 flex-wrap">
+                                    {state.dataSource.conclusions?.map(c => (
+                                        <Badge
+                                            key={c}
+                                            variant="outline"
+                                            className={c === 'success' ? "border-green-200 text-green-700 bg-green-50" : "border-red-200 text-red-700 bg-red-50"}
+                                        >
+                                            {c}
+                                        </Badge>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Features Configuration */}
+            <Card className="border-indigo-100 dark:border-indigo-900 overflow-hidden">
+                <CardHeader className="pb-3 bg-slate-50/50 dark:bg-slate-900/50 border-b">
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Settings2 className="h-4 w-4 text-indigo-500" />
+                        Feature Engineering
+                    </CardTitle>
+                    <CardDescription>
+                        Configuration for feature extraction and analysis
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6 grid md:grid-cols-2 gap-8 relative z-10">
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-muted-foreground">Extraction Features</span>
+                            <Badge className="bg-indigo-600 hover:bg-indigo-700">{totalFeatures}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Features will be extracted from build logs, source code, and collaboration history based on the selected graph.
+                        </p>
                     </div>
-                </div>
-                <div className="rounded-lg border p-4">
-                    <h4 className="font-medium mb-2">Features</h4>
-                    <p className="text-sm text-muted-foreground">
-                        {totalFeatures} feature groups selected
-                    </p>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                        {scansEnabled.length > 0 && (
-                            <div>Scans enabled: {scansEnabled.join(", ")}</div>
+
+                    <div className="space-y-3">
+                        <span className="text-sm font-medium text-muted-foreground">Active Scanners</span>
+                        {scansEnabled.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                                {scansEnabled.map(scan => (
+                                    <div key={scan} className="flex items-center gap-2 bg-white dark:bg-slate-800 border rounded-md px-3 py-2 shadow-sm">
+                                        <div className={`h-2 w-2 rounded-full ${scan === 'SonarQube' ? 'bg-blue-500' : 'bg-cyan-500'}`}></div>
+                                        <span className="font-medium text-sm">{scan}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-muted-foreground italic flex items-center gap-2">
+                                <Shield className="h-3 w-3" /> No security scans enabled
+                            </div>
                         )}
                     </div>
-                </div>
-                <div className="rounded-lg border p-4 bg-muted/30">
-                    <h4 className="font-medium mb-2">Splitting & Export</h4>
-                    <p className="text-sm text-muted-foreground">
-                        Splitting strategy will be configured in the Export step after processing completes.
-                    </p>
-                </div>
-            </CardContent>
-        </Card>
+                </CardContent>
+            </Card>
+        </div>
     );
 }
 
@@ -148,9 +264,8 @@ function WizardContent() {
                 name: state.name || `Scenario ${new Date().toISOString().split('T')[0]}`,
                 description: state.description,
                 data_source_config: {
-                    filter_by: state.dataSource.filter_by,
                     languages: state.dataSource.languages,
-                    repo_names: state.dataSource.repo_names,
+                    build_source_ids: state.dataSource.build_source_ids,
                     date_start: state.dataSource.date_start || undefined,
                     date_end: state.dataSource.date_end || undefined,
                     conclusions: state.dataSource.conclusions,
@@ -159,7 +274,6 @@ function WizardContent() {
                 feature_config: {
                     dag_features: state.features.dag_features,
                     scan_metrics: state.features.scan_metrics,
-                    exclude: state.features.exclude,
                     scan_tool_config: state.scanConfigs,
                     extractor_configs: state.featureConfigs.global,
                 },
@@ -177,9 +291,10 @@ function WizardContent() {
             router.push(`/scenarios/${scenario.id}`);
         } catch (error) {
             console.error("Failed to create scenario", error);
+            const message = getApiErrorMessage(error);
             toast({
                 title: "Creation failed",
-                description: "Failed to create scenario. Please try again.",
+                description: message || "Failed to create scenario. Please try again.",
                 variant: "destructive",
             });
         } finally {
@@ -210,7 +325,7 @@ function WizardContent() {
     };
 
     return (
-        <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden">
             {/* Header Area */}
             <div className="flex-shrink-0 px-6 py-4 border-b bg-background z-10">
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -259,7 +374,7 @@ function WizardContent() {
                                 </>
                             ) : state.step === 3 ? (
                                 <>
-                                    Start Ingestion
+                                    Start
                                     <Save className="ml-2 h-4 w-4" />
                                 </>
                             ) : (

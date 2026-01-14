@@ -174,9 +174,8 @@ export type ScenarioStatus =
   | "failed";
 
 export interface DataSourceConfig {
-  filter_by: "all" | "by_language" | "by_name" | "by_owner";
   languages: string[];
-  repo_names: string[];
+  build_source_ids: string[];
   owners: string[];
   date_start?: string;
   date_end?: string;
@@ -191,7 +190,6 @@ export interface FeatureConfig {
     sonarqube?: string[];
     trivy?: string[];
   };
-  exclude: string[];
 }
 
 export interface SplittingConfig {
@@ -249,9 +247,6 @@ export interface TrainingScenarioRecord {
   scans_failed: number;
   feature_extraction_completed: boolean;
   scan_extraction_completed: boolean;
-  train_count: number;
-  val_count: number;
-  test_count: number;
   // Timestamps
   created_by?: string;
   filtering_started_at?: string;

@@ -264,7 +264,6 @@ start_scenario_ingestion
 
 ```python
 DataSourceConfig = {
-    filter_by: "all" | "by_language" | "by_name",
     languages: ["python", "java"],      # Filter by main_lang
     date_start: "2024-01-01",
     date_end: "2024-12-31",
@@ -352,12 +351,25 @@ chain(
 
 ### 2.4 Feature Config
 
+> **Note:** Features are selected via UI from the Feature Graph. The UI displays explicit feature names grouped by category. Wildcard patterns (e.g., `build_*`) are NOT supported in the current UI flow.
+
 ```python
 FeatureConfig = {
-    dag_features: ["git_*", "build_*", "log_*"],  # Wildcard support
+    # Explicit feature names selected from UI
+    dag_features: [
+        "tr_build_duration",
+        "tr_build_queue_time",
+        "gh_commits_count",
+        "gh_files_changed",
+        "gh_lines_added",
+        "gh_lines_deleted",
+        "tr_prev_build_failed",
+        "tr_success_rate_last_5",
+        # ... more features as selected in UI
+    ],
     scan_metrics: {
         sonarqube: ["code_smells", "bugs", "coverage"],
-        trivy: ["vuln_total", "vuln_critical"],
+        trivy: ["critical", "high", "medium"],
     },
     extractor_configs: {
         "lookback_days": 90,
