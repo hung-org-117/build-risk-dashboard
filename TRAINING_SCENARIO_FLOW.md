@@ -13,7 +13,7 @@
 8. [API Endpoints](#api-endpoints)
 9. [Frontend UI Flow](#frontend-ui-flow)
 10. [Error Handling & Recovery](#error-handling--recovery)
-11. [WebSocket Real-time Updates](#websocket-real-time-updates)
+11. [SSE Real-time Updates](#sse-real-time-updates)
 
 ---
 
@@ -907,32 +907,188 @@ Step 5: Review & Start
 
 ---
 
-## WebSocket Real-time Updates
+## SSE Real-time Updates
+
+### Event Naming Convention
+
+Events follow the format: `{PIPELINE}.{ENTITY}.{ACTION}`
+
+- **PIPELINE**: `SCENARIO` (Training Scenario Pipeline)
+- **ENTITY**: `INGESTION`, `PROCESSING`, `SCAN`
+- **ACTION**: `UPDATED`, `ERROR`
 
 ### Event Types
 
+Scenario Pipeline publishes the following SSE events:
+
+| Event Type | Purpose | When Published |
+|------------|---------|----------------|
+| `SCENARIO.UPDATED` | Scenario aggregate status | Status transitions (QUEUED → FILTERING → INGESTING → etc.) |
+| `SCENARIO.INGESTION.UPDATED` | Ingestion resource progress | Git clone, worktree creation, log download |
+| `SCENARIO.PROCESSING.UPDATED` | Processing/enrichment progress | Feature extraction per build |
+| `SCENARIO.SCAN.UPDATED` | Scan status change | Trivy/SonarQube scan completion |
+| `SCENARIO.SCAN.ERROR` | Scan failure | Scan errors |
+
+### Event Payloads
+
 ```python
-# Scenario status update
+# SCENARIO.UPDATED - Scenario status change
 {
-    "event": "SCENARIO_UPDATE",
-    "scenario_id": "...",
-    "status": "processing",
-    "message": "Extracting features for 150 builds...",
-    "stats": {
-        "builds_total": 500,
-        "builds_ingested": 450,
-        "builds_processed": 150,
+    "type": "SCENARIO.UPDATED",
+    "payload": {
+        "scenario_id": "...",
+        "status": "processing",
+        "message": "Extracting features for 150 builds...",
+        "stats": {
+            "builds_total": 500,
+            "builds_ingested": 450,
+            "builds_processed": 150,
+        }
     }
 }
 
-# Build status update
+# SCENARIO.INGESTION.UPDATED - Ingestion progress (shared with Model pipeline)
 {
-    "event": "SCENARIO_BUILD_UPDATE",
-    "scenario_id": "...",
-    "build_id": "...",
-    "phase": "processing",
-    "status": "completed",
+    "type": "SCENARIO.INGESTION.UPDATED",
+    "payload": {
+        "scenario_id": "...",
+        "resource": "git_worktree",  # git_history | git_worktree | build_logs
+        "status": "in_progress",     # in_progress | completed | failed | completed_with_errors
+        "builds_affected": 10,
+        "chunk_index": 2,
+        "total_chunks": 5,
+        "completed_commit_shas": ["abc123", "def456"],
+        "failed_commit_shas": []
+    }
 }
+
+# SCENARIO.PROCESSING.UPDATED - Feature extraction progress
+{
+    "type": "SCENARIO.PROCESSING.UPDATED",
+    "payload": {
+        "scenario_id": "...",
+        "build_id": "...",
+        "phase": "processing",
+        "status": "completed",
+        "feature_count": 45,
+        "expected_feature_count": 45
+    }
+}
+
+# SCENARIO.SCAN.UPDATED - Scan completion
+{
+    "type": "SCENARIO.SCAN.UPDATED",
+    "payload": {
+        "scenario_id": "...",
+        "build_id": "...",
+        "scan_type": "trivy",  # trivy | sonarqube
+        "status": "completed"
+    }
+}
+```
+
+### Frontend SSE Subscription with Delta Merge
+
+Frontend uses SSE subscriptions with delta merge pattern for efficient real-time updates:
+
+```tsx
+// Subscribe to scenario events
+useEffect(() => {
+    const unsubIngestion = subscribe("SCENARIO.INGESTION.UPDATED", (data) => {
+        if (data.scenario_id === scenarioId) {
+            // Delta merge: update affected builds
+            setBuilds((prev) => prev.map((build) => {
+                if (data.completed_commit_shas?.includes(build.commit_sha)) {
+                    return { ...build, ingestion_status: "completed" };
+                }
+                return build;
+            }));
+        }
+    });
+
+    const unsubProcessing = subscribe("SCENARIO.PROCESSING.UPDATED", (data) => {
+        if (data.scenario_id === scenarioId) {
+            // Delta merge: update specific build
+            setBuilds((prev) => prev.map((build) =>
+                build.id === data.build_id
+                    ? { ...build, processing_status: data.status,
+                        feature_count: data.feature_count }
+                    : build
+            ));
+        }
+    });
+
+    return () => {
+        unsubIngestion();
+        unsubProcessing();
+    };
+}, [subscribe, scenarioId]);
+```
+
+### Backend Event Publishing
+
+Events are published via shared utility functions in `app/tasks/shared/events.py`:
+
+```python
+from app.tasks.shared.events import (
+    publish_scenario_updated,
+    publish_ingestion_progress,
+    publish_scenario_processing_updated,
+    publish_scenario_scan_updated,
+)
+
+# Publish scenario status update
+publish_scenario_updated(
+    scenario_id=str(scenario.id),
+    status="processing",
+    message=f"Processing {count} builds...",
+    stats={"builds_total": 500, "builds_ingested": 450}
+)
+
+# Publish ingestion progress (shared function for both pipelines)
+publish_ingestion_progress(
+    repo_id=str(scenario.id),
+    resource="git_worktree",
+    status="completed",
+    pipeline_type="dataset",  # "dataset" for Scenario pipeline
+    builds_affected=10,
+    chunk_index=2,
+    total_chunks=5,
+    completed_commit_shas=["abc123"]
+)
+
+# Publish processing progress
+publish_scenario_processing_updated(
+    scenario_id=str(scenario.id),
+    build_id=str(build.id),
+    status="completed",
+    feature_count=45,
+    expected_feature_count=45
+)
+```
+
+### Shared Ingestion Tasks
+
+The ingestion tasks (git clone, worktree creation, log download) are shared between Model and Scenario pipelines. The `pipeline_type` parameter determines which event type is published:
+
+```python
+# In app/tasks/shared/events.py
+def publish_ingestion_progress(
+    repo_id: str,
+    resource: str,
+    status: str,
+    pipeline_type: str = "model",  # "model" or "dataset"
+    ...
+) -> bool:
+    # Determine event type based on pipeline
+    if pipeline_type == "dataset":
+        event_type = EventType.SCENARIO_INGESTION_UPDATED
+        payload = {"scenario_id": repo_id, ...}
+    else:
+        event_type = EventType.MODEL_INGESTION_PROGRESS
+        payload = {"repo_id": repo_id, ...}
+    
+    return publish_event(event_type, payload)
 ```
 
 ---
@@ -954,3 +1110,6 @@ Training Scenario Pipeline là hệ thống 4-phase tạo dataset ML từ builds
 - **Sequential processing**: Temporal features yêu cầu xử lý tuần tự
 - **Async scans**: Trivy/SonarQube chạy song song, không block feature extraction
 - **Tool-specific retry**: Retry scans theo tool (Trivy/SonarQube riêng), check server existence cho SonarQube
+- **Real-time updates via SSE**: Server-Sent Events với delta merge pattern cho frontend
+- **Shared ingestion tasks**: `publish_ingestion_progress(pipeline_type)` hỗ trợ cả Model và Scenario pipelines
+- **Template-based expected features**: Sử dụng `DatasetTemplate.feature_names + DEFAULT_FEATURES` để tính expected_feature_count

@@ -11,7 +11,7 @@
 8. [API Endpoints](#api-endpoints)
 9. [Frontend UI Flow](#frontend-ui-flow)
 10. [Error Handling & Recovery](#error-handling--recovery)
-11. [WebSocket Real-time Updates](#websocket-real-time-updates)
+11. [SSE Real-time Updates](#sse-real-time-updates)
 
 ---
 
@@ -980,47 +980,195 @@ handle_processing_chain_error:
 
 ---
 
-## WebSocket Real-time Updates
+## SSE Real-time Updates
+
+### Event Naming Convention
+
+Events follow the format: `{PIPELINE}.{ENTITY}.{ACTION}`
+
+- **PIPELINE**: `MODEL` (Model Training Pipeline) or `SCENARIO` (Training Scenario Pipeline)
+- **ENTITY**: `REPO`, `BUILD`, `INGESTION`, `PROCESSING`, `PREDICTION`, `SCAN`
+- **ACTION**: `UPDATED`, `PROGRESS`, `ERROR`
 
 ### Event Types
 
+Model Pipeline publishes the following SSE events:
+
+| Event Type | Purpose | When Published |
+|------------|---------|----------------|
+| `MODEL.REPO.UPDATED` | Repository status change | Status transitions (QUEUED → FETCHING → INGESTING → etc.) |
+| `MODEL.BUILD.UPDATED` | Build status change | Build ingestion/processing/prediction status change |
+| `MODEL.INGESTION.PROGRESS` | Resource ingestion progress | Git clone, worktree creation, log download chunks |
+| `MODEL.INGESTION.ERROR` | Ingestion failure | Git/log download errors |
+| `MODEL.PROCESSING.UPDATED` | Feature extraction progress | Per-build extraction status with feature_count |
+| `MODEL.PREDICTION.UPDATED` | Prediction progress | Per-build prediction with label and confidence |
+
+### Event Payloads
+
 ```python
-# Repository status update
+# MODEL.REPO.UPDATED - Repository status change
 {
-    "event": "REPO_UPDATE",
-    "repo_id": "...",
-    "status": "ingesting",
-    "message": "Preparing resources for 50 builds...",
-    "stats": {
-        "builds_fetched": 100,
-        "builds_ingested": 50,
-        "builds_missing_resource": 5,
+    "type": "MODEL.REPO.UPDATED",
+    "payload": {
+        "repo_id": "...",
+        "status": "ingesting",
+        "message": "Preparing resources for 50 builds...",
+        "stats": {
+            "builds_fetched": 100,
+            "builds_ingested": 50,
+            "builds_missing_resource": 5,
+        }
     }
 }
 
-# Build status update
+# MODEL.INGESTION.PROGRESS - Resource ingestion progress
 {
-    "event": "BUILD_UPDATE",
-    "repo_id": "...",
-    "build_id": "...",
-    "status": "completed",
+    "type": "MODEL.INGESTION.PROGRESS",
+    "payload": {
+        "repo_id": "...",
+        "resource": "git_worktree",  # git_history | git_worktree | build_logs
+        "status": "in_progress",     # in_progress | completed | failed | completed_with_errors
+        "builds_affected": 10,
+        "chunk_index": 2,
+        "total_chunks": 5,
+        "completed_commit_shas": ["abc123", "def456"],
+        "failed_commit_shas": []
+    }
+}
+
+# MODEL.PROCESSING.UPDATED - Feature extraction progress
+{
+    "type": "MODEL.PROCESSING.UPDATED",
+    "payload": {
+        "repo_id": "...",
+        "build_id": "...",
+        "extraction_status": "completed",  # pending | in_progress | completed | partial | failed
+        "feature_count": 45,
+        "expected_feature_count": 45,
+        "ci_run_id": "12345",
+        "commit_sha": "abc123"
+    }
+}
+
+# MODEL.PREDICTION.UPDATED - Prediction progress
+{
+    "type": "MODEL.PREDICTION.UPDATED",
+    "payload": {
+        "repo_id": "...",
+        "build_id": "...",
+        "prediction_status": "completed",  # pending | in_progress | completed | failed
+        "predicted_label": "LOW",          # LOW | MEDIUM | HIGH
+        "prediction_confidence": 0.85,
+        "ci_run_id": "12345",
+        "commit_sha": "abc123"
+    }
 }
 ```
 
-### Frontend Subscription
+### Frontend SSE Subscription with Delta Merge
+
+Frontend uses SSE subscriptions with delta merge pattern for efficient real-time updates:
 
 ```tsx
-// In layout.tsx
+// In UnifiedBuildsTable.tsx - Subscribe to all 3 phase events
 useEffect(() => {
-    const unsubscribe = subscribe("REPO_UPDATE", (data: any) => {
+    // Phase 1: Ingestion progress
+    const unsubIngestion = subscribe("MODEL.INGESTION.PROGRESS", (data) => {
         if (data.repo_id === repoId) {
-            loadRepo();
-            loadProgress();
-            loadBuilds();
+            // Delta merge: update affected builds without full refetch
+            setBuilds((prev) => prev.map((build) => {
+                if (data.completed_commit_shas?.includes(build.commit_sha)) {
+                    return { ...build, resource_status: data.resource, status: "completed" };
+                }
+                return build;
+            }));
         }
     });
-    return () => unsubscribe();
-}, [subscribe, ...]);
+
+    // Phase 2: Processing/Extraction progress
+    const unsubProcessing = subscribe("MODEL.PROCESSING.UPDATED", (data) => {
+        if (data.repo_id === repoId) {
+            // Delta merge: update specific build extraction status
+            setBuilds((prev) => prev.map((build) =>
+                build.id === data.build_id
+                    ? { ...build, extraction_status: data.extraction_status, 
+                        feature_count: data.feature_count }
+                    : build
+            ));
+        }
+    });
+
+    // Phase 3: Prediction progress
+    const unsubPrediction = subscribe("MODEL.PREDICTION.UPDATED", (data) => {
+        if (data.repo_id === repoId) {
+            // Delta merge: update prediction results
+            setBuilds((prev) => prev.map((build) =>
+                build.id === data.build_id
+                    ? { ...build, prediction_status: data.prediction_status,
+                        predicted_label: data.predicted_label,
+                        prediction_confidence: data.prediction_confidence }
+                    : build
+            ));
+        }
+    });
+
+    return () => {
+        unsubIngestion();
+        unsubProcessing();
+        unsubPrediction();
+    };
+}, [subscribe, repoId]);
+```
+
+### Backend Event Publishing
+
+Events are published via shared utility functions in `app/tasks/shared/events.py`:
+
+```python
+from app.tasks.shared.events import (
+    publish_model_repo_updated,
+    publish_ingestion_progress,
+    publish_model_processing_updated,
+    publish_model_prediction_updated,
+)
+
+# Publish repo status update
+publish_model_repo_updated(
+    repo_id=str(repo_config.id),
+    status="ingesting",
+    message=f"Processing {count} builds...",
+    stats={"builds_fetched": 100, "builds_ingested": 50}
+)
+
+# Publish ingestion progress (shared function for both pipelines)
+publish_ingestion_progress(
+    repo_id=str(repo_config.id),
+    resource="git_worktree",
+    status="completed",
+    pipeline_type="model",  # or "dataset" for Scenario pipeline
+    builds_affected=10,
+    chunk_index=2,
+    total_chunks=5,
+    completed_commit_shas=["abc123"]
+)
+
+# Publish extraction progress
+publish_model_processing_updated(
+    repo_id=str(repo_config.id),
+    build_id=str(build.id),
+    extraction_status="completed",
+    feature_count=45,
+    expected_feature_count=45
+)
+
+# Publish prediction result
+publish_model_prediction_updated(
+    repo_id=str(repo_config.id),
+    build_id=str(build.id),
+    prediction_status="completed",
+    predicted_label="LOW",
+    prediction_confidence=0.85
+)
 ```
 
 ---
@@ -1084,4 +1232,5 @@ Model Training Pipeline là một hệ thống 4-phase xử lý builds từ GitH
 - Sequential processing cho temporal features
 - Checkpoint mechanism cho incremental processing
 - Graceful degradation (MISSING_RESOURCE vs FAILED)
-- Real-time updates via WebSocket
+- Real-time updates via SSE (Server-Sent Events) with delta merge pattern
+- Template-based expected feature count using DatasetTemplate + DEFAULT_FEATURES
