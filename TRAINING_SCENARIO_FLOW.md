@@ -194,9 +194,10 @@ These metrics help admins track dataset preparation progress and manage training
 
 | Task | Queue | Timeout | Mô Tả |
 |------|-------|---------|-------|
-| `source_validation_orchestrator` | validation | 3600s | Parse CSV, dispatch validation |
-| `validate_source_repos` | validation | 600s | Validate repos on GitHub |
-| `validate_source_builds` | validation | 600s | Validate builds on CI |
+| `validate_build_source` | validation | 3600s | Parse CSV, dispatch validation |
+| `validate_repo_batch` | validation | 600s | Validate repos on GitHub |
+| `validate_builds_batch` | validation | 600s | Validate builds on CI |
+| `aggregate_build_source_validation` | validation | 120s | Aggregate validation results |
 
 ### 0.2 Upload Flow
 
@@ -208,15 +209,15 @@ POST /api/build-sources/upload
 │
 ├─ Parse CSV, create BuildSource entity
 ├─ Create SourceBuild records (PENDING)
-└─ Dispatch source_validation_orchestrator
+└─ Dispatch validate_build_source
        │
        ▼
-source_validation_orchestrator
+validate_build_source
 │
 ├─ Group builds by repo
 ├─ For each repo:
-│   ├─ validate_source_repos → RawRepository
-│   └─ validate_source_builds → RawBuildRun
+│   ├─ validate_repo_batch → RawRepository
+│   └─ validate_builds_batch → RawBuildRun
 │
 └─ Aggregate results
     ├─ Mark SourceBuild as FOUND/NOT_FOUND
@@ -349,8 +350,8 @@ DataSourceConfig = {
 | `finalize_scan_dispatch` | scenario_scanning | 180s | Finalize after all scan batches complete |
 | `dispatch_enrichment_batches` | scenario_processing | 240s | Create EnrichmentBuild, dispatch chain |
 | `process_single_enrichment` | scenario_processing | 600s | Extract features for 1 build (max_retries=2) |
-| `finalize_scenario_processing` | scenario_processing | 120s | Mark PROCESSED, notify users |
-| `reprocess_failed_builds` | scenario_processing | 360s | Retry failed builds |
+| `finalize_feature_extraction` | scenario_processing | 120s | Mark PROCESSED, notify users |
+| `reprocess_failed_feature_extraction` | scenario_processing | 360s | Retry failed builds |
 | `retry_failed_scenario_scans` | scenario_scanning | 600s | Retry failed scans (tool-specific, batch mode) |
 | `process_retry_scan_batch` | scenario_scanning | 300s | Process single batch of scan retries |
 | `handle_processing_chain_error` | scenario_processing | 120s | Error handler for chain failures |
@@ -606,7 +607,7 @@ ExportSplittingConfig = {
 {
     scenario_id: ObjectId,
     name: str,
-    status: "pending" | "generating" | "completed" | "failed",
+    status: "queued" | "generating" | "completed" | "failed",
     splitting_config: ExportSplittingConfig,
     preprocessing_config: PreprocessingConfig,
     output_config: OutputConfig,
@@ -718,7 +719,7 @@ class ScenarioStatus(str, Enum):
     FAILED = "failed"
 
 class ExportStatus(str, Enum):
-    PENDING = "pending"
+    QUEUED = "queued"
     GENERATING = "generating"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -762,7 +763,19 @@ class ExtractionStatus(str, Enum):
 | `POST` | `/training-scenarios/{id}/process` | Start Phase 2 (Processing) |
 | `POST` | `/training-scenarios/{id}/generate` | Start Phase 3 (Dataset Generation) |
 | `POST` | `/training-scenarios/{id}/retry-ingestion` | Retry failed ingestion |
-| `POST` | `/training-scenarios/{id}/retry-processing` | Retry failed processing |
+| `POST` | `/training-scenarios/{id}/reprocess-failed-feature-extraction` | Retry failed feature extraction |
+
+### Filtering & Preview
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/training-scenarios/preview-builds` | Preview builds with filters |
+| `GET` | `/training-scenarios/filter-options` | Get dynamic filter options |
+| `GET` | `/training-scenarios/splitting-groups` | Get splitting groups for wizard |
+| `GET` | `/training-scenarios/{id}/split-group-distribution` | Preview group distribution |
+| `GET` | `/training-scenarios/{id}/splitting-groups` | Get scenario splitting groups |
+| `GET` | `/training-scenarios/{id}/data-quality-report` | Get data quality report |
+| `GET` | `/training-scenarios/{id}/data-availability` | Get data availability summary |
 
 ### Builds & Splits
 
@@ -771,10 +784,6 @@ class ExtractionStatus(str, Enum):
 | `GET` | `/training-scenarios/{id}/ingestion-builds` | List ingestion builds |
 | `GET` | `/training-scenarios/{id}/enrichment-builds` | List enrichment builds |
 | `GET` | `/training-scenarios/{id}/enrichment-builds/{build_id}` | Get enrichment build detail |
-| `GET` | `/training-scenarios/{id}/splits` | List dataset splits |
-| `GET` | `/training-scenarios/{id}/splits/{split_id}/download` | Download single split file |
-| `GET` | `/training-scenarios/{id}/splits/download-all` | Download all splits as zip |
-| `GET` | `/training-scenarios/preview-builds` | Preview builds with filters |
 
 ### Scan Status
 
@@ -782,7 +791,21 @@ class ExtractionStatus(str, Enum):
 |--------|----------|-------|
 | `GET` | `/training-scenarios/{id}/scan-status` | Get scan progress status |
 | `GET` | `/training-scenarios/{id}/commit-scans` | List commit scan results |
+| `GET` | `/training-scenarios/{id}/commit-scans/{commit_sha}` | Get commit scan detail |
 | `POST` | `/training-scenarios/{id}/retry-scans?tool_type=trivy\|sonarqube` | Retry failed scans for specific tool (required param) |
+
+### Exports
+
+| Method | Endpoint | Mô Tả |
+|--------|----------|-------|
+| `GET` | `/training-scenarios/{id}/exports` | List exports for scenario |
+| `POST` | `/training-scenarios/{id}/exports` | Create new export |
+| `GET` | `/training-scenarios/{id}/exports/{export_id}` | Get export detail |
+| `DELETE` | `/training-scenarios/{id}/exports/{export_id}` | Delete export |
+| `POST` | `/training-scenarios/{id}/exports/{export_id}/generate` | Trigger export generation |
+| `GET` | `/training-scenarios/{id}/exports/{export_id}/splits` | List splits for export |
+| `GET` | `/training-scenarios/{id}/exports/{export_id}/splits/{split_id}/download` | Download single split file |
+| `GET` | `/training-scenarios/{id}/exports/{export_id}/download-all` | Download all splits as zip |
 
 ---
 
@@ -795,16 +818,17 @@ class ExtractionStatus(str, Enum):
 ```
 /scenarios
 ├── page.tsx                   # Scenario list
-├── import/                    # Import from existing data sources
-├── upload/                    # BuildSource upload wizard
-│   ├── page.tsx
-│   └── _components/
+├── sources/                   # Build Source management
+│   ├── page.tsx               # Sources list
+│   └── upload/                # BuildSource upload wizard
+│       ├── page.tsx
+│       └── _components/
 ├── create/                    # Scenario creation wizard
 │   ├── page.tsx
 │   └── _components/
 │       ├── StepDataSource.tsx     # Step 1: Filter config
 │       ├── StepFeatures.tsx       # Step 2: Feature selection
-│       ├── StepSplitting.tsx      # Step 3: Split strategy
+│       ├── BuildSourceSelector.tsx # Build source selection
 │       └── WizardContext.tsx      # Wizard state management
 └── [scenarioId]/
     ├── layout.tsx             # Tabs navigation
@@ -892,8 +916,8 @@ Step 5: Review & Start
 
 | Error Type | Status | Retryable | Action |
 |------------|--------|-----------|--------|
-| Feature extraction failed | FAILED | Yes | `reprocess_failed_builds` |
-| Hamilton DAG error | FAILED | Yes | `reprocess_failed_builds` |
+| Feature extraction failed | FAILED | Yes | `reprocess_failed_feature_extraction` |
+| Hamilton DAG error | FAILED | Yes | `reprocess_failed_feature_extraction` |
 
 ### Scan Errors
 
@@ -927,6 +951,8 @@ Scenario Pipeline publishes the following SSE events:
 | `SCENARIO.INGESTION.UPDATED` | Ingestion resource progress | Git clone, worktree creation, log download |
 | `SCENARIO.PROCESSING.UPDATED` | Processing/enrichment progress | Feature extraction per build |
 | `SCENARIO.SCAN.UPDATED` | Scan status change | Trivy/SonarQube scan completion or errors |
+| `EXPORT.UPDATED` | Export generation progress | Export status transitions (QUEUED → GENERATING → COMPLETED) |
+| `SOURCE.VALIDATION.UPDATED` | Build source validation progress | Validation of CSV uploads |
 
 ### Event Payloads
 

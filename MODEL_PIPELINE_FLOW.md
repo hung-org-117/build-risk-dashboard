@@ -191,9 +191,9 @@ ingest_model_builds
 
 **Mục đích**: Tự động nhận builds mới từ GitHub webhook khi workflow hoàn thành
 
-| Task | Queue | Timeout | Mô Tả |
-|------|-------|---------|-------|
-| `ingest_webhook_build` | model_ingestion | 300s | Ingest single build từ webhook event |
+| Task | Queue | Timeout (soft/hard) | Mô Tả |
+|------|-------|---------------------|-------|
+| `ingest_webhook_build` | model_ingestion | 300s / 360s | Ingest single build từ webhook event |
 
 ```
 GitHub sends webhook (workflow_run.completed)
@@ -811,7 +811,6 @@ class ExtractionStatus(str, Enum):
 │   ├── ActionProgressBanner.tsx    # Progress banner with retry buttons
 │   ├── CollectionCard.tsx          # Ingestion stats display
 │   ├── CurrentPhaseCard.tsx        # Active phase details card
-│   ├── ImportProgressDisplay.tsx   # Import progress in list view
 │   ├── MiniStepper.tsx             # 4-phase indicator component
 │   ├── ProcessingCard.tsx          # Processing stats display
 │   └── StatBox.tsx                 # Stat box component
@@ -820,7 +819,6 @@ class ExtractionStatus(str, Enum):
 └── [repoId]/
     ├── layout.tsx             # Repo context & tabs navigation
     ├── page.tsx               # Redirect to overview
-    ├── repo-context.tsx       # React context for repo state
     ├── overview/
     │   └── page.tsx           # Pipeline overview (uses OverviewTab)
     ├── analytics/
@@ -830,14 +828,16 @@ class ExtractionStatus(str, Enum):
     │   ├── layout.tsx         # Builds layout
     │   └── _components/
     │       └── ...            # Build-related components
-    ├── build/
-    │   └── [buildId]/
-    │       └── page.tsx       # Single build detail page
-    └── _tabs/
-        ├── OverviewTab.tsx    # Overview tab component
-        ├── AnalyticsTab.tsx   # Analytics/charts tab component
-        └── builds/
-            └── UnifiedBuildsTable.tsx  # Unified builds table (ingestion + processing)
+    └── build/
+        └── [buildId]/
+            └── page.tsx       # Single build detail page
+
+# Shared Components (in src/components/repositories/)
+├── tabs/
+│   ├── OverviewTab.tsx        # Overview tab component
+│   ├── AnalyticsTab.tsx       # Analytics/charts tab component
+│   └── UnifiedBuildsTable.tsx # Unified builds table (ingestion + processing)
+└── ImportProgressDisplay.tsx  # Import progress in list view
 ```
 
 ### Import Flow UI
@@ -891,7 +891,7 @@ Repository detail page (`/repositories/[repoId]`) có các tabs:
 ### Overview Tab Components
 
 ```
-OverviewTab (in _tabs/OverviewTab.tsx)
+OverviewTab (in src/components/repositories/tabs/OverviewTab.tsx)
 ├── MiniStepper          # 4-phase indicator (Fetch → Ingest → Extract → Predict)
 ├── CollectionCard       # Ingestion stats (fetched, ingested, missing_resource counts)
 │   ├── Fetched count
