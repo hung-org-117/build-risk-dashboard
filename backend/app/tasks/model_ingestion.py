@@ -46,7 +46,7 @@ from app.tasks.base import PipelineTask, SafeTask, TaskState, TransientError
 from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.shared import ModelPipelineContext, build_workflow_with_context
-from app.tasks.shared.events import publish_model_ingestion_progress
+from app.tasks.shared.events import publish_model_repo_updated
 
 logger = logging.getLogger(__name__)
 
@@ -680,6 +680,9 @@ def fetch_builds_batch(
                 status=ModelImportBuildStatus.FETCHED,
                 ci_run_id=raw_build_run.ci_run_id,
                 commit_sha=build.commit_sha or "",
+                ingestion_started_at=None,
+                ingested_at=None,
+                ingestion_error=None,
             )
             import_builds_to_insert.append(import_build)
 
@@ -766,6 +769,9 @@ def aggregate_fetch_results(
 
         # Update repo config
         repo_config = repo_config_repo.find_by_id(repo_config_id)
+        if not repo_config:
+            raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
+
         repo_config_repo.update_repository(
             repo_config_id,
             {"builds_fetched": total_fetched},
@@ -1143,7 +1149,7 @@ def aggregate_model_ingestion_results(
         # Get resource status summary for stats
         resource_summary = import_build_repo.get_resource_status_summary(repo_config_id)
 
-        publish_status(
+        publish_model_repo_updated(
             repo_config_id,
             final_status.value,
             msg,
@@ -1152,8 +1158,6 @@ def aggregate_model_ingestion_results(
                 "builds_ingested": ingested,
                 "builds_missing_resource": missing_resource,
                 "builds_ingestion_failed": failed,
-                "last_synced_at": now.isoformat(),
-                "resource_status": resource_summary,
             },
         )
 
@@ -1489,6 +1493,9 @@ def x(
         status=ModelImportBuildStatus.FETCHED,
         ci_run_id=ci_run_id,
         commit_sha=commit_sha,
+        ingestion_started_at=None,
+        ingested_at=None,
+        ingestion_error=None,
     )
     result = import_build_repo.insert_one(import_build)
     import_build_id = str(result.id)
