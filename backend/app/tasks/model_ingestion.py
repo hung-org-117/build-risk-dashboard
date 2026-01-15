@@ -46,7 +46,7 @@ from app.tasks.base import PipelineTask, SafeTask, TaskState, TransientError
 from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.shared import ModelPipelineContext, build_workflow_with_context
-from app.tasks.shared.events import publish_model_repo_updated
+from app.tasks.shared.events import publish_ingestion_progress, publish_model_repo_updated
 
 logger = logging.getLogger(__name__)
 
@@ -947,7 +947,7 @@ def dispatch_ingestion(
                 ResourceStatus.IN_PROGRESS,
             )
 
-            publish_model_ingestion_progress(
+            publish_ingestion_progress(
                 repo_id=repo_config_id,
                 resource=resource,
                 status="in_progress",
