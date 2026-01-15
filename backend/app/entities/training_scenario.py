@@ -99,12 +99,6 @@ class TrainingScenario(BaseEntity):
     description: Optional[str] = None
     version: str = Field(default="1.0")
 
-    # Raw YAML config (for reference/editing)
-    yaml_config: str = Field(
-        default="",
-        description="Raw YAML configuration string",
-    )
-
     # Parsed configuration sections
     data_source_config: DataSourceConfig = Field(default_factory=DataSourceConfig)
     feature_config: FeatureConfig = Field(

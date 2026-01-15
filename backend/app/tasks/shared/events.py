@@ -169,6 +169,38 @@ def publish_scenario_update(
     return publish_event("SCENARIO_UPDATE", payload)
 
 
+def publish_enrichment_build_status(
+    scenario_id: str,
+    build_id: str,
+    extraction_status: str,
+    feature_count: int = 0,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    Publish enrichment build extraction status for real-time UI updates.
+
+    Args:
+        scenario_id: Training scenario ID
+        build_id: EnrichmentBuild ID
+        extraction_status: Status (pending, in_progress, completed, partial, failed)
+        feature_count: Number of features extracted
+        error: Optional error message
+
+    Returns:
+        True if published successfully, False otherwise
+    """
+    payload = {
+        "scenario_id": scenario_id,
+        "build_id": build_id,
+        "extraction_status": extraction_status,
+        "feature_count": feature_count,
+    }
+    if error:
+        payload["error"] = error
+
+    return publish_event("ENRICHMENT_BUILD_UPDATE", payload)
+
+
 def publish_scan_update(
     scenario_id: str,
     scan_id: str,

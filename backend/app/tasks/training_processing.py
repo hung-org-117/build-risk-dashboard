@@ -29,7 +29,10 @@ from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRe
 from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.tasks.base import PipelineTask, SafeTask, TaskState
-from app.tasks.shared.events import publish_scenario_update
+from app.tasks.shared.events import (
+    publish_enrichment_build_status,
+    publish_scenario_update,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +168,9 @@ def dispatch_scans_and_processing(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}")
+        logger.info(
+            f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}"
+        )
 
         scenario_repo = TrainingScenarioRepository(self.db)
         scenario = scenario_repo.find_by_id(scenario_id)
@@ -248,7 +253,9 @@ def dispatch_enrichment_batches(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}")
+        logger.info(
+            f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}"
+        )
 
         scenario_repo = TrainingScenarioRepository(self.db)
         ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
@@ -330,7 +337,9 @@ def dispatch_enrichment_batches(
             )
             enrichment_build_ids.append(str(eb.id))
 
-        logger.info(f"{corr_prefix} Created {len(enrichment_build_ids)} enrichment builds")
+        logger.info(
+            f"{corr_prefix} Created {len(enrichment_build_ids)} enrichment builds"
+        )
 
         # Get selected features from feature_config
         feature_config = scenario.feature_config
@@ -375,7 +384,9 @@ def dispatch_enrichment_batches(
         workflow.on_error(error_callback)
         workflow.apply_async()
 
-        logger.info(f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing")
+        logger.info(
+            f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing"
+        )
 
         publish_scenario_update(scenario)
 
@@ -414,7 +425,9 @@ def handle_processing_chain_error(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     error_msg = str(exc) if exc else "Unknown processing error"
 
-    logger.error(f"{corr_prefix} Processing chain failed for {scenario_id}: {error_msg}")
+    logger.error(
+        f"{corr_prefix} Processing chain failed for {scenario_id}: {error_msg}"
+    )
 
     enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
     scenario_repo = TrainingScenarioRepository(self.db)
@@ -609,6 +622,14 @@ def process_single_enrichment(
         # Increment processed count
         scenario_repo.increment_counter(scenario_id, "builds_features_extracted")
 
+        # Publish event for real-time UI update
+        publish_enrichment_build_status(
+            scenario_id=scenario_id,
+            build_id=enrichment_build_id,
+            extraction_status=result["status"],
+            feature_count=result.get("feature_count", 0),
+        )
+
         logger.info(
             f"{corr_prefix} [process_single] {enrichment_build_id}: "
             f"status={result['status']}, features={result.get('feature_count', 0)}"
@@ -637,8 +658,8 @@ def process_single_enrichment(
     base=SafeTask,
     name="app.tasks.training_processing.finalize_feature_extraction",
     queue="scenario_processing",
-    soft_time_limit=60,
-    time_limit=120,
+    soft_time_limit=160,
+    time_limit=220,
 )
 def finalize_feature_extraction(
     self: SafeTask,
@@ -695,6 +716,16 @@ def finalize_feature_extraction(
             logger.info(
                 f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
             )
+
+            # Trigger quality evaluation immediately after feature extraction
+            try:
+                from app.services.data_quality_service import DataQualityService
+
+                quality_service = DataQualityService(self.db)
+                quality_service.finalize_quality_report(scenario_id)
+                logger.info(f"{corr_prefix} Quality report finalized for {scenario_id}")
+            except Exception as e:
+                logger.warning(f"{corr_prefix} Quality evaluation failed: {e}")
 
             # Check if enrichment is fully complete (features + scans) and send notification
             from app.services.notification_service import (
@@ -886,8 +917,12 @@ def dispatch_scenario_scans(
             status_filter=IngestionStatus.INGESTED,
         )
 
-        raw_build_run_ids = [b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id]
-        raw_build_runs = raw_build_run_repo.find_by_ids([str(rid) for rid in raw_build_run_ids])
+        raw_build_run_ids = [
+            b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id
+        ]
+        raw_build_runs = raw_build_run_repo.find_by_ids(
+            [str(rid) for rid in raw_build_run_ids]
+        )
         build_run_map = {str(r.id): r for r in raw_build_runs}
 
         for build in ingested_builds:
@@ -941,16 +976,18 @@ def dispatch_scenario_scans(
         commits_list = list(commits_to_scan.values())
         batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
         batches = [
-            commits_list[i : i + batch_size] for i in range(0, len(commits_list), batch_size)
+            commits_list[i : i + batch_size]
+            for i in range(0, len(commits_list), batch_size)
         ]
 
         logger.info(
             f"{corr_prefix} Dispatching {len(commits_list)} commits in {len(batches)} batches"
         )
 
-        # Chain batches
+        # Chain batches - use .si() (immutable) to prevent previous task's result
+        # from being passed as first positional argument
         batch_tasks = [
-            process_scan_batch.s(
+            process_scan_batch.si(
                 scenario_id=scenario_id,
                 commits_batch=batch,
                 batch_index=i,
@@ -1146,7 +1183,8 @@ def retry_failed_scenario_scans(
     # Split into batches
     batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
     batches = [
-        scans_to_retry[i : i + batch_size] for i in range(0, len(scans_to_retry), batch_size)
+        scans_to_retry[i : i + batch_size]
+        for i in range(0, len(scans_to_retry), batch_size)
     ]
 
     logger.info(
@@ -1296,7 +1334,9 @@ def process_retry_scan_batch(
             # Check current status - skip if already COMPLETED in DB
             current_scan = sonar_repo.find_by_id(str(scan_id))
             if current_scan and current_scan.status == SonarScanStatus.COMPLETED.value:
-                logger.debug(f"{corr_prefix} Skip {scan_info['commit_sha'][:8]} - completed in DB")
+                logger.debug(
+                    f"{corr_prefix} Skip {scan_info['commit_sha'][:8]} - completed in DB"
+                )
                 skipped_completed += 1
                 continue
 
@@ -1314,7 +1354,9 @@ def process_retry_scan_batch(
 
             # Generate component key
             repo_name_safe = scan_info["repo_full_name"].replace("/", "_")
-            component_key = f"{scenario_id[:8]}_{repo_name_safe}_{scan_info['commit_sha'][:12]}"
+            component_key = (
+                f"{scenario_id[:8]}_{repo_name_safe}_{scan_info['commit_sha'][:12]}"
+            )
 
             # Check if project already exists on SonarQube server
             if sonar_tool._project_exists(component_key):

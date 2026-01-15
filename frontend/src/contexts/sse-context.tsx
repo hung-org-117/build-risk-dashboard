@@ -82,8 +82,8 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
             }
         };
 
-        // Listen for all event types
-        eventSource.onmessage = (event) => {
+        // Handler for all messages
+        const handleMessage = (event: MessageEvent) => {
             try {
                 const message: SSEMessage = JSON.parse(event.data);
                 const eventType = message.type;
@@ -105,6 +105,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
 
                 // Notify subscribers via context
                 if (subscribersRef.current[eventType]) {
+                    console.log(`[SSE] Dispatching ${eventType} to ${subscribersRef.current[eventType].size} subscribers:`, payload);
                     subscribersRef.current[eventType].forEach((callback) => {
                         try {
                             callback(payload);
@@ -117,6 +118,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
                 // Also dispatch as window custom event for components that need it
                 if ([
                     "ENRICHMENT_UPDATE",
+                    "ENRICHMENT_BUILD_UPDATE",
                     "DATASET_UPDATE",
                     "SCAN_UPDATE",
                     "INGESTION_ERROR",
@@ -134,6 +136,28 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
                 console.error("Failed to parse SSE message:", e);
             }
         };
+
+        // Listen for default message event
+        eventSource.onmessage = handleMessage;
+
+        // Explicitly listen for named events because EventSource doesn't fire onmessage for named events
+        const eventTypes = [
+            "ENRICHMENT_UPDATE",
+            "ENRICHMENT_BUILD_UPDATE",
+            "DATASET_UPDATE",
+            "SCAN_UPDATE",
+            "INGESTION_ERROR",
+            "SCAN_ERROR",
+            "INGESTION_BUILD_UPDATE",
+            "REPO_UPDATE",
+            "BUILD_UPDATE",
+            "SCENARIO_UPDATE",
+            "USER_NOTIFICATION"
+        ];
+
+        eventTypes.forEach(type => {
+            eventSource.addEventListener(type, handleMessage);
+        });
 
         eventSourceRef.current = eventSource;
     }, [toast]);
@@ -157,9 +181,12 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
             }
             subscribersRef.current[eventType].add(callback);
 
+            console.log(`[SSE Context] Subscribed to ${eventType}. Total subscribers: ${subscribersRef.current[eventType].size}`);
+
             return () => {
                 if (subscribersRef.current[eventType]) {
                     subscribersRef.current[eventType].delete(callback);
+                    console.log(`[SSE Context] Unsubscribed from ${eventType}. Remaining: ${subscribersRef.current[eventType]?.size || 0}`);
                     if (subscribersRef.current[eventType].size === 0) {
                         delete subscribersRef.current[eventType];
                     }

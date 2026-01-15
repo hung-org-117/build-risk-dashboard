@@ -214,9 +214,17 @@ export function UnifiedBuildsTable({
             }
         });
 
+        // Listen for individual ingestion build updates
+        const unsubscribeIngestion = subscribe("INGESTION_BUILD_UPDATE", (payload: { repo_id: string }) => {
+            if (payload.repo_id === repoId) {
+                loadBuilds(page);
+            }
+        });
+
         return () => {
             unsubscribeBuild();
             unsubscribeRepo();
+            unsubscribeIngestion();
         };
     }, [subscribe, loadBuilds, page, repoId]);
 

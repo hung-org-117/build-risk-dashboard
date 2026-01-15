@@ -238,25 +238,43 @@ class SettingsService:
         return self.get_settings()
 
     def get_decrypted_token(self, service: str) -> Optional[str]:
-        """Get decrypted token for a service (for internal use by runners/tasks)."""
+        """Get decrypted token for a service (for internal use by runners/tasks).
+
+        Priority: DB token > ENV token (fallback when DB token is empty)
+        """
         db_settings = self.repo.get_settings()
-        if not db_settings:
-            # Fallback to ENV
-            if service == "circleci":
+
+        # Helper to get ENV fallback
+        def _get_env_token(svc: str) -> Optional[str]:
+            if svc == "circleci":
                 return app_config.CIRCLECI_TOKEN
-            elif service == "travis":
+            elif svc == "travis":
                 return app_config.TRAVIS_TOKEN
-            elif service == "sonarqube":
+            elif svc == "sonarqube":
                 return app_config.SONAR_TOKEN
             return None
 
+        if not db_settings:
+            # DB settings not initialized - use ENV
+            return _get_env_token(service)
+
+        # Get token from DB, fallback to ENV if empty
+        token = None
         if service == "circleci":
-            return self._decrypt_token(db_settings.circleci.token_encrypted or "")
+            token = self._decrypt_token(db_settings.circleci.token_encrypted or "")
         elif service == "travis":
-            return self._decrypt_token(db_settings.travis.token_encrypted or "")
+            token = self._decrypt_token(db_settings.travis.token_encrypted or "")
         elif service == "sonarqube":
-            return self._decrypt_token(db_settings.sonarqube.token_encrypted or "")
-        return None
+            token = self._decrypt_token(db_settings.sonarqube.token_encrypted or "")
+
+        # Fallback to ENV if DB token is empty
+        if not token:
+            env_token = _get_env_token(service)
+            if env_token:
+                logger.info(f"Using ENV fallback for {service} token (DB token empty)")
+                return env_token
+
+        return token
 
     def initialize_from_env(self) -> bool:
         """Initialize DB settings from ENV vars if not already exists.
@@ -290,7 +308,8 @@ class SettingsService:
                 default_config=DEFAULT_SONARQUBE_CONFIG,
             ),
             trivy=TrivySettings(
-                server_url=getattr(app_config, "TRIVY_SERVER_URL", None),
+                server_url=getattr(app_config, "TRIVY_SERVER_URL", None)
+                or "http://localhost:4954",
                 default_config=DEFAULT_TRIVY_CONFIG,
             ),
         )

@@ -227,7 +227,6 @@ export interface TrainingScenarioRecord {
   name: string;
   description?: string | null;
   version: string;
-  yaml_config: string;
   data_source_config: DataSourceConfig;
   feature_config: FeatureConfig;
   splitting_config: SplittingConfig;

@@ -60,6 +60,7 @@ export default function ProcessingBuildsPage() {
 
     // Fetch enrichment builds
     const fetchBuilds = useCallback(async () => {
+        console.log("[ProcessingBuilds] fetchBuilds called. Loading:", loading);
         setLoading(true);
         try {
             const response = await trainingScenariosApi.getEnrichmentBuilds(scenarioId, {
@@ -81,13 +82,33 @@ export default function ProcessingBuildsPage() {
 
     // SSE subscription - refetch on scenario updates
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (payload: { scenario_id?: string }) => {
+        console.log("[ProcessingBuilds] Setting up SSE subscriptions for scenario:", scenarioId);
+
+        const unsubscribeScenario = subscribe("SCENARIO_UPDATE", (payload: { scenario_id?: string }) => {
             if (payload.scenario_id === scenarioId) {
                 fetchScenario();
                 fetchBuilds();
             }
         });
-        return () => unsubscribe();
+
+        // Listen for individual enrichment build updates
+        const unsubscribeEnrichment = subscribe("ENRICHMENT_BUILD_UPDATE", (payload: { scenario_id?: string }) => {
+            console.log("[ProcessingBuilds] Received ENRICHMENT_BUILD_UPDATE:", payload, "expecting scenarioId:", scenarioId);
+            if (payload.scenario_id === scenarioId) {
+                console.log("[ProcessingBuilds] Matched! Calling fetchBuilds...");
+                fetchBuilds();
+            } else {
+                console.log("[ProcessingBuilds] NOT matched - payload.scenario_id:", payload.scenario_id, "!==", scenarioId);
+            }
+        });
+
+        console.log("[ProcessingBuilds] Subscriptions registered");
+
+        return () => {
+            console.log("[ProcessingBuilds] Cleaning up SSE subscriptions");
+            unsubscribeScenario();
+            unsubscribeEnrichment();
+        };
     }, [subscribe, scenarioId, fetchScenario, fetchBuilds]);
 
     // Retry handler

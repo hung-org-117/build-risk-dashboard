@@ -21,7 +21,9 @@ class FeatureConfigDTO(BaseModel):
     scan_metrics: Dict[str, List[str]] = {}
     # Tool configurations (editable via UI)
     scan_tool_config: Dict[str, Any] = {}  # SonarQube/Trivy tool settings
-    extractor_configs: Dict[str, Any] = {}  # Per-language/framework extractor settings: { global: {...}, repos: {...} }
+    extractor_configs: Dict[str, Any] = (
+        {}
+    )  # Per-language/framework extractor settings: { global: {...}, repos: {...} }
 
 
 class TrainingScenarioCreateDTO(BaseModel):
@@ -53,7 +55,6 @@ class TrainingScenarioResponse(BaseModel):
     # Configs (serialized)
     data_source_config: DataSourceConfigDTO
     feature_config: FeatureConfigDTO  # Includes scan_tool_config and extractor_configs
-    yaml_config: Optional[str] = ""
 
     # Statistics
     builds_total: int = 0

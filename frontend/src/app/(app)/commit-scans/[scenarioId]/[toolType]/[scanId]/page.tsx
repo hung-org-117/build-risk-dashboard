@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
     ArrowLeft,
@@ -12,11 +12,12 @@ import {
     Shield,
     BarChart3,
     RotateCcw,
-    ExternalLink
+    Search
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
     Card,
     CardContent,
@@ -29,6 +30,7 @@ import {
     CommitScanRecord
 } from "@/lib/api/training-scenarios";
 import { formatDateTime } from "@/lib/utils";
+import { FeatureValue } from "@/components/shared/feature-value";
 
 function ScanStatusBadge({ status }: { status: string }) {
     const s = status.toLowerCase();
@@ -78,6 +80,7 @@ export default function ScanDetailPage() {
     const [scan, setScan] = useState<CommitScanRecord | null>(null);
     const [loading, setLoading] = useState(true);
     const [retrying, setRetrying] = useState(false);
+    const [metricSearch, setMetricSearch] = useState("");
 
     const loadScan = async () => {
         setLoading(true);
@@ -109,6 +112,16 @@ export default function ScanDetailPage() {
             setRetrying(false);
         }
     };
+
+    const metricEntries = useMemo(() => {
+        if (!scan?.metrics) return [];
+        return Object.entries(scan.metrics)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .filter(([key]) =>
+                metricSearch === "" ||
+                key.toLowerCase().includes(metricSearch.toLowerCase())
+            );
+    }, [scan, metricSearch]);
 
     if (loading) {
         return (
@@ -289,20 +302,51 @@ export default function ScanDetailPage() {
                     <CardDescription>Risk metrics collected by the tool</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {scan.metrics && Object.keys(scan.metrics).length > 0 ? (
-                        <div className="rounded-md border text-sm">
-                            <table className="w-full">
-                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {Object.entries(scan.metrics).map(([key, value]) => (
-                                        <tr key={key}>
-                                            <td className="px-4 py-3 font-medium text-slate-500 w-[50%]">{key}</td>
-                                            <td className="px-4 py-3 text-right font-mono text-foreground">
-                                                {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                            </td>
+                    {metricEntries.length > 0 || metricSearch !== "" ? (
+                        <div className="space-y-4">
+                            <div className="relative max-w-sm">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    placeholder="Search metrics..."
+                                    value={metricSearch}
+                                    onChange={(e) => setMetricSearch(e.target.value)}
+                                    className="pl-9"
+                                />
+                            </div>
+                            <div className="rounded-lg border overflow-hidden max-h-[500px] overflow-y-auto relative">
+                                <table className="w-full text-sm relative">
+                                    <thead className="sticky top-0 z-10">
+                                        <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+                                            <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                                                Metric Name
+                                            </th>
+                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground bg-slate-50 dark:bg-slate-900">
+                                                Value
+                                            </th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                        {metricEntries.length > 0 ? (
+                                            metricEntries.map(([key, value]) => (
+                                                <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
+                                                    <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
+                                                        {key}
+                                                    </td>
+                                                    <td className="px-4 py-3 align-top">
+                                                        <FeatureValue value={value} />
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        ) : (
+                                            <tr>
+                                                <td colSpan={2} className="px-4 py-8 text-center text-muted-foreground">
+                                                    No metrics match your search.
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     ) : (
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">

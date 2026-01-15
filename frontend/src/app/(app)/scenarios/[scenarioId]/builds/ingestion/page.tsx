@@ -218,15 +218,26 @@ export default function IngestionBuildsPage() {
         fetchBuilds();
     }, [fetchScenario, fetchBuilds]);
 
-    // SSE subscription - refetch on scenario updates
+    // SSE subscription - refetch on scenario and build updates
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (payload: { scenario_id?: string }) => {
+        const unsubscribeScenario = subscribe("SCENARIO_UPDATE", (payload: { scenario_id?: string }) => {
             if (payload.scenario_id === scenarioId) {
                 fetchScenario();
                 fetchBuilds();
             }
         });
-        return () => unsubscribe();
+
+        // Listen for individual ingestion build updates
+        const unsubscribeIngestion = subscribe("INGESTION_BUILD_UPDATE", (payload: { scenario_id?: string }) => {
+            if (payload.scenario_id === scenarioId) {
+                fetchBuilds();
+            }
+        });
+
+        return () => {
+            unsubscribeScenario();
+            unsubscribeIngestion();
+        };
     }, [subscribe, scenarioId, fetchScenario, fetchBuilds]);
 
     // Action handlers

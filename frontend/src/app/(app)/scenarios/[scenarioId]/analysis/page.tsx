@@ -70,12 +70,12 @@ export default function ScenarioAnalysisPage() {
     // =============================================================================
     // Derived State for Progressive Availability
     // =============================================================================
-    
+
     const isProcessing = scenario?.status === "processing";
     const isProcessed = scenario?.status === "processed";
     const featuresCompleted = scenario?.feature_extraction_completed ?? false;
     const scansCompleted = scenario?.scan_extraction_completed ?? false;
-    
+
     // Scan progress
     const scansTotal = scenario?.scans_total ?? 0;
     const scansFinished = (scenario?.scans_completed ?? 0) + (scenario?.scans_failed ?? 0);
@@ -112,7 +112,7 @@ export default function ScenarioAnalysisPage() {
                                     {isProcessing ? "Feature Extraction in Progress" : "Analysis Not Available"}
                                 </h3>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    {isProcessing 
+                                    {isProcessing
                                         ? `Extracting features... ${scenario.builds_features_extracted}/${scenario.builds_total} builds processed`
                                         : "Start the processing phase to extract features and generate analysis."
                                     }
@@ -122,9 +122,9 @@ export default function ScenarioAnalysisPage() {
                                 Status: {scenario.status}
                             </Badge>
                             {isProcessing && (
-                                <Progress 
-                                    value={(scenario.builds_features_extracted / Math.max(scenario.builds_total, 1)) * 100} 
-                                    className="w-64 h-2" 
+                                <Progress
+                                    value={(scenario.builds_features_extracted / Math.max(scenario.builds_total, 1)) * 100}
+                                    className="w-64 h-2"
                                 />
                             )}
                         </div>
@@ -137,7 +137,7 @@ export default function ScenarioAnalysisPage() {
     // =============================================================================
     // Case 2 & 3: Features done - show analysis (with or without complete scans)
     // =============================================================================
-    
+
     // If no quality report yet but features are done, show message
     if (!qualityReport?.available) {
         return (
@@ -175,35 +175,6 @@ export default function ScenarioAnalysisPage() {
                     Refresh
                 </Button>
             </div>
-
-            {/* Scan Progress Banner - shown when scans are still running */}
-            {scansRunning && (
-                <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/50">
-                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                    <AlertTitle className="text-blue-800 dark:text-blue-200">Scans In Progress</AlertTitle>
-                    <AlertDescription className="text-blue-700 dark:text-blue-300">
-                        <div className="flex items-center justify-between mt-2">
-                            <span>
-                                Security and quality scans are still running ({scansFinished}/{scansTotal} completed).
-                                Scan metrics will be updated automatically.
-                            </span>
-                            <span className="font-medium">{scansProgress}%</span>
-                        </div>
-                        <Progress value={scansProgress} className="h-1.5 mt-2" />
-                    </AlertDescription>
-                </Alert>
-            )}
-
-            {/* All Complete Banner */}
-            {scansCompleted && featuresCompleted && (
-                <Alert className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/50">
-                    <Shield className="h-4 w-4 text-green-600" />
-                    <AlertTitle className="text-green-800 dark:text-green-200">Analysis Complete</AlertTitle>
-                    <AlertDescription className="text-green-700 dark:text-green-300">
-                        All features extracted and scans completed. Data is ready for export.
-                    </AlertDescription>
-                </Alert>
-            )}
 
             <Tabs defaultValue="quality" className="space-y-4">
                 <TabsList>
@@ -447,7 +418,7 @@ export default function ScenarioAnalysisPage() {
                             </CardContent>
                         </Card>
                     )}
-                    
+
                     {qualityReport?.scan_metrics_summary ? (
                         <>
                             {/* Scan Coverage Summary */}
@@ -590,7 +561,7 @@ export default function ScenarioAnalysisPage() {
                                     <div>
                                         <h3 className="font-semibold">No Scan Metrics Available</h3>
                                         <p className="text-sm text-muted-foreground mt-1">
-                                            {scansTotal === 0 
+                                            {scansTotal === 0
                                                 ? "No scans were configured for this scenario."
                                                 : "Scan metrics not available. Try refreshing the page."
                                             }

@@ -90,7 +90,7 @@ class DataQualityService:
 
         try:
             # Get all enrichment builds for this scenario
-            builds = self.build_repo.find_by_scenario(scenario_id)
+            builds, _ = self.build_repo.find_by_scenario(scenario_id)
 
             if not builds:
                 report.mark_failed("No enrichment builds found for this scenario")

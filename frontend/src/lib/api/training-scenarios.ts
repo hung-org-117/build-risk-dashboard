@@ -414,7 +414,6 @@ export interface DataQualityReport {
 export interface CreateTrainingScenarioPayload {
     name: string;
     description?: string;
-    yaml_config?: string;  // Optional - use if importing from YAML
     data_source_config?: {
         languages?: string[];
         build_source_ids?: string[];

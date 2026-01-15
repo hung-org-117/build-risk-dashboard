@@ -213,6 +213,21 @@ def start_trivy_scan_for_version_commit(
                 builds_affected=updated_count,
             )
 
+            # Update Quality Report incrementally
+            try:
+                from app.services.data_quality_service import DataQualityService
+
+                quality_service = DataQualityService(db)
+                quality_service.update_scan_metrics_incremental(
+                    scenario_id=scenario_id,
+                    scan_type="trivy",
+                    has_metrics=bool(filtered_metrics),
+                )
+            except Exception as e:
+                logger.warning(
+                    f"{corr_prefix} Failed to update quality report scan metrics: {e}"
+                )
+
             # Increment scans_completed counter (context-aware for version or scenario)
             from app.tasks.shared.scan_context_helpers import (
                 check_and_mark_scans_completed,

@@ -85,7 +85,6 @@ class TrainingScenarioService:
                 scan_tool_config=scenario.feature_config.scan_tool_config,
                 extractor_configs=scenario.feature_config.extractor_configs,
             ),
-            yaml_config=scenario.yaml_config,
             builds_total=scenario.builds_total,
             builds_ingested=scenario.builds_ingested,
             builds_features_extracted=scenario.builds_features_extracted,
@@ -171,7 +170,6 @@ class TrainingScenarioService:
             name=data.name,
             description=data.description,
             version=data.version,
-            yaml_config="",  # Deprecated
             data_source_config=data_source_config,
             feature_config=feature_config,
             status=ScenarioStatus.QUEUED,

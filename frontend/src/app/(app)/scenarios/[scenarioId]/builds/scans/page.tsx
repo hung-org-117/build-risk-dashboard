@@ -151,29 +151,28 @@ export default function ScansPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scenarioId, trivyPage, sonarPage, activeTab]);
 
-    // Listen for real-time SCAN_UPDATE events
+    // Listen for real-time SCAN_UPDATE events via SSE
     useEffect(() => {
-        const handleScanUpdate = (event: CustomEvent<{
+        const unsubscribeScan = subscribe("SCAN_UPDATE", (payload: {
             scenario_id?: string;
             scan_id: string;
             commit_sha: string;
             tool_type: string;
             status: string;
-        }>) => {
-            if (event.detail.scenario_id === scenarioId) {
+        }) => {
+            if (payload.scenario_id === scenarioId) {
                 fetchScans(true);
             }
-        };
+        });
 
-        window.addEventListener("SCAN_UPDATE", handleScanUpdate as EventListener);
         return () => {
-            window.removeEventListener("SCAN_UPDATE", handleScanUpdate as EventListener);
+            unsubscribeScan();
         };
-    }, [scenarioId, fetchScans]);
+    }, [subscribe, scenarioId, fetchScans]);
 
-    // Subscribe to SSE for scenario scan progress updates
+    // Subscribe to SSE for scenario scan progress and individual scan updates
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: any) => {
+        const unsubscribeScenario = subscribe("SCENARIO_UPDATE", (data: any) => {
             if (data.scenario_id === scenarioId) {
                 setScanProgress({
                     scans_total: data.scans_total ?? 0,
@@ -183,8 +182,19 @@ export default function ScansPage() {
                 });
             }
         });
-        return () => unsubscribe();
-    }, [subscribe, scenarioId]);
+
+        // Listen for individual scan updates
+        const unsubscribeScan = subscribe("SCAN_UPDATE", (data: any) => {
+            if (data.scenario_id === scenarioId) {
+                fetchScans(true);
+            }
+        });
+
+        return () => {
+            unsubscribeScenario();
+            unsubscribeScan();
+        };
+    }, [subscribe, scenarioId, fetchScans]);
 
     // Listen for SCAN_ERROR events
     useEffect(() => {

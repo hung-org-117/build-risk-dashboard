@@ -70,46 +70,6 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
             limit=batch_size,
         )
 
-    def bulk_create_from_ingestion_builds(
-        self,
-        scenario_id: str,
-        ingestion_build_data: List[Dict[str, Any]],
-    ) -> int:
-        """
-        Bulk create enrichment builds from ingested builds.
-
-        Args:
-            scenario_id: Scenario ID
-            ingestion_build_data: List of dicts with ingestion build info
-
-        Returns:
-            Number of enrichment builds created
-        """
-        if not ingestion_build_data:
-            return 0
-
-        scenario_oid = self._to_object_id(scenario_id)
-        documents = []
-
-        for data in ingestion_build_data:
-            doc = TrainingEnrichmentBuild(
-                scenario_id=scenario_oid,
-                ingestion_build_id=data["ingestion_build_id"],
-                raw_repo_id=data["raw_repo_id"],
-                raw_build_run_id=data["raw_build_run_id"],
-                ci_run_id=data.get("ci_run_id", ""),
-                commit_sha=data.get("commit_sha", ""),
-                repo_full_name=data.get("repo_full_name", ""),
-                outcome=data.get("outcome"),
-                group_value=data.get("group_value"),
-                build_started_at=data.get("build_started_at"),
-                extraction_status=ExtractionStatus.PENDING,
-            )
-            documents.append(doc)
-
-        inserted = self.insert_many(documents)
-        return len(inserted)
-
     def upsert_for_ingestion_build(
         self,
         scenario_id: str,
@@ -136,6 +96,20 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         if existing:
             return existing
 
+        # Eagerly create FeatureVector (race condition fix)
+        from app.entities.enums import FeatureVectorScope
+        from app.repositories.feature_vector import FeatureVectorRepository
+
+        fv_repo = FeatureVectorRepository(self.db)
+        fv = fv_repo.upsert_features(
+            raw_repo_id=self._to_object_id(raw_repo_id),
+            raw_build_run_id=self._to_object_id(raw_build_run_id),
+            features={},
+            scope=FeatureVectorScope.DATASET.value,
+            config_id=self._to_object_id(scenario_id),
+            extraction_status=ExtractionStatus.PENDING,
+        )
+
         doc = TrainingEnrichmentBuild(
             scenario_id=self._to_object_id(scenario_id),
             ingestion_build_id=self._to_object_id(ingestion_build_id),
@@ -147,6 +121,7 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
             outcome=outcome,
             build_started_at=build_started_at,
             extraction_status=ExtractionStatus.PENDING,
+            feature_vector_id=fv.id,  # Link immediately
         )
         return self.insert_one(doc)
 

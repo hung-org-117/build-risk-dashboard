@@ -169,7 +169,7 @@ def start_sonar_scan_for_version_commit(
     bind=True,
     base=PipelineTask,
     name="app.tasks.sonar.export_metrics_from_webhook",
-    queue="dataset_processing",
+    queue="scenario_processing",
     soft_time_limit=120,
     time_limit=180,
 )
@@ -301,6 +301,19 @@ def export_metrics_from_webhook(
             metrics=metrics,
             builds_affected=updated_count,
         )
+
+        # Update Quality Report incrementally
+        try:
+            from app.services.data_quality_service import DataQualityService
+
+            quality_service = DataQualityService(db)
+            quality_service.update_scan_metrics_incremental(
+                scenario_id=scenario_id_str,
+                scan_type="sonarqube",
+                has_metrics=bool(metrics),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update quality report scan metrics: {e}")
 
         # Increment scans_completed (context-aware for version or scenario)
         from app.tasks.shared.scan_context_helpers import (
