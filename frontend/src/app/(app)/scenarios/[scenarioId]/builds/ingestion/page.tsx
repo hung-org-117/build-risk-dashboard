@@ -38,6 +38,7 @@ import {
     from "@/lib/api/training-scenarios";
 import { useSSE } from "@/contexts/sse-context";
 import { useToast } from "@/components/ui/use-toast";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 
 import { IngestionStatusBadge, TablePagination, ResourceStatusIndicator } from "@/components/builds";
 import { cn, formatTimestamp } from "@/lib/utils";
@@ -218,19 +219,59 @@ export default function IngestionBuildsPage() {
         fetchBuilds();
     }, [fetchScenario, fetchBuilds]);
 
-    // SSE subscription - refetch on scenario and build updates
+    // Debounced refetch for scenario updates that affect aggregate stats
+    const debouncedFetchBuilds = useDebouncedCallback(fetchBuilds, 1000, {
+        leading: true,
+        trailing: true,
+    });
+
+    // SSE subscription - merge delta for individual builds, debounce scenario updates
     useEffect(() => {
-        const unsubscribeScenario = subscribe("SCENARIO_UPDATE", (payload: { scenario_id?: string }) => {
+        // For scenario-level updates, use debounced refetch (affects stats, not individual rows)
+        const unsubscribeScenario = subscribe("SCENARIO.UPDATED", (payload: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
             if (payload.scenario_id === scenarioId) {
-                fetchScenario();
-                fetchBuilds();
+                // Merge scenario stats directly instead of refetch
+                setScenario((prev) =>
+                    prev
+                        ? {
+                            ...prev,
+                            ...payload,
+                            status: payload.status || prev.status,
+                        }
+                        : prev
+                );
+                // Debounced refetch for builds only when status changes
+                if (payload.status && ["ingesting", "ingested", "failed"].includes(payload.status)) {
+                    debouncedFetchBuilds();
+                }
             }
         });
 
-        // Listen for individual ingestion build updates
-        const unsubscribeIngestion = subscribe("INGESTION_BUILD_UPDATE", (payload: { scenario_id?: string }) => {
-            if (payload.scenario_id === scenarioId) {
-                fetchBuilds();
+        // For individual ingestion build updates - merge delta into local state
+        const unsubscribeIngestion = subscribe("SCENARIO.INGESTION.UPDATED", (payload: {
+            scenario_id?: string;
+            build_id: string;
+            status: string;
+            resource_status?: Record<string, { status: string; error?: string }>;
+            ci_run_id?: string;
+            commit_sha?: string;
+            repo_full_name?: string;
+        }) => {
+            if (payload.scenario_id === scenarioId && payload.build_id) {
+                // Merge delta into existing data - no refetch needed!
+                setData((prev) => {
+                    if (!prev) return prev;
+                    const updatedItems = prev.items.map((build) =>
+                        build.id === payload.build_id
+                            ? {
+                                ...build,
+                                status: (payload.status as TrainingIngestionBuildRecord["status"]) || build.status,
+                                resource_status: payload.resource_status || build.resource_status,
+                            }
+                            : build
+                    );
+                    return { ...prev, items: updatedItems };
+                });
             }
         });
 
@@ -238,7 +279,7 @@ export default function IngestionBuildsPage() {
             unsubscribeScenario();
             unsubscribeIngestion();
         };
-    }, [subscribe, scenarioId, fetchScenario, fetchBuilds]);
+    }, [subscribe, scenarioId, debouncedFetchBuilds]);
 
     // Action handlers
     const handleStartProcessing = async () => {

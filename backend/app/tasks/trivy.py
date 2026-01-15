@@ -17,7 +17,7 @@ from app.integrations.tools.trivy import TrivyTool
 from app.paths import get_worktree_path
 from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
 from app.tasks.base import SafeTask, TaskState
-from app.tasks.shared.events import publish_scan_update
+from app.tasks.shared.events import publish_scenario_scan_updated
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def start_trivy_scan_for_version_commit(
         """Mark scan as failed and publish error."""
         error_msg = str(exc)
         trivy_scan_repo.mark_failed(scan_record.id, error_msg)
-        publish_scan_update(
+        publish_scenario_scan_updated(
             scenario_id=scenario_id,
             scan_id=str(scan_record.id),
             commit_sha=commit_sha,
@@ -122,9 +122,7 @@ def start_trivy_scan_for_version_commit(
 
             worktree_path = get_worktree_path(github_repo_id, commit_sha)
             if not worktree_path.exists():
-                error_msg = (
-                    f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
-                )
+                error_msg = f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
                 logger.error(error_msg)
                 trivy_scan_repo.mark_failed(scan_record.id, error_msg)
                 raise ValueError(error_msg)
@@ -133,7 +131,7 @@ def start_trivy_scan_for_version_commit(
 
             # Mark as scanning
             trivy_scan_repo.mark_scanning(scan_record.id)
-            publish_scan_update(
+            publish_scenario_scan_updated(
                 scenario_id=scenario_id,
                 scan_id=str(scan_record.id),
                 commit_sha=commit_sha,
@@ -161,9 +159,7 @@ def start_trivy_scan_for_version_commit(
 
             if scan_result.get("status") == "failed":
                 error_msg = scan_result.get("error", "Unknown error")
-                logger.error(
-                    f"{corr_prefix} Trivy scan failed for {commit_sha[:8]}: {error_msg}"
-                )
+                logger.error(f"{corr_prefix} Trivy scan failed for {commit_sha[:8]}: {error_msg}")
                 trivy_scan_repo.mark_failed(scan_record.id, error_msg)
                 return {"status": "error", "error": error_msg}
 
@@ -203,7 +199,7 @@ def start_trivy_scan_for_version_commit(
                 f"backfilled to {updated_count} builds ({scan_duration_ms}ms)"
             )
 
-            publish_scan_update(
+            publish_scenario_scan_updated(
                 scenario_id=scenario_id,
                 scan_id=str(scan_record.id),
                 commit_sha=commit_sha,
@@ -224,9 +220,7 @@ def start_trivy_scan_for_version_commit(
                     has_metrics=bool(filtered_metrics),
                 )
             except Exception as e:
-                logger.warning(
-                    f"{corr_prefix} Failed to update quality report scan metrics: {e}"
-                )
+                logger.warning(f"{corr_prefix} Failed to update quality report scan metrics: {e}")
 
             # Increment scans_completed counter (context-aware for version or scenario)
             from app.tasks.shared.scan_context_helpers import (
@@ -249,9 +243,7 @@ def start_trivy_scan_for_version_commit(
                 if pipeline_ctx:
                     pipeline_ctx.check_and_notify_completed()
             except Exception as e:
-                logger.warning(
-                    f"{corr_prefix} Failed to check completion notification: {e}"
-                )
+                logger.warning(f"{corr_prefix} Failed to check completion notification: {e}")
 
             state.phase = "DONE"
 

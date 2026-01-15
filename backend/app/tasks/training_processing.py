@@ -30,8 +30,8 @@ from app.repositories.training_ingestion_build import TrainingIngestionBuildRepo
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.tasks.base import PipelineTask, SafeTask, TaskState
 from app.tasks.shared.events import (
-    publish_enrichment_build_status,
-    publish_scenario_update,
+    publish_scenario_processing_updated,
+    publish_scenario_updated,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def _create_scenario_failure_handler(scenario_id: str, db):
                 return_updated=True,
             )
             if updated_scenario:
-                publish_scenario_update(updated_scenario, error=error_message)
+                publish_scenario_updated(updated_scenario, error=error_message)
         except Exception as e:
             logger.warning(f"Failed to update scenario {scenario_id}: {e}")
 
@@ -121,7 +121,7 @@ def start_scenario_processing(
         )
 
         if scenario:
-            publish_scenario_update(scenario)
+            publish_scenario_updated(scenario)
 
         # Dispatch scans and processing
         dispatch_scans_and_processing.delay(
@@ -168,9 +168,7 @@ def dispatch_scans_and_processing(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(
-            f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}"
-        )
+        logger.info(f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}")
 
         scenario_repo = TrainingScenarioRepository(self.db)
         scenario = scenario_repo.find_by_id(scenario_id)
@@ -253,9 +251,7 @@ def dispatch_enrichment_batches(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(
-            f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}"
-        )
+        logger.info(f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}")
 
         scenario_repo = TrainingScenarioRepository(self.db)
         ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
@@ -291,7 +287,7 @@ def dispatch_enrichment_batches(
                 return_updated=True,
             )
             if updated_scenario:
-                publish_scenario_update(updated_scenario)
+                publish_scenario_updated(updated_scenario)
             return {"status": "completed", "builds_features_extracted": 0}
 
         # Get raw build run data for outcome determination and temporal ordering
@@ -337,9 +333,7 @@ def dispatch_enrichment_batches(
             )
             enrichment_build_ids.append(str(eb.id))
 
-        logger.info(
-            f"{corr_prefix} Created {len(enrichment_build_ids)} enrichment builds"
-        )
+        logger.info(f"{corr_prefix} Created {len(enrichment_build_ids)} enrichment builds")
 
         # Get selected features from feature_config
         feature_config = scenario.feature_config
@@ -384,11 +378,9 @@ def dispatch_enrichment_batches(
         workflow.on_error(error_callback)
         workflow.apply_async()
 
-        logger.info(
-            f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing"
-        )
+        logger.info(f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing")
 
-        publish_scenario_update(scenario)
+        publish_scenario_updated(scenario)
 
         return {
             "status": "dispatched",
@@ -425,9 +417,7 @@ def handle_processing_chain_error(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     error_msg = str(exc) if exc else "Unknown processing error"
 
-    logger.error(
-        f"{corr_prefix} Processing chain failed for {scenario_id}: {error_msg}"
-    )
+    logger.error(f"{corr_prefix} Processing chain failed for {scenario_id}: {error_msg}")
 
     enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
     scenario_repo = TrainingScenarioRepository(self.db)
@@ -473,7 +463,7 @@ def handle_processing_chain_error(
         )
 
         if updated_scenario:
-            publish_scenario_update(updated_scenario)
+            publish_scenario_updated(updated_scenario)
 
         # Check and notify enrichment completion (if scans also done)
         from app.services.notification_service import (
@@ -495,7 +485,7 @@ def handle_processing_chain_error(
         )
 
         if updated_scenario:
-            publish_scenario_update(updated_scenario, error=error_msg)
+            publish_scenario_updated(updated_scenario, error=error_msg)
 
         # Notify failure
         from app.services.notification_service import notify_dataset_enrichment_failed
@@ -622,12 +612,21 @@ def process_single_enrichment(
         # Increment processed count
         scenario_repo.increment_counter(scenario_id, "builds_features_extracted")
 
-        # Publish event for real-time UI update
-        publish_enrichment_build_status(
+        # Get expected feature count from scenario config
+        expected_feature_count = len(selected_features) if selected_features else 0
+
+        # Publish event for real-time UI update with enriched payload
+        publish_scenario_processing_updated(
             scenario_id=scenario_id,
             build_id=enrichment_build_id,
             extraction_status=result["status"],
             feature_count=result.get("feature_count", 0),
+            expected_feature_count=expected_feature_count,
+            ci_run_id=str(raw_build_run.ci_run_id) if raw_build_run else None,
+            commit_sha=raw_build_run.commit_sha if raw_build_run else None,
+            repo_full_name=raw_repo.full_name if raw_repo else None,
+            enriched_at=datetime.utcnow().isoformat(),
+            error="; ".join(result.get("errors", [])) if result.get("errors") else None,
         )
 
         logger.info(
@@ -711,7 +710,7 @@ def finalize_feature_extraction(
         )
 
         if updated_scenario:
-            publish_scenario_update(updated_scenario)
+            publish_scenario_updated(updated_scenario)
 
             logger.info(
                 f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
@@ -917,12 +916,8 @@ def dispatch_scenario_scans(
             status_filter=IngestionStatus.INGESTED,
         )
 
-        raw_build_run_ids = [
-            b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id
-        ]
-        raw_build_runs = raw_build_run_repo.find_by_ids(
-            [str(rid) for rid in raw_build_run_ids]
-        )
+        raw_build_run_ids = [b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id]
+        raw_build_runs = raw_build_run_repo.find_by_ids([str(rid) for rid in raw_build_run_ids])
         build_run_map = {str(r.id): r for r in raw_build_runs}
 
         for build in ingested_builds:
@@ -963,7 +958,7 @@ def dispatch_scenario_scans(
                 return_updated=True,
             )
             if updated_scenario:
-                publish_scenario_update(updated_scenario)
+                publish_scenario_updated(updated_scenario)
             return {"status": "skipped", "reason": "No commits found"}
 
         # Calculate scans_total
@@ -976,8 +971,7 @@ def dispatch_scenario_scans(
         commits_list = list(commits_to_scan.values())
         batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
         batches = [
-            commits_list[i : i + batch_size]
-            for i in range(0, len(commits_list), batch_size)
+            commits_list[i : i + batch_size] for i in range(0, len(commits_list), batch_size)
         ]
 
         logger.info(
@@ -1015,7 +1009,7 @@ def dispatch_scenario_scans(
         # Refresh scenario with updated scans_total and publish
         scenario = scenario_repo.find_by_id(scenario_id)
         if scenario:
-            publish_scenario_update(scenario)
+            publish_scenario_updated(scenario)
 
         return {
             "status": "dispatched",
@@ -1183,8 +1177,7 @@ def retry_failed_scenario_scans(
     # Split into batches
     batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
     batches = [
-        scans_to_retry[i : i + batch_size]
-        for i in range(0, len(scans_to_retry), batch_size)
+        scans_to_retry[i : i + batch_size] for i in range(0, len(scans_to_retry), batch_size)
     ]
 
     logger.info(
@@ -1334,9 +1327,7 @@ def process_retry_scan_batch(
             # Check current status - skip if already COMPLETED in DB
             current_scan = sonar_repo.find_by_id(str(scan_id))
             if current_scan and current_scan.status == SonarScanStatus.COMPLETED.value:
-                logger.debug(
-                    f"{corr_prefix} Skip {scan_info['commit_sha'][:8]} - completed in DB"
-                )
+                logger.debug(f"{corr_prefix} Skip {scan_info['commit_sha'][:8]} - completed in DB")
                 skipped_completed += 1
                 continue
 
@@ -1354,9 +1345,7 @@ def process_retry_scan_batch(
 
             # Generate component key
             repo_name_safe = scan_info["repo_full_name"].replace("/", "_")
-            component_key = (
-                f"{scenario_id[:8]}_{repo_name_safe}_{scan_info['commit_sha'][:12]}"
-            )
+            component_key = f"{scenario_id[:8]}_{repo_name_safe}_{scan_info['commit_sha'][:12]}"
 
             # Check if project already exists on SonarQube server
             if sonar_tool._project_exists(component_key):

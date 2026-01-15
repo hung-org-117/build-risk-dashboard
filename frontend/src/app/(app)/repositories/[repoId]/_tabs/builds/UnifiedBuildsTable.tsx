@@ -1,41 +1,41 @@
 "use client";
 
 import {
-    AlertCircle,
-    CheckCircle2,
-    ChevronDown,
-    ChevronRight,
-    Clock,
-    ExternalLink,
-    GitBranch,
-    GitCommit,
-    Loader2,
-    RefreshCw,
-    RotateCcw,
-    Settings,
-    XCircle,
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  ExternalLink,
+  GitBranch,
+  GitCommit,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import {
-    Collapsible,
-    CollapsibleContent,
-    CollapsibleTrigger,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
-    SearchFilterBar,
-    ResourceStatusIndicator,
-    TablePagination,
+  SearchFilterBar,
+  ResourceStatusIndicator,
+  TablePagination,
 } from "@/components/builds";
 import { useSSE } from "@/contexts/sse-context";
 import { buildApi } from "@/lib/api";
@@ -46,516 +46,791 @@ const PAGE_SIZE = 20;
 
 // Phase status options for filter dropdown
 const UNIFIED_STATUS_OPTIONS = [
-    { value: "all", label: "All Phases" },
-    { value: "ingestion", label: "Ingestion" },
-    { value: "processing", label: "Processing" },
-    { value: "prediction", label: "Prediction" },
+  { value: "all", label: "All Phases" },
+  { value: "ingestion", label: "Ingestion" },
+  { value: "processing", label: "Processing" },
+  { value: "prediction", label: "Prediction" },
 ];
 
 // Status icon component for phase columns
 function PhaseStatusIcon({ status }: { status: string | undefined }) {
-    if (!status) {
-        return <Clock className="h-4 w-4 text-slate-400" />;
-    }
-
-    const statusLower = status.toLowerCase();
-    if (statusLower === "completed" || statusLower === "ingested") {
-        return <CheckCircle2 className="h-4 w-4 text-green-600" />;
-    }
-    if (statusLower === "partial") {
-        return <AlertCircle className="h-4 w-4 text-amber-500" />;
-    }
-    if (statusLower === "failed") {
-        return <XCircle className="h-4 w-4 text-red-500" />;
-    }
-    if (statusLower === "missing_resource") {
-        return <AlertCircle className="h-4 w-4 text-amber-500" />;
-    }
-    if (statusLower === "in_progress" || statusLower === "ingesting" || statusLower === "processing") {
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-    }
+  if (!status) {
     return <Clock className="h-4 w-4 text-slate-400" />;
+  }
+
+  const statusLower = status.toLowerCase();
+  if (statusLower === "completed" || statusLower === "ingested") {
+    return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+  }
+  if (statusLower === "partial") {
+    return <AlertCircle className="h-4 w-4 text-amber-500" />;
+  }
+  if (statusLower === "failed") {
+    return <XCircle className="h-4 w-4 text-red-500" />;
+  }
+  if (statusLower === "missing_resource") {
+    return <AlertCircle className="h-4 w-4 text-amber-500" />;
+  }
+  if (
+    statusLower === "in_progress" ||
+    statusLower === "ingesting" ||
+    statusLower === "processing"
+  ) {
+    return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+  }
+  return <Clock className="h-4 w-4 text-slate-400" />;
 }
 
 // Risk badge for prediction column - includes uncertainty
-function RiskBadge({ level, confidence, uncertainty }: { level?: string; confidence?: number; uncertainty?: number }) {
-    if (!level) return <span className="text-muted-foreground">—</span>;
+function RiskBadge({
+  level,
+  confidence,
+  uncertainty,
+}: {
+  level?: string;
+  confidence?: number;
+  uncertainty?: number;
+}) {
+  if (!level) return <span className="text-muted-foreground">—</span>;
 
-    const riskLevel = level.toUpperCase();
-    const confLabel = confidence ? ` ${(confidence * 100).toFixed(0)}%` : "";
-    const uncertaintyLabel = uncertainty !== undefined ? `±${(uncertainty * 100).toFixed(0)}%` : "";
+  const riskLevel = level.toUpperCase();
+  const confLabel = confidence ? ` ${(confidence * 100).toFixed(0)}%` : "";
+  const uncertaintyLabel =
+    uncertainty !== undefined ? `±${(uncertainty * 100).toFixed(0)}%` : "";
 
-    if (riskLevel === "LOW") {
-        return (
-            <div className="flex flex-col gap-0.5">
-                <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Low{confLabel}
-                </Badge>
-                {uncertaintyLabel && (
-                    <span className="text-[10px] text-muted-foreground">{uncertaintyLabel}</span>
-                )}
-            </div>
-        );
-    }
-    if (riskLevel === "MEDIUM") {
-        return (
-            <div className="flex flex-col gap-0.5">
-                <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
-                    <AlertCircle className="h-3 w-3" />
-                    Med{confLabel}
-                </Badge>
-                {uncertaintyLabel && (
-                    <span className="text-[10px] text-muted-foreground">{uncertaintyLabel}</span>
-                )}
-            </div>
-        );
-    }
-    if (riskLevel === "HIGH") {
-        return (
-            <div className="flex flex-col gap-0.5">
-                <Badge variant="destructive" className="gap-1">
-                    <XCircle className="h-3 w-3" />
-                    High{confLabel}
-                </Badge>
-                {uncertaintyLabel && (
-                    <span className="text-[10px] text-muted-foreground">{uncertaintyLabel}</span>
-                )}
-            </div>
-        );
-    }
-    return <Badge variant="secondary">{level}</Badge>;
+  if (riskLevel === "LOW") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <Badge
+          variant="outline"
+          className="border-green-500 text-green-600 gap-1"
+        >
+          <CheckCircle2 className="h-3 w-3" />
+          Low{confLabel}
+        </Badge>
+        {uncertaintyLabel && (
+          <span className="text-[10px] text-muted-foreground">
+            {uncertaintyLabel}
+          </span>
+        )}
+      </div>
+    );
+  }
+  if (riskLevel === "MEDIUM") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <Badge
+          variant="outline"
+          className="border-amber-500 text-amber-600 gap-1"
+        >
+          <AlertCircle className="h-3 w-3" />
+          Med{confLabel}
+        </Badge>
+        {uncertaintyLabel && (
+          <span className="text-[10px] text-muted-foreground">
+            {uncertaintyLabel}
+          </span>
+        )}
+      </div>
+    );
+  }
+  if (riskLevel === "HIGH") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <Badge variant="destructive" className="gap-1">
+          <XCircle className="h-3 w-3" />
+          High{confLabel}
+        </Badge>
+        {uncertaintyLabel && (
+          <span className="text-[10px] text-muted-foreground">
+            {uncertaintyLabel}
+          </span>
+        )}
+      </div>
+    );
+  }
+  return <Badge variant="secondary">{level}</Badge>;
 }
 
 interface UnifiedBuildsTableProps {
-    repoId: string;
-    onRetryIngestion?: () => void;
-    onRetryProcessing?: () => void;
-    retryIngestionLoading?: boolean;
-    retryProcessingLoading?: boolean;
-    // Failed counts from progress API
-    failedIngestionCount?: number;
-    failedProcessingCount?: number;
+  repoId: string;
+  onRetryIngestion?: () => void;
+  onRetryProcessing?: () => void;
+  retryIngestionLoading?: boolean;
+  retryProcessingLoading?: boolean;
+  // Failed counts from progress API
+  failedIngestionCount?: number;
+  failedProcessingCount?: number;
 }
 
 export function UnifiedBuildsTable({
-    repoId,
-    onRetryIngestion,
-    onRetryProcessing,
-    retryIngestionLoading,
-    retryProcessingLoading,
-    failedIngestionCount = 0,
-    failedProcessingCount = 0,
+  repoId,
+  onRetryIngestion,
+  onRetryProcessing,
+  retryIngestionLoading,
+  retryProcessingLoading,
+  failedIngestionCount = 0,
+  failedProcessingCount = 0,
 }: UnifiedBuildsTableProps) {
-    const router = useRouter();
-    const [builds, setBuilds] = useState<UnifiedBuild[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [tableLoading, setTableLoading] = useState(false);
-    const [page, setPage] = useState(1);
-    const [total, setTotal] = useState(0);
-    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const router = useRouter();
+  const [builds, setBuilds] = useState<UnifiedBuild[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
-    // Search and filter state
-    const [searchQuery, setSearchQuery] = useState("");
-    const [phaseFilter, setPhaseFilter] = useState("all");
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [phaseFilter, setPhaseFilter] = useState("all");
 
-    const { subscribe } = useSSE();
+  const { subscribe } = useSSE();
 
-    const loadBuilds = useCallback(
-        async (pageNumber = 1, withSpinner = false) => {
-            if (withSpinner) setTableLoading(true);
-            try {
-                const response = await buildApi.getUnifiedBuilds(repoId, {
-                    skip: (pageNumber - 1) * PAGE_SIZE,
-                    limit: PAGE_SIZE,
-                    q: searchQuery || undefined,
-                    phase: phaseFilter !== "all" ? phaseFilter : undefined,
-                });
-                setBuilds(response.items);
-                setTotal(response.total);
-                setPage(pageNumber);
-            } catch (err) {
-                console.error("Failed to load unified builds:", err);
-            } finally {
-                setLoading(false);
-                setTableLoading(false);
-            }
-        },
-        [repoId, searchQuery, phaseFilter]
-    );
-
-    useEffect(() => {
-        loadBuilds(1, true);
-    }, [loadBuilds]);
-
-    // Search handler
-    const handleSearch = useCallback((query: string) => {
-        setSearchQuery(query);
-        setPage(1);
-    }, []);
-
-    // Phase filter handler
-    const handlePhaseFilter = useCallback((phase: string) => {
-        setPhaseFilter(phase);
-        setPage(1);
-    }, []);
-
-    // WebSocket subscription for real-time updates
-    useEffect(() => {
-        const unsubscribeBuild = subscribe("BUILD_UPDATE", (payload: { repo_id: string }) => {
-            if (payload.repo_id === repoId) {
-                loadBuilds(page);
-            }
+  const loadBuilds = useCallback(
+    async (pageNumber = 1, withSpinner = false) => {
+      if (withSpinner) setTableLoading(true);
+      try {
+        const response = await buildApi.getUnifiedBuilds(repoId, {
+          skip: (pageNumber - 1) * PAGE_SIZE,
+          limit: PAGE_SIZE,
+          q: searchQuery || undefined,
+          phase: phaseFilter !== "all" ? phaseFilter : undefined,
         });
+        setBuilds(response.items);
+        setTotal(response.total);
+        setPage(pageNumber);
+      } catch (err) {
+        console.error("Failed to load unified builds:", err);
+      } finally {
+        setLoading(false);
+        setTableLoading(false);
+      }
+    },
+    [repoId, searchQuery, phaseFilter]
+  );
 
-        const unsubscribeRepo = subscribe("REPO_UPDATE", (payload: { repo_id: string }) => {
-            if (payload.repo_id === repoId) {
-                loadBuilds(page);
-            }
-        });
+  useEffect(() => {
+    loadBuilds(1, true);
+  }, [loadBuilds]);
 
-        // Listen for individual ingestion build updates
-        const unsubscribeIngestion = subscribe("INGESTION_BUILD_UPDATE", (payload: { repo_id: string }) => {
-            if (payload.repo_id === repoId) {
-                loadBuilds(page);
-            }
-        });
+  // Search handler
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    setPage(1);
+  }, []);
 
-        return () => {
-            unsubscribeBuild();
-            unsubscribeRepo();
-            unsubscribeIngestion();
-        };
-    }, [subscribe, loadBuilds, page, repoId]);
+  // Phase filter handler
+  const handlePhaseFilter = useCallback((phase: string) => {
+    setPhaseFilter(phase);
+    setPage(1);
+  }, []);
 
-    const toggleRow = (buildId: string) => {
-        setExpandedRows((prev) => {
-            const next = new Set(prev);
-            if (next.has(buildId)) {
-                next.delete(buildId);
-            } else {
-                next.add(buildId);
-            }
-            return next;
-        });
+  // Debounced refetch for aggregate updates (only when necessary)
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedLoadBuilds = useMemo(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        loadBuilds(page);
+      }, 1000);
     };
+  }, [loadBuilds, page]);
 
-    const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
-
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-        );
-    }
-
-    return (
-        <Card>
-            <CardHeader className="space-y-4">
-                <div className="flex flex-row items-center justify-between">
-                    <div>
-                        <CardTitle>Pipeline Builds</CardTitle>
-                        <CardDescription>
-                            All builds with ingestion, extraction, and prediction status
-                        </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => loadBuilds(page, true)}
-                            disabled={tableLoading}
-                        >
-                            <RefreshCw className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`} />
-                            Refresh
-                        </Button>
-                        {onRetryIngestion && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={onRetryIngestion}
-                                disabled={retryIngestionLoading || failedIngestionCount === 0}
-                                className={cn(
-                                    "text-amber-600 border-amber-300 hover:bg-amber-50",
-                                    failedIngestionCount === 0 && "opacity-50"
-                                )}
-                            >
-                                {retryIngestionLoading ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : (
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                )}
-                                Retry Failed Ingestion {failedIngestionCount > 0 && `(${failedIngestionCount})`}
-                            </Button>
-                        )}
-                        {onRetryProcessing && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={onRetryProcessing}
-                                disabled={retryProcessingLoading || failedProcessingCount === 0}
-                                className={cn(
-                                    "text-amber-600 border-amber-300 hover:bg-amber-50",
-                                    failedProcessingCount === 0 && "opacity-50"
-                                )}
-                            >
-                                {retryProcessingLoading ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : (
-                                    <RotateCcw className="mr-2 h-4 w-4" />
-                                )}
-                                Retry Failed Processing {failedProcessingCount > 0 && `(${failedProcessingCount})`}
-                            </Button>
-                        )}
-                    </div>
-                </div>
-                <SearchFilterBar
-                    placeholder="Search by commit SHA or build number..."
-                    statusOptions={UNIFIED_STATUS_OPTIONS}
-                    onSearch={handleSearch}
-                    onStatusFilter={handlePhaseFilter}
-                    isLoading={tableLoading}
-                />
-            </CardHeader>
-            <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                        <thead className="bg-slate-50 dark:bg-slate-900/40">
-                            <tr>
-                                <th className="px-4 py-3 w-[50px]" />
-                                <th className="px-4 py-3 text-left font-medium text-slate-500">Build ID</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500">Commit</th>
-                                <th className="px-4 py-3 text-center font-medium text-slate-500">Pipeline</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500">Risk</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500">Created At</th>
-                            </tr>
-                        </thead>
-                        {builds.length === 0 ? (
-                            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                <tr>
-                                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                                        No builds found.
-                                    </td>
-                                </tr>
-                            </tbody>
-                        ) : (
-                            builds.map((build) => {
-                                const isExpanded = expandedRows.has(build.model_import_build_id);
-                                const hasResources = Object.keys(build.resource_status || {}).length > 0;
-
-                                return (
-                                    <Collapsible
-                                        key={build.model_import_build_id}
-                                        open={isExpanded}
-                                        onOpenChange={() => toggleRow(build.model_import_build_id)}
-                                        asChild
-                                    >
-                                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
-                                            <tr
-                                                className="cursor-pointer"
-                                                onClick={(e) => {
-                                                    // Navigate to build detail if training_build_id exists
-                                                    if (build.training_build_id) {
-                                                        router.push(
-                                                            `/repositories/${repoId}/build/${build.training_build_id}`
-                                                        );
-                                                    }
-                                                }}
-                                            >
-                                                <td
-                                                    className="px-4 py-3"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                >
-                                                    {hasResources && (
-                                                        <CollapsibleTrigger asChild>
-                                                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                                                                {isExpanded ? (
-                                                                    <ChevronDown className="h-4 w-4" />
-                                                                ) : (
-                                                                    <ChevronRight className="h-4 w-4" />
-                                                                )}
-                                                            </Button>
-                                                        </CollapsibleTrigger>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-medium font-mono text-xs">
-                                                            {build.ci_run_id || "—"}
-                                                        </span>
-                                                        {/* Show Pending badge for builds ingested but not processed */}
-                                                        {build.ingestion_status === "ingested" && !build.training_build_id && (
-                                                            <Badge variant="outline" className="text-[10px] border-amber-400 text-amber-600 bg-amber-50">
-                                                                Pending
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-1 font-mono text-xs">
-                                                        <GitCommit className="h-3 w-3" />
-                                                        <span title={build.commit_message}>
-                                                            {build.commit_sha?.substring(0, 7)}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center justify-center gap-2" title="Ingestion → Extraction → Prediction">
-                                                        <div className="flex items-center gap-0.5" title={`Ingestion: ${build.ingestion_status}`}>
-                                                            <PhaseStatusIcon status={build.ingestion_status} />
-                                                        </div>
-                                                        <span className="text-slate-300">→</span>
-                                                        <div className="flex items-center gap-0.5" title={`Extraction: ${build.extraction_status || 'pending'}`}>
-                                                            <PhaseStatusIcon status={build.extraction_status} />
-                                                            {build.feature_count > 0 && (
-                                                                <span className="text-[10px] text-muted-foreground">
-                                                                    {build.feature_count}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <span className="text-slate-300">→</span>
-                                                        <div title={`Prediction: ${build.prediction_status || 'pending'}`}>
-                                                            <PhaseStatusIcon status={build.prediction_status} />
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <RiskBadge
-                                                        level={build.predicted_label}
-                                                        confidence={build.prediction_confidence}
-                                                        uncertainty={build.prediction_uncertainty}
-                                                    />
-                                                </td>
-                                                <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                                                    {formatTimestamp(build.created_at)}
-                                                </td>
-                                            </tr>
-                                            {hasResources && (
-                                                <CollapsibleContent asChild>
-                                                    <tr className="bg-slate-50 dark:bg-slate-900/20 shadow-inner">
-                                                        <td colSpan={6} className="px-4 py-4">
-                                                            <div className="space-y-4">
-                                                                {/* Commit Info and CI Build Info */}
-                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                                    {/* Commit Info */}
-                                                                    <div>
-                                                                        <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
-                                                                            <GitCommit className="h-4 w-4" />
-                                                                            Commit Info
-                                                                        </h4>
-                                                                        <div className="space-y-1 text-sm">
-                                                                            <div>
-                                                                                <span className="text-muted-foreground">SHA: </span>
-                                                                                <span className="font-mono text-xs">{build.commit_sha}</span>
-                                                                            </div>
-                                                                            <div>
-                                                                                <span className="text-muted-foreground">Branch: </span>
-                                                                                <span>{build.branch || "—"}</span>
-                                                                            </div>
-                                                                            {build.commit_message && (
-                                                                                <div>
-                                                                                    <span className="text-muted-foreground">Message: </span>
-                                                                                    <span className="text-xs">{build.commit_message}</span>
-                                                                                </div>
-                                                                            )}
-                                                                            {build.commit_author && (
-                                                                                <div>
-                                                                                    <span className="text-muted-foreground">Author: </span>
-                                                                                    <span>{build.commit_author}</span>
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* CI Build Info */}
-                                                                    <div>
-                                                                        <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
-                                                                            <Settings className="h-4 w-4" />
-                                                                            CI Build Info
-                                                                        </h4>
-                                                                        <div className="space-y-1 text-sm">
-                                                                            <div>
-                                                                                <span className="text-muted-foreground">Provider: </span>
-                                                                                <span>GitHub Actions</span>
-                                                                            </div>
-                                                                            <div>
-                                                                                <span className="text-muted-foreground">Conclusion: </span>
-                                                                                <span className={build.ci_conclusion === "success" ? "text-green-600" : build.ci_conclusion === "failure" ? "text-red-600" : ""}>
-                                                                                    {build.ci_conclusion}
-                                                                                </span>
-                                                                            </div>
-                                                                            {build.web_url && (
-                                                                                <div>
-                                                                                    <a
-                                                                                        href={build.web_url}
-                                                                                        target="_blank"
-                                                                                        rel="noopener noreferrer"
-                                                                                        className="text-blue-600 hover:underline flex items-center gap-1"
-                                                                                        onClick={(e) => e.stopPropagation()}
-                                                                                    >
-                                                                                        View on CI <ExternalLink className="h-3 w-3" />
-                                                                                    </a>
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-
-                                                                {/* Resources Collected */}
-                                                                {hasResources && (
-                                                                    <div>
-                                                                        <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 mb-2">
-                                                                            Resources Collected
-                                                                        </h4>
-                                                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                                                            {Object.entries(build.resource_status || {}).map(
-                                                                                ([resourceName, resourceData]) => (
-                                                                                    <ResourceStatusIndicator
-                                                                                        key={resourceName}
-                                                                                        resourceName={resourceName}
-                                                                                        status={resourceData.status}
-                                                                                        error={resourceData.error}
-                                                                                    />
-                                                                                )
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-
-                                                                {build.extraction_error && (
-                                                                    <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                                                                        <p className="font-medium text-red-600 text-sm">
-                                                                            Extraction Error:
-                                                                        </p>
-                                                                        <p className="text-red-700 text-xs mt-1">
-                                                                            {build.extraction_error}
-                                                                        </p>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                </CollapsibleContent>
-                                            )}
-                                        </tbody>
-                                    </Collapsible>
-                                );
-                            })
-                        )}
-                    </table>
-                </div>
-                <TablePagination
-                    currentPage={page}
-                    totalPages={totalPages}
-                    totalItems={total}
-                    pageSize={PAGE_SIZE}
-                    onPageChange={(newPage) => loadBuilds(newPage, true)}
-                    isLoading={tableLoading}
-                />
-            </CardContent>
-        </Card>
+  // SSE subscription with delta merge for individual build updates
+  useEffect(() => {
+    // MODEL.BUILD.UPDATED - Delta merge for extraction/prediction status changes
+    const unsubscribeBuild = subscribe(
+      "MODEL.BUILD.UPDATED",
+      (payload: {
+        repo_id: string;
+        build_id: string;
+        status?: string;
+        extraction_status?: string;
+        prediction_status?: string;
+        predicted_label?: string;
+      }) => {
+        if (payload.repo_id === repoId && payload.build_id) {
+          // Delta merge into existing builds
+          setBuilds((prev) => {
+            const buildExists = prev.some(
+              (b) =>
+                b.model_import_build_id === payload.build_id ||
+                b.training_build_id === payload.build_id
+            );
+            if (buildExists) {
+              return prev.map((build) => {
+                if (
+                  build.model_import_build_id === payload.build_id ||
+                  build.training_build_id === payload.build_id
+                ) {
+                  return {
+                    ...build,
+                    extraction_status:
+                      payload.extraction_status || build.extraction_status,
+                    prediction_status:
+                      payload.prediction_status || build.prediction_status,
+                    predicted_label:
+                      payload.predicted_label || build.predicted_label,
+                  };
+                }
+                return build;
+              });
+            }
+            return prev;
+          });
+        }
+      }
     );
+
+    // MODEL.REPO.UPDATED - Debounced refetch for aggregate stats changes
+    const unsubscribeRepo = subscribe(
+      "MODEL.REPO.UPDATED",
+      (payload: { repo_id: string }) => {
+        if (payload.repo_id === repoId) {
+          debouncedLoadBuilds();
+        }
+      }
+    );
+
+    // MODEL.INGESTION.PROGRESS - Delta merge for ingestion status by commit_sha
+    const unsubscribeIngestion = subscribe(
+      "MODEL.INGESTION.PROGRESS",
+      (payload: {
+        repo_id: string;
+        resource: string;
+        status: string;
+        completed_build_ids?: string[];
+        failed_build_ids?: string[];
+      }) => {
+        if (payload.repo_id === repoId) {
+          // Delta merge: update resource_status for affected builds
+          const completedIds = payload.completed_build_ids || [];
+          const failedIds = payload.failed_build_ids || [];
+          const affectedIds = [...completedIds, ...failedIds];
+
+          if (affectedIds.length > 0) {
+            setBuilds((prev) => {
+              return prev.map((build) => {
+                if (affectedIds.includes(build.model_import_build_id)) {
+                  const isCompleted = completedIds.includes(
+                    build.model_import_build_id
+                  );
+                  const newResourceStatus = {
+                    ...build.resource_status,
+                    [payload.resource]: {
+                      status: isCompleted ? "completed" : "failed",
+                    },
+                  };
+                  // Update ingestion_status based on all resources
+                  const allCompleted = build.required_resources.every(
+                    (r) => newResourceStatus[r]?.status === "completed"
+                  );
+                  const anyFailed = build.required_resources.some(
+                    (r) => newResourceStatus[r]?.status === "failed"
+                  );
+                  return {
+                    ...build,
+                    resource_status: newResourceStatus,
+                    ingestion_status: anyFailed
+                      ? "partial"
+                      : allCompleted
+                      ? "ingested"
+                      : build.ingestion_status,
+                  };
+                }
+                return build;
+              });
+            });
+          }
+        }
+      }
+    );
+
+    // MODEL.PROCESSING.UPDATED - Delta merge for extraction progress
+    const unsubscribeProcessing = subscribe(
+      "MODEL.PROCESSING.UPDATED",
+      (payload: {
+        repo_id: string;
+        build_id: string;
+        extraction_status: string;
+        feature_count?: number;
+        expected_feature_count?: number;
+        error?: string;
+      }) => {
+        if (payload.repo_id === repoId && payload.build_id) {
+          setBuilds((prev) =>
+            prev.map((build) => {
+              if (build.training_build_id === payload.build_id) {
+                const updated: UnifiedBuild = {
+                  ...build,
+                  extraction_status: payload.extraction_status,
+                  feature_count: payload.feature_count ?? build.feature_count,
+                  expected_feature_count:
+                    payload.expected_feature_count ??
+                    build.expected_feature_count,
+                };
+                return updated;
+              }
+              return build;
+            })
+          );
+        }
+      }
+    );
+
+    // MODEL.PREDICTION.UPDATED - Delta merge for prediction progress
+    const unsubscribePrediction = subscribe(
+      "MODEL.PREDICTION.UPDATED",
+      (payload: {
+        repo_id: string;
+        build_id: string;
+        prediction_status: string;
+        predicted_label?: string;
+        prediction_confidence?: number;
+        error?: string;
+      }) => {
+        if (payload.repo_id === repoId && payload.build_id) {
+          setBuilds((prev) =>
+            prev.map((build) => {
+              if (build.training_build_id === payload.build_id) {
+                return {
+                  ...build,
+                  prediction_status: payload.prediction_status,
+                  predicted_label:
+                    payload.predicted_label || build.predicted_label,
+                  prediction_confidence:
+                    payload.prediction_confidence ??
+                    build.prediction_confidence,
+                };
+              }
+              return build;
+            })
+          );
+        }
+      }
+    );
+
+    return () => {
+      unsubscribeBuild();
+      unsubscribeRepo();
+      unsubscribeIngestion();
+      unsubscribeProcessing();
+      unsubscribePrediction();
+    };
+  }, [subscribe, debouncedLoadBuilds, repoId]);
+
+  const toggleRow = (buildId: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(buildId)) {
+        next.delete(buildId);
+      } else {
+        next.add(buildId);
+      }
+      return next;
+    });
+  };
+
+  const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 1;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="space-y-4">
+        <div className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Pipeline Builds</CardTitle>
+            <CardDescription>
+              All builds with ingestion, extraction, and prediction status
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadBuilds(page, true)}
+              disabled={tableLoading}
+            >
+              <RefreshCw
+                className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+            {onRetryIngestion && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRetryIngestion}
+                disabled={retryIngestionLoading || failedIngestionCount === 0}
+                className={cn(
+                  "text-amber-600 border-amber-300 hover:bg-amber-50",
+                  failedIngestionCount === 0 && "opacity-50"
+                )}
+              >
+                {retryIngestionLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                )}
+                Retry Failed Ingestion{" "}
+                {failedIngestionCount > 0 && `(${failedIngestionCount})`}
+              </Button>
+            )}
+            {onRetryProcessing && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRetryProcessing}
+                disabled={retryProcessingLoading || failedProcessingCount === 0}
+                className={cn(
+                  "text-amber-600 border-amber-300 hover:bg-amber-50",
+                  failedProcessingCount === 0 && "opacity-50"
+                )}
+              >
+                {retryProcessingLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                )}
+                Retry Failed Processing{" "}
+                {failedProcessingCount > 0 && `(${failedProcessingCount})`}
+              </Button>
+            )}
+          </div>
+        </div>
+        <SearchFilterBar
+          placeholder="Search by commit SHA or build number..."
+          statusOptions={UNIFIED_STATUS_OPTIONS}
+          onSearch={handleSearch}
+          onStatusFilter={handlePhaseFilter}
+          isLoading={tableLoading}
+        />
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+            <thead className="bg-slate-50 dark:bg-slate-900/40">
+              <tr>
+                <th className="px-4 py-3 w-[50px]" />
+                <th className="px-4 py-3 text-left font-medium text-slate-500">
+                  Build ID
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-slate-500">
+                  Commit
+                </th>
+                <th className="px-4 py-3 text-center font-medium text-slate-500">
+                  Pipeline
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-slate-500">
+                  Risk
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-slate-500">
+                  Created At
+                </th>
+              </tr>
+            </thead>
+            {builds.length === 0 ? (
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-4 py-8 text-center text-muted-foreground"
+                  >
+                    No builds found.
+                  </td>
+                </tr>
+              </tbody>
+            ) : (
+              builds.map((build) => {
+                const isExpanded = expandedRows.has(
+                  build.model_import_build_id
+                );
+                const hasResources =
+                  Object.keys(build.resource_status || {}).length > 0;
+
+                return (
+                  <Collapsible
+                    key={build.model_import_build_id}
+                    open={isExpanded}
+                    onOpenChange={() => toggleRow(build.model_import_build_id)}
+                    asChild
+                  >
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors">
+                      <tr
+                        className="cursor-pointer"
+                        onClick={(e) => {
+                          // Navigate to build detail if training_build_id exists
+                          if (build.training_build_id) {
+                            router.push(
+                              `/repositories/${repoId}/build/${build.training_build_id}`
+                            );
+                          }
+                        }}
+                      >
+                        <td
+                          className="px-4 py-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {hasResources && (
+                            <CollapsibleTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                              >
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </CollapsibleTrigger>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium font-mono text-xs">
+                              {build.ci_run_id || "—"}
+                            </span>
+                            {/* Show Pending badge for builds ingested but not processed */}
+                            {build.ingestion_status === "ingested" &&
+                              !build.training_build_id && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] border-amber-400 text-amber-600 bg-amber-50"
+                                >
+                                  Pending
+                                </Badge>
+                              )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1 font-mono text-xs">
+                            <GitCommit className="h-3 w-3" />
+                            <span title={build.commit_message}>
+                              {build.commit_sha?.substring(0, 7)}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div
+                            className="flex items-center justify-center gap-2"
+                            title="Ingestion → Extraction → Prediction"
+                          >
+                            <div
+                              className="flex items-center gap-0.5"
+                              title={`Ingestion: ${build.ingestion_status}`}
+                            >
+                              <PhaseStatusIcon
+                                status={build.ingestion_status}
+                              />
+                            </div>
+                            <span className="text-slate-300">→</span>
+                            <div
+                              className="flex items-center gap-0.5"
+                              title={`Extraction: ${
+                                build.extraction_status || "pending"
+                              }`}
+                            >
+                              <PhaseStatusIcon
+                                status={build.extraction_status}
+                              />
+                              {build.feature_count > 0 && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {build.feature_count}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-slate-300">→</span>
+                            <div
+                              title={`Prediction: ${
+                                build.prediction_status || "pending"
+                              }`}
+                            >
+                              <PhaseStatusIcon
+                                status={build.prediction_status}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <RiskBadge
+                            level={build.predicted_label}
+                            confidence={build.prediction_confidence}
+                            uncertainty={build.prediction_uncertainty}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                          {formatTimestamp(build.created_at)}
+                        </td>
+                      </tr>
+                      {hasResources && (
+                        <CollapsibleContent asChild>
+                          <tr className="bg-slate-50 dark:bg-slate-900/20 shadow-inner">
+                            <td colSpan={6} className="px-4 py-4">
+                              <div className="space-y-4">
+                                {/* Commit Info and CI Build Info */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                  {/* Commit Info */}
+                                  <div>
+                                    <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
+                                      <GitCommit className="h-4 w-4" />
+                                      Commit Info
+                                    </h4>
+                                    <div className="space-y-1 text-sm">
+                                      <div>
+                                        <span className="text-muted-foreground">
+                                          SHA:{" "}
+                                        </span>
+                                        <span className="font-mono text-xs">
+                                          {build.commit_sha}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground">
+                                          Branch:{" "}
+                                        </span>
+                                        <span>{build.branch || "—"}</span>
+                                      </div>
+                                      {build.commit_message && (
+                                        <div>
+                                          <span className="text-muted-foreground">
+                                            Message:{" "}
+                                          </span>
+                                          <span className="text-xs">
+                                            {build.commit_message}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {build.commit_author && (
+                                        <div>
+                                          <span className="text-muted-foreground">
+                                            Author:{" "}
+                                          </span>
+                                          <span>{build.commit_author}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* CI Build Info */}
+                                  <div>
+                                    <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2 mb-2">
+                                      <Settings className="h-4 w-4" />
+                                      CI Build Info
+                                    </h4>
+                                    <div className="space-y-1 text-sm">
+                                      <div>
+                                        <span className="text-muted-foreground">
+                                          Provider:{" "}
+                                        </span>
+                                        <span>GitHub Actions</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground">
+                                          Conclusion:{" "}
+                                        </span>
+                                        <span
+                                          className={
+                                            build.ci_conclusion === "success"
+                                              ? "text-green-600"
+                                              : build.ci_conclusion ===
+                                                "failure"
+                                              ? "text-red-600"
+                                              : ""
+                                          }
+                                        >
+                                          {build.ci_conclusion}
+                                        </span>
+                                      </div>
+                                      {build.web_url && (
+                                        <div>
+                                          <a
+                                            href={build.web_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:underline flex items-center gap-1"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            View on CI{" "}
+                                            <ExternalLink className="h-3 w-3" />
+                                          </a>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Resources Collected */}
+                                {hasResources && (
+                                  <div>
+                                    <h4 className="font-medium text-sm text-slate-900 dark:text-slate-100 mb-2">
+                                      Resources Collected
+                                    </h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                      {Object.entries(
+                                        build.resource_status || {}
+                                      ).map(([resourceName, resourceData]) => (
+                                        <ResourceStatusIndicator
+                                          key={resourceName}
+                                          resourceName={resourceName}
+                                          status={resourceData.status}
+                                          error={resourceData.error}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {build.extraction_error && (
+                                  <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                                    <p className="font-medium text-red-600 text-sm">
+                                      Extraction Error:
+                                    </p>
+                                    <p className="text-red-700 text-xs mt-1">
+                                      {build.extraction_error}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        </CollapsibleContent>
+                      )}
+                    </tbody>
+                  </Collapsible>
+                );
+              })
+            )}
+          </table>
+        </div>
+        <TablePagination
+          currentPage={page}
+          totalPages={totalPages}
+          totalItems={total}
+          pageSize={PAGE_SIZE}
+          onPageChange={(newPage) => loadBuilds(newPage, true)}
+          isLoading={tableLoading}
+        />
+      </CardContent>
+    </Card>
+  );
 }

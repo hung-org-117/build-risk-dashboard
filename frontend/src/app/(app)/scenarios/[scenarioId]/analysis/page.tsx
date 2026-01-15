@@ -59,7 +59,7 @@ export default function ScenarioAnalysisPage() {
 
     // Subscribe to SSE for real-time updates when scans complete
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: { scenario_id?: string }) => {
+        const unsubscribe = subscribe("SCENARIO.UPDATED", (data: { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
                 fetchData();
             }

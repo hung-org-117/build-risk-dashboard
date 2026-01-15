@@ -185,9 +185,7 @@ class NotificationService:
                     },
                 )
             except Exception as e:
-                logger.warning(
-                    f"Failed to create notification for admin {admin.id}: {e}"
-                )
+                logger.warning(f"Failed to create notification for admin {admin.id}: {e}")
 
         # Send Gmail alert to admins
         try:
@@ -264,7 +262,7 @@ class NotificationManager:
 
         # Publish real-time event
         try:
-            from app.tasks.shared.events import publish_event
+            from app.tasks.shared.events import EventType, publish_event
 
             payload = {
                 "user_id": str(user_id),
@@ -273,11 +271,9 @@ class NotificationManager:
                 "message": message,
                 "link": link,
                 "metadata": metadata,
-                "created_at": (
-                    result.created_at.isoformat() if result.created_at else None
-                ),
+                "created_at": (result.created_at.isoformat() if result.created_at else None),
             }
-            publish_event("USER_NOTIFICATION", payload)
+            publish_event(EventType.SYSTEM_NOTIFICATION, payload)
         except Exception as e:
             logger.warning(f"Failed to publish user notification event: {e}")
 
@@ -368,7 +364,7 @@ def create_notification(
 
     # Publish real-time event
     try:
-        from app.tasks.shared.events import publish_event
+        from app.tasks.shared.events import EventType, publish_event
 
         payload = {
             "user_id": str(user_id),
@@ -379,7 +375,7 @@ def create_notification(
             "metadata": metadata,
             "created_at": result.created_at.isoformat() if result.created_at else None,
         }
-        publish_event("USER_NOTIFICATION", payload)
+        publish_event(EventType.SYSTEM_NOTIFICATION, payload)
     except Exception as e:
         logger.warning(f"Failed to publish user notification event: {e}")
 
@@ -411,25 +407,21 @@ def _send_admin_email(
 
         # Check master toggle
         if not settings.notifications.email_enabled:
-            logger.debug(f"Admin email disabled (master toggle off)")
+            logger.debug("Admin email disabled (master toggle off)")
             return False
 
         # Check per-type toggle
         toggles = settings.notifications.email_type_toggles
-        toggle_key = notification_type.replace(
-            "-", "_"
-        )  # e.g. pipeline-failed -> pipeline_failed
+        toggle_key = notification_type.replace("-", "_")  # e.g. pipeline-failed -> pipeline_failed
         if not getattr(toggles, toggle_key, False):
-            logger.debug(
-                f"Admin email for {notification_type} disabled (type toggle off)"
-            )
+            logger.debug(f"Admin email for {notification_type} disabled (type toggle off)")
             return False
 
         # Get recipients
         recipients_str = settings.notifications.email_recipients or ""
         recipients = [r.strip() for r in recipients_str.split(",") if r.strip()]
         if not recipients:
-            logger.debug(f"No admin email recipients configured")
+            logger.debug("No admin email recipients configured")
             return False
 
         # Render and send email
@@ -657,9 +649,7 @@ def notify_system_error_to_admins(
                 },
             )
         except Exception as e:
-            logger.warning(
-                f"Failed to create error notification for admin {admin.id}: {e}"
-            )
+            logger.warning(f"Failed to create error notification for admin {admin.id}: {e}")
 
     # Email notification (if enabled via system_alerts toggle)
     _send_admin_email(
@@ -796,12 +786,8 @@ def notify_users_for_repo(
             # HIGH RISK DETECTED notifications
             if high_risk_builds and len(high_risk_builds) > 0:
                 high_risk_sub = subscriptions.get("high_risk_detected", {})
-                send_in_app = (
-                    high_risk_sub.get("in_app", True) if high_risk_sub else True
-                )
-                send_email = (
-                    high_risk_sub.get("email", False) if high_risk_sub else False
-                )
+                send_in_app = high_risk_sub.get("in_app", True) if high_risk_sub else True
+                send_email = high_risk_sub.get("email", False) if high_risk_sub else False
 
                 ci_run_ids = [b.get("ci_run_id", "") for b in high_risk_builds]
                 count = len(ci_run_ids)
@@ -1011,9 +997,7 @@ def notify_dataset_enrichment_failed(
     message = f"{scenario.name}: {completed_count} completed, {failed_count} failed."
     if error_message:
         # Truncate long error messages
-        short_error = (
-            error_message[:100] + "..." if len(error_message) > 100 else error_message
-        )
+        short_error = error_message[:100] + "..." if len(error_message) > 100 else error_message
         message += f" Error: {short_error}"
 
     create_notification(

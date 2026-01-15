@@ -89,7 +89,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
 
     // WebSocket subscription for REPO_UPDATE
     useEffect(() => {
-        const unsubscribe = subscribe("REPO_UPDATE", (data: any) => {
+        const unsubscribe = subscribe("MODEL.REPO.UPDATED", (data: any) => {
             if (data.repo_id === repoId) {
                 loadRepo();
                 loadProgress();

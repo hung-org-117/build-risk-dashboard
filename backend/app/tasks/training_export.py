@@ -33,7 +33,7 @@ from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRe
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.services.splitting_strategy_service import SplittingStrategyService
 from app.tasks.base import SafeTask, TaskState
-from app.tasks.shared.events import publish_scenario_update
+from app.tasks.shared.events import publish_scenario_updated
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +131,7 @@ def generate_export_dataset(
         # STEP 2: Lazy Materialization
         # ======================================================================
         try:
-            df = _ensure_dataset_materialized(
-                scenario_id, self.db, correlation_id=correlation_id
-            )
+            df = _ensure_dataset_materialized(scenario_id, self.db, correlation_id=correlation_id)
         except Exception as e:
             logger.error(f"{corr_prefix} Failed to materialize dataset: {e}")
             export_repo.mark_failed(export_id, f"Materialization failed: {str(e)}")
@@ -226,9 +224,7 @@ def generate_export_dataset(
                             fold_id=fold_id,
                             record_count=len(split_df),
                             feature_count=len(split_df.columns),
-                            class_distribution={
-                                str(k): v for k, v in class_dist.items()
-                            },
+                            class_distribution={str(k): v for k, v in class_dist.items()},
                             group_distribution=fold.metadata,
                             file_path=str(file_path.relative_to(paths.DATA_DIR)),
                             file_size_bytes=file_size,
@@ -302,7 +298,7 @@ def generate_export_dataset(
         # Publish update
         scenario = scenario_repo.find_by_id(scenario_id)
         if scenario:
-            publish_scenario_update(scenario)
+            publish_scenario_updated(scenario)
 
         logger.info(
             f"{corr_prefix} Completed: folds={fold_count if is_cv else 1}, "
@@ -332,9 +328,7 @@ def generate_export_dataset(
 # ============================================================================
 
 
-def _ensure_dataset_materialized(
-    scenario_id: str, db, correlation_id: str = ""
-) -> pd.DataFrame:
+def _ensure_dataset_materialized(scenario_id: str, db, correlation_id: str = "") -> pd.DataFrame:
     """
     Ensure 'master_dataset.parquet' exists for the scenario.
     If not, materialize it by streaming data from MongoDB.
@@ -448,11 +442,7 @@ def _process_and_write_batch(
         return
 
     # Bulk fetch FeatureVectors
-    fv_ids = [
-        doc.get("feature_vector_id")
-        for doc in batch_docs
-        if doc.get("feature_vector_id")
-    ]
+    fv_ids = [doc.get("feature_vector_id") for doc in batch_docs if doc.get("feature_vector_id")]
     fvs = fv_repo.find_by_ids(list(map(str, fv_ids)))
     fv_map = {str(fv.id): fv for fv in fvs}
 

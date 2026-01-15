@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ArrowLeft,
     ExternalLink,
@@ -87,17 +87,77 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
         loadBuilds();
     }, [loadRepo, loadProgress, loadBuilds]);
 
-    // WebSocket subscription for REPO_UPDATE
-    useEffect(() => {
-        const unsubscribe = subscribe("REPO_UPDATE", (data: any) => {
-            if (data.repo_id === repoId) {
+    // Debounced refresh for SSE updates (only for full refetch scenarios)
+    const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const debouncedRefresh = useMemo(() => {
+        return () => {
+            if (debounceTimerRef.current) {
+                clearTimeout(debounceTimerRef.current);
+            }
+            debounceTimerRef.current = setTimeout(() => {
                 loadRepo();
                 loadProgress();
                 loadBuilds();
+            }, 1000);
+        };
+    }, [loadRepo, loadProgress, loadBuilds]);
+
+    // Cleanup debounce timer on unmount
+    useEffect(() => {
+        return () => {
+            if (debounceTimerRef.current) {
+                clearTimeout(debounceTimerRef.current);
+            }
+        };
+    }, []);
+
+    // SSE subscription for MODEL.REPO.UPDATED with delta merge
+    useEffect(() => {
+        const unsubscribe = subscribe("MODEL.REPO.UPDATED", (data: {
+            repo_id: string;
+            status?: string;
+            message?: string;
+            stats?: {
+                builds_fetched?: number;
+                builds_ingested?: number;
+                builds_processing?: number;
+                builds_processed?: number;
+                [key: string]: number | undefined;
+            };
+        }) => {
+            if (data.repo_id === repoId) {
+                // Delta merge for repo status
+                if (data.status) {
+                    setRepo((prev) => prev ? { ...prev, status: data.status as RepoDetail["status"] } : prev);
+                }
+
+                // Delta merge for progress stats if provided
+                if (data.stats) {
+                    setProgress((prev) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            import_builds: {
+                                ...prev.import_builds,
+                                fetched: data.stats?.builds_fetched ?? prev.import_builds.fetched,
+                                ingested: data.stats?.builds_ingested ?? prev.import_builds.ingested,
+                            },
+                            training_builds: {
+                                ...prev.training_builds,
+                                completed: data.stats?.builds_processed ?? prev.training_builds.completed,
+                            },
+                        };
+                    });
+                }
+
+                // Debounced full refresh for status changes that affect overall state
+                if (data.status && ["ingested", "processed", "failed", "idle"].includes(data.status)) {
+                    debouncedRefresh();
+                }
             }
         });
         return () => unsubscribe();
-    }, [subscribe, loadRepo, loadProgress, loadBuilds, repoId]);
+    }, [subscribe, debouncedRefresh, repoId]);
 
     // Listen for INGESTION_ERROR events
     useEffect(() => {

@@ -26,6 +26,15 @@ interface ActionProgressBannerProps {
     processingLoading?: boolean;
     retryIngestionLoading?: boolean;
     retryProcessingLoading?: boolean;
+    // Real-time progress from SSE
+    currentPhase?: "ingestion" | "extraction" | "prediction";
+    currentBuildProgress?: {
+        buildNumber?: number;
+        featureCount?: number;
+        expectedFeatureCount?: number;
+        extractionStatus?: string;
+        predictionStatus?: string;
+    };
 }
 
 export function ActionProgressBanner({
@@ -35,6 +44,8 @@ export function ActionProgressBanner({
     processingLoading = false,
     retryIngestionLoading = false,
     retryProcessingLoading = false,
+    currentPhase,
+    currentBuildProgress,
 }: ActionProgressBannerProps) {
     const status = repoStatus.toLowerCase();
 
@@ -90,7 +101,12 @@ export function ActionProgressBanner({
         const isExtractionDone = extractionPending === 0 && extractionDone > 0;
         const isPredictionPhase = isExtractionDone && pendingPrediction > 0;
 
-        if (isPredictionPhase) {
+        // Use real-time progress if available
+        if (currentPhase === "extraction" && currentBuildProgress?.featureCount !== undefined && currentBuildProgress?.expectedFeatureCount) {
+            description = `Extracting features: ${currentBuildProgress.featureCount}/${currentBuildProgress.expectedFeatureCount} (Build ${extractionDone + 1}/${extractionTotal})`;
+            const featureProgress = Math.round((currentBuildProgress.featureCount / currentBuildProgress.expectedFeatureCount) * 100);
+            progressValue = featureProgress;
+        } else if (currentPhase === "prediction" || isPredictionPhase) {
             description = `Predicting risk: ${predictionDone}/${extractionDone}`;
             const predictionPercent = extractionDone > 0 ? Math.round((predictionDone / extractionDone) * 100) : 0;
             progressValue = predictionPercent;

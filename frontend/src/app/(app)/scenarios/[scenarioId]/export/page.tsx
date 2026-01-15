@@ -1,41 +1,20 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState, useCallback, useMemo } from "react";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Loader2, Play, Settings, AlertTriangle } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
 import {
     trainingScenariosApi,
-    TrainingDatasetSplitRecord,
     TrainingExportRecord,
     TrainingScenarioRecord,
+    TrainingDatasetSplitRecord,
 } from "@/lib/api/training-scenarios";
 import { toast } from "@/components/ui/use-toast";
 import { useSSE } from "@/contexts/sse-context";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Progress } from "@/components/ui/progress";
 import {
-    PreprocessingSection,
-    SplittingStrategySection,
-    OutputFormatSection,
+    ExportsListSection,
     DatasetSummarySection,
     NotReadyState,
-    GeneratingState,
     LoadingState,
-    ExportConfig,
-    GroupPreview,
-    DEFAULT_CONFIG,
-    STRATEGY_OPTIONS,
-    STRATEGY,
-    isCVStrategy,
-    getStrategyOption,
 } from "./_components";
 
 // =============================================================================
@@ -50,22 +29,24 @@ export default function ScenarioExportPage() {
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [exports, setExports] = useState<TrainingExportRecord[]>([]);
-    const [splits, setSplits] = useState<TrainingDatasetSplitRecord[]>([]);
     const [loading, setLoading] = useState(true);
-    const [generating, setGenerating] = useState(false);
-    const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
-    const [groupsPreview, setGroupsPreview] = useState<GroupPreview | null>(null);
-    const [loadingGroups, setLoadingGroups] = useState(false);
+    
+    // View state: "list" | "detail"
+    const [viewingExport, setViewingExport] = useState<TrainingExportRecord | null>(null);
+    const [viewingSplits, setViewingSplits] = useState<TrainingDatasetSplitRecord[]>([]);
 
     // =============================================================================
     // Derived State
     // =============================================================================
 
     const canGenerate = scenario?.status === "processed" || scenario?.status === "completed";
-    const hasExports = exports.length > 0;
-    const latestExport = exports[0];
-    const isExportGenerating = latestExport?.status === "generating";
-    const isExportCompleted = latestExport?.status === "completed";
+    
+    // Scan progress tracking
+    const scansCompleted = scenario?.scan_extraction_completed ?? false;
+    const scansTotal = scenario?.scans_total ?? 0;
+    const scansFinished = (scenario?.scans_completed ?? 0) + (scenario?.scans_failed ?? 0);
+    const scansProgress = scansTotal > 0 ? Math.round((scansFinished / scansTotal) * 100) : 0;
+    const scansRunning = scansTotal > 0 && !scansCompleted;
 
     // =============================================================================
     // Data Fetching
@@ -86,48 +67,10 @@ export default function ScenarioExportPage() {
         try {
             const data = await trainingScenariosApi.listExports(scenarioId);
             setExports(data.items);
-
-            // If there's a completed export, fetch its splits
-            const completedExport = data.items.find(e => e.status === "completed");
-            if (completedExport) {
-                const splitsData = await trainingScenariosApi.getExportSplits(
-                    scenarioId,
-                    completedExport.id
-                );
-                setSplits(splitsData);
-            } else {
-                setSplits([]);
-            }
         } catch (err) {
             console.error("Failed to fetch exports:", err);
         }
     }, [scenarioId]);
-
-    const fetchGroupsPreview = useCallback(async () => {
-        if (!scenarioId) return;
-
-        // Check if current strategy requires group preview
-        const currentStrategy = STRATEGY_OPTIONS.find((s) => s.value === config.strategy);
-        if (!currentStrategy?.requiresGroupBy) {
-            setGroupsPreview(null);
-            return;
-        }
-
-        setLoadingGroups(true);
-        try {
-            const data = await trainingScenariosApi.getGroupPreview(scenarioId, {
-                group_by: config.group_by,
-                num_bins: config.num_bins,
-                time_slots: config.time_slots,
-            });
-            setGroupsPreview(data);
-        } catch (err) {
-            console.error("Failed to fetch groups preview:", err);
-            setGroupsPreview(null);
-        } finally {
-            setLoadingGroups(false);
-        }
-    }, [scenarioId, config.strategy, config.group_by, config.num_bins, config.time_slots]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -143,17 +86,9 @@ export default function ScenarioExportPage() {
         loadData();
     }, [loadData]);
 
-    // Fetch groups preview when group config changes
-    useEffect(() => {
-        if (scenario?.status === "processed") {
-            fetchGroupsPreview();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scenario?.status, config.strategy, config.group_by, config.num_bins, config.time_slots]);
-
     // Subscribe to SSE for real-time updates
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: { scenario_id?: string }) => {
+        const unsubscribe = subscribe("SCENARIO.UPDATED", (data: { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
                 fetchScenario();
                 fetchExports();
@@ -172,105 +107,45 @@ export default function ScenarioExportPage() {
         }, 3000);
 
         return () => clearInterval(interval);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [scenario?.status]);
+    }, [exports, fetchExports]);
 
     // =============================================================================
     // Handlers
     // =============================================================================
 
-    const handleGenerateDataset = async () => {
-        setGenerating(true);
+    const handleCreateNew = () => {
+        router.push(`/scenarios/${scenarioId}/export/create`);
+    };
+
+    const handleViewExport = async (exportId: string) => {
         try {
-            // Build splitting config from UI state
-            const splittingConfig = {
-                strategy: config.strategy,
-                group_by: config.group_by,
-                num_bins: config.num_bins,
-                time_slots: config.time_slots,
-                n_folds: config.n_folds,
-                ratios: config.ratios,
-            };
-
-            // Build preprocessing config
-            const preprocessingConfig = {
-                missing_values_strategy: config.missing_values_strategy,
-                normalization: config.normalization,
-            };
-
-            // Build output config
-            const outputConfig = {
-                format: config.format,
-                include_metadata: config.include_metadata,
-            };
-
-            await trainingScenariosApi.createExport(scenarioId, {
-                name: `Export ${new Date().toISOString().split("T")[0]}`,
-                splitting_config: splittingConfig,
-                preprocessing_config: preprocessingConfig,
-                output_config: outputConfig,
-            });
-
-            toast({ title: "Dataset generation started" });
-            await fetchExports();
+            const exportRecord = exports.find(e => e.id === exportId);
+            const splits = await trainingScenariosApi.getExportSplits(scenarioId, exportId);
+            setViewingSplits(splits);
+            setViewingExport(exportRecord || null);
         } catch (err) {
-            console.error("Failed to generate dataset:", err);
-            toast({ variant: "destructive", title: "Failed to generate dataset" });
-        } finally {
-            setGenerating(false);
+            console.error("Failed to fetch export splits:", err);
+            toast({ variant: "destructive", title: "Failed to load export details" });
         }
     };
 
-    const updateConfig = useCallback((updates: Partial<ExportConfig>) => {
-        setConfig((prev) => ({ ...prev, ...updates }));
-    }, []);
-
-    const updateRatios = useCallback((key: "train" | "val" | "test", value: number) => {
-        setConfig((prev) => {
-            const newRatios = { ...prev.ratios, [key]: value };
-            // Auto-adjust other values to sum to 1
-            const total = newRatios.train + newRatios.val + newRatios.test;
-            if (total > 1) {
-                const other = key === "train" ? "val" : "train";
-                newRatios[other] = Math.max(0, newRatios[other] - (total - 1));
-            }
-            return { ...prev, ratios: newRatios };
-        });
-    }, []);
-
-    // =============================================================================
-    // Validation
-    // =============================================================================
-
-    const getConfigValidationError = useCallback((): string | null => {
-        const groupCount = groupsPreview?.groups?.length || 0;
-        const currentStrategyOption = getStrategyOption(config.strategy);
-        const isCV = isCVStrategy(config.strategy);
-
-        // Check if strategy requires grouping and has minimum group requirement
-        if (currentStrategyOption?.requiresGroupBy && currentStrategyOption?.minGroups) {
-            if (groupCount < currentStrategyOption.minGroups) {
-                return `${currentStrategyOption.label} requires at least ${currentStrategyOption.minGroups} groups. Current: ${groupCount}. Try different grouping.`;
-            }
+    const handleDeleteExport = async (exportId: string) => {
+        if (!confirm("Are you sure you want to delete this export?")) return;
+        
+        try {
+            await trainingScenariosApi.deleteExport(scenarioId, exportId);
+            toast({ title: "Export deleted" });
+            await fetchExports();
+        } catch (err) {
+            console.error("Failed to delete export:", err);
+            toast({ variant: "destructive", title: "Failed to delete export" });
         }
+    };
 
-        // Validate ratios sum to ~1.0 for non-CV strategies
-        if (!isCV) {
-            const ratioSum = config.ratios.train + config.ratios.val + config.ratios.test;
-            if (ratioSum < 0.95 || ratioSum > 1.05) {
-                return `Train/Val/Test ratios must sum to 100%. Current: ${(ratioSum * 100).toFixed(0)}%`;
-            }
-        }
-
-        // Imbalanced K-Fold: warn if n_folds is too high
-        if (config.strategy === STRATEGY.IMBALANCED_KFOLD_CV && config.n_folds > 20) {
-            return `Number of folds should be ≤20 for practical K-Fold CV`;
-        }
-
-        return null;
-    }, [config, groupsPreview]);
-
-    const validationError = getConfigValidationError();
+    const handleBackToList = () => {
+        setViewingExport(null);
+        setViewingSplits([]);
+    };
 
     // =============================================================================
     // Render States
@@ -292,75 +167,29 @@ export default function ScenarioExportPage() {
         );
     }
 
-    // Generating state
-    if (isExportGenerating) {
-        return <GeneratingState />;
-    }
-
-    // Show completed exports
-    if (hasExports && isExportCompleted && splits.length > 0) {
+    // Viewing specific export details
+    if (viewingExport && viewingSplits.length > 0) {
         return (
             <DatasetSummarySection
                 scenarioId={scenarioId}
-                splits={splits}
-                onRegenerate={() => {
-                    setExports([]);
-                    setSplits([]);
-                }}
+                exportId={viewingExport.id}
+                exportName={viewingExport.name}
+                splits={viewingSplits}
+                onBack={handleBackToList}
             />
         );
     }
 
-    // =============================================================================
-    // Configuration UI (ready to generate)
-    // =============================================================================
-
+    // Default: Show exports list
     return (
-        <div className="space-y-6">
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Settings className="h-5 w-5" />
-                        Export Configuration
-                    </CardTitle>
-                    <CardDescription>
-                        Configure preprocessing, splitting, and output format
-                    </CardDescription>
-                </CardHeader>
-            </Card>
-
-            <PreprocessingSection config={config} updateConfig={updateConfig} />
-
-            <SplittingStrategySection
-                config={config}
-                updateConfig={updateConfig}
-                updateRatios={updateRatios}
-                groupsPreview={groupsPreview}
-                loadingGroups={loadingGroups}
-                fetchGroupsPreview={fetchGroupsPreview}
-                validationError={validationError}
-            />
-
-            <OutputFormatSection config={config} updateConfig={updateConfig} />
-
-            {/* Generate Button */}
-            <Card>
-                <CardContent className="pt-6">
-                    <Button
-                        size="lg"
-                        className="w-full bg-green-600 hover:bg-green-700"
-                        onClick={handleGenerateDataset}
-                        disabled={generating || !!validationError}
-                    >
-                        {generating ? (
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        ) : (
-                            <Play className="mr-2 h-5 w-5" />
-                        )}
-                        Generate Dataset
-                    </Button>
-                </CardContent>
-            </Card>
-        </div>
+        <ExportsListSection
+            scenarioId={scenarioId}
+            exports={exports}
+            onCreateNew={handleCreateNew}
+            onViewExport={handleViewExport}
+            onDeleteExport={handleDeleteExport}
+            scansRunning={scansRunning}
+            scansProgress={scansProgress}
+        />
     );
 }

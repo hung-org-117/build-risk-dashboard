@@ -10,7 +10,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import { Download, RefreshCw } from "lucide-react";
+import { Download, ChevronLeft } from "lucide-react";
 import {
     Card,
     CardContent,
@@ -23,14 +23,18 @@ import { formatBytes } from "@/lib/utils";
 
 interface DatasetSummarySectionProps {
     scenarioId: string;
+    exportId: string;
+    exportName?: string;
     splits: TrainingDatasetSplitRecord[];
-    onRegenerate: () => void;
+    onBack: () => void;
 }
 
 export function DatasetSummarySection({
     scenarioId,
+    exportId,
+    exportName,
     splits,
-    onRegenerate,
+    onBack,
 }: DatasetSummarySectionProps) {
     const totalRecords = splits.reduce((sum, s) => sum + s.record_count, 0);
     const totalSize = splits.reduce((sum, s) => sum + s.file_size_bytes, 0);
@@ -40,14 +44,20 @@ export function DatasetSummarySection({
             {/* Summary Card */}
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                        <CardTitle>Dataset Summary</CardTitle>
-                        <CardDescription>Generated splits ready for download</CardDescription>
+                    <div className="flex items-center gap-4">
+                        <Button variant="ghost" size="sm" onClick={onBack}>
+                            <ChevronLeft className="h-4 w-4 mr-1" />
+                            Back
+                        </Button>
+                        <div>
+                            <CardTitle>{exportName || "Export Details"}</CardTitle>
+                            <CardDescription>Generated splits ready for download</CardDescription>
+                        </div>
                     </div>
                     <div className="flex gap-2">
                         <Button variant="outline" size="sm" asChild>
                             <a
-                                href={`/api/training-scenarios/${scenarioId}/splits/download-all?file_format=parquet`}
+                                href={`/api/training-scenarios/${scenarioId}/exports/${exportId}/download-all?file_format=parquet`}
                             >
                                 <Download className="mr-2 h-4 w-4" />
                                 All (Parquet)
@@ -55,15 +65,11 @@ export function DatasetSummarySection({
                         </Button>
                         <Button variant="outline" size="sm" asChild>
                             <a
-                                href={`/api/training-scenarios/${scenarioId}/splits/download-all?file_format=csv`}
+                                href={`/api/training-scenarios/${scenarioId}/exports/${exportId}/download-all?file_format=csv`}
                             >
                                 <Download className="mr-2 h-4 w-4" />
                                 All (CSV)
                             </a>
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={onRegenerate}>
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            Regenerate
                         </Button>
                     </div>
                 </CardHeader>
@@ -123,7 +129,7 @@ export function DatasetSummarySection({
                                     <TableCell className="text-right">
                                         <Button size="sm" variant="outline" asChild>
                                             <a
-                                                href={`/api/training-scenarios/${scenarioId}/splits/${split.id}/download`}
+                                                href={`/api/training-scenarios/${scenarioId}/exports/${exportId}/splits/${split.id}/download`}
                                             >
                                                 <Download className="mr-2 h-4 w-4" />
                                                 Download

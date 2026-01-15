@@ -95,7 +95,7 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
                 const payload = message.payload || message;
 
                 // Handle User Notification (Toast)
-                if (eventType === "USER_NOTIFICATION") {
+                if (eventType === "SYSTEM.NOTIFICATION") {
                     toast({
                         title: payload.title,
                         description: payload.message,
@@ -116,18 +116,24 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 // Also dispatch as window custom event for components that need it
-                if ([
-                    "ENRICHMENT_UPDATE",
-                    "ENRICHMENT_BUILD_UPDATE",
-                    "DATASET_UPDATE",
-                    "SCAN_UPDATE",
-                    "INGESTION_ERROR",
-                    "SCAN_ERROR",
-                    "INGESTION_BUILD_UPDATE",
-                    "REPO_UPDATE",
-                    "BUILD_UPDATE",
-                    "SCENARIO_UPDATE",
-                ].includes(eventType)) {
+                // Naming convention: {PIPELINE}.{ENTITY}.{ACTION}
+                // - MODEL.*: Model Training Pipeline events  
+                // - SCENARIO.*: Training Scenario Pipeline events
+                // - SYSTEM.*: System-wide events
+                const broadcastEventTypes = [
+                    "MODEL.REPO.UPDATED",
+                    "MODEL.BUILD.UPDATED",
+                    "MODEL.INGESTION.PROGRESS",
+                    "MODEL.INGESTION.ERROR",
+                    "SCENARIO.UPDATED",
+                    "SCENARIO.INGESTION.UPDATED",
+                    "SCENARIO.PROCESSING.UPDATED",
+                    "SCENARIO.SCAN.UPDATED",
+                    "SCENARIO.SCAN.ERROR",
+                    "SYSTEM.NOTIFICATION",
+                ];
+                
+                if (broadcastEventTypes.includes(eventType)) {
                     window.dispatchEvent(
                         new CustomEvent(eventType, { detail: payload })
                     );
@@ -141,18 +147,18 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
         eventSource.onmessage = handleMessage;
 
         // Explicitly listen for named events because EventSource doesn't fire onmessage for named events
+        // Naming convention: {PIPELINE}.{ENTITY}.{ACTION}
         const eventTypes = [
-            "ENRICHMENT_UPDATE",
-            "ENRICHMENT_BUILD_UPDATE",
-            "DATASET_UPDATE",
-            "SCAN_UPDATE",
-            "INGESTION_ERROR",
-            "SCAN_ERROR",
-            "INGESTION_BUILD_UPDATE",
-            "REPO_UPDATE",
-            "BUILD_UPDATE",
-            "SCENARIO_UPDATE",
-            "USER_NOTIFICATION"
+            "MODEL.REPO.UPDATED",
+            "MODEL.BUILD.UPDATED",
+            "MODEL.INGESTION.PROGRESS",
+            "MODEL.INGESTION.ERROR",
+            "SCENARIO.UPDATED",
+            "SCENARIO.INGESTION.UPDATED",
+            "SCENARIO.PROCESSING.UPDATED",
+            "SCENARIO.SCAN.UPDATED",
+            "SCENARIO.SCAN.ERROR",
+            "SYSTEM.NOTIFICATION",
         ];
 
         eventTypes.forEach(type => {

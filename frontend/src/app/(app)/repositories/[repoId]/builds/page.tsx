@@ -1,20 +1,85 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { reposApi } from "@/lib/api";
 import { UnifiedBuildsTable } from "../_tabs/builds/UnifiedBuildsTable";
 import { useRepo } from "@/components/repositories/RepoContext";
+import { useSSE } from "@/contexts/sse-context";
 import { ActionProgressBanner } from "../../_components/ActionProgressBanner";
 
 export default function BuildsPage() {
     const params = useParams();
     const repoId = params.repoId as string;
     const { repo, progress, syncLoading, startProcessingLoading } = useRepo();
+    const { subscribe } = useSSE();
 
     const [retryIngestionLoading, setRetryIngestionLoading] = useState(false);
     const [retryProcessingLoading, setRetryProcessingLoading] = useState(false);
+    
+    // Track current phase and build-level progress for ActionProgressBanner
+    const [currentPhase, setCurrentPhase] = useState<"ingestion" | "extraction" | "prediction">();
+    const [currentBuildProgress, setCurrentBuildProgress] = useState<{
+        buildNumber?: number;
+        featureCount?: number;
+        expectedFeatureCount?: number;
+        extractionStatus?: string;
+        predictionStatus?: string;
+    }>();
+
+    // Subscribe to SSE events for real-time progress tracking
+    useEffect(() => {
+        const unsubscribeProcessing = subscribe("MODEL.PROCESSING.UPDATED", (payload: {
+            repo_id: string;
+            build_id: string;
+            extraction_status: string;
+            feature_count?: number;
+            expected_feature_count?: number;
+        }) => {
+            if (payload.repo_id === repoId && payload.extraction_status === "in_progress") {
+                setCurrentPhase("extraction");
+                setCurrentBuildProgress({
+                    featureCount: payload.feature_count,
+                    expectedFeatureCount: payload.expected_feature_count,
+                    extractionStatus: payload.extraction_status,
+                });
+            } else if (payload.repo_id === repoId && ["completed", "failed", "partial"].includes(payload.extraction_status)) {
+                // Clear current progress when extraction completes
+                setCurrentBuildProgress(undefined);
+            }
+        });
+
+        const unsubscribePrediction = subscribe("MODEL.PREDICTION.UPDATED", (payload: {
+            repo_id: string;
+            build_id: string;
+            prediction_status: string;
+        }) => {
+            if (payload.repo_id === repoId && payload.prediction_status === "in_progress") {
+                setCurrentPhase("prediction");
+                setCurrentBuildProgress({
+                    predictionStatus: payload.prediction_status,
+                });
+            } else if (payload.repo_id === repoId && ["completed", "failed"].includes(payload.prediction_status)) {
+                setCurrentBuildProgress(undefined);
+            }
+        });
+
+        const unsubscribeIngestion = subscribe("MODEL.INGESTION.PROGRESS", (payload: {
+            repo_id: string;
+            status: string;
+        }) => {
+            if (payload.repo_id === repoId && payload.status === "in_progress") {
+                setCurrentPhase("ingestion");
+            }
+        });
+
+        return () => {
+            unsubscribeProcessing();
+            unsubscribePrediction();
+            unsubscribeIngestion();
+        };
+    }, [subscribe, repoId]);
 
     const handleRetryIngestion = async () => {
         setRetryIngestionLoading(true);
@@ -67,6 +132,8 @@ export default function BuildsPage() {
                 processingLoading={startProcessingLoading}
                 retryIngestionLoading={retryIngestionLoading}
                 retryProcessingLoading={retryProcessingLoading}
+                currentPhase={currentPhase}
+                currentBuildProgress={currentBuildProgress}
             />
 
             {/* Builds Table */}

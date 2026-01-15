@@ -251,6 +251,7 @@ class UnifiedBuildSummary(BaseModel):
     training_build_id: Optional[str] = None
     extraction_status: Optional[str] = None  # pending, in_progress, completed, partial, failed
     feature_count: int = 0
+    expected_feature_count: Optional[int] = None  # Expected features from template
     extraction_error: Optional[str] = None
 
     # Phase 4: Prediction (optional)

@@ -370,6 +370,7 @@ export interface UnifiedBuild {
   training_build_id?: string;
   extraction_status?: string;
   feature_count: number;
+  expected_feature_count?: number;
   extraction_error?: string;
   // Phase 4: Prediction (optional)
   prediction_status?: string;

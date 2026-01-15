@@ -85,7 +85,7 @@ export default function AdminReposPage() {
 
   // WebSocket connection
   useEffect(() => {
-    const unsubscribe = subscribe("REPO_UPDATE", (data: any) => {
+    const unsubscribe = subscribe("MODEL.REPO.UPDATED", (data: any) => {
       setRepositories((prev) => {
         return prev.map((repo) => {
           if (repo.id === data.repo_id) {

@@ -63,7 +63,7 @@ export default function UserReposPage() {
 
     // WebSocket subscription for real-time updates
     useEffect(() => {
-        const unsubscribe = subscribe("REPO_UPDATE", (data: any) => {
+        const unsubscribe = subscribe("MODEL.REPO.UPDATED", (data: any) => {
             setRepositories((prev) => {
                 let found = false;
                 const next = prev.map((repo) => {

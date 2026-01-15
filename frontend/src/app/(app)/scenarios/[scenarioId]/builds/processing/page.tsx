@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/training-scenarios";
 import { useSSE } from "@/contexts/sse-context";
 import { useToast } from "@/components/ui/use-toast";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 
 import { ExtractionStatusBadge, TablePagination } from "@/components/builds";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -80,23 +81,77 @@ export default function ProcessingBuildsPage() {
         fetchBuilds();
     }, [fetchScenario, fetchBuilds]);
 
-    // SSE subscription - refetch on scenario updates
+    // Debounced refetch for scenario updates
+    const debouncedFetchBuilds = useDebouncedCallback(fetchBuilds, 1000, {
+        leading: true,
+        trailing: true,
+    });
+
+    // SSE subscription - merge delta for individual builds, debounce scenario updates
     useEffect(() => {
         console.log("[ProcessingBuilds] Setting up SSE subscriptions for scenario:", scenarioId);
 
-        const unsubscribeScenario = subscribe("SCENARIO_UPDATE", (payload: { scenario_id?: string }) => {
+        // For scenario-level updates - merge stats directly
+        const unsubscribeScenario = subscribe("SCENARIO.UPDATED", (payload: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
             if (payload.scenario_id === scenarioId) {
-                fetchScenario();
-                fetchBuilds();
+                // Merge scenario stats directly instead of refetch
+                setScenario((prev) =>
+                    prev
+                        ? {
+                            ...prev,
+                            ...payload,
+                            status: payload.status || prev.status,
+                        }
+                        : prev
+                );
+                // Only debounced refetch when processing status changes
+                if (payload.status && ["processing", "processed", "failed"].includes(payload.status)) {
+                    debouncedFetchBuilds();
+                }
             }
         });
 
-        // Listen for individual enrichment build updates
-        const unsubscribeEnrichment = subscribe("ENRICHMENT_BUILD_UPDATE", (payload: { scenario_id?: string }) => {
+        // For individual enrichment build updates - merge delta into local state
+        const unsubscribeEnrichment = subscribe("SCENARIO.PROCESSING.UPDATED", (payload: {
+            scenario_id?: string;
+            build_id: string;
+            extraction_status: string;
+            feature_count?: number;
+            expected_feature_count?: number;
+            enriched_at?: string;
+            error?: string;
+        }) => {
             console.log("[ProcessingBuilds] Received ENRICHMENT_BUILD_UPDATE:", payload, "expecting scenarioId:", scenarioId);
-            if (payload.scenario_id === scenarioId) {
-                console.log("[ProcessingBuilds] Matched! Calling fetchBuilds...");
-                fetchBuilds();
+            if (payload.scenario_id === scenarioId && payload.build_id) {
+                console.log("[ProcessingBuilds] Matched! Merging delta...");
+                // Merge delta into existing data - no refetch needed!
+                setData((prev) => {
+                    if (!prev) return prev;
+
+                    // Check if build exists in current page
+                    const buildExists = prev.items.some((b) => b.id === payload.build_id);
+
+                    if (buildExists) {
+                        // Update existing build
+                        const updatedItems = prev.items.map((build) =>
+                            build.id === payload.build_id
+                                ? {
+                                    ...build,
+                                    extraction_status: (payload.extraction_status as TrainingEnrichmentBuildRecord["extraction_status"]) || build.extraction_status,
+                                    feature_count: payload.feature_count ?? build.feature_count,
+                                    expected_feature_count: payload.expected_feature_count ?? build.expected_feature_count,
+                                    enriched_at: payload.enriched_at || build.enriched_at,
+                                    extraction_error: payload.error || build.extraction_error,
+                                }
+                                : build
+                        );
+                        return { ...prev, items: updatedItems };
+                    } else {
+                        // Build not on current page - just update total count potentially
+                        // Could trigger a refetch if we want to show new builds
+                        return prev;
+                    }
+                });
             } else {
                 console.log("[ProcessingBuilds] NOT matched - payload.scenario_id:", payload.scenario_id, "!==", scenarioId);
             }
@@ -109,7 +164,7 @@ export default function ProcessingBuildsPage() {
             unsubscribeScenario();
             unsubscribeEnrichment();
         };
-    }, [subscribe, scenarioId, fetchScenario, fetchBuilds]);
+    }, [subscribe, scenarioId, debouncedFetchBuilds]);
 
     // Retry handler
     const handleRetry = async () => {
@@ -133,7 +188,6 @@ export default function ProcessingBuildsPage() {
 
     return (
         <div className="space-y-4">
-
             <Card>
                 <CardHeader className="space-y-4">
                     <div className="flex flex-row items-center justify-between">

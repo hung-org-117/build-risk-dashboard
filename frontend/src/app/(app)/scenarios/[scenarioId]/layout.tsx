@@ -69,7 +69,7 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
 
     // Subscribe to SSE for real-time updates
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
+        const unsubscribe = subscribe("SCENARIO.UPDATED", (data: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId && data.status) {
                 setScenario((prev) =>
                     prev

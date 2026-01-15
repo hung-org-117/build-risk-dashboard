@@ -211,6 +211,7 @@ export default function CreateExportPage() {
         setCreating(true);
         try {
             // Create the export with config
+            // Backend auto-triggers generation when export is created
             const dto: TrainingExportCreateDTO = {
                 name: config.name || undefined,
                 splitting_config: {
@@ -235,14 +236,10 @@ export default function CreateExportPage() {
                 },
             };
 
-            const exportRecord = await trainingScenariosApi.createExport(scenarioId, dto);
-            toast({ title: "Export created" });
+            await trainingScenariosApi.createExport(scenarioId, dto);
+            toast({ title: "Export created and generation started" });
 
-            // Trigger generation
-            await trainingScenariosApi.generateExport(scenarioId, exportRecord.id);
-            toast({ title: "Dataset generation started" });
-
-            // Redirect to list
+            // Redirect to list - generation is already running
             router.push(`/scenarios/${scenarioId}/export`);
         } catch (err) {
             console.error("Failed to create export:", err);
@@ -457,7 +454,7 @@ export default function CreateExportPage() {
                                         </div>
                                         <Slider
                                             value={[config.num_bins]}
-                                            onValueChange={([v]) => updateConfig({ num_bins: v })}
+                                            onValueChange={([v]: number[]) => updateConfig({ num_bins: v })}
                                             min={2}
                                             max={10}
                                             step={1}
@@ -472,7 +469,7 @@ export default function CreateExportPage() {
                                         </div>
                                         <Slider
                                             value={[config.time_slots]}
-                                            onValueChange={([v]) => updateConfig({ time_slots: v })}
+                                            onValueChange={([v]: number[]) => updateConfig({ time_slots: v })}
                                             min={2}
                                             max={12}
                                             step={1}
@@ -527,7 +524,7 @@ export default function CreateExportPage() {
                                 </div>
                                 <Slider
                                     value={[config.internal_val_ratio * 100]}
-                                    onValueChange={([v]) => updateConfig({ internal_val_ratio: v / 100 })}
+                                    onValueChange={([v]: number[]) => updateConfig({ internal_val_ratio: v / 100 })}
                                     min={5}
                                     max={50}
                                     step={5}
@@ -548,7 +545,7 @@ export default function CreateExportPage() {
                                     </div>
                                     <Slider
                                         value={[config.n_folds]}
-                                        onValueChange={([v]) => updateConfig({ n_folds: v })}
+                                        onValueChange={([v]: number[]) => updateConfig({ n_folds: v })}
                                         min={2}
                                         max={20}
                                         step={1}
@@ -561,7 +558,7 @@ export default function CreateExportPage() {
                                     </div>
                                     <Slider
                                         value={[config.imbalance_drop_rate * 100]}
-                                        onValueChange={([v]) => updateConfig({ imbalance_drop_rate: v / 100 })}
+                                        onValueChange={([v]: number[]) => updateConfig({ imbalance_drop_rate: v / 100 })}
                                         min={0}
                                         max={90}
                                         step={10}
@@ -583,7 +580,7 @@ export default function CreateExportPage() {
                                     </div>
                                     <Slider
                                         value={[config.ratios.train * 100]}
-                                        onValueChange={([v]) => updateRatios("train", v / 100)}
+                                        onValueChange={([v]: number[]) => updateRatios("train", v / 100)}
                                         min={10}
                                         max={90}
                                         step={5}
@@ -596,7 +593,7 @@ export default function CreateExportPage() {
                                     </div>
                                     <Slider
                                         value={[config.ratios.val * 100]}
-                                        onValueChange={([v]) => updateRatios("val", v / 100)}
+                                        onValueChange={([v]: number[]) => updateRatios("val", v / 100)}
                                         min={5}
                                         max={40}
                                         step={5}
@@ -609,7 +606,7 @@ export default function CreateExportPage() {
                                     </div>
                                     <Slider
                                         value={[config.ratios.test * 100]}
-                                        onValueChange={([v]) => updateRatios("test", v / 100)}
+                                        onValueChange={([v]: number[]) => updateRatios("test", v / 100)}
                                         min={5}
                                         max={40}
                                         step={5}

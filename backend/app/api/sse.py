@@ -113,14 +113,10 @@ async def sse_events_generator(
 
     allowed_config_ids = set()
     if accessible_raw_repo_ids:
-        configs = repo_config_repo.find_many(
-            {"raw_repo_id": {"$in": accessible_raw_repo_ids}}
-        )
+        configs = repo_config_repo.find_many({"raw_repo_id": {"$in": accessible_raw_repo_ids}})
         allowed_config_ids = {str(c.id) for c in configs}
 
-    logger.info(
-        f"SSE connected for user {user_id}. Access to {len(allowed_config_ids)} repos."
-    )
+    logger.info(f"SSE connected for user {user_id}. Access to {len(allowed_config_ids)} repos.")
 
     # Send initial connection message
     yield format_sse({"type": "connected", "message": "SSE stream connected"})
@@ -153,35 +149,33 @@ async def sse_events_generator(
                             event_type = event.get("type")
                             payload = event.get("payload", {})
 
-                            # === FILTERING LOGIC (same as WebSocket) ===
+                            # === FILTERING LOGIC (RBAC-based) ===
+                            #
+                            # Event Naming Convention: {PIPELINE}.{ENTITY}.{ACTION}
+                            # - MODEL.*: Model Training Pipeline events
+                            # - SCENARIO.*: Training Scenario Pipeline events
+                            # - SYSTEM.*: System-wide events
+                            #
 
-                            # 1. User Notifications (Direct Message)
-                            if event_type == "USER_NOTIFICATION":
+                            # 1. System Notifications (Direct to specific user)
+                            if event_type == "SYSTEM.NOTIFICATION":
                                 target_user_id = payload.get("user_id")
                                 if target_user_id and target_user_id != user_id:
                                     continue  # Not for this user
 
-                            # 2. Repo/Build Events (RBAC)
-                            elif event_type in ("REPO_UPDATE", "BUILD_UPDATE"):
+                            # 2. Model Pipeline Events (RBAC by repo_id)
+                            elif event_type.startswith("MODEL."):
                                 repo_id = payload.get("repo_id")
                                 if role != "admin":
                                     if not repo_id or repo_id not in allowed_config_ids:
                                         continue
 
-                            # 3. System Events (Admin only)
-                            elif event_type == "SYSTEM":
+                            # 3. Scenario Pipeline Events (admin-only for now)
+                            # TrainingScenario events - broadcast to admins
+                            # Future: could filter by scenario ownership
+                            elif event_type.startswith("SCENARIO."):
                                 if role != "admin":
                                     continue
-
-                            # 4. Scan/Ingestion (RBAC via repo_id)
-                            elif event_type in (
-                                "SCAN_UPDATE",
-                                "INGESTION_BUILD_UPDATE",
-                            ):
-                                repo_id = payload.get("repo_id")
-                                if repo_id and role != "admin":
-                                    if repo_id not in allowed_config_ids:
-                                        continue
 
                             # === END FILTERING ===
 
@@ -195,7 +189,6 @@ async def sse_events_generator(
             except asyncio.TimeoutError:
                 # Send heartbeat on timeout (every 30s)
                 yield format_sse({"type": "heartbeat"})
-
 
     except asyncio.CancelledError:
         logger.info(f"SSE stream cancelled for user {user_id}")

@@ -128,7 +128,7 @@ export default function ScenarioOverviewPage() {
 
     // SSE subscription
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
+        const unsubscribe = subscribe("SCENARIO.UPDATED", (data: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
                 setScenario((prev) =>
                     prev

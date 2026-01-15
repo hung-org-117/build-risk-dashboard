@@ -6,9 +6,10 @@ This module provides context classes for each pipeline type:
 - TrainingPipelineContext: For Training Scenario pipeline
 """
 
-from app.repositories import TrainingScenarioRepository
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+
+from app.repositories import TrainingScenarioRepository
 
 
 @dataclass
@@ -55,10 +56,11 @@ class ModelPipelineContext:
         status: str,
         error: Optional[str] = None,
     ) -> None:
+        from app.entities.model_import_build import ResourceStatus
         from app.repositories.model_import_build import ModelImportBuildRepository
 
         repo = ModelImportBuildRepository(db)
-        repo.update_resource_status(build_id, resource, status, error)
+        repo.update_resource_status(build_id, resource, ResourceStatus(status), error)
 
     def mark_build_ingested(self, db: Any, build_id: str) -> None:
         from app.entities.model_import_build import ModelImportBuildStatus
@@ -81,17 +83,17 @@ class ModelPipelineContext:
         )
 
     def publish_status(self, status: str, message: str, **kwargs) -> None:
-        from app.tasks.shared.events import publish_status
+        from app.tasks.shared.events import publish_model_repo_updated
 
-        publish_status(self.repo_config_id, status, message, **kwargs)
+        publish_model_repo_updated(self.repo_config_id, status, message, **kwargs)
 
     def publish_build_update(self, build_id: str, status: str, **kwargs) -> None:
-        from app.tasks.shared.events import publish_ingestion_build_update
+        from app.tasks.shared.events import publish_ingestion_progress
 
-        publish_ingestion_build_update(
-            self.repo_config_id,
-            build_id,
-            status,
+        publish_ingestion_progress(
+            repo_id=self.repo_config_id,
+            resource=kwargs.get("resource", "unknown"),
+            status=status,
             pipeline_type="model",
             **kwargs,
         )
@@ -166,24 +168,25 @@ class TrainingPipelineContext:
         status: str,
         error: Optional[str] = None,
     ) -> None:
+        from app.entities.training_ingestion_build import ResourceStatus
         from app.repositories.training_ingestion_build import (
             TrainingIngestionBuildRepository,
         )
 
         repo = TrainingIngestionBuildRepository(db)
-        repo.update_resource_status(build_id, resource, status, error)
+        repo.update_resource_status(build_id, resource, ResourceStatus(status), error)
 
     def mark_build_ingested(self, db: Any, build_id: str) -> None:
-        from app.entities.training_ingestion_build import IngestionBuildStatus
+        from app.entities.training_ingestion_build import IngestionStatus
         from app.repositories.training_ingestion_build import (
             TrainingIngestionBuildRepository,
         )
 
         repo = TrainingIngestionBuildRepository(db)
-        repo.update_one(build_id, {"status": IngestionBuildStatus.INGESTED.value})
+        repo.update_one(build_id, {"status": IngestionStatus.INGESTED.value})
 
     def mark_build_failed(self, db: Any, build_id: str, error: str) -> None:
-        from app.entities.training_ingestion_build import IngestionBuildStatus
+        from app.entities.training_ingestion_build import IngestionStatus
         from app.repositories.training_ingestion_build import (
             TrainingIngestionBuildRepository,
         )
@@ -192,28 +195,27 @@ class TrainingPipelineContext:
         repo.update_one(
             build_id,
             {
-                "status": IngestionBuildStatus.FAILED.value,
+                "status": IngestionStatus.FAILED.value,
                 "ingestion_error": error,
             },
         )
 
-    def publish_status(self, status: str, message: str, **kwargs) -> None:
-        from app.tasks.shared.events import publish_scenario_update
+    def publish_status(self, db: Any, status: str, message: str, **kwargs) -> None:
+        from app.tasks.shared.events import publish_scenario_updated
 
         # Re-fetch scenario to get latest state for entity-based update
-        scenario_repo = TrainingScenarioRepository(self.db)
+        scenario_repo = TrainingScenarioRepository(db)
         scenario = scenario_repo.find_by_id(self.scenario_id)
         if scenario:
-            publish_scenario_update(scenario)
+            publish_scenario_updated(scenario)
 
     def publish_build_update(self, build_id: str, status: str, **kwargs) -> None:
-        from app.tasks.shared.events import publish_ingestion_build_update
+        from app.tasks.shared.events import publish_scenario_ingestion_updated
 
-        publish_ingestion_build_update(
-            self.scenario_id,
-            build_id,
-            status,
-            pipeline_type="dataset",
+        publish_scenario_ingestion_updated(
+            scenario_id=self.scenario_id,
+            build_id=build_id,
+            status=status,
             **kwargs,
         )
 

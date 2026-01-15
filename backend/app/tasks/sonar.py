@@ -18,7 +18,7 @@ from app.paths import get_worktree_path
 from app.repositories.sonar_commit_scan import SonarCommitScanRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.tasks.base import PipelineTask, SafeTask, TaskState
-from app.tasks.shared.events import publish_scan_update
+from app.tasks.shared.events import publish_scenario_scan_updated
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def start_sonar_scan_for_version_commit(
         """Mark scan as failed and publish error."""
         error_msg = str(exc)
         scan_repo.mark_failed(scan_record.id, error_msg)
-        publish_scan_update(
+        publish_scenario_scan_updated(
             scenario_id=scenario_id,
             scan_id=str(scan_record.id),
             commit_sha=commit_sha,
@@ -104,9 +104,7 @@ def start_sonar_scan_for_version_commit(
 
             worktree_path = get_worktree_path(github_repo_id, commit_sha)
             if not worktree_path.exists():
-                error_msg = (
-                    f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
-                )
+                error_msg = f"Worktree not found for {repo_full_name} @ {commit_sha[:8]}"
                 logger.error(error_msg)
                 scan_repo.mark_failed(scan_record.id, error_msg)
                 raise ValueError(error_msg)
@@ -115,7 +113,7 @@ def start_sonar_scan_for_version_commit(
 
             # Mark as scanning
             scan_repo.mark_scanning(scan_record.id)
-            publish_scan_update(
+            publish_scenario_scan_updated(
                 scenario_id=scenario_id,
                 scan_id=str(scan_record.id),
                 commit_sha=commit_sha,
@@ -130,9 +128,7 @@ def start_sonar_scan_for_version_commit(
             worktree_path_str = state.meta["worktree_path"]
 
             project_key = component_key.rsplit("_", 1)[0]
-            sonar_tool = SonarQubeTool(
-                project_key=project_key, github_repo_id=github_repo_id
-            )
+            sonar_tool = SonarQubeTool(project_key=project_key, github_repo_id=github_repo_id)
             sonar_tool.scan_commit(
                 commit_sha=commit_sha,
                 full_name=repo_full_name,
@@ -187,9 +183,7 @@ def export_metrics_from_webhook(
         component_key: SonarQube component/project key
         analysis_status: Status from webhook ("SUCCESS", "FAILED", etc.)
     """
-    logger.info(
-        f"Processing SonarQube webhook for {component_key}, status={analysis_status}"
-    )
+    logger.info(f"Processing SonarQube webhook for {component_key}, status={analysis_status}")
 
     db = get_database()
     scan_repo = SonarCommitScanRepository(db)
@@ -220,7 +214,7 @@ def export_metrics_from_webhook(
             scan_repo.mark_failed(scan_record.id, error_msg)
 
             # Publish failed status
-            publish_scan_update(
+            publish_scenario_scan_updated(
                 scenario_id=scenario_id_str,
                 scan_id=str(scan_record.id),
                 commit_sha=scan_record.commit_sha,
@@ -292,7 +286,7 @@ def export_metrics_from_webhook(
         )
 
         # Publish completed status
-        publish_scan_update(
+        publish_scenario_scan_updated(
             scenario_id=scenario_id_str,
             scan_id=str(scan_record.id),
             commit_sha=scan_record.commit_sha,
@@ -342,7 +336,7 @@ def export_metrics_from_webhook(
         scan_repo.mark_failed(scan_record.id, str(exc))
 
         # Publish failed status
-        publish_scan_update(
+        publish_scenario_scan_updated(
             scenario_id=scenario_id_str,
             scan_id=str(scan_record.id),
             commit_sha=scan_record.commit_sha,

@@ -99,9 +99,9 @@ def check_and_mark_scans_completed(db: Database, context_id: str) -> bool:
                 logger.info(f"TrainingScenario {context_id} scan extraction completed")
 
                 # Publish SSE update for scan completion
-                from app.tasks.shared.events import publish_scenario_update
+                from app.tasks.shared.events import publish_scenario_updated
 
-                publish_scenario_update(scenario)
+                publish_scenario_updated(scenario)
             return True
         return False
 

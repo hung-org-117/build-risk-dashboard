@@ -156,7 +156,7 @@ export default function ScenariosPage() {
     const { subscribe } = useSSE();
 
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO_UPDATE", (data: {
+        const unsubscribe = subscribe("SCENARIO.UPDATED", (data: {
             scenario_id: string;
             status?: TrainingScenarioStatus;
             builds_ingested?: number;

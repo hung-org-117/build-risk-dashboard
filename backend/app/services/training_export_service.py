@@ -9,9 +9,8 @@ Handles Phase 3 of the Training Pipeline (Exports):
 
 import logging
 import zipfile
-from datetime import datetime
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -19,7 +18,7 @@ from pymongo.database import Database
 
 from app import paths
 from app.dtos.training_export import ExportCreateDTO, ExportResponse, SplitResponse
-from app.entities.training_dataset_export import ExportStatus, TrainingDatasetExport
+from app.entities.training_dataset_export import ExportStatus
 from app.entities.training_scenario import ScenarioStatus
 from app.repositories.training_dataset_export import TrainingDatasetExportRepository
 from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
@@ -53,9 +52,7 @@ class TrainingExportService:
         if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
-        exports, total = self.export_repo.find_by_scenario(
-            scenario_id, skip=skip, limit=limit
-        )
+        exports, total = self.export_repo.find_by_scenario(scenario_id, skip=skip, limit=limit)
         return [ExportResponse.from_entity(e) for e in exports], total
 
     def create_export(
@@ -64,16 +61,23 @@ class TrainingExportService:
         user_id: str,
         dto: ExportCreateDTO,
     ) -> ExportResponse:
-        """Create a new export for a scenario."""
+        """
+        Create a new export for a scenario and automatically trigger generation.
+
+        This combines create + generate into one step for better UX.
+        """
         scenario = self.scenario_repo.find_by_id(scenario_id)
         if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
-        # Must be Processed or Completed
-        if scenario.status not in [ScenarioStatus.PROCESSED, ScenarioStatus.COMPLETED]:
+        # Must be Processed
+        if scenario.status != ScenarioStatus.PROCESSED:
             raise HTTPException(
                 status_code=400,
-                detail=f"Scenario must be processed to create export. Current status: {scenario.status}",
+                detail=(
+                    f"Scenario must be processed to create export. "
+                    f"Current status: {scenario.status}"
+                ),
             )
 
         # Generate default name if needed
@@ -91,7 +95,20 @@ class TrainingExportService:
             created_by=user_id,
         )
 
-        return ExportResponse.from_entity(export)
+        # Auto-trigger generation
+        export_id = str(export.id)
+        self.export_repo.update_status(export_id, ExportStatus.GENERATING)
+
+        from app.tasks.training_export import generate_export_dataset
+
+        task = generate_export_dataset.delay(scenario_id, export_id)
+        self.export_repo.update_status(export_id, ExportStatus.GENERATING, task_id=task.id)
+
+        # Return with updated status
+        updated_export = self.export_repo.find_by_id(export_id)
+        if not updated_export:
+            raise HTTPException(status_code=500, detail="Failed to retrieve created export")
+        return ExportResponse.from_entity(updated_export)
 
     def get_export(self, scenario_id: str, export_id: str) -> ExportResponse:
         """Get export details."""
@@ -109,7 +126,8 @@ class TrainingExportService:
         # Delete splits first
         self.split_repo.delete_by_export(export_id)
         # Delete export
-        self.export_repo.delete_one(export.id)
+        if export.id:
+            self.export_repo.delete_one(export.id)
 
         # TODO: Cleanup physical files if implementation allows
         # Currently files are tracked in splits, which are deleted from DB,
@@ -134,9 +152,7 @@ class TrainingExportService:
             raise HTTPException(status_code=404, detail="Export not found")
 
         if export.status == ExportStatus.GENERATING:
-            raise HTTPException(
-                status_code=400, detail="Export is already being generated"
-            )
+            raise HTTPException(status_code=400, detail="Export is already being generated")
 
         # Update status
         self.export_repo.update_status(export_id, ExportStatus.GENERATING)
@@ -147,9 +163,7 @@ class TrainingExportService:
         task = generate_export_dataset.delay(scenario_id, export_id)
 
         # Save task ID
-        self.export_repo.update_status(
-            export_id, ExportStatus.GENERATING, task_id=task.id
-        )
+        self.export_repo.update_status(export_id, ExportStatus.GENERATING, task_id=task.id)
 
         return {
             "success": True,
@@ -162,9 +176,7 @@ class TrainingExportService:
     # Splits & Files
     # =========================================================================
 
-    def get_export_splits(
-        self, scenario_id: str, export_id: str
-    ) -> List[SplitResponse]:
+    def get_export_splits(self, scenario_id: str, export_id: str) -> List[SplitResponse]:
         """Get splits for an export."""
         # Validate export access
         export = self.export_repo.find_by_id(export_id)
@@ -189,19 +201,15 @@ class TrainingExportService:
             for s in splits
         ]
 
-    def download_split(
-        self, scenario_id: str, export_id: str, split_id: str
-    ) -> FileResponse:
+    def download_split(self, scenario_id: str, export_id: str, split_id: str) -> FileResponse:
         """Download a split file."""
         # Validate hierarchy
         split = self.split_repo.find_by_id(split_id)
         if not split or str(split.export_id) != export_id:
             raise HTTPException(status_code=404, detail="Split not found")
 
-        # We could double check export.scenario_id == scenario_id, but implicit via export_id check if we did it.
-        # But split doesn't directly link to scenario, so let's check export first?
-        # Actually split table doesn't have scenario_id anymore in new design?
-        # Let's check: TrainingDatasetSplit has export_id. Export has scenario_id.
+        # Check export.scenario_id matches via export_id
+        # Split → Export → Scenario hierarchy validation
         export = self.export_repo.find_by_id(export_id)
         if not export or str(export.scenario_id) != scenario_id:
             raise HTTPException(status_code=404, detail="Export not found for scenario")
@@ -216,9 +224,7 @@ class TrainingExportService:
             media_type="application/octet-stream",
         )
 
-    def download_all_splits(
-        self, scenario_id: str, export_id: str
-    ) -> StreamingResponse:
+    def download_all_splits(self, scenario_id: str, export_id: str) -> StreamingResponse:
         """
         Download all splits for an export as a zip file.
 

@@ -274,7 +274,9 @@ class ModelBuildService:
             prediction_error=(training_dict.get("prediction_error") if training_dict else None),
         )
 
-    def get_recent_builds(self, limit: int = 10, current_user: dict = None) -> List[BuildSummary]:
+    def get_recent_builds(
+        self, limit: int = 10, current_user: Optional[dict] = None
+    ) -> List[BuildSummary]:
         """Get most recent builds across repos accessible to user.
 
         Only returns builds from IMPORTED repositories (status='imported').
@@ -598,6 +600,8 @@ class ModelBuildService:
             UnifiedBuildListResponse,
             UnifiedBuildSummary,
         )
+        from app.repositories.dataset_template_repository import DatasetTemplateRepository
+        from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
         try:
             config_oid = ObjectId(repo_id)
@@ -607,6 +611,16 @@ class ModelBuildService:
         repo_config = self.model_repo_config_repo.find_by_id(repo_id)
         if not repo_config:
             return UnifiedBuildListResponse(items=[], total=0, page=1, size=limit)
+
+        # Get expected feature count from template
+        template_repo = DatasetTemplateRepository(self.db)
+        template = template_repo.find_by_name("Risk Prediction")
+        current_features = (
+            set(template.feature_names)
+            if template
+            else set()
+        )
+        expected_features = len(current_features.union(DEFAULT_FEATURES))
 
         # Build match query for model_import_builds
         match_query: Dict[str, Any] = {"model_repo_config_id": config_oid}
@@ -742,6 +756,7 @@ class ModelBuildService:
                     ),
                     feature_count=feature_vector.get("feature_count", 0)
                     or len(feature_vector.get("features", {})),
+                    expected_feature_count=expected_features,
                     extraction_error=(
                         training_build.get("extraction_error") if training_build else None
                     ),

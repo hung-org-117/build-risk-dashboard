@@ -36,6 +36,7 @@ import {
     FileJson,
     Activity
 } from "lucide-react";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 
 import {
     trainingScenariosApi,
@@ -151,29 +152,92 @@ export default function ScansPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scenarioId, trivyPage, sonarPage, activeTab]);
 
-    // Listen for real-time SCAN_UPDATE events via SSE
+    // Debounced refetch for scan updates
+    const debouncedFetchScans = useDebouncedCallback(
+        () => fetchScans(true),
+        500,
+        { leading: true, trailing: true }
+    );
+
+    // Helper to merge a single scan update into local state
+    const mergeScanUpdate = (payload: {
+        scan_id: string;
+        commit_sha: string;
+        tool_type: string;
+        status: "completed" | "failed" | "pending" | "scanning";
+        error?: string;
+        metrics?: Record<string, any>;
+    }) => {
+        const updateScanInList = (items: CommitScanRecord[] | undefined) => {
+            if (!items) return items;
+            return items.map((scan) =>
+                scan.id === payload.scan_id
+                    ? {
+                        ...scan,
+                        status: payload.status as CommitScanRecord["status"],
+                        error_message: payload.error || scan.error_message,
+                        metrics: payload.metrics || scan.metrics,
+                    }
+                    : scan
+            );
+        };
+
+        if (payload.tool_type === "trivy") {
+            setTrivyData((prev) =>
+                prev ? { ...prev, items: updateScanInList(prev.items) || [] } : prev
+            );
+        } else if (payload.tool_type === "sonarqube") {
+            setSonarData((prev) =>
+                prev ? { ...prev, items: updateScanInList(prev.items) || [] } : prev
+            );
+        }
+    };
+
+    // Listen for real-time SCENARIO.SCAN.UPDATED events via SSE - merge delta
     useEffect(() => {
-        const unsubscribeScan = subscribe("SCAN_UPDATE", (payload: {
+        const unsubscribeScan = subscribe("SCENARIO.SCAN.UPDATED", (payload: {
             scenario_id?: string;
             scan_id: string;
             commit_sha: string;
             tool_type: string;
-            status: string;
+            status: "completed" | "failed" | "pending" | "scanning";
+            error?: string;
+            metrics?: Record<string, any>;
         }) => {
             if (payload.scenario_id === scenarioId) {
-                fetchScans(true);
+                // Merge delta into local state instead of full refetch
+                mergeScanUpdate(payload as any);
+
+                // If scan completed or failed, update progress counts
+                if (payload.status === "completed" || payload.status === "failed") {
+                    setScanProgress((prev) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            scans_completed:
+                                payload.status === "completed"
+                                    ? prev.scans_completed + 1
+                                    : prev.scans_completed,
+                            scans_failed:
+                                payload.status === "failed"
+                                    ? prev.scans_failed + 1
+                                    : prev.scans_failed,
+                        };
+                    });
+                }
             }
         });
 
         return () => {
             unsubscribeScan();
         };
-    }, [subscribe, scenarioId, fetchScans]);
+    }, [subscribe, scenarioId]);
 
-    // Subscribe to SSE for scenario scan progress and individual scan updates
+    // Subscribe to SSE for scenario scan progress - merge stats directly
     useEffect(() => {
-        const unsubscribeScenario = subscribe("SCENARIO_UPDATE", (data: any) => {
+        const unsubscribeScenario = subscribe("SCENARIO.UPDATED", (data: any) => {
             if (data.scenario_id === scenarioId) {
+                // Merge scan progress stats directly
                 setScanProgress({
                     scans_total: data.scans_total ?? 0,
                     scans_completed: data.scans_completed ?? 0,
@@ -183,20 +247,12 @@ export default function ScansPage() {
             }
         });
 
-        // Listen for individual scan updates
-        const unsubscribeScan = subscribe("SCAN_UPDATE", (data: any) => {
-            if (data.scenario_id === scenarioId) {
-                fetchScans(true);
-            }
-        });
-
         return () => {
             unsubscribeScenario();
-            unsubscribeScan();
         };
-    }, [subscribe, scenarioId, fetchScans]);
+    }, [subscribe, scenarioId]);
 
-    // Listen for SCAN_ERROR events
+    // Listen for SCAN_ERROR events - merge error into local state
     useEffect(() => {
         const handleScanError = (event: CustomEvent<{
             scenario_id?: string;
@@ -207,7 +263,10 @@ export default function ScansPage() {
             retry_count: number;
         }>) => {
             if (event.detail.scenario_id === scenarioId) {
-                fetchScans(true);
+                mergeScanUpdate({
+                    ...event.detail,
+                    status: "failed",
+                });
             }
         };
 
@@ -215,7 +274,7 @@ export default function ScansPage() {
         return () => {
             window.removeEventListener("SCAN_ERROR", handleScanError as EventListener);
         };
-    }, [scenarioId, fetchScans]);
+    }, [scenarioId]);
 
     const handleRetry = async (commitSha: string, toolType: "trivy" | "sonarqube") => {
         setRetrying(`${toolType}-${commitSha}`);
