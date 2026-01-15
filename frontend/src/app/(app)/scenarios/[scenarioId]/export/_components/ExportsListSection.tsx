@@ -71,13 +71,13 @@ export function ExportsListSection({
                     <div>
                         <CardTitle>Dataset Exports</CardTitle>
                         <CardDescription>
-                            {exports.length === 0 
+                            {exports.length === 0
                                 ? "No exports yet. Create one to generate train/val/test splits."
                                 : `${completedExports.length} of ${exports.length} exports completed`
                             }
                         </CardDescription>
                     </div>
-                    <Button onClick={onCreateNew} disabled={hasGenerating}>
+                    <Button onClick={onCreateNew} disabled={hasGenerating} className="bg-green-600 hover:bg-green-700 text-white">
                         <Plus className="mr-2 h-4 w-4" />
                         Create New Export
                     </Button>
@@ -89,7 +89,7 @@ export function ExportsListSection({
                         <div className="p-3 bg-amber-50 dark:bg-amber-950/50 rounded-lg border border-amber-200 dark:border-amber-800">
                             <p className="text-sm text-amber-700 dark:text-amber-300">
                                 <Loader2 className="inline mr-2 h-4 w-4 animate-spin" />
-                                Scans still running ({scansProgress}% complete). 
+                                Scans still running ({scansProgress}% complete).
                                 Exports will include available scan metrics.
                             </p>
                         </div>
@@ -111,7 +111,7 @@ export function ExportsListSection({
                                     Create your first export to generate train/val/test dataset splits.
                                 </p>
                             </div>
-                            <Button onClick={onCreateNew}>
+                            <Button onClick={onCreateNew} className="bg-green-600 hover:bg-green-700 text-white">
                                 <Plus className="mr-2 h-4 w-4" />
                                 Create Export
                             </Button>
@@ -149,13 +149,13 @@ export function ExportsListSection({
                                             </Badge>
                                         </TableCell>
                                         <TableCell>
-                                            {exp.status === "completed" 
+                                            {exp.status === "completed"
                                                 ? `${(exp.train_count + exp.val_count + exp.test_count).toLocaleString()}`
                                                 : "—"
                                             }
                                         </TableCell>
                                         <TableCell className="text-muted-foreground">
-                                            {exp.created_at 
+                                            {exp.created_at
                                                 ? formatDistanceToNow(new Date(exp.created_at), { addSuffix: true })
                                                 : "—"
                                             }

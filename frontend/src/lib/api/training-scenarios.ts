@@ -499,6 +499,24 @@ export const trainingScenariosApi = {
     },
 
     /**
+     * Get data availability for export configuration
+     * Shows feature and scan progress
+     */
+    getDataAvailability: async (
+        scenarioId: string
+    ): Promise<{
+        features: { total: number; completed: number; coverage_pct: number; ready: boolean };
+        trivy: { total: number; completed: number; coverage_pct: number; ready: boolean };
+        sonarqube: { total: number; completed: number; coverage_pct: number; ready: boolean };
+        all_complete: boolean;
+    }> => {
+        const response = await api.get(
+            `/training-scenarios/${scenarioId}/data-availability`
+        );
+        return response.data;
+    },
+
+    /**
      * List training scenarios
      */
     list: async (params?: {

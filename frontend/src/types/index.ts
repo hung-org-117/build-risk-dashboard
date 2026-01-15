@@ -944,6 +944,8 @@ export interface DatasetTemplateRecord {
   name: string;
   description?: string;
   feature_names: string[];
+  combined_feature_names?: string[];
+  default_features?: string[];
   tags?: string[];
   source?: string;
   created_at?: string;

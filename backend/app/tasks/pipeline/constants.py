@@ -22,6 +22,12 @@ DEFAULT_FEATURES = {
     "build_started_at",
 }
 
+
+def get_default_features() -> list[str]:
+    """Get DEFAULT_FEATURES as sorted list for API responses."""
+    return sorted(DEFAULT_FEATURES)
+
+
 HAMILTON_MODULES = [
     build,
     ci,

@@ -37,6 +37,7 @@ import {
     TrainingExportCreateDTO,
 } from "@/lib/api/training-scenarios";
 import { toast } from "@/components/ui/use-toast";
+import { RatioSlider } from "@/components/ui/ratio-slider";
 
 // =============================================================================
 // Constants
@@ -153,6 +154,12 @@ export default function CreateExportPage() {
         total_builds: number;
     } | null>(null);
     const [loadingGroups, setLoadingGroups] = useState(false);
+    const [dataAvailability, setDataAvailability] = useState<{
+        features: { total: number; completed: number; coverage_pct: number; ready: boolean };
+        trivy: { total: number; completed: number; coverage_pct: number; ready: boolean };
+        sonarqube: { total: number; completed: number; coverage_pct: number; ready: boolean };
+        all_complete: boolean;
+    } | null>(null);
 
     const fetchScenario = useCallback(async () => {
         try {
@@ -183,28 +190,29 @@ export default function CreateExportPage() {
         }
     }, [scenarioId, config.group_by, config.num_bins, config.time_slots]);
 
+    const fetchDataAvailability = useCallback(async () => {
+        if (!scenarioId) return;
+        try {
+            const data = await trainingScenariosApi.getDataAvailability(scenarioId);
+            setDataAvailability(data);
+        } catch (err) {
+            console.error("Failed to fetch data availability:", err);
+        }
+    }, [scenarioId]);
+
     useEffect(() => {
         fetchScenario();
     }, [fetchScenario]);
 
     useEffect(() => {
-        if (scenario?.status === "processed") {
+        if (scenario?.status === "processed" || scenario?.status === "completed") {
             fetchGroupsPreview();
+            fetchDataAvailability();
         }
-    }, [scenario?.status, fetchGroupsPreview]);
+    }, [scenario?.status, fetchGroupsPreview, fetchDataAvailability]);
 
     const updateConfig = (updates: Partial<ExportConfig>) => {
         setConfig(prev => ({ ...prev, ...updates }));
-    };
-
-    const updateRatios = (key: "train" | "val" | "test", value: number) => {
-        const newRatios = { ...config.ratios, [key]: value };
-        const total = newRatios.train + newRatios.val + newRatios.test;
-        if (total > 1) {
-            const other = key === "train" ? "val" : "train";
-            newRatios[other] = Math.max(0, newRatios[other] - (total - 1));
-        }
-        setConfig(prev => ({ ...prev, ratios: newRatios }));
     };
 
     const handleCreateAndGenerate = async () => {
@@ -319,7 +327,7 @@ export default function CreateExportPage() {
                             Back
                         </Button>
                         <div>
-                            <CardTitle className="flex items-center gap-2">
+                            <CardTitle className="flex items-center gap-2 text-xl">
                                 <Settings className="h-5 w-5" />
                                 Create New Export
                             </CardTitle>
@@ -329,6 +337,41 @@ export default function CreateExportPage() {
                         </div>
                     </div>
                 </CardHeader>
+                {/* Data Availability Indicator */}
+                {dataAvailability && (
+                    <CardContent className="pt-0">
+                        <div className="flex flex-wrap items-center gap-4 text-sm">
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-muted-foreground">Features:</span>
+                                <Badge variant={dataAvailability.features.ready ? "default" : "secondary"}>
+                                    {dataAvailability.features.coverage_pct}%
+                                </Badge>
+                            </div>
+                            {dataAvailability.trivy.total > 0 && (
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-muted-foreground">Trivy:</span>
+                                    <Badge variant={dataAvailability.trivy.ready ? "default" : "outline"}>
+                                        {dataAvailability.trivy.coverage_pct}%
+                                    </Badge>
+                                </div>
+                            )}
+                            {dataAvailability.sonarqube.total > 0 && (
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-muted-foreground">SonarQube:</span>
+                                    <Badge variant={dataAvailability.sonarqube.ready ? "default" : "outline"}>
+                                        {dataAvailability.sonarqube.coverage_pct}%
+                                    </Badge>
+                                </div>
+                            )}
+                            {!dataAvailability.all_complete && (
+                                <span className="text-xs text-amber-600 flex items-center gap-1">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Scans in progress
+                                </span>
+                            )}
+                        </div>
+                    </CardContent>
+                )}
             </Card>
 
             {/* Export Name */}
@@ -572,47 +615,10 @@ export default function CreateExportPage() {
                     {!isCVStrategy && (
                         <div className="space-y-4 pt-4 border-t">
                             <Label>Train / Validation / Test Ratios</Label>
-                            <div className="grid gap-4 md:grid-cols-3">
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Train</span>
-                                        <span className="text-sm font-medium">{(config.ratios.train * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.ratios.train * 100]}
-                                        onValueChange={([v]: number[]) => updateRatios("train", v / 100)}
-                                        min={10}
-                                        max={90}
-                                        step={5}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Validation</span>
-                                        <span className="text-sm font-medium">{(config.ratios.val * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.ratios.val * 100]}
-                                        onValueChange={([v]: number[]) => updateRatios("val", v / 100)}
-                                        min={5}
-                                        max={40}
-                                        step={5}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-sm text-muted-foreground">Test</span>
-                                        <span className="text-sm font-medium">{(config.ratios.test * 100).toFixed(0)}%</span>
-                                    </div>
-                                    <Slider
-                                        value={[config.ratios.test * 100]}
-                                        onValueChange={([v]: number[]) => updateRatios("test", v / 100)}
-                                        min={5}
-                                        max={40}
-                                        step={5}
-                                    />
-                                </div>
-                            </div>
+                            <RatioSlider
+                                ratios={config.ratios}
+                                onChange={(newRatios) => updateConfig({ ratios: newRatios })}
+                            />
                         </div>
                     )}
 
@@ -664,7 +670,7 @@ export default function CreateExportPage() {
 
             {/* Generate Button */}
             <Button
-                className="w-full h-12 text-lg"
+                className="w-full h-12 text-lg bg-green-600 hover:bg-green-700 text-white"
                 onClick={handleCreateAndGenerate}
                 disabled={creating || !!validationError}
             >

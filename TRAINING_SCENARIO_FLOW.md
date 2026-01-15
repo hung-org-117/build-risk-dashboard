@@ -511,40 +511,48 @@ Mỗi `TrainingDatasetExport` có config riêng:
 
 ### Generation Flow
 
-```mermaid
-graph TD
-    User([User]) -->|Create Export| API[POST /training-scenarios/{id}/exports]
-    API --> Entity[Create TrainingDatasetExport <br/> Status: PENDING]
-    User -->|Trigger Generation| GenAPI[POST /exports/{id}/generate]
-    GenAPI --> Task(generate_export_dataset <br/> Queue: scenario_processing)
-
-    subgraph Logic [Generation Logic]
-        direction TB
-        Task --> Validate{Status == PROCESSED?}
-        Validate -->|Yes| StatusGen[Status: GENERATING]
-        
-        StatusGen --> Collect[Collect Features <br/> Join Enrichment + Scan Metrics]
-        Collect --> DF[Build DataFrame]
-        
-        DF --> Split{Apply Splitting Strategy}
-        
-        %% Green Nodes for Ratios/Splitting as requested
-        Split -->|Ratios: Train/Val/Test| Train[Train Split]
-        Split -->|Ratios: Train/Val/Test| Val[Validation Split]
-        Split -->|Ratios: Train/Val/Test| Test[Test Split]
-        
-        style Split fill:#d1fae5,stroke:#059669,stroke-width:2px
-        style Train fill:#d1fae5,stroke:#059669,stroke-width:2px
-        style Val fill:#d1fae5,stroke:#059669,stroke-width:2px
-        style Test fill:#d1fae5,stroke:#059669,stroke-width:2px
-    end
-
-    Train --> Export[Export Parquet/CSV]
-    Val --> Export
-    Test --> Export
-    
-    Export --> DBRecords[Create TrainingDatasetSplit Records]
-    DBRecords --> Complete[Status: COMPLETED]
+```
+User creates TrainingDatasetExport via API
+       │
+       ▼
+POST /training-scenarios/{id}/exports
+│
+├─ Create TrainingDatasetExport entity (PENDING)
+└─ User triggers generation via POST /exports/{id}/generate
+       │
+       ▼
+generate_export_dataset (Celery task)
+│
+├─ Validate scenario is PROCESSED
+├─ Update export status → GENERATING
+│
+├─ Collect features from EnrichmentBuilds
+│   ├─ Query all builds with extraction_status = COMPLETED
+│   ├─ Join with FeatureVector.features
+│   └─ Join with FeatureVector.scan_metrics (if available)
+│
+├─ Build pandas DataFrame
+│   ├─ Feature columns
+│   ├─ Label column (outcome: 0=success, 1=failure)
+│   └─ Metadata (repo, commit, build_id)
+│
+├─ Apply splitting strategy (from export config):
+│   ├─ stratified_within_group (default)
+│   ├─ leave_one_out (L1GO) - requires ≥3 groups
+│   ├─ leave_two_out (L2GO) - requires ≥4 groups
+│   ├─ extreme_novelty - isolate target group+label → test
+│   ├─ imbalanced_train - reduce label 1 in train only
+│   ├─ time_series_split
+│   └─ random_split / stratified_split
+│
+├─ Export files to export-specific directory:
+│   ├─ train.parquet (based on ratios)
+│   ├─ val.parquet
+│   └─ test.parquet
+│
+├─ Create TrainingDatasetSplit records (linked to export_id)
+│
+└─ Update export status → COMPLETED
 ```
 
 ### ExportSplittingConfig

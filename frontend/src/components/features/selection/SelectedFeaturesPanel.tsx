@@ -48,6 +48,8 @@ interface SelectedFeaturesPanelProps {
     rowCount: number;
     className?: string;
     hideHeader?: boolean;
+    /** Default features that cannot be deselected */
+    defaultFeatures?: string[];
 }
 
 const groupIcons: Record<string, typeof GitBranch> = {
@@ -68,9 +70,10 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
     rowCount,
     className,
     hideHeader = false,
+    defaultFeatures = [],
 }: SelectedFeaturesPanelProps) {
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(
-        new Set(["git_commit_info", "git_diff_features", "job_metadata"])
+        new Set()
     );
 
     // Build node display name map from API data
@@ -211,33 +214,42 @@ export const SelectedFeaturesPanel = memo(function SelectedFeaturesPanel({
 
                             <CollapsibleContent>
                                 <div className="mt-1 space-y-0.5 pl-6">
-                                    {features.map((feature) => (
-                                        <div
-                                            key={feature.name}
-                                            className="group flex items-center justify-between rounded px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                        >
-                                            <div className="min-w-0 flex-1">
-                                                <span className="font-mono text-xs">
-                                                    {feature.name}
-                                                </span>
-                                                {feature.description && (
-                                                    <span className="ml-2 text-xs text-muted-foreground">
-                                                        {feature.description}
+                                    {features.map((feature) => {
+                                        const isDefault = defaultFeatures.includes(feature.name);
+                                        return (
+                                            <div
+                                                key={feature.name}
+                                                className={cn(
+                                                    "group flex items-center justify-between rounded px-2 py-1 hover:bg-slate-50 dark:hover:bg-slate-800",
+                                                    isDefault && "bg-blue-50/50 dark:bg-blue-900/20"
+                                                )}
+                                            >
+                                                <div className="min-w-0 flex-1 flex items-center gap-2">
+                                                    <span className="font-mono text-xs">
+                                                        {feature.name}
                                                     </span>
+                                                    {isDefault && (
+                                                        <Badge variant="outline" className="h-4 px-1 text-[9px] text-blue-600 border-blue-300 dark:border-blue-700 dark:text-blue-400">
+                                                            Core
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                                {!isDefault && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => onRemoveFeature(feature.name)}
+                                                        className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
+                                                    >
+                                                        <X className="h-3 w-3" />
+                                                    </Button>
                                                 )}
                                             </div>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => onRemoveFeature(feature.name)}
-                                                className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
-                                            >
-                                                <X className="h-3 w-3" />
-                                            </Button>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </CollapsibleContent>
+
                         </Collapsible>
                     );
                 })}

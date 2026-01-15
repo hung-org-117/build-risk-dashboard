@@ -49,10 +49,12 @@ export function TemplateSelector({ onApplyTemplate, disabled }: TemplateSelector
     }, []);
 
     const handleSelect = (template: DatasetTemplateRecord) => {
-        onApplyTemplate(template.feature_names);
+        const featuresToApply = template.combined_feature_names ?? template.feature_names;
+        onApplyTemplate(featuresToApply);
         setAppliedTemplate(template.name);
         setOpen(false);
     };
+
 
     return (
         <Popover open={open} onOpenChange={setOpen}>

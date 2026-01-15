@@ -308,6 +308,7 @@ export function StepFeatures() {
                                                 rowCount={0}
                                                 className="border-none shadow-none h-full rounded-none"
                                                 hideHeader={true}
+                                                defaultFeatures={defaultFeatures}
                                             />
                                         </div>
                                     </div>

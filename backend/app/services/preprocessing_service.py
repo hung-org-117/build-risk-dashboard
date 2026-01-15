@@ -15,17 +15,12 @@ import pandas as pd
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
+from app.tasks.pipeline.constants import DEFAULT_FEATURES
+
 logger = logging.getLogger(__name__)
 
-# Metadata columns that should not be preprocessed
-# These are DEFAULT_FEATURES used for identification, grouping, and labels
-METADATA_COLUMNS = frozenset([
-    "build_id",           # CI run ID (identifier)
-    "build_status_num",   # Label: 0=passed, 1=failed
-    "repo_full_name",     # Repository identifier
-    "repo_language",      # Language for grouping
-    "build_started_at",   # Timestamp for time-based splits
-])
+# Metadata columns that should not be preprocessed (single source of truth)
+METADATA_COLUMNS = DEFAULT_FEATURES
 
 
 @dataclass

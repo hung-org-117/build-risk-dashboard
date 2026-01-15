@@ -14,11 +14,21 @@ class DatasetTemplateService:
         self.template_repo = DatasetTemplateRepository(db)
 
     def _serialize_template(self, template) -> DatasetTemplateResponse:
+        from app.tasks.pipeline.constants import DEFAULT_FEATURES, get_default_features
+
         payload = (
             template.model_dump(by_alias=True)
             if hasattr(template, "model_dump")
             else template
         )
+
+        # Add combined features (template + defaults)
+        template_features = set(payload.get("feature_names", []))
+        combined = sorted(template_features | DEFAULT_FEATURES)
+
+        payload["combined_feature_names"] = combined
+        payload["default_features"] = get_default_features()
+
         return DatasetTemplateResponse.model_validate(payload)
 
     def list_templates(self) -> DatasetTemplateListResponse:

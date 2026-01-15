@@ -425,3 +425,263 @@ class TrainingScenarioService:
         result = service.get_available_groups(df, dimension)
 
         return SplittingGroupsResponse(**result)
+
+    def get_group_preview(
+        self,
+        scenario_id: str,
+        user_id: str,
+        group_by_str: str,
+        num_bins: int = 4,
+        time_slots: int = 4,
+    ) -> Dict[str, Any]:
+        """
+        Get group distribution preview for export configuration.
+
+        Queries FeatureVector.features for grouping features extracted by Hamilton DAG.
+        Supports: repo_language, time_of_day, percentage_of_builds_before, number_of_builds_before.
+        """
+        # Validate group_by
+        try:
+            group_by_enum = GroupByDimension(group_by_str)
+        except ValueError:
+            return {
+                "error": f"Invalid group_by: {group_by_str}",
+                "valid_options": [e.value for e in GroupByDimension],
+            }
+
+        # Verify scenario access and status
+        scenario = self.get_scenario(scenario_id, user_id)
+
+        if scenario.status not in ["processed", "completed"]:
+            return {
+                "error": "Processing not complete",
+                "groups": [],
+                "total_builds": 0,
+            }
+
+        # Map group_by to feature name in FeatureVector.features
+        FEATURE_MAP = {
+            GroupByDimension.REPO_LANGUAGE: "repo_language",
+            GroupByDimension.TIME_OF_DAY: "build_hour",
+            GroupByDimension.PERCENTAGE_OF_BUILDS_BEFORE: "percentage_of_builds_before",
+            GroupByDimension.NUMBER_OF_BUILDS_BEFORE: "number_of_builds_before",
+        }
+
+        feature_name = FEATURE_MAP.get(group_by_enum)
+        if not feature_name:
+            return {
+                "error": f"Unsupported group_by: {group_by_str}",
+                "groups": [],
+                "total_builds": 0,
+            }
+
+        # Aggregate from FeatureVector via enrichment builds
+        scenario_oid = ObjectId(scenario_id)
+
+        # MongoDB aggregation pipeline: EnrichmentBuild → FeatureVector
+        pipeline = [
+            {
+                "$match": {
+                    "scenario_id": scenario_oid,
+                    "extraction_status": "completed",
+                    "feature_vector_id": {"$ne": None},
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": "$fv"},
+            {
+                "$project": {
+                    "feature_value": f"$fv.features.{feature_name}",
+                }
+            },
+        ]
+
+        results = list(self.db["training_enrichment_builds"].aggregate(pipeline))
+
+        if not results:
+            return {
+                "group_by": group_by_str,
+                "groups": [],
+                "total_builds": 0,
+            }
+
+        # Process based on group type
+        if group_by_enum == GroupByDimension.REPO_LANGUAGE:
+            # Aggregate language counts
+            language_counts: Dict[str, int] = {}
+            for r in results:
+                lang = r.get("feature_value")
+                if lang:
+                    lang = str(lang).lower()
+                else:
+                    lang = "other"
+                language_counts[lang] = language_counts.get(lang, 0) + 1
+
+            groups = [
+                {
+                    "value": lang,
+                    "label": lang.title(),
+                    "count": count,
+                    **({"warning": "small_sample"} if count < 50 else {}),
+                }
+                for lang, count in sorted(language_counts.items(), key=lambda x: -x[1])
+            ]
+
+        elif group_by_enum == GroupByDimension.TIME_OF_DAY:
+            # build_hour is 0-23, group into time slots
+            hours_per_slot = 24 // time_slots
+            slot_counts: Dict[int, int] = {}
+
+            for r in results:
+                hour = r.get("feature_value")
+                if hour is None:
+                    hour = 12
+                else:
+                    hour = int(hour)
+
+                slot_start = (hour // hours_per_slot) * hours_per_slot
+                slot_counts[slot_start] = slot_counts.get(slot_start, 0) + 1
+
+            groups = []
+            for slot_start in sorted(slot_counts.keys()):
+                slot_end = min(slot_start + hours_per_slot, 24)
+                label = f"{slot_start:02d}:00-{slot_end:02d}:00"
+                count = slot_counts[slot_start]
+                groups.append(
+                    {
+                        "value": label,
+                        "label": label,
+                        "count": count,
+                        **({"warning": "small_sample"} if count < 50 else {}),
+                    }
+                )
+
+        else:
+            # percentage_of_builds_before or number_of_builds_before
+            # These are numeric (0-100 for percentage, integer for count)
+            # Create equal-width bins based on actual data
+            values = [
+                r.get("feature_value")
+                for r in results
+                if r.get("feature_value") is not None
+            ]
+
+            if not values:
+                return {
+                    "group_by": group_by_str,
+                    "groups": [],
+                    "total_builds": 0,
+                }
+
+            min_val = min(values)
+            max_val = max(values)
+
+            if min_val == max_val:
+                # Single value - one bin
+                groups = [
+                    {
+                        "value": f"{int(min_val)}-{int(max_val)}",
+                        "label": f"{int(min_val)}-{int(max_val)}",
+                        "count": len(values),
+                    }
+                ]
+            else:
+                # Create equal-width bins
+                bin_width = (max_val - min_val) / num_bins
+                bin_counts: Dict[int, int] = {i: 0 for i in range(num_bins)}
+
+                for v in values:
+                    bin_idx = min(int((v - min_val) / bin_width), num_bins - 1)
+                    bin_counts[bin_idx] += 1
+
+                groups = []
+                for i in range(num_bins):
+                    bin_start = min_val + i * bin_width
+                    bin_end = min_val + (i + 1) * bin_width
+                    count = bin_counts[i]
+                    groups.append(
+                        {
+                            "value": f"{int(bin_start)}-{int(bin_end)}",
+                            "label": f"{int(bin_start)}-{int(bin_end)}",
+                            "count": count,
+                            **({"warning": "small_sample"} if count < 50 else {}),
+                        }
+                    )
+
+        total_builds = sum(g["count"] for g in groups)
+
+        return {
+            "group_by": group_by_str,
+            "groups": groups,
+            "total_builds": total_builds,
+            "num_bins": num_bins,
+            "time_slots": time_slots,
+        }
+
+    def get_data_availability(
+        self,
+        scenario_id: str,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get data availability summary for export configuration.
+
+        Returns progress of features and scan metrics extraction.
+        """
+        # Verify scenario access
+        scenario = self.get_scenario(scenario_id, user_id)
+        scenario_oid = ObjectId(scenario_id)
+
+        # Feature extraction stats from enrichment builds
+        feature_stats = self.enrichment_build_repo.count_by_extraction_status(
+            scenario_id
+        )
+        features_total = sum(feature_stats.values())
+        features_completed = feature_stats.get("completed", 0)
+
+        # Get detailed scan counts from repositories
+        trivy_total = self.trivy_scan_repo.count_by_scenario(scenario_oid)
+        trivy_completed = self.trivy_scan_repo.count_completed_by_scenario(scenario_oid)
+        sonar_total = self.sonar_scan_repo.count_by_scenario(scenario_oid)
+        sonar_completed = self.sonar_scan_repo.count_completed_by_scenario(scenario_oid)
+
+        return {
+            "features": {
+                "total": features_total,
+                "completed": features_completed,
+                "coverage_pct": (
+                    round(features_completed / features_total * 100)
+                    if features_total > 0
+                    else 0
+                ),
+                "ready": scenario.feature_extraction_completed,
+            },
+            "trivy": {
+                "total": trivy_total,
+                "completed": trivy_completed,
+                "coverage_pct": (
+                    round(trivy_completed / trivy_total * 100) if trivy_total > 0 else 0
+                ),
+                "ready": trivy_completed == trivy_total and trivy_total > 0,
+            },
+            "sonarqube": {
+                "total": sonar_total,
+                "completed": sonar_completed,
+                "coverage_pct": (
+                    round(sonar_completed / sonar_total * 100) if sonar_total > 0 else 0
+                ),
+                "ready": sonar_completed == sonar_total and sonar_total > 0,
+            },
+            "all_complete": (
+                scenario.feature_extraction_completed
+                and (trivy_completed == trivy_total or trivy_total == 0)
+                and (sonar_completed == sonar_total or sonar_total == 0)
+            ),
+        }

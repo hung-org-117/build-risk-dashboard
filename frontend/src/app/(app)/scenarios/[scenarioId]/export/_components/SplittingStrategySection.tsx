@@ -41,6 +41,7 @@ import {
     showNumBins as checkShowNumBins,
     showTimeSlots as checkShowTimeSlots,
 } from "./types";
+import { RatioSlider } from "@/components/ui/ratio-slider";
 
 interface SplittingStrategySectionProps {
     config: ExportConfig;
@@ -332,53 +333,10 @@ export function SplittingStrategySection({
                 {!isCV && (
                     <div className="space-y-4 pt-4 border-t">
                         <Label>Train / Validation / Test Ratios</Label>
-                        <div className="grid gap-4 md:grid-cols-3">
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Train</span>
-                                    <span className="text-sm font-medium">
-                                        {(config.ratios.train * 100).toFixed(0)}%
-                                    </span>
-                                </div>
-                                <Slider
-                                    value={[config.ratios.train * 100]}
-                                    onValueChange={([v]: number[]) => updateRatios("train", v / 100)}
-                                    min={10}
-                                    max={90}
-                                    step={5}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Validation</span>
-                                    <span className="text-sm font-medium">
-                                        {(config.ratios.val * 100).toFixed(0)}%
-                                    </span>
-                                </div>
-                                <Slider
-                                    value={[config.ratios.val * 100]}
-                                    onValueChange={([v]: number[]) => updateRatios("val", v / 100)}
-                                    min={5}
-                                    max={40}
-                                    step={5}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-sm text-muted-foreground">Test</span>
-                                    <span className="text-sm font-medium">
-                                        {(config.ratios.test * 100).toFixed(0)}%
-                                    </span>
-                                </div>
-                                <Slider
-                                    value={[config.ratios.test * 100]}
-                                    onValueChange={([v]: number[]) => updateRatios("test", v / 100)}
-                                    min={5}
-                                    max={40}
-                                    step={5}
-                                />
-                            </div>
-                        </div>
+                        <RatioSlider
+                            ratios={config.ratios}
+                            onChange={(newRatios) => updateConfig({ ratios: newRatios })}
+                        />
                     </div>
                 )}
 

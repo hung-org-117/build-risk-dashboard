@@ -151,6 +151,10 @@ class SonarCommitScanRepository(BaseRepository[SonarCommitScan]):
             }
         )
 
+    def count_completed_by_scenario(self, scenario_id: ObjectId) -> int:
+        """Count completed scans for a scenario."""
+        return self.count_by_scenario_and_status(scenario_id, SonarScanStatus.COMPLETED)
+
     def find_by_scenario_and_commit(
         self,
         scenario_id: ObjectId,

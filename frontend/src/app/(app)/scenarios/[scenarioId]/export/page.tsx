@@ -30,7 +30,7 @@ export default function ScenarioExportPage() {
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [exports, setExports] = useState<TrainingExportRecord[]>([]);
     const [loading, setLoading] = useState(true);
-    
+
     // View state: "list" | "detail"
     const [viewingExport, setViewingExport] = useState<TrainingExportRecord | null>(null);
     const [viewingSplits, setViewingSplits] = useState<TrainingDatasetSplitRecord[]>([]);
@@ -40,7 +40,7 @@ export default function ScenarioExportPage() {
     // =============================================================================
 
     const canGenerate = scenario?.status === "processed" || scenario?.status === "completed";
-    
+
     // Scan progress tracking
     const scansCompleted = scenario?.scan_extraction_completed ?? false;
     const scansTotal = scenario?.scans_total ?? 0;
@@ -114,7 +114,7 @@ export default function ScenarioExportPage() {
     // =============================================================================
 
     const handleCreateNew = () => {
-        router.push(`/scenarios/${scenarioId}/export/create`);
+        router.push(`/export-config/${scenarioId}`);
     };
 
     const handleViewExport = async (exportId: string) => {
@@ -131,7 +131,7 @@ export default function ScenarioExportPage() {
 
     const handleDeleteExport = async (exportId: string) => {
         if (!confirm("Are you sure you want to delete this export?")) return;
-        
+
         try {
             await trainingScenariosApi.deleteExport(scenarioId, exportId);
             toast({ title: "Export deleted" });

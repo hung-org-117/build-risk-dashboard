@@ -13,6 +13,9 @@ class DatasetTemplateResponse(BaseModel):
     name: str
     description: Optional[str] = None
     feature_names: List[str] = Field(default_factory=list)
+    # Combined features (template + DEFAULT_FEATURES)
+    combined_feature_names: List[str] = Field(default_factory=list)
+    default_features: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     source: str = "seed"
     created_at: Optional[datetime] = None

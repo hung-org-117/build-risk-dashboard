@@ -175,6 +175,19 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
             sort=[("created_at", 1)],
         )
 
+    def find_completed_by_scenario(
+        self,
+        scenario_id: str,
+    ) -> List[TrainingEnrichmentBuild]:
+        """Get all completed enrichment builds for a scenario (for group preview)."""
+        return self.find_many(
+            {
+                "scenario_id": self._to_object_id(scenario_id),
+                "extraction_status": ExtractionStatus.COMPLETED.value,
+            },
+            sort=[("created_at", 1)],
+        )
+
     def find_by_scenario_with_features(
         self,
         scenario_id: str,
