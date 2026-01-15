@@ -1,6 +1,6 @@
 "use client";
 
-import { Checkbox } from "@/components/ui/checkbox";
+
 import { Label } from "@/components/ui/label";
 import {
     Select,
@@ -44,16 +44,6 @@ export function OutputFormatSection({ config, updateConfig }: OutputFormatSectio
                                 <SelectItem value="csv">CSV</SelectItem>
                             </SelectContent>
                         </Select>
-                    </div>
-                    <div className="flex items-center gap-3 pt-6">
-                        <Checkbox
-                            id="include-metadata"
-                            checked={config.include_metadata}
-                            onCheckedChange={(v) => updateConfig({ include_metadata: !!v })}
-                        />
-                        <Label htmlFor="include-metadata" className="cursor-pointer">
-                            Include Metadata (repo, commit, build_id)
-                        </Label>
                     </div>
                 </div>
             </CardContent>

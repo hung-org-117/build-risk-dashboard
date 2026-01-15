@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.tasks.training_processing",
         "app.tasks.training_scan_helpers",
         "app.tasks.export",
+        "app.tasks.training_export",
         "app.tasks.sonar",
         "app.tasks.trivy",
         "app.tasks.shared.ingestion_tasks",

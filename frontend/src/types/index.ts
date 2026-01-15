@@ -226,7 +226,6 @@ export interface PreprocessingConfig {
 
 export interface OutputConfig {
   format: string;
-  include_metadata: boolean;
 }
 
 export interface TrainingScenarioRecord {

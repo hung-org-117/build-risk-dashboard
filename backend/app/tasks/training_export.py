@@ -33,12 +33,12 @@ from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRe
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.services.splitting_strategy_service import SplittingStrategyService
 from app.tasks.base import SafeTask, TaskState
-from app.tasks.shared.events import publish_scenario_updated
+from app.tasks.shared.events import publish_export_updated
 
 logger = logging.getLogger(__name__)
 
 
-def _create_export_failure_handler(export_id: str, db):
+def _create_export_failure_handler(export_id: str, scenario_id: str, db):
     """
     Create a failure handler for TrainingDatasetExport tasks.
     Updates status to FAILED on unhandled errors.
@@ -48,6 +48,14 @@ def _create_export_failure_handler(export_id: str, db):
         try:
             export_repo = TrainingDatasetExportRepository(db)
             export_repo.mark_failed(export_id, error_message)
+
+            # Publish SSE event for FAILED status
+            publish_export_updated(
+                scenario_id=scenario_id,
+                export_id=export_id,
+                status="failed",
+                error=error_message,
+            )
         except Exception as e:
             logger.warning(f"Failed to update export {export_id}: {e}")
 
@@ -92,7 +100,7 @@ def generate_export_dataset(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_export_failure_handler(export_id, self.db)
+        handler = _create_export_failure_handler(export_id, scenario_id, self.db)
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -127,19 +135,41 @@ def generate_export_dataset(
         # Update export status to GENERATING
         export_repo.update_status(export_id, ExportStatus.GENERATING)
 
+        # Publish SSE event for GENERATING status
+        publish_export_updated(
+            scenario_id=scenario_id,
+            export_id=export_id,
+            status="generating",
+            name=export.name,
+        )
+
         # ======================================================================
         # STEP 2: Lazy Materialization
         # ======================================================================
         try:
-            df = _ensure_dataset_materialized(scenario_id, self.db, correlation_id=correlation_id)
+            df = _ensure_dataset_materialized(
+                scenario_id, self.db, correlation_id=correlation_id
+            )
         except Exception as e:
             logger.error(f"{corr_prefix} Failed to materialize dataset: {e}")
             export_repo.mark_failed(export_id, f"Materialization failed: {str(e)}")
+            publish_export_updated(
+                scenario_id=scenario_id,
+                export_id=export_id,
+                status="failed",
+                error=f"Materialization failed: {str(e)}",
+            )
             raise e
 
         if df.empty:
             logger.warning(f"{corr_prefix} Master dataset is empty")
             export_repo.mark_failed(export_id, "Master dataset is empty")
+            publish_export_updated(
+                scenario_id=scenario_id,
+                export_id=export_id,
+                status="failed",
+                error="Master dataset is empty",
+            )
             return {"status": "error", "error": "Master dataset is empty"}
 
         logger.info(f"{corr_prefix} Loaded master dataset with {len(df)} rows")
@@ -224,7 +254,9 @@ def generate_export_dataset(
                             fold_id=fold_id,
                             record_count=len(split_df),
                             feature_count=len(split_df.columns),
-                            class_distribution={str(k): v for k, v in class_dist.items()},
+                            class_distribution={
+                                str(k): v for k, v in class_dist.items()
+                            },
                             group_distribution=fold.metadata,
                             file_path=str(file_path.relative_to(paths.DATA_DIR)),
                             file_size_bytes=file_size,
@@ -295,10 +327,19 @@ def generate_export_dataset(
             generation_duration_seconds=total_duration,
         )
 
-        # Publish update
-        scenario = scenario_repo.find_by_id(scenario_id)
-        if scenario:
-            publish_scenario_updated(scenario)
+        # Publish SSE event for COMPLETED status
+        publish_export_updated(
+            scenario_id=scenario_id,
+            export_id=export_id,
+            status="completed",
+            name=export.name,
+            train_count=total_train,
+            val_count=total_val,
+            test_count=total_test,
+            fold_count=fold_count if is_cv else 1,
+            feature_count=len(df.columns),
+            generation_duration_seconds=total_duration,
+        )
 
         logger.info(
             f"{corr_prefix} Completed: folds={fold_count if is_cv else 1}, "
@@ -328,7 +369,9 @@ def generate_export_dataset(
 # ============================================================================
 
 
-def _ensure_dataset_materialized(scenario_id: str, db, correlation_id: str = "") -> pd.DataFrame:
+def _ensure_dataset_materialized(
+    scenario_id: str, db, correlation_id: str = ""
+) -> pd.DataFrame:
     """
     Ensure 'master_dataset.parquet' exists for the scenario.
     If not, materialize it by streaming data from MongoDB.
@@ -442,7 +485,11 @@ def _process_and_write_batch(
         return
 
     # Bulk fetch FeatureVectors
-    fv_ids = [doc.get("feature_vector_id") for doc in batch_docs if doc.get("feature_vector_id")]
+    fv_ids = [
+        doc.get("feature_vector_id")
+        for doc in batch_docs
+        if doc.get("feature_vector_id")
+    ]
     fvs = fv_repo.find_by_ids(list(map(str, fv_ids)))
     fv_map = {str(fv.id): fv for fv in fvs}
 

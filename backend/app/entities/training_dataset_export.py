@@ -55,10 +55,6 @@ class OutputConfig(BaseModel):
         default="parquet",
         description="File format: parquet | csv",
     )
-    include_metadata: bool = Field(
-        default=True,
-        description="Include repo, commit, build_id columns",
-    )
 
 
 class ExportSplittingConfig(BaseModel):

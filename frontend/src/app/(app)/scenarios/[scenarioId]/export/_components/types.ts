@@ -23,7 +23,6 @@ export interface ExportConfig {
     novelty_target_label: number;
     // Output
     format: "parquet" | "csv";
-    include_metadata: boolean;
 }
 
 export interface GroupPreview {
@@ -63,7 +62,6 @@ export const DEFAULT_CONFIG: ExportConfig = {
     imbalance_drop_label: 1,
     novelty_target_label: 1,
     format: "parquet",
-    include_metadata: true,
 };
 
 // Strategy value constants - use these instead of inline strings

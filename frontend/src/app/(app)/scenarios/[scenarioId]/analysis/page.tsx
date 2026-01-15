@@ -182,10 +182,6 @@ export default function ScenarioAnalysisPage() {
     // Case 2 & 3: Features done - show analysis (with or without complete scans)
     // =============================================================================
 
-    // =============================================================================
-    // Helper & Render Logic
-    // =============================================================================
-
     const getScoreColor = (score: number | undefined | null, type: 'text' | 'bg') => {
         const val = score ?? 0;
         if (val >= 90) return type === 'text' ? 'text-green-600 dark:text-green-500' : 'bg-green-500';
@@ -492,7 +488,6 @@ export default function ScenarioAnalysisPage() {
                                 <CardHeader className="pb-3">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
-                                            <Shield className="h-5 w-5 text-green-600" />
                                             <CardTitle className="text-base">Trivy Security</CardTitle>
                                         </div>
                                         <Badge className={getBadgeClass(trivyStats.scan_summary.trivy_coverage_pct)}>
@@ -523,7 +518,6 @@ export default function ScenarioAnalysisPage() {
                             <Card>
                                 <CardHeader>
                                     <div className="flex items-center gap-2">
-                                        <AlertTriangle className="h-5 w-5 text-red-500" />
                                         <CardTitle className="text-base">Vulnerability Summary</CardTitle>
                                     </div>
                                     <CardDescription>
@@ -665,7 +659,6 @@ export default function ScenarioAnalysisPage() {
                                 <CardHeader className="pb-3">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
-                                            <BarChart3 className="h-5 w-5 text-blue-600" />
                                             <CardTitle className="text-base">SonarQube Quality</CardTitle>
                                         </div>
                                         <Badge className={getBadgeClass(sonarStats.scan_summary.sonar_coverage_pct)}>
@@ -696,7 +689,6 @@ export default function ScenarioAnalysisPage() {
                             <Card>
                                 <CardHeader>
                                     <div className="flex items-center gap-2">
-                                        <Code className="h-5 w-5 text-blue-500" />
                                         <CardTitle className="text-base">Code Quality Summary</CardTitle>
                                     </div>
                                     <CardDescription>

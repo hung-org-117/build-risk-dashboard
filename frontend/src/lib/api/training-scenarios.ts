@@ -303,7 +303,6 @@ export interface ExportPreprocessingConfig {
 
 export interface ExportOutputConfig {
     format: string;
-    include_metadata: boolean;
 }
 
 export interface TrainingExportRecord {
@@ -444,7 +443,6 @@ export interface CreateTrainingScenarioPayload {
     };
     output_config?: {
         format?: string;
-        include_metadata?: boolean;
     };
 }
 

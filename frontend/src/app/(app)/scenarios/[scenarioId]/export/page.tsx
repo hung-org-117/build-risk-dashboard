@@ -88,26 +88,28 @@ export default function ScenarioExportPage() {
 
     // Subscribe to SSE for real-time updates
     useEffect(() => {
-        const unsubscribe = subscribe("SCENARIO.UPDATED", (data: { scenario_id?: string }) => {
+        const unsubScenario = subscribe("SCENARIO.UPDATED", (data: { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
                 fetchScenario();
-                fetchExports();
             }
         });
-        return () => unsubscribe();
-    }, [subscribe, scenarioId, fetchScenario, fetchExports]);
 
-    // Poll while any export is generating
-    useEffect(() => {
-        const hasGenerating = exports.some(e => e.status === "generating");
-        if (!hasGenerating) return;
+        // Export updates (generation status)
+        const unsubExport = subscribe("EXPORT.UPDATED", (data: { scenario_id?: string; export_id?: string }) => {
+            if (data.scenario_id === scenarioId) {
+                fetchExports();
+                // If viewing this specific export, refresh details if needed
+                if (viewingExport && viewingExport.id === data.export_id) {
+                    // Optionally refresh splits if completed, but fetchExports updates the list status
+                }
+            }
+        });
 
-        const interval = setInterval(() => {
-            fetchExports();
-        }, 3000);
-
-        return () => clearInterval(interval);
-    }, [exports, fetchExports]);
+        return () => {
+            unsubScenario();
+            unsubExport();
+        };
+    }, [subscribe, scenarioId, fetchScenario, fetchExports, viewingExport]);
 
     // =============================================================================
     // Handlers

@@ -19,7 +19,6 @@ from app.tasks.pipeline.constants import DEFAULT_FEATURES
 
 logger = logging.getLogger(__name__)
 
-# Metadata columns that should not be preprocessed (single source of truth)
 METADATA_COLUMNS = DEFAULT_FEATURES
 
 
@@ -27,7 +26,7 @@ METADATA_COLUMNS = DEFAULT_FEATURES
 class PreprocessingConfig:
     """Configuration for preprocessing operations."""
 
-    missing_strategy: str = "fill"  # fill, drop, mean
+    missing_strategy: str = "fill_zero"  # drop_row, fill_mean, fill_median, fill_zero
     fill_value: float = 0.0
     normalization_method: str = "none"  # none, z_score, min_max
 
@@ -64,9 +63,9 @@ class PreprocessingConfig:
 
             return cls(
                 missing_strategy=(
-                    missing_config.get("strategy", "fill")
+                    missing_config.get("strategy", "fill_zero")
                     if isinstance(missing_config, dict)
-                    else getattr(missing_config, "strategy", "fill")
+                    else getattr(missing_config, "strategy", "fill_zero")
                 ),
                 fill_value=(
                     missing_config.get("fill_value", 0)
@@ -83,9 +82,11 @@ class PreprocessingConfig:
         # Handle Flat structure (MLScenario Entity style)
         # Entity field: missing_values_strategy -> Service field: missing_strategy
         return cls(
-            missing_strategy=config_dict.get("missing_values_strategy", "fill"),
+            missing_strategy=config_dict.get("missing_values_strategy", "fill_zero"),
             fill_value=config_dict.get("fill_value", 0),
-            normalization_method=config_dict.get("normalization_method", "none"),
+            normalization_method=config_dict.get(
+                "normalization", config_dict.get("normalization_method", "none")
+            ),
         )
 
 
@@ -144,6 +145,24 @@ class MeanFillMissingStrategy(MissingValuesStrategy):
         return df
 
 
+class MedianFillMissingStrategy(MissingValuesStrategy):
+    """Fill missing values with column median using SimpleImputer."""
+
+    def handle(self, df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+        if columns:
+            df = df.copy()
+            numeric_cols = [
+                c
+                for c in columns
+                if df[c].dtype in ["float64", "int64", "float32", "int32"]
+            ]
+            if numeric_cols:
+                imputer = SimpleImputer(strategy="median")
+                df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
+                logger.info(f"Filled {len(numeric_cols)} columns with column medians")
+        return df
+
+
 class NormalizationStrategy(ABC):
     """Base class for normalization strategies."""
 
@@ -190,13 +209,31 @@ class MinMaxNormalizationStrategy(NormalizationStrategy):
         return df
 
 
+class RobustNormalizationStrategy(NormalizationStrategy):
+    """Robust normalization (IQR-based) using RobustScaler."""
+
+    def normalize(self, df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+        if not columns:
+            return df
+
+        from sklearn.preprocessing import RobustScaler
+
+        df = df.copy()
+        scaler = RobustScaler()
+        df[columns] = scaler.fit_transform(df[columns])
+
+        logger.info(f"Applied robust normalization to {len(columns)} columns")
+        return df
+
+
 class MissingValuesStrategyFactory:
     """Factory for creating missing values strategies."""
 
     STRATEGIES = {
-        "fill": FillMissingStrategy,
-        "drop": DropMissingStrategy,
-        "mean": MeanFillMissingStrategy,
+        "drop_row": DropMissingStrategy,
+        "fill_mean": MeanFillMissingStrategy,
+        "fill_median": MedianFillMissingStrategy,
+        "fill_zero": FillMissingStrategy,
     }
 
     @classmethod
@@ -216,6 +253,7 @@ class NormalizationStrategyFactory:
         "none": NoNormalizationStrategy,
         "z_score": ZScoreNormalizationStrategy,
         "min_max": MinMaxNormalizationStrategy,
+        "robust": RobustNormalizationStrategy,
     }
 
     @classmethod

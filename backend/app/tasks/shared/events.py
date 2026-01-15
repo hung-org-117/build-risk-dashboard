@@ -81,6 +81,7 @@ class EventType:
     SCENARIO_INGESTION_UPDATED = "SCENARIO.INGESTION.UPDATED"
     SCENARIO_PROCESSING_UPDATED = "SCENARIO.PROCESSING.UPDATED"
     SCENARIO_SCAN_UPDATED = "SCENARIO.SCAN.UPDATED"
+    EXPORT_UPDATED = "EXPORT.UPDATED"
 
     # Source Validation Events
     SOURCE_VALIDATION_UPDATED = "SOURCE.VALIDATION.UPDATED"
@@ -551,6 +552,58 @@ def publish_scenario_scan_updated(
         payload["metrics"] = metrics
 
     return publish_event(EventType.SCENARIO_SCAN_UPDATED, payload)
+
+
+def publish_export_updated(
+    scenario_id: str,
+    export_id: str,
+    status: str,
+    name: str = "",
+    train_count: int = 0,
+    val_count: int = 0,
+    test_count: int = 0,
+    fold_count: int = 0,
+    feature_count: int = 0,
+    generation_duration_seconds: float = 0.0,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    Publish EXPORT.UPDATED event for dataset export status changes.
+
+    Used when TrainingDatasetExport status changes (pending -> generating -> completed/failed).
+
+    Args:
+        scenario_id: TrainingScenario ID
+        export_id: TrainingDatasetExport ID
+        status: Export status (pending, generating, completed, failed)
+        name: Export name
+        train_count: Number of training samples
+        val_count: Number of validation samples
+        test_count: Number of test samples
+        fold_count: Number of CV folds (if CV strategy)
+        feature_count: Number of features in dataset
+        generation_duration_seconds: Time taken to generate
+        error: Error message (if failed)
+
+    Returns:
+        True if published successfully
+    """
+    payload = {
+        "scenario_id": scenario_id,
+        "export_id": export_id,
+        "status": status,
+        "name": name,
+        "train_count": train_count,
+        "val_count": val_count,
+        "test_count": test_count,
+        "fold_count": fold_count,
+        "feature_count": feature_count,
+        "generation_duration_seconds": generation_duration_seconds,
+    }
+    if error:
+        payload["error"] = error
+
+    return publish_event(EventType.EXPORT_UPDATED, payload)
 
 
 def publish_source_validation_updated(
