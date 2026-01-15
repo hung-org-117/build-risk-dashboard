@@ -1,3 +1,10 @@
+export interface ValidationStats {
+  total: number;
+  found: number;
+  not_found: number;
+  filtered: number;
+}
+
 export interface SonarConfig {
   content: string;
 }

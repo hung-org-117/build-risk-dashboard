@@ -997,11 +997,12 @@ Model Pipeline publishes the following SSE events:
 | Event Type | Purpose | When Published |
 |------------|---------|----------------|
 | `MODEL.REPO.UPDATED` | Repository status change | Status transitions (QUEUED → FETCHING → INGESTING → etc.) |
-| `MODEL.BUILD.UPDATED` | Build status change | Build ingestion/processing/prediction status change |
-| `MODEL.INGESTION.PROGRESS` | Resource ingestion progress | Git clone, worktree creation, log download chunks |
-| `MODEL.INGESTION.ERROR` | Ingestion failure | Git/log download errors |
+| `MODEL.INGESTION.PROGRESS` | Resource ingestion progress | Git clone, worktree creation, log download chunks, errors |
 | `MODEL.PROCESSING.UPDATED` | Feature extraction progress | Per-build extraction status with feature_count |
 | `MODEL.PREDICTION.UPDATED` | Prediction progress | Per-build prediction with label and confidence |
+
+> [!NOTE]
+> `MODEL.BUILD.UPDATED` and `MODEL.INGESTION.ERROR` were deprecated and merged into `MODEL.PROCESSING.UPDATED`, `MODEL.PREDICTION.UPDATED`, and `MODEL.INGESTION.PROGRESS` respectively.
 
 ### Event Payloads
 

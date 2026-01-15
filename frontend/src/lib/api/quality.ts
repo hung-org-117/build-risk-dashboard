@@ -31,7 +31,6 @@ export interface QualityReport {
     scenario_id: string;
     status: "pending" | "running" | "completed" | "failed";
     error_message?: string;
-    quality_score: number;
     completeness_score: number;
     validity_score: number;
     consistency_score: number;
@@ -50,13 +49,6 @@ export interface QualityReport {
     created_at?: string;
 }
 
-export interface EvaluateQualityResponse {
-    report_id: string;
-    status: string;
-    message: string;
-    quality_score?: number;
-}
-
 export interface UserSettingsResponse {
     user_id: string;
     browser_notifications: boolean;
@@ -70,15 +62,6 @@ export interface UpdateUserSettingsRequest {
 }
 
 export const qualityApi = {
-    evaluate: async (
-        scenarioId: string
-    ): Promise<EvaluateQualityResponse> => {
-        const response = await api.post<EvaluateQualityResponse>(
-            `/scenarios/${scenarioId}/evaluate`
-        );
-        return response.data;
-    },
-
     getReport: async (
         scenarioId: string
     ): Promise<QualityReport | { available: false; message: string }> => {

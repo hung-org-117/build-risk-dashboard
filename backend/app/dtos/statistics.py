@@ -30,8 +30,7 @@ class VersionStatistics(BaseModel):
     avg_features_per_build: float = 0.0
     total_feature_values_extracted: int = 0
 
-    # Quality (if evaluated)
-    quality_score: Optional[float] = None
+    # Sub-scores (0-100)
     completeness_score: Optional[float] = None
     validity_score: Optional[float] = None
     consistency_score: Optional[float] = None

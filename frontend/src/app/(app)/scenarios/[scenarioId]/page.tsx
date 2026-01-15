@@ -176,67 +176,10 @@ export default function ScenarioOverviewPage() {
                 </CardContent>
             </Card>
 
-            {/* Stats Grid */}
-            <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Builds</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{scenario.builds_total}</div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Ingested</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{scenario.builds_ingested}</div>
-                        <Progress value={ingestionProgress} className="mt-2" indicatorClassName="bg-green-500" />
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Extracted</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{scenario.builds_features_extracted}</div>
-                        <Progress value={processingProgress} className="mt-2" indicatorClassName="bg-purple-500" />
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Scans</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">
-                            {scenario.scans_completed}/{scenario.scans_total}
-                        </div>
-                        <Progress value={scanProgress} className="mt-2" indicatorClassName="bg-orange-500" />
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Datasets</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{exportsCount}</div>
-                        <p className="text-xs text-muted-foreground mt-2">Generated datasets</p>
-                    </CardContent>
-                </Card>
-            </div>
-
             {/* Configuration Summary */}
             <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg">Configuration</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid md:grid-cols-3 gap-8">
+                <CardContent className="pt-8">
+                    <div className="grid md:grid-cols-4 gap-8">
                         {/* Ingestion Stats */}
                         <div className="space-y-3">
                             <h4 className="font-semibold text-sm">Ingestion</h4>
@@ -260,7 +203,7 @@ export default function ScenarioOverviewPage() {
                             </div>
                         </div>
 
-                        {/* Feature Extraction Stats */}
+                        {/* Feature Extraction & Dataset Stats */}
                         <div className="space-y-3">
                             <h4 className="font-semibold text-sm">Feature Extraction</h4>
                             <div className="space-y-2 text-sm">
@@ -294,71 +237,91 @@ export default function ScenarioOverviewPage() {
                             </div>
                         </div>
 
-                        {/* Data Source Filters Column */}
-                        {(scenario as any).data_source_config && (
-                            <div className="space-y-4">
-                                <div className="flex items-center gap-2">
-                                    <h4 className="font-semibold">Filters</h4>
+                        {/* Dataset Stats */}
+                        <div className="space-y-3">
+                            <h4 className="font-semibold text-sm">Datasets</h4>
+                            <div className="flex justify-between p-2 bg-blue-50 dark:bg-blue-950/30 rounded-md">
+                                <div className="flex flex-col">
+                                    <span className="text-muted-foreground">Datasets</span>
+                                    <span className="text-[10px] text-muted-foreground -mt-1">Generated datasets</span>
                                 </div>
-                                <div className="space-y-3 text-sm border-l-2 pl-4 border-muted">
-                                    <div>
-                                        <span className="text-muted-foreground block text-xs">Languages</span>
-                                        <span className="font-medium">
-                                            {(scenario as any).data_source_config.languages && (scenario as any).data_source_config.languages.length > 0
-                                                ? (scenario as any).data_source_config.languages.join(", ")
-                                                : "All"}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span className="text-muted-foreground block text-xs">Date Range</span>
-                                        <span className="font-medium">
-                                            {(scenario as any).data_source_config.date_start
-                                                ? `${(scenario as any).data_source_config.date_start} - ${(scenario as any).data_source_config.date_end || "Now"}`
-                                                : "All Time"}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span className="text-muted-foreground block text-xs">Conclusions</span>
-                                        <div className="flex gap-1 flex-wrap mt-1">
-                                            {(scenario as any).data_source_config.conclusions && (scenario as any).data_source_config.conclusions.length > 0
-                                                ? (scenario as any).data_source_config.conclusions.map((c: string) => (
-                                                    <Badge key={c} variant="secondary" className="text-xs px-1 py-0">{c}</Badge>
-                                                ))
-                                                : <Badge variant="outline" className="text-xs">All</Badge>}
-                                        </div>
-                                    </div>
-                                </div>
+                                <span className="font-bold text-lg text-blue-600">{exportsCount}</span>
                             </div>
-                        )}
+                        </div>
+                    </div>
 
-                        {/* Feature Config Column */}
-                        {(scenario as any).feature_config && (
-                            <div className="space-y-4">
-                                <div className="flex items-center gap-2">
-                                    <h4 className="font-semibold">Features & Tools</h4>
-                                </div>
-                                <div className="space-y-3 text-sm bg-muted/20 p-4 rounded-lg">
-                                    <div className="flex justify-between items-center border-b pb-2">
-                                        <span className="text-muted-foreground">DAG Features</span>
-                                        <Badge variant="default">{(scenario as any).feature_config.dag_features?.length || 0}</Badge>
+                    {/* New Configuration Header & Sections */}
+                    <div className="mt-12 pt-8 border-t">
+                        <h3 className="text-xl font-bold mb-6">Configuration</h3>
+                        <div className="grid md:grid-cols-2 gap-12">
+                            {/* Data Source Filters Column */}
+                            {(scenario as any).data_source_config && (
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-2">
+                                        <h4 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Filters</h4>
                                     </div>
-                                    <div className="space-y-2 pt-1">
-                                        <span className="text-muted-foreground block text-xs">Active Scan Tools</span>
-                                        <div className="flex gap-2">
-                                            {(scenario as any).feature_config.scan_metrics?.sonarqube ? (
-                                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">SonarQube</Badge>
-                                            ) : null}
-                                            {(scenario as any).feature_config.scan_metrics?.trivy ? (
-                                                <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200">Trivy</Badge>
-                                            ) : null}
-                                            {!(scenario as any).feature_config.scan_metrics?.sonarqube && !(scenario as any).feature_config.scan_metrics?.trivy && (
-                                                <span className="text-muted-foreground text-xs italic">No scan tools enabled</span>
-                                            )}
+                                    <div className="space-y-4 text-sm border-l-2 pl-6 border-slate-200 dark:border-slate-800">
+                                        <div>
+                                            <span className="text-muted-foreground block text-xs mb-1">Languages</span>
+                                            <span className="font-medium text-base">
+                                                {(scenario as any).data_source_config.languages && (scenario as any).data_source_config.languages.length > 0
+                                                    ? (scenario as any).data_source_config.languages.join(", ")
+                                                    : "All"}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span className="text-muted-foreground block text-xs mb-1">Date Range</span>
+                                            <span className="font-medium text-base">
+                                                {(scenario as any).data_source_config.date_start
+                                                    ? `${(scenario as any).data_source_config.date_start} - ${(scenario as any).data_source_config.date_end || "Now"}`
+                                                    : "All Time"}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span className="text-muted-foreground block text-xs mb-1">Conclusions</span>
+                                            <div className="flex gap-1.5 flex-wrap mt-1">
+                                                {(scenario as any).data_source_config.conclusions && (scenario as any).data_source_config.conclusions.length > 0
+                                                    ? (scenario as any).data_source_config.conclusions.map((c: string) => (
+                                                        <Badge key={c} variant="secondary" className="px-2 py-0.5">{c}</Badge>
+                                                    ))
+                                                    : <Badge variant="outline">All</Badge>}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
+
+                            {/* Feature Config Column */}
+                            {(scenario as any).feature_config && (
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-2">
+                                        <h4 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Features & Tools</h4>
+                                    </div>
+                                    <div className="space-y-4 text-sm bg-transparent p-0 border-0 rounded-none dark:border-0 dark:bg-transparent">
+                                        <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3">
+                                            <span className="text-muted-foreground text-sm font-medium">DAG Features</span>
+                                            <Badge variant="default" className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-3">
+                                                {(scenario as any).feature_config.dag_features?.length || 0}
+                                            </Badge>
+                                        </div>
+                                        <div className="space-y-3 pt-1">
+                                            <span className="text-muted-foreground block text-xs font-medium uppercase tracking-tight">Active Scan Tools</span>
+                                            <div className="flex gap-2">
+                                                {(scenario as any).feature_config.scan_metrics?.sonarqube ? (
+                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">SonarQube</Badge>
+                                                ) : null}
+                                                {(scenario as any).feature_config.scan_metrics?.trivy ? (
+                                                    <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 px-3 py-1">Trivy</Badge>
+                                                ) : null}
+                                                {!(scenario as any).feature_config.scan_metrics?.sonarqube && !(scenario as any).feature_config.scan_metrics?.trivy && (
+                                                    <span className="text-muted-foreground text-xs italic">No scan tools enabled</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </CardContent>
             </Card>

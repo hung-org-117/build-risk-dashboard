@@ -249,50 +249,6 @@ export function UnifiedBuildsTable({
 
   // SSE subscription with delta merge for individual build updates
   useEffect(() => {
-    // MODEL.BUILD.UPDATED - Delta merge for extraction/prediction status changes
-    const unsubscribeBuild = subscribe(
-      "MODEL.BUILD.UPDATED",
-      (payload: {
-        repo_id: string;
-        build_id: string;
-        status?: string;
-        extraction_status?: string;
-        prediction_status?: string;
-        predicted_label?: string;
-      }) => {
-        if (payload.repo_id === repoId && payload.build_id) {
-          // Delta merge into existing builds
-          setBuilds((prev) => {
-            const buildExists = prev.some(
-              (b) =>
-                b.model_import_build_id === payload.build_id ||
-                b.training_build_id === payload.build_id
-            );
-            if (buildExists) {
-              return prev.map((build) => {
-                if (
-                  build.model_import_build_id === payload.build_id ||
-                  build.training_build_id === payload.build_id
-                ) {
-                  return {
-                    ...build,
-                    extraction_status:
-                      payload.extraction_status || build.extraction_status,
-                    prediction_status:
-                      payload.prediction_status || build.prediction_status,
-                    predicted_label:
-                      payload.predicted_label || build.predicted_label,
-                  };
-                }
-                return build;
-              });
-            }
-            return prev;
-          });
-        }
-      }
-    );
-
     // MODEL.REPO.UPDATED - Debounced refetch for aggregate stats changes
     const unsubscribeRepo = subscribe(
       "MODEL.REPO.UPDATED",
@@ -345,8 +301,8 @@ export function UnifiedBuildsTable({
                     ingestion_status: anyFailed
                       ? "partial"
                       : allCompleted
-                      ? "ingested"
-                      : build.ingestion_status,
+                        ? "ingested"
+                        : build.ingestion_status,
                   };
                 }
                 return build;
@@ -422,7 +378,6 @@ export function UnifiedBuildsTable({
     );
 
     return () => {
-      unsubscribeBuild();
       unsubscribeRepo();
       unsubscribeIngestion();
       unsubscribeProcessing();
@@ -646,9 +601,8 @@ export function UnifiedBuildsTable({
                             <span className="text-slate-300">→</span>
                             <div
                               className="flex items-center gap-0.5"
-                              title={`Extraction: ${
-                                build.extraction_status || "pending"
-                              }`}
+                              title={`Extraction: ${build.extraction_status || "pending"
+                                }`}
                             >
                               <PhaseStatusIcon
                                 status={build.extraction_status}
@@ -661,9 +615,8 @@ export function UnifiedBuildsTable({
                             </div>
                             <span className="text-slate-300">→</span>
                             <div
-                              title={`Prediction: ${
-                                build.prediction_status || "pending"
-                              }`}
+                              title={`Prediction: ${build.prediction_status || "pending"
+                                }`}
                             >
                               <PhaseStatusIcon
                                 status={build.prediction_status}
@@ -754,8 +707,8 @@ export function UnifiedBuildsTable({
                                               ? "text-green-600"
                                               : build.ci_conclusion ===
                                                 "failure"
-                                              ? "text-red-600"
-                                              : ""
+                                                ? "text-red-600"
+                                                : ""
                                           }
                                         >
                                           {build.ci_conclusion}

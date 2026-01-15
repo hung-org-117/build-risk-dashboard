@@ -1,14 +1,11 @@
 """
 Data Quality Service - Core evaluation logic for dataset quality assessment.
 
-Evaluates enriched datasets and calculates quality scores based on:
+Evaluates enriched datasets and calculates individual scores for:
 - Completeness: % features non-null
 - Validity: % values within valid range (from FEATURE_REGISTRY)
 - Consistency: % builds with all selected features
 - Coverage: % successfully enriched builds
-
-Quality Score Formula:
-    quality_score = 0.4 * completeness + 0.3 * validity + 0.2 * consistency + 0.1 * coverage
 """
 
 import logging
@@ -39,12 +36,6 @@ logger = logging.getLogger(__name__)
 
 class DataQualityService:
     """Service for evaluating dataset quality."""
-
-    # Score weights
-    COMPLETENESS_WEIGHT = 0.4
-    VALIDITY_WEIGHT = 0.3
-    CONSISTENCY_WEIGHT = 0.2
-    COVERAGE_WEIGHT = 0.1
 
     def __init__(self, db: Database):
         self.db = db
@@ -188,19 +179,10 @@ class DataQualityService:
                 [m for m in report.feature_metrics if m.issues]
             )
 
-            # Calculate overall quality score
-            quality_score = (
-                self.COMPLETENESS_WEIGHT * report.completeness_score
-                + self.VALIDITY_WEIGHT * report.validity_score
-                + self.CONSISTENCY_WEIGHT * report.consistency_score
-                + self.COVERAGE_WEIGHT * report.coverage_score
-            )
-
-            report.mark_completed(quality_score)
+            report.mark_completed()
 
             logger.info(
                 f"Quality evaluation completed for scenario {scenario_id}: "
-                f"score={quality_score:.1f}, "
                 f"completeness={report.completeness_score:.1f}, "
                 f"validity={report.validity_score:.1f}, "
                 f"consistency={report.consistency_score:.1f}, "
@@ -713,15 +695,7 @@ class DataQualityService:
         # Calculate validity score
         report.validity_score = self._calculate_validity_score(report.feature_metrics)
 
-        # Calculate overall quality score
-        quality_score = (
-            self.COMPLETENESS_WEIGHT * report.completeness_score
-            + self.VALIDITY_WEIGHT * report.validity_score
-            + self.CONSISTENCY_WEIGHT * report.consistency_score
-            + self.COVERAGE_WEIGHT * report.coverage_score
-        )
-
-        report.mark_completed(quality_score)
+        report.mark_completed()
 
         # Update in DB
         self.quality_repo.update_one(
@@ -732,7 +706,6 @@ class DataQualityService:
                     if hasattr(report.status, "value")
                     else report.status
                 ),
-                "quality_score": report.quality_score,
                 "completeness_score": report.completeness_score,
                 "validity_score": report.validity_score,
                 "consistency_score": report.consistency_score,
@@ -748,7 +721,7 @@ class DataQualityService:
 
         logger.info(
             f"Quality report finalized for scenario {scenario_id}: "
-            f"score={quality_score:.1f}"
+            f"completeness={report.completeness_score:.1f}"
         )
 
         return report

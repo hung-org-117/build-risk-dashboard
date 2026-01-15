@@ -589,6 +589,35 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
         )
         return result.modified_count
 
+    def get_build_ids_by_commits(
+        self,
+        config_id: str,
+        commits: List[str],
+    ) -> List[str]:
+        """
+        Get ModelImportBuild IDs matching specific commit SHAs.
+
+        Used by SSE events to send build_ids instead of commit_shas for frontend delta merge.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            commits: List of commit SHAs
+
+        Returns:
+            List of ModelImportBuild IDs (as strings)
+        """
+        if not commits:
+            return []
+
+        docs = self.collection.find(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "commit_sha": {"$in": commits},
+            },
+            {"_id": 1},
+        )
+        return [str(doc["_id"]) for doc in docs]
+
     def update_resource_by_ci_run_ids(
         self,
         config_id: str,

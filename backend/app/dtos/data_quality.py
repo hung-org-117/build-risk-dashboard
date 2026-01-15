@@ -47,7 +47,6 @@ class QualityReportSummaryResponse(BaseModel):
     id: str
     scenario_id: str
     status: str
-    quality_score: float
     completeness_score: float
     validity_score: float
     consistency_score: float
@@ -68,8 +67,7 @@ class QualityReportResponse(BaseModel):
     status: str
     error_message: Optional[str] = None
 
-    # Scores
-    quality_score: float
+    # Scores (0-100)
     completeness_score: float
     validity_score: float
     consistency_score: float
@@ -94,17 +92,3 @@ class QualityReportResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
-
-
-class EvaluateQualityRequest(BaseModel):
-    """Request body for triggering quality evaluation."""
-
-    pass  # No additional fields needed, uses path params
-
-
-class EvaluateQualityResponse(BaseModel):
-    """Response after triggering quality evaluation."""
-
-    report_id: str
-    status: str
-    message: str

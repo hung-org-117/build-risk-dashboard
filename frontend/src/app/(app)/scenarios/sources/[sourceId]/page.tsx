@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/use-toast";
 import { formatDateTime, getBuildSourceStatusConfig, getSourceBuildStatusConfig } from "@/lib/utils";
+import { SourceValidationStats } from "@/types";
 
 interface SourceBuild {
     id: string;
@@ -34,13 +35,6 @@ interface SourceBuild {
     raw_run_id?: string;
 }
 
-interface ValidationStats {
-    total: number;
-    found: number;
-    not_found: number;
-    filtered: number;
-}
-
 interface BuildSourceDetail {
     id: string;
     name: string;
@@ -49,7 +43,7 @@ interface BuildSourceDetail {
     rows: number;
     mapped_fields: Record<string, string>;
     validation_status: "pending" | "validating" | "completed" | "failed";
-    validation_stats: ValidationStats;
+    validation_stats: SourceValidationStats;
     created_at: string;
     updated_at: string;
 }

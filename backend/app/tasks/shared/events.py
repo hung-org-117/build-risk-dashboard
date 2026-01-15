@@ -72,9 +72,7 @@ class EventType:
 
     # Model Pipeline Events
     MODEL_REPO_UPDATED = "MODEL.REPO.UPDATED"
-    MODEL_BUILD_UPDATED = "MODEL.BUILD.UPDATED"
     MODEL_INGESTION_PROGRESS = "MODEL.INGESTION.PROGRESS"
-    MODEL_INGESTION_ERROR = "MODEL.INGESTION.ERROR"
     MODEL_PROCESSING_UPDATED = "MODEL.PROCESSING.UPDATED"
     MODEL_PREDICTION_UPDATED = "MODEL.PREDICTION.UPDATED"
 
@@ -83,7 +81,9 @@ class EventType:
     SCENARIO_INGESTION_UPDATED = "SCENARIO.INGESTION.UPDATED"
     SCENARIO_PROCESSING_UPDATED = "SCENARIO.PROCESSING.UPDATED"
     SCENARIO_SCAN_UPDATED = "SCENARIO.SCAN.UPDATED"
-    SCENARIO_SCAN_ERROR = "SCENARIO.SCAN.ERROR"
+
+    # Source Validation Events
+    SOURCE_VALIDATION_UPDATED = "SOURCE.VALIDATION.UPDATED"
 
     # System Events
     SYSTEM_NOTIFICATION = "SYSTEM.NOTIFICATION"
@@ -158,45 +158,6 @@ def publish_model_repo_updated(
     return publish_event(EventType.MODEL_REPO_UPDATED, payload)
 
 
-def publish_model_build_updated(
-    repo_id: str,
-    build_id: str,
-    status: str,
-    extraction_status: Optional[str] = None,
-    prediction_status: Optional[str] = None,
-    predicted_label: Optional[str] = None,
-) -> bool:
-    """
-    Publish MODEL.BUILD.UPDATED event for build status changes.
-
-    Used for ModelImportBuild or ModelTrainingBuild status updates.
-
-    Args:
-        repo_id: ModelRepoConfig ID
-        build_id: Build ID (ModelImportBuild or ModelTrainingBuild)
-        status: Build status
-        extraction_status: Feature extraction status (optional)
-        prediction_status: Prediction status (optional)
-        predicted_label: Prediction result label (optional)
-
-    Returns:
-        True if published successfully
-    """
-    payload = {
-        "repo_id": repo_id,
-        "build_id": build_id,
-        "status": status,
-    }
-    if extraction_status:
-        payload["extraction_status"] = extraction_status
-    if prediction_status:
-        payload["prediction_status"] = prediction_status
-    if predicted_label:
-        payload["predicted_label"] = predicted_label
-
-    return publish_event(EventType.MODEL_BUILD_UPDATED, payload)
-
-
 def publish_ingestion_progress(
     repo_id: str,
     resource: str,
@@ -209,16 +170,19 @@ def publish_ingestion_progress(
     failed_commit_shas: Optional[List[str]] = None,
     completed_build_ids: Optional[List[str]] = None,
     failed_build_ids: Optional[List[str]] = None,
+    error: Optional[str] = None,
+    correlation_id: Optional[str] = None,
 ) -> bool:
     """
     Publish ingestion progress event for both Model and Scenario pipelines.
 
     Used during git clone, worktree creation, and log downloads.
+    Also handles error events (use status="error" with error param).
 
     Args:
         repo_id: ModelRepoConfig ID (model) or TrainingScenario ID (dataset)
         resource: Resource type (git_history, git_worktree, build_logs)
-        status: Status (in_progress, completed, failed, completed_with_errors)
+        status: Status (in_progress, completed, failed, completed_with_errors, error)
         pipeline_type: Pipeline type ("model" or "dataset")
         builds_affected: Number of builds affected
         chunk_index: Current chunk index
@@ -227,6 +191,8 @@ def publish_ingestion_progress(
         failed_commit_shas: Failed commits
         completed_build_ids: Successfully processed builds
         failed_build_ids: Failed builds
+        error: Error message (when status="error")
+        correlation_id: Correlation ID for tracing
 
     Returns:
         True if published successfully
@@ -264,40 +230,12 @@ def publish_ingestion_progress(
         payload["completed_build_ids"] = completed_build_ids
     if failed_build_ids:
         payload["failed_build_ids"] = failed_build_ids
-
-    return publish_event(event_type, payload)
-
-
-def publish_model_ingestion_error(
-    repo_id: str,
-    resource: str,
-    error: str,
-    chunk_index: int = 0,
-    correlation_id: Optional[str] = None,
-) -> bool:
-    """
-    Publish MODEL.INGESTION.ERROR event for ingestion failures.
-
-    Args:
-        repo_id: ModelRepoConfig ID or RawRepository ID
-        resource: Resource type that failed
-        error: Error message
-        chunk_index: Chunk that failed (if applicable)
-        correlation_id: Correlation ID for tracing
-
-    Returns:
-        True if published successfully
-    """
-    payload = {
-        "repo_id": repo_id,
-        "resource": resource,
-        "error": error,
-        "chunk_index": chunk_index,
-    }
+    if error:
+        payload["error"] = error
     if correlation_id:
         payload["correlation_id"] = correlation_id
 
-    return publish_event(EventType.MODEL_INGESTION_ERROR, payload)
+    return publish_event(event_type, payload)
 
 
 def publish_model_processing_updated(
@@ -415,25 +353,37 @@ def publish_scenario_updated(
     """
     # Extract values from entity
     scenario_id = str(scenario.id)
-    status = scenario.status.value if hasattr(scenario.status, "value") else scenario.status
+    status = (
+        scenario.status.value if hasattr(scenario.status, "value") else scenario.status
+    )
     builds_total = getattr(scenario, "builds_total", 0) or 0
     builds_ingested = getattr(scenario, "builds_ingested", 0) or 0
     builds_features_extracted = getattr(scenario, "builds_features_extracted", 0) or 0
     builds_ingestion_failed = getattr(scenario, "builds_ingestion_failed", 0) or 0
-    builds_features_extracted_failed = getattr(scenario, "builds_features_extracted_failed", 0) or 0
+    builds_features_extracted_failed = (
+        getattr(scenario, "builds_features_extracted_failed", 0) or 0
+    )
     builds_missing_resource = getattr(scenario, "builds_missing_resource", 0) or 0
     scans_total = getattr(scenario, "scans_total", 0) or 0
     scans_completed = getattr(scenario, "scans_completed", 0) or 0
     scans_failed = getattr(scenario, "scans_failed", 0) or 0
-    feature_extraction_completed = getattr(scenario, "feature_extraction_completed", False)
+    feature_extraction_completed = getattr(
+        scenario, "feature_extraction_completed", False
+    )
     scan_extraction_completed = getattr(scenario, "scan_extraction_completed", False)
 
     # Calculate progress percentages
-    ingestion_progress = round((builds_ingested / builds_total) * 100, 1) if builds_total > 0 else 0
-    feature_extraction_progress = (
-        round((builds_features_extracted / builds_total) * 100, 1) if builds_total > 0 else 0
+    ingestion_progress = (
+        round((builds_ingested / builds_total) * 100, 1) if builds_total > 0 else 0
     )
-    scan_progress = round((scans_completed / scans_total) * 100, 1) if scans_total > 0 else 0
+    feature_extraction_progress = (
+        round((builds_features_extracted / builds_total) * 100, 1)
+        if builds_total > 0
+        else 0
+    )
+    scan_progress = (
+        round((scans_completed / scans_total) * 100, 1) if scans_total > 0 else 0
+    )
 
     payload = {
         "scenario_id": scenario_id,
@@ -603,37 +553,37 @@ def publish_scenario_scan_updated(
     return publish_event(EventType.SCENARIO_SCAN_UPDATED, payload)
 
 
-def publish_scenario_scan_error(
-    scenario_id: str,
-    scan_id: str,
-    commit_sha: str,
-    tool_type: str,
-    error: str,
-    retry_count: int = 0,
+def publish_source_validation_updated(
+    source_id: str,
+    status: str,
+    progress: int = 0,
+    stats: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
 ) -> bool:
     """
-    Publish SCENARIO.SCAN.ERROR event for scan failures.
+    Publish SOURCE.VALIDATION.UPDATED event for build source validation.
 
     Args:
-        scenario_id: TrainingScenario ID
-        scan_id: Scan record ID
-        commit_sha: Commit that failed
-        tool_type: "trivy" or "sonarqube"
-        error: Error message
-        retry_count: Number of retries
+        source_id: BuildSource ID
+        status: Validation status (validating, completed, failed)
+        progress: Progress percentage (0-100)
+        stats: Validation statistics
+        error: Error message (if failed)
 
     Returns:
         True if published successfully
     """
     payload = {
-        "scenario_id": scenario_id,
-        "scan_id": scan_id,
-        "commit_sha": commit_sha,
-        "tool_type": tool_type,
-        "error": error,
-        "retry_count": retry_count,
+        "source_id": source_id,
+        "validation_status": status,
+        "validation_progress": progress,
     }
-    return publish_event(EventType.SCENARIO_SCAN_ERROR, payload)
+    if stats:
+        payload["validation_stats"] = stats
+    if error:
+        payload["validation_error"] = error
+
+    return publish_event(EventType.SOURCE_VALIDATION_UPDATED, payload)
 
 
 # =============================================================================

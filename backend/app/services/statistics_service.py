@@ -90,7 +90,6 @@ class StatisticsService:
         # Update DataQualityRepository to support TrainingScenario
         quality_report = self.quality_repo.find_by_scenario(scenario_id)
         if quality_report and quality_report.status == "completed":
-            stats.quality_score = quality_report.quality_score
             stats.completeness_score = quality_report.completeness_score
             stats.validity_score = quality_report.validity_score
             stats.consistency_score = quality_report.consistency_score
@@ -274,6 +273,7 @@ class StatisticsService:
     def get_scan_metrics_statistics(
         self,
         scenario_id: str,
+        tool: Optional[str] = None,
     ) -> ScanMetricsStatisticsResponse:
         """
         Get aggregated scan metrics statistics for a scenario.
@@ -282,6 +282,7 @@ class StatisticsService:
 
         Args:
             scenario_id: Scenario ID
+            tool: Optional tool filter ('trivy' or 'sonarqube')
 
         Returns:
             ScanMetricsStatisticsResponse with Trivy and SonarQube summaries
@@ -333,6 +334,9 @@ class StatisticsService:
         alert_status_ok = 0
         alert_status_error = 0
 
+        should_process_trivy = tool in (None, "trivy")
+        should_process_sonar = tool in (None, "sonarqube")
+
         for build in builds:
             # Note: "scan_metrics" is flattened in repository aggregation
             scan_metrics = build.get("scan_metrics", {})
@@ -343,7 +347,7 @@ class StatisticsService:
             has_trivy = any(k.startswith("trivy_") for k in scan_metrics.keys())
             has_sonar = any(k.startswith("sonar_") for k in scan_metrics.keys())
 
-            if has_trivy:
+            if should_process_trivy and has_trivy:
                 scan_summary.builds_with_trivy += 1
 
                 # Collect Trivy metrics
@@ -362,7 +366,7 @@ class StatisticsService:
                 if scan_metrics.get("trivy_has_high", False):
                     has_high_count += 1
 
-            if has_sonar:
+            if should_process_sonar and has_sonar:
                 scan_summary.builds_with_sonar += 1
 
                 # Collect SonarQube metrics

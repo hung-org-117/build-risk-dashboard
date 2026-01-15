@@ -43,6 +43,7 @@ from app.repositories.source_build import SourceBuildRepository
 from app.repositories.source_repo_stats import SourceRepoStatsRepository
 from app.services.github.github_client import get_public_github_client
 from app.tasks.base import SafeTask, TaskState
+from app.tasks.shared.events import publish_source_validation_updated
 from app.tasks.validation_helpers import (
     calculate_progress,
     chunk_dict,
@@ -81,44 +82,12 @@ def _create_source_failure_handler(
                 },
             )
             # Publish event for frontend
-            publish_source_update(
-                redis_client, source_id, "failed", error=error_message
-            )
+            publish_source_validation_updated(source_id, "failed", error=error_message)
             cleanup_validation_stats(redis_client, source_id)
         except Exception as e:
             logger.warning(f"Failed to update source {source_id} status: {e}")
 
     return update_source_failed
-
-
-def publish_source_update(
-    redis_client: redis.Redis,
-    source_id: str,
-    status: str,
-    progress: int = 0,
-    stats: Optional[Dict[str, Any]] = None,
-    error: Optional[str] = None,
-):
-    """Publish source validation update to Redis for SSE broadcast."""
-    import json
-
-    try:
-        payload = {
-            "type": "SOURCE_UPDATE",
-            "payload": {
-                "source_id": source_id,
-                "validation_status": status,
-                "validation_progress": progress,
-            },
-        }
-        if stats:
-            payload["payload"]["validation_stats"] = stats
-        if error:
-            payload["payload"]["validation_error"] = error
-
-        redis_client.publish("events", json.dumps(payload))
-    except Exception as e:
-        logger.error(f"Failed to publish source update: {e}")
 
 
 class SourceValidationTask(SafeTask):
@@ -139,11 +108,7 @@ class SourceValidationTask(SafeTask):
         return None
 
 
-# =============================================================================
 # Task 1: Orchestrator
-# =============================================================================
-
-
 @celery_app.task(
     bind=True,
     base=SourceValidationTask,
@@ -199,7 +164,7 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
                 "validation_error": None,
             },
         )
-        publish_source_update(self.redis, source_id, "validating", progress=0)
+        publish_source_validation_updated(source_id, "validating", progress=0)
 
         # Get configuration
         file_path = source.file_path
@@ -274,7 +239,7 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
                     "setup_step": 2,
                 },
             )
-            publish_source_update(self.redis, source_id, "completed", progress=100)
+            publish_source_validation_updated(source_id, "completed", progress=100)
             return {"status": "completed", "message": "No valid repos found"}
 
         # Initialize Redis counters
@@ -471,8 +436,8 @@ def validate_source_repo_chunk(
         # Publish progress update
         stats = get_validation_stats(self.redis, source_id)
         progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
-        publish_source_update(
-            self.redis, source_id, "validating", progress=progress, stats=stats
+        publish_source_validation_updated(
+            source_id, "validating", progress=progress, stats=stats
         )
 
         return {
@@ -916,8 +881,7 @@ def aggregate_source_validation_results(
         )
 
         # Publish completion event
-        publish_source_update(
-            self.redis,
+        publish_source_validation_updated(
             source_id,
             "completed",
             progress=100,

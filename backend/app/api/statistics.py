@@ -110,6 +110,9 @@ async def get_correlation_matrix(
 @router.get("/scans", response_model=ScanMetricsStatisticsResponse)
 async def get_scan_metrics_statistics(
     scenario_id: str,
+    tool: Optional[str] = Query(
+        None, description="Filter by tool: 'trivy' or 'sonarqube'"
+    ),
     db=Depends(get_db),
     current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
 ):
@@ -129,4 +132,5 @@ async def get_scan_metrics_statistics(
     service = StatisticsService(db)
     return service.get_scan_metrics_statistics(
         scenario_id=scenario_id,
+        tool=tool,
     )

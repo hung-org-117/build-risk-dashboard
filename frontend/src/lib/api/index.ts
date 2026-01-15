@@ -68,7 +68,6 @@ export type {
     QualityIssue,
     QualityMetric,
     QualityReport,
-    EvaluateQualityResponse,
     UserSettingsResponse,
     UpdateUserSettingsRequest,
 } from './quality';

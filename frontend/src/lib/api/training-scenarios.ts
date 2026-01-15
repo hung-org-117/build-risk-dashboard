@@ -390,7 +390,6 @@ export interface DataQualityReport {
     // When report is available (only present when available=true)
     id?: string;
     scenario_id?: string;
-    quality_score?: number;
     completeness_score?: number;
     validity_score?: number;
     consistency_score?: number;

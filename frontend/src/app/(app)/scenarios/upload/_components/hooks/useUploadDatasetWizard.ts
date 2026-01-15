@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import type { BuildSourceRecord, ValidationStats } from "@/types";
+import { useState, useCallback, useEffect } from "react";
+import type { BuildSourceRecord, SourceValidationStats } from "@/types";
 import { buildSourcesApi } from "@/lib/api";
 import type { Step } from "../types";
 import { useStep1Upload } from "./useStep1Upload";
+import { useSSE } from "@/contexts/sse-context";
 
 interface UseUploadBuildSourceWizardProps {
     open: boolean;
@@ -18,7 +19,7 @@ interface UseUploadBuildSourceWizardProps {
  * Simplified 2-step upload wizard.
  *
  * Step 1: Upload CSV + Map columns + Select CI Provider
- * Step 2: Validation status + Repo stats
+ * Step 2: Validation status + Repo stats (Real-time via SSE)
  */
 export function useUploadBuildSourceWizard({
     open,
@@ -38,22 +39,38 @@ export function useUploadBuildSourceWizard({
         "pending" | "validating" | "completed" | "failed"
     >("pending");
     const [validationProgress, setValidationProgress] = useState(0);
-    const [validationStats, setValidationStats] = useState<ValidationStats | null>(null);
+    const [validationStats, setValidationStats] = useState<SourceValidationStats | null>(null);
     const [validationError, setValidationError] = useState<string | null>(null);
-
-    // Use ref for polling to avoid stale closure issues
-    const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // Step 1 hook
     const step1 = useStep1Upload();
 
-    // Stop polling helper
-    const stopPolling = useCallback(() => {
-        if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-        }
-    }, []);
+    // SSE Subscription
+    const { subscribe } = useSSE();
+
+    // Subscribe to SOURCE.VALIDATION.UPDATED
+    useEffect(() => {
+        if (!sourceId || step !== 2) return;
+
+        console.log("Subscribing to SOURCE.VALIDATION.UPDATED for", sourceId);
+
+        const unsubscribe = subscribe("SOURCE.VALIDATION.UPDATED", (data: any) => {
+            if (data.source_id === sourceId) {
+                setValidationStatus(data.validation_status);
+                setValidationProgress(data.validation_progress);
+                if (data.validation_stats) {
+                    setValidationStats(data.validation_stats);
+                }
+                if (data.validation_error) {
+                    setValidationError(data.validation_error);
+                }
+            }
+        });
+
+        return () => {
+            unsubscribe();
+        };
+    }, [subscribe, sourceId, step]);
 
     const resetAll = useCallback(() => {
         setStep(1);
@@ -65,19 +82,11 @@ export function useUploadBuildSourceWizard({
         setValidationProgress(0);
         setValidationStats(null);
         setValidationError(null);
-        stopPolling();
         step1.resetStep1();
-    }, [step1, stopPolling]);
+    }, [step1]);
 
-    // Cleanup polling on unmount
-    useEffect(() => {
-        return () => {
-            stopPolling();
-        };
-    }, [stopPolling]);
-
-    // Poll validation status
-    const pollValidationStatus = useCallback(async (id: string) => {
+    // Initial status fetch (when entering step 2)
+    const fetchInitialStatus = useCallback(async (id: string) => {
         try {
             const source = await buildSourcesApi.get(id);
             setValidationStatus(source.validation_status || "pending");
@@ -89,31 +98,10 @@ export function useUploadBuildSourceWizard({
                 setValidationError(source.validation_error);
             }
             setCreatedSource(source);
-
-            // Stop polling on completion
-            if (["completed", "failed"].includes(source.validation_status || "")) {
-                stopPolling();
-            }
         } catch (err) {
-            console.error("Failed to poll validation status:", err);
+            console.error("Failed to fetch validation status:", err);
         }
-    }, [stopPolling]);
-
-    // Start polling for validation status
-    const startValidationPolling = useCallback((id: string) => {
-        // Clear existing interval
-        stopPolling();
-
-        // Initial poll
-        pollValidationStatus(id);
-
-        // Start interval
-        const interval = setInterval(() => {
-            pollValidationStatus(id);
-        }, 2000);
-
-        pollingIntervalRef.current = interval;
-    }, [pollValidationStatus, stopPolling]);
+    }, []);
 
     // Load existing source when modal opens in resume mode
     useEffect(() => {
@@ -124,28 +112,33 @@ export function useUploadBuildSourceWizard({
 
         if (!existingSource) return;
 
-        setIsResuming(true);
-        setCreatedSource(existingSource);
-        setSourceId(existingSource.id);
-        step1.loadFromExistingSource(existingSource);
+        try {
+            setIsResuming(true);
+            setCreatedSource(existingSource);
+            setSourceId(existingSource.id);
+            step1.loadFromExistingSource(existingSource);
 
-        const validationStatus = existingSource.validation_status;
+            const status = existingSource.validation_status;
 
-        if (validationStatus && ["validating", "completed", "failed"].includes(validationStatus)) {
-            setStep(2);
-            setValidationStatus(validationStatus as typeof validationStatus);
-            setValidationProgress(existingSource.validation_progress || 0);
-            if (existingSource.validation_stats) {
-                setValidationStats(existingSource.validation_stats);
+            if (status && ["validating", "completed", "failed"].includes(status)) {
+                setStep(2);
+                setValidationStatus(status as typeof validationStatus);
+                setValidationProgress(existingSource.validation_progress || 0);
+                if (existingSource.validation_stats) {
+                    setValidationStats(existingSource.validation_stats);
+                }
+
+                // Ensure we have latest data
+                if (status === "validating") {
+                    fetchInitialStatus(existingSource.id);
+                }
+            } else {
+                setStep(1);
             }
-            if (validationStatus === "validating") {
-                startValidationPolling(existingSource.id);
-            }
-        } else {
-            setStep(1);
+        } catch (e) {
+            console.error("Error loading existing source:", e);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, existingSource]);
+    }, [open, existingSource, step1, fetchInitialStatus, resetAll]); // Added resetAll dependency
 
     // Step 1 -> Step 2: Upload/Update and start validation
     const proceedToStep2 = async () => {
@@ -182,7 +175,7 @@ export function useUploadBuildSourceWizard({
                     description: step1.description || undefined,
                 });
 
-                // Update with mappings and CI provider (upload doesn't take mappings directly in current API impl in build-sources.ts line 105)
+                // Update with mappings and CI provider
                 source = await buildSourcesApi.update(source.id, {
                     mapped_fields: mappedFields,
                     ci_provider: ciProviderValue,
@@ -198,10 +191,13 @@ export function useUploadBuildSourceWizard({
             // Start the validation process explicitly
             await buildSourcesApi.startValidation(source.id);
 
-            // Move to Step 2 and start polling
+            // Move to Step 2
             setStep(2);
             setValidationStatus("validating");
-            startValidationPolling(source.id);
+
+            // Initial fetch to ensure sync before SSE takes over
+            fetchInitialStatus(source.id);
+
         } catch (err) {
             console.error("Upload failed:", err);
             step1.setError(err instanceof Error ? err.message : "Failed to upload build source");
@@ -234,12 +230,12 @@ export function useUploadBuildSourceWizard({
             setValidationStatus("validating");
             setValidationProgress(0);
             setValidationError(null);
-            startValidationPolling(sourceId);
+            fetchInitialStatus(sourceId);
         } catch (err) {
             console.error("Failed to retry validation:", err);
             setValidationError(err instanceof Error ? err.message : "Failed to retry validation");
         }
-    }, [sourceId, startValidationPolling]);
+    }, [sourceId, fetchInitialStatus]);
 
     // Delete source and close
     const deleteSource = useCallback(async () => {
@@ -261,13 +257,12 @@ export function useUploadBuildSourceWizard({
 
     // Go back to Step 1
     const goBackToStep1 = useCallback(() => {
-        stopPolling();
         setValidationStatus("pending");
         setValidationProgress(0);
         setValidationStats(null);
         setValidationError(null);
         setStep(1);
-    }, [stopPolling]);
+    }, []);
 
     return {
         // Current state

@@ -122,17 +122,17 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
                 // - SYSTEM.*: System-wide events
                 const broadcastEventTypes = [
                     "MODEL.REPO.UPDATED",
-                    "MODEL.BUILD.UPDATED",
                     "MODEL.INGESTION.PROGRESS",
-                    "MODEL.INGESTION.ERROR",
+                    "MODEL.PROCESSING.UPDATED",
+                    "MODEL.PREDICTION.UPDATED",
                     "SCENARIO.UPDATED",
                     "SCENARIO.INGESTION.UPDATED",
                     "SCENARIO.PROCESSING.UPDATED",
                     "SCENARIO.SCAN.UPDATED",
-                    "SCENARIO.SCAN.ERROR",
+                    "SOURCE.VALIDATION.UPDATED",
                     "SYSTEM.NOTIFICATION",
                 ];
-                
+
                 if (broadcastEventTypes.includes(eventType)) {
                     window.dispatchEvent(
                         new CustomEvent(eventType, { detail: payload })
@@ -150,14 +150,14 @@ export function SSEProvider({ children }: { children: React.ReactNode }) {
         // Naming convention: {PIPELINE}.{ENTITY}.{ACTION}
         const eventTypes = [
             "MODEL.REPO.UPDATED",
-            "MODEL.BUILD.UPDATED",
             "MODEL.INGESTION.PROGRESS",
-            "MODEL.INGESTION.ERROR",
+            "MODEL.PROCESSING.UPDATED",
+            "MODEL.PREDICTION.UPDATED",
             "SCENARIO.UPDATED",
             "SCENARIO.INGESTION.UPDATED",
             "SCENARIO.PROCESSING.UPDATED",
             "SCENARIO.SCAN.UPDATED",
-            "SCENARIO.SCAN.ERROR",
+            "SOURCE.VALIDATION.UPDATED",
             "SYSTEM.NOTIFICATION",
         ];
 

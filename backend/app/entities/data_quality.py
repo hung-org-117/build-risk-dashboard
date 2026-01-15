@@ -116,9 +116,7 @@ class DataQualityReport(BaseEntity):
     # References
     scenario_id: PyObjectId = Field(..., description="Reference to training_scenarios")
 
-    # Overall scores (0-100)
-    # Formula: 0.4*completeness + 0.3*validity + 0.2*consistency + 0.1*coverage
-    quality_score: float = 0.0
+    # Sub-scores (0-100) - kept for individual score tracking
     completeness_score: float = 0.0  # % features non-null
     validity_score: float = 0.0  # % values within valid range
     consistency_score: float = 0.0  # % builds with all selected features
@@ -168,10 +166,9 @@ class DataQualityReport(BaseEntity):
         self.started_at = datetime.utcnow()
         return self
 
-    def mark_completed(self, quality_score: float) -> "DataQualityReport":
+    def mark_completed(self) -> "DataQualityReport":
         """Mark evaluation as completed."""
         self.status = QualityEvaluationStatus.COMPLETED
-        self.quality_score = quality_score
         self.completed_at = datetime.utcnow()
         return self
 

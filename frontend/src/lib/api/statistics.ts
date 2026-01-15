@@ -11,7 +11,6 @@ export interface VersionStatistics {
     total_features_selected: number;
     avg_features_per_build: number;
     total_feature_values_extracted: number;
-    quality_score?: number;
     completeness_score?: number;
     validity_score?: number;
     consistency_score?: number;
@@ -212,10 +211,14 @@ export const statisticsApi = {
     },
 
     getScanMetrics: async (
-        scenarioId: string
+        scenarioId: string,
+        tool?: "trivy" | "sonarqube"
     ): Promise<ScanMetricsStatisticsResponse> => {
         const response = await api.get<ScanMetricsStatisticsResponse>(
-            `/scenarios/${scenarioId}/statistics/scans`
+            `/scenarios/${scenarioId}/statistics/scans`,
+            {
+                params: tool ? { tool } : undefined,
+            }
         );
         return response.data;
     },
