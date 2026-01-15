@@ -190,6 +190,7 @@ export default function ScenarioExportPage() {
             onCreateNew={handleCreateNew}
             onViewExport={handleViewExport}
             onDeleteExport={handleDeleteExport}
+            onRefresh={fetchExports}
             scansRunning={scansRunning}
             scansProgress={scansProgress}
         />
