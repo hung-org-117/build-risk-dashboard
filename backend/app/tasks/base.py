@@ -3,7 +3,19 @@ Base Celery Task with automatic TracingContext propagation and SafeTask pattern.
 
 Task Hierarchy:
 1. PipelineTask - Base with DB, Redis, TracingContext, rate limit handling
-2. SafeTask - Adds run_safe() with error taxonomy and checkpoint/cleanup hooks
+2. SafeTask - Adds run_safe() with error taxonomy, checkpoint/cleanup hooks, and on_failure
+
+Specialized Task Classes (inherit from SafeTask):
+  ├── IngestionTask (abstract)
+  │     ├── ModelIngestionTask      - Handles model_import_build failures
+  │     └── ScenarioIngestionTask   - Handles ingestion_build failures
+  ├── ProcessingTask (abstract)
+  │     ├── ModelProcessingTask     - Handles model_build extraction failures
+  │     ├── ModelPredictionTask     - Handles batch prediction failures
+  │     └── ScenarioProcessingTask  - Handles enrichment_build extraction failures
+  ├── ScanTask                       - Handles scan record failures (Trivy/SonarQube)
+  ├── ExportTask                     - Handles TrainingDatasetExport failures
+  └── ModelExportTask                - Handles ExportJob failures
 
 Error Taxonomy:
 - TransientError: Retryable (network, timeout, API 429)
@@ -19,7 +31,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
 import redis
 from celery import Task
@@ -283,124 +295,38 @@ class SafeTask(PipelineTask):
         self, kwargs: dict
     ) -> Optional[Callable[[str, str], None]]:
         """
-        Auto-detect entity type from kwargs and return appropriate failure handler.
+        Return failure handler for orchestrator-level entities.
 
-        Checks for these keys in priority order (more specific first):
-        1. Build-level IDs (most granular):
-           - enrichment_build_id → TrainingEnrichmentBuild
-           - ingestion_build_id → TrainingIngestionBuild
-        2. Parent-level IDs:
-           - repo_config_id → ModelRepoConfig
-           - scenario_id → TrainingScenario (but not if also has commit_sha → ScanTask)
-           - export_id → TrainingDatasetExport
+        This base implementation handles parent-level entities only:
+        - repo_config_id → ModelRepoConfig (Model Pipeline orchestrators)
+        - scenario_id → TrainingScenario (Training Pipeline orchestrators)
+
+        Specialized subclasses override this to handle more granular entities:
+        - IngestionTask subclasses: handle build-level ingestion failures
+        - ProcessingTask subclasses: handle build-level extraction failures
+        - ScanTask: handles scan record failures
+        - ExportTask: handles export failures
 
         Returns a callable(status: str, error_message: str) -> None
         that updates the relevant entity to FAILED status.
         """
-        # Skip if this is a ScanTask (handled by ScanTask subclass)
-        if kwargs.get("commit_sha") and kwargs.get("scenario_id"):
-            # Likely a scan task - let ScanTask handle it
-            return None
-
-        # === BUILD-LEVEL HANDLERS (most granular - check first) ===
-
-        # Check for TrainingEnrichmentBuild (feature extraction)
-        enrichment_build_id = kwargs.get("enrichment_build_id")
-        if enrichment_build_id:
-            return self._create_enrichment_build_failure_handler(enrichment_build_id)
-
-        # Check for TrainingIngestionBuild (ingestion)
-        # ingestion_build_id = kwargs.get("ingestion_build_id")
-        # if ingestion_build_id:
-        #     return self._create_ingestion_build_failure_handler(ingestion_build_id)
-
-        # === PARENT-LEVEL HANDLERS ===
-
-        # Check for ModelRepoConfig (Model Pipeline)
+        # Check for ModelRepoConfig (Model Pipeline orchestrators)
         repo_config_id = kwargs.get("repo_config_id")
         if repo_config_id:
             return self._create_model_repo_config_failure_handler(repo_config_id)
 
-        # Check for TrainingScenario (Training Pipeline)
+        # Check for TrainingScenario (Training Pipeline orchestrators)
+        # Skip if commit_sha present (likely a scan task handled by ScanTask)
         scenario_id = kwargs.get("scenario_id")
-        if scenario_id:
+        if scenario_id and not kwargs.get("commit_sha"):
             return self._create_training_scenario_failure_handler(scenario_id)
 
-        # Check for TrainingDatasetExport (Export)
-        export_id = kwargs.get("export_id")
-        if export_id:
-            return self._create_training_export_failure_handler(export_id)
-
         return None
-
-    def _create_enrichment_build_failure_handler(
-        self, enrichment_build_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingEnrichmentBuild (feature extraction)."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.enums import ExtractionStatus
-                from app.repositories.training_enrichment_build import (
-                    TrainingEnrichmentBuildRepository,
-                )
-
-                db = get_database()
-                repo = TrainingEnrichmentBuildRepository(db)
-                repo.update_extraction_status(
-                    enrichment_build_id,
-                    ExtractionStatus.FAILED,
-                    error_message=error_message[:500],
-                )
-                logger.info(
-                    f"Marked TrainingEnrichmentBuild {enrichment_build_id[:8]} as FAILED: "
-                    f"{error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark TrainingEnrichmentBuild {enrichment_build_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
-
-    def _create_ingestion_build_failure_handler(
-        self, ingestion_build_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingIngestionBuild (ingestion)."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.training_ingestion_build import IngestionStatus
-                from app.repositories.training_ingestion_build import (
-                    TrainingIngestionBuildRepository,
-                )
-
-                db = get_database()
-                repo = TrainingIngestionBuildRepository(db)
-                repo.update_one(
-                    ingestion_build_id,
-                    {
-                        "status": IngestionStatus.FAILED.value,
-                        "ingestion_error": error_message[:500],
-                    },
-                )
-                logger.info(
-                    f"Marked TrainingIngestionBuild {ingestion_build_id[:8]} as FAILED: "
-                    f"{error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark TrainingIngestionBuild {ingestion_build_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
 
     def _create_model_repo_config_failure_handler(
         self, repo_config_id: str
     ) -> Callable[[str, str], None]:
-        """Create failure handler for ModelRepoConfig."""
+        """Create failure handler for ModelRepoConfig (Model Pipeline orchestrators)."""
 
         def update_failed(status: str, error_message: str) -> None:
             try:
@@ -434,7 +360,7 @@ class SafeTask(PipelineTask):
     def _create_training_scenario_failure_handler(
         self, scenario_id: str
     ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingScenario."""
+        """Create failure handler for TrainingScenario (Training Pipeline orchestrators)."""
 
         def update_failed(status: str, error_message: str) -> None:
             try:
@@ -464,38 +390,6 @@ class SafeTask(PipelineTask):
                 logger.warning(
                     f"Failed to mark TrainingScenario {scenario_id[:8]} as FAILED: {e}"
                 )
-
-        return update_failed
-
-    def _create_training_export_failure_handler(
-        self, export_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingDatasetExport."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.training_dataset_export import ExportStatus
-                from app.repositories.training_export import TrainingExportRepository
-
-                db = get_database()
-                repo = TrainingExportRepository(db)
-                repo.update_one(
-                    export_id,
-                    {
-                        "status": ExportStatus.FAILED.value,
-                        "error_message": error_message[:500],
-                    },
-                )
-                logger.info(
-                    f"Marked TrainingDatasetExport {export_id[:8]} as FAILED: {error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark TrainingDatasetExport {export_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Handle task failure by calling entity failure handler if defined."""
@@ -770,3 +664,550 @@ class ScanTask(SafeTask):
                 )
 
         return update_scan_failed
+
+
+# =============================================================================
+# IngestionTask - Base Task for Ingestion Operations
+# =============================================================================
+
+
+class IngestionTask(SafeTask):
+    """
+    Base task for ingestion operations with build-level failure handling.
+
+    When ingestion tasks fail (SoftTimeLimitExceeded, network errors, etc.),
+    this class ensures the affected builds are properly marked as FAILED.
+
+    Subclasses must implement:
+    - get_pipeline_type() -> Literal["model", "dataset"]
+    - get_build_repository(db) -> Repository for build entities
+
+    Usage:
+        @celery_app.task(bind=True, base=IngestionTask, ...)
+        def my_ingestion_task(self, pipeline_id: str, pipeline_type: str, ...):
+            ...
+    """
+
+    abstract = True
+
+    def get_pipeline_type(self) -> str:
+        """Return pipeline type: 'model' or 'dataset'."""
+        raise NotImplementedError("Subclass must implement get_pipeline_type()")
+
+    def get_build_repository(self, db: Database):
+        """Return the appropriate build repository for this pipeline."""
+        raise NotImplementedError("Subclass must implement get_build_repository()")
+
+    def mark_builds_failed_by_commits(
+        self,
+        pipeline_id: str,
+        pipeline_type: str,
+        commit_shas: list[str],
+        error_message: str,
+    ) -> int:
+        """
+        Mark builds as FAILED based on commit SHAs.
+
+        Args:
+            pipeline_id: ModelRepoConfig ID or TrainingScenario ID
+            pipeline_type: "model" or "dataset"
+            commit_shas: List of commit SHAs whose builds should be marked
+            error_message: Error message to store
+
+        Returns:
+            Number of builds marked as failed
+        """
+        try:
+            if pipeline_type == "model":
+                from app.repositories.model_import_build import (
+                    ModelImportBuildRepository,
+                )
+
+                repo = ModelImportBuildRepository(self.db)
+                return repo.mark_builds_failed_by_commits(
+                    pipeline_id, commit_shas, error_message
+                )
+            else:
+                from app.repositories.training_ingestion_build import (
+                    TrainingIngestionBuildRepository,
+                )
+
+                repo = TrainingIngestionBuildRepository(self.db)
+                return repo.mark_builds_failed_by_commits(
+                    pipeline_id, commit_shas, error_message
+                )
+        except Exception as e:
+            logger.warning(f"Failed to mark builds as failed: {e}")
+            return 0
+
+    def mark_all_ingesting_failed(
+        self,
+        pipeline_id: str,
+        pipeline_type: str,
+        error_message: str,
+    ) -> int:
+        """
+        Mark ALL currently INGESTING builds as FAILED.
+
+        Used when a repo-wide failure occurs (e.g., clone failed).
+
+        Args:
+            pipeline_id: ModelRepoConfig ID or TrainingScenario ID
+            pipeline_type: "model" or "dataset"
+            error_message: Error message to store
+
+        Returns:
+            Number of builds marked as failed
+        """
+        try:
+            if pipeline_type == "model":
+                from app.repositories.model_import_build import (
+                    ModelImportBuildRepository,
+                )
+
+                repo = ModelImportBuildRepository(self.db)
+                return repo.mark_all_ingesting_failed(pipeline_id, error_message)
+            else:
+                from app.repositories.training_ingestion_build import (
+                    TrainingIngestionBuildRepository,
+                )
+
+                repo = TrainingIngestionBuildRepository(self.db)
+                return repo.mark_all_ingesting_failed(pipeline_id, error_message)
+        except Exception as e:
+            logger.warning(f"Failed to mark all ingesting builds as failed: {e}")
+            return 0
+
+
+class ModelIngestionTask(IngestionTask):
+    """
+    Task for Model Pipeline ingestion operations.
+
+    Provides failure handlers for ModelRepoConfig and ModelImportBuild entities.
+    """
+
+    abstract = True
+
+    def get_pipeline_type(self) -> str:
+        return "model"
+
+    def get_build_repository(self, db: Database):
+        from app.repositories.model_import_build import ModelImportBuildRepository
+
+        return ModelImportBuildRepository(db)
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """
+        Override to provide Model Pipeline specific failure handling.
+
+        Priority order (most specific first):
+        1. model_import_build_id -> Mark specific build as FAILED
+        2. repo_config_id -> Mark ModelRepoConfig as FAILED
+        """
+        # Check for specific build ID first
+        build_id = kwargs.get("model_import_build_id")
+        if build_id:
+            return self._create_model_import_build_handler(build_id)
+
+        # Fall back to repo config level
+        repo_config_id = kwargs.get("repo_config_id") or kwargs.get("pipeline_id")
+        pipeline_type = kwargs.get("pipeline_type", "")
+        if repo_config_id and pipeline_type == "model":
+            return self._create_model_repo_config_failure_handler(repo_config_id)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_model_import_build_handler(
+        self, build_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for ModelImportBuild."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.entities.model_import_build import ModelImportBuildStatus
+                from app.repositories.model_import_build import (
+                    ModelImportBuildRepository,
+                )
+
+                repo = ModelImportBuildRepository(self.db)
+                repo.update_one(
+                    build_id,
+                    {
+                        "status": ModelImportBuildStatus.FAILED.value,
+                        "ingestion_error": error_message[:500],
+                    },
+                )
+                logger.info(
+                    f"Marked ModelImportBuild {build_id[:8]} as FAILED: "
+                    f"{error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark ModelImportBuild {build_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+
+class ScenarioIngestionTask(IngestionTask):
+    """
+    Task for Training Scenario ingestion operations.
+
+    Provides failure handlers for TrainingScenario and TrainingIngestionBuild entities.
+    """
+
+    abstract = True
+
+    def get_pipeline_type(self) -> str:
+        return "dataset"
+
+    def get_build_repository(self, db: Database):
+        from app.repositories.training_ingestion_build import (
+            TrainingIngestionBuildRepository,
+        )
+
+        return TrainingIngestionBuildRepository(db)
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """
+        Override to provide Training Scenario specific failure handling.
+
+        Priority order (most specific first):
+        1. ingestion_build_id -> Mark specific build as FAILED
+        2. scenario_id -> Mark TrainingScenario as FAILED
+        """
+        # Check for specific build ID first
+        build_id = kwargs.get("ingestion_build_id")
+        if build_id:
+            return self._create_ingestion_build_failure_handler(build_id)
+
+        # Fall back to scenario level
+        scenario_id = kwargs.get("scenario_id") or kwargs.get("pipeline_id")
+        pipeline_type = kwargs.get("pipeline_type", "")
+        if scenario_id and pipeline_type == "dataset":
+            return self._create_training_scenario_failure_handler(scenario_id)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_ingestion_build_failure_handler(
+        self, build_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingIngestionBuild."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.entities.training_ingestion_build import IngestionStatus
+                from app.repositories.training_ingestion_build import (
+                    TrainingIngestionBuildRepository,
+                )
+
+                repo = TrainingIngestionBuildRepository(self.db)
+                repo.update_one(
+                    build_id,
+                    {
+                        "status": IngestionStatus.FAILED.value,
+                        "ingestion_error": error_message[:500],
+                    },
+                )
+                logger.info(
+                    f"Marked TrainingIngestionBuild {build_id[:8]} as FAILED: "
+                    f"{error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingIngestionBuild {build_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+
+# =============================================================================
+# ProcessingTask - Base Task for Processing Operations
+# =============================================================================
+
+
+class ProcessingTask(SafeTask):
+    """
+    Base task for feature extraction/processing operations with build-level failure handling.
+    """
+
+    abstract = True
+
+
+class ModelProcessingTask(ProcessingTask):
+    """
+    Model Pipeline Processing Task.
+
+    Handles failures for individual ModelTrainingBuilds.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """Override to handle model_build_id."""
+        model_build_id = kwargs.get("model_build_id")
+        if model_build_id:
+            return self._create_model_build_failure_handler(model_build_id)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_model_build_failure_handler(
+        self, model_build_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for ModelTrainingBuild."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.enums import ExtractionStatus
+                from app.repositories.model_training_build import (
+                    ModelTrainingBuildRepository,
+                )
+
+                db = get_database()
+                model_build_repo = ModelTrainingBuildRepository(db)
+
+                # Mark build as FAILED
+                model_build_repo.update_one(
+                    model_build_id,
+                    {
+                        "extraction_status": ExtractionStatus.FAILED.value,
+                        "extraction_error": error_message[:500],
+                    },
+                )
+
+                logger.info(
+                    f"Marked ModelTrainingBuild {model_build_id[:8]} as FAILED: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark ModelTrainingBuild {model_build_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+
+class ScenarioProcessingTask(ProcessingTask):
+    """
+    Training Scenario Processing Task.
+
+    Handles failures for individual TrainingEnrichmentBuilds.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """Override to handle enrichment_build_id."""
+        enrichment_build_id = kwargs.get("enrichment_build_id")
+        if enrichment_build_id:
+            return self._create_enrichment_build_failure_handler(enrichment_build_id)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_enrichment_build_failure_handler(
+        self, enrichment_build_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingEnrichmentBuild."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.enums import ExtractionStatus
+                from app.repositories.training_enrichment_build import (
+                    TrainingEnrichmentBuildRepository,
+                )
+
+                db = get_database()
+                repo = TrainingEnrichmentBuildRepository(db)
+                repo.update_extraction_status(
+                    enrichment_build_id,
+                    ExtractionStatus.FAILED,
+                    error_message=error_message[:500],
+                )
+                logger.info(
+                    f"Marked TrainingEnrichmentBuild {enrichment_build_id[:8]} as FAILED: "
+                    f"{error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingEnrichmentBuild {enrichment_build_id[:8]} "
+                    f"as FAILED: {e}"
+                )
+
+        return update_failed
+
+
+class ModelPredictionTask(ProcessingTask):
+    """
+    Model Prediction Task.
+
+    Handles failures for a BATCH of ModelTrainingBuilds.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """Override to handle list of model_build_ids."""
+        model_build_ids = kwargs.get("model_build_ids")
+        # Check if it's a list and not empty
+        if model_build_ids and isinstance(model_build_ids, list):
+            return self._create_batch_prediction_failure_handler(model_build_ids)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_batch_prediction_failure_handler(
+        self, model_build_ids: List[str]
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for a batch of ModelTrainingBuilds."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from bson import ObjectId
+
+                from app.database.mongo import get_database
+                from app.entities.enums import ExtractionStatus
+                from app.repositories.model_training_build import (
+                    ModelTrainingBuildRepository,
+                )
+
+                db = get_database()
+                model_build_repo = ModelTrainingBuildRepository(db)
+
+                # Bulk update for efficiency
+                build_oids = [
+                    ObjectId(bid) for bid in model_build_ids if ObjectId.is_valid(bid)
+                ]
+
+                if build_oids:
+                    model_build_repo.collection.update_many(
+                        {"_id": {"$in": build_oids}},
+                        {
+                            "$set": {
+                                "prediction_status": ExtractionStatus.FAILED.value,
+                                "prediction_error": error_message[:500],
+                            }
+                        },
+                    )
+
+                logger.info(
+                    f"Marked {len(build_oids)} builds as PREDICTION FAILED in batch: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark batch prediction failed for {len(model_build_ids)} builds: {e}"
+                )
+
+        return update_failed
+
+
+# Export Tasks
+class ExportTask(SafeTask):
+    """
+    Training Scenario Export Task.
+
+    Handles failures for TrainingDatasetExport entities.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """Override to handle export_id."""
+        export_id = kwargs.get("export_id")
+        if export_id:
+            return self._create_export_failure_handler(export_id)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_export_failure_handler(
+        self, export_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingDatasetExport."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.training_dataset_export import ExportStatus
+                from app.repositories.training_dataset_export import (
+                    TrainingDatasetExportRepository,
+                )
+
+                db = get_database()
+                export_repo = TrainingDatasetExportRepository(db)
+
+                export_repo.update_one(
+                    export_id,
+                    {
+                        "status": ExportStatus.FAILED.value,
+                        "error_message": error_message[:500],
+                    },
+                )
+
+                logger.info(
+                    f"Marked TrainingDatasetExport {export_id[:8]} as FAILED: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingDatasetExport {export_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+
+class ModelExportTask(SafeTask):
+    """
+    Model Pipeline Export Task.
+
+    Handles failures for ExportJob entities.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """Override to handle job_id."""
+        job_id = kwargs.get("job_id")
+        if job_id:
+            return self._create_export_job_failure_handler(job_id)
+
+        return super().get_entity_failure_handler(kwargs)
+
+    def _create_export_job_failure_handler(
+        self, job_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for ExportJob."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.export_job import ExportStatus
+                from app.repositories.export_job import ExportJobRepository
+
+                db = get_database()
+                job_repo = ExportJobRepository(db)
+
+                job_repo.update_status(
+                    job_id,
+                    ExportStatus.FAILED.value,
+                    error_message=error_message[:500],
+                )
+
+                logger.info(
+                    f"Marked ExportJob {job_id[:8]} as FAILED: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to mark ExportJob {job_id[:8]} as FAILED: {e}")
+
+        return update_failed

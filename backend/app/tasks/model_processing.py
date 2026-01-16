@@ -16,7 +16,13 @@ from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.model_training_build import ModelTrainingBuildRepository
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
-from app.tasks.base import PipelineTask, SafeTask, TaskState
+from app.tasks.base import (
+    ModelPredictionTask,
+    ModelProcessingTask,
+    PipelineTask,
+    SafeTask,
+    TaskState,
+)
 from app.tasks.shared import extract_features_for_build
 from app.tasks.shared.events import (
     publish_model_prediction_updated,
@@ -503,7 +509,11 @@ def finalize_model_processing(
 
             # Use chord: run all predictions in parallel, then call finalize_prediction
             prediction_tasks = [
-                predict_builds_batch.si(repo_config_id, batch) for batch in batches
+                predict_builds_batch.si(
+                    repo_config_id=repo_config_id,
+                    model_build_ids=batch,
+                )
+                for batch in batches
             ]
             callback = finalize_prediction.si(
                 repo_config_id=repo_config_id,
@@ -667,7 +677,7 @@ def finalize_prediction(
 # Task 4: Process a single build
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=ModelProcessingTask,
     name="app.tasks.model_processing.process_workflow_run",
     queue="model_processing",
     soft_time_limit=600,
@@ -675,7 +685,7 @@ def finalize_prediction(
     max_retries=3,
 )
 def process_workflow_run(
-    self: SafeTask,
+    self: ModelProcessingTask,
     repo_config_id: str,
     model_build_id: str,
     is_reprocess: bool = False,
@@ -1009,7 +1019,11 @@ def retry_failed_builds(self: SafeTask, repo_config_id: str) -> Dict[str, Any]:
                 for i in range(0, len(prediction_only_ids), batch_size)
             ]
             prediction_tasks = [
-                predict_builds_batch.si(repo_config_id, batch) for batch in batches
+                predict_builds_batch.si(
+                    repo_config_id=repo_config_id,
+                    model_build_ids=batch,
+                )
+                for batch in batches
             ]
             group(prediction_tasks).apply_async()
             tasks_dispatched += len(prediction_only_ids)
@@ -1156,7 +1170,7 @@ def handle_processing_chain_error(
 # PREDICTION TASK
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=ModelPredictionTask,
     name="app.tasks.model_processing.predict_builds_batch",
     queue="model_prediction",
     soft_time_limit=300,
@@ -1164,7 +1178,7 @@ def handle_processing_chain_error(
     max_retries=3,
 )
 def predict_builds_batch(
-    self: SafeTask,
+    self: ModelPredictionTask,
     repo_config_id: str,
     model_build_ids: List[str],
 ) -> Dict[str, Any]:

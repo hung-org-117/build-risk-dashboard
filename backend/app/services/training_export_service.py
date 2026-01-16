@@ -52,7 +52,9 @@ class TrainingExportService:
         if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
-        exports, total = self.export_repo.find_by_scenario(scenario_id, skip=skip, limit=limit)
+        exports, total = self.export_repo.find_by_scenario(
+            scenario_id, skip=skip, limit=limit
+        )
         return [ExportResponse.from_entity(e) for e in exports], total
 
     def create_export(
@@ -101,13 +103,19 @@ class TrainingExportService:
 
         from app.tasks.training_export import generate_export_dataset
 
-        task = generate_export_dataset.delay(scenario_id, export_id)
-        self.export_repo.update_status(export_id, ExportStatus.GENERATING, task_id=task.id)
+        task = generate_export_dataset.delay(
+            scenario_id=scenario_id, export_id=export_id
+        )
+        self.export_repo.update_status(
+            export_id, ExportStatus.GENERATING, task_id=task.id
+        )
 
         # Return with updated status
         updated_export = self.export_repo.find_by_id(export_id)
         if not updated_export:
-            raise HTTPException(status_code=500, detail="Failed to retrieve created export")
+            raise HTTPException(
+                status_code=500, detail="Failed to retrieve created export"
+            )
         return ExportResponse.from_entity(updated_export)
 
     def get_export(self, scenario_id: str, export_id: str) -> ExportResponse:
@@ -152,7 +160,9 @@ class TrainingExportService:
             raise HTTPException(status_code=404, detail="Export not found")
 
         if export.status == ExportStatus.GENERATING:
-            raise HTTPException(status_code=400, detail="Export is already being generated")
+            raise HTTPException(
+                status_code=400, detail="Export is already being generated"
+            )
 
         # Update status
         self.export_repo.update_status(export_id, ExportStatus.GENERATING)
@@ -160,10 +170,14 @@ class TrainingExportService:
         # Dispatch Task
         from app.tasks.training_export import generate_export_dataset
 
-        task = generate_export_dataset.delay(scenario_id, export_id)
+        task = generate_export_dataset.delay(
+            scenario_id=scenario_id, export_id=export_id
+        )
 
         # Save task ID
-        self.export_repo.update_status(export_id, ExportStatus.GENERATING, task_id=task.id)
+        self.export_repo.update_status(
+            export_id, ExportStatus.GENERATING, task_id=task.id
+        )
 
         return {
             "success": True,
@@ -176,7 +190,9 @@ class TrainingExportService:
     # Splits & Files
     # =========================================================================
 
-    def get_export_splits(self, scenario_id: str, export_id: str) -> List[SplitResponse]:
+    def get_export_splits(
+        self, scenario_id: str, export_id: str
+    ) -> List[SplitResponse]:
         """Get splits for an export."""
         # Validate export access
         export = self.export_repo.find_by_id(export_id)
@@ -201,7 +217,9 @@ class TrainingExportService:
             for s in splits
         ]
 
-    def download_split(self, scenario_id: str, export_id: str, split_id: str) -> FileResponse:
+    def download_split(
+        self, scenario_id: str, export_id: str, split_id: str
+    ) -> FileResponse:
         """Download a split file."""
         # Validate hierarchy
         split = self.split_repo.find_by_id(split_id)
@@ -224,7 +242,9 @@ class TrainingExportService:
             media_type="application/octet-stream",
         )
 
-    def download_all_splits(self, scenario_id: str, export_id: str) -> StreamingResponse:
+    def download_all_splits(
+        self, scenario_id: str, export_id: str
+    ) -> StreamingResponse:
         """
         Download all splits for an export as a zip file.
 
