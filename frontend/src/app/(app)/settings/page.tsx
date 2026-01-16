@@ -205,7 +205,6 @@ export default function SettingsPage() {
                         <CardHeader>
                             <div className="space-y-1">
                                 <CardTitle className="flex items-center gap-2">
-                                    <Mail className="h-5 w-5" />
                                     Email Notifications
                                 </CardTitle>
                                 <CardDescription>
@@ -247,7 +246,7 @@ export default function SettingsPage() {
                         <CardHeader>
                             <CardTitle>Email Notifications for Events</CardTitle>
                             <CardDescription>
-                                All events are shown in-app by default. Configure which events should also be sent via email.
+                                Configure which events should also be sent via email.
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
@@ -291,11 +290,6 @@ export default function SettingsPage() {
                                     );
                                 })}
                             </div>
-                            {!user.email_notifications_enabled && (
-                                <p className="text-xs text-muted-foreground mt-4">
-                                    Enable email notifications above to configure email subscriptions.
-                                </p>
-                            )}
                         </CardContent>
                     </Card>
 
