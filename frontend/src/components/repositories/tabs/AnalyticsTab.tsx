@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
     AlertCircle,
     CheckCircle2,
@@ -8,6 +8,7 @@ import {
     TrendingUp,
     Loader2,
     ShieldCheck,
+    RefreshCw,
 } from "lucide-react";
 import {
     Card,
@@ -16,6 +17,7 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { buildApi } from "@/lib/api";
 import { useRepo } from "../RepoContext";
@@ -39,23 +41,25 @@ export function AnalyticsTab() {
     const [builds, setBuilds] = useState<UnifiedBuild[]>([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        async function loadBuilds() {
-            try {
-                // Load more builds for analytics
-                const response = await buildApi.getUnifiedBuilds(repoId, {
-                    skip: 0,
-                    limit: 100,
-                });
-                setBuilds(response.items);
-            } catch (err) {
-                console.error("Failed to load builds for analytics:", err);
-            } finally {
-                setLoading(false);
-            }
+    const loadBuilds = useCallback(async () => {
+        setLoading(true);
+        try {
+            // Load more builds for analytics
+            const response = await buildApi.getUnifiedBuilds(repoId, {
+                skip: 0,
+                limit: 100,
+            });
+            setBuilds(response.items);
+        } catch (err) {
+            console.error("Failed to load builds for analytics:", err);
+        } finally {
+            setLoading(false);
         }
-        loadBuilds();
     }, [repoId]);
+
+    useEffect(() => {
+        loadBuilds();
+    }, [loadBuilds]);
 
     if (loading) {
         return (
@@ -132,6 +136,27 @@ export function AnalyticsTab() {
 
     return (
         <div className="space-y-8">
+            {/* Header with Refresh Button */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Build Risk Analytics</h2>
+                    <p className="text-muted-foreground">
+                        Comprehensive risk analysis and trends for your builds
+                    </p>
+                </div>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadBuilds}
+                    disabled={loading}
+                >
+                    <RefreshCw
+                        className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`}
+                    />
+                    Refresh
+                </Button>
+            </div>
+
             {/* Key Metrics Row */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card className="shadow-sm">

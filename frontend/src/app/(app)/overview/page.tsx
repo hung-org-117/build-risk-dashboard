@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import type { ReactNode } from "react";
-import { ShieldCheck, Workflow, GitBranch, Settings2, Plus, GripVertical, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload, Timer, Database, Users, AlertTriangle, Activity, Layers, CheckCircle2, Clock, Loader2, Rocket, FolderGit2 } from "lucide-react";
+import { Settings2, Plus, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload } from "lucide-react";
 
 import GridLayout from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
@@ -56,7 +55,11 @@ import { dashboardApi } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import type { Build, DashboardSummaryResponse, WidgetConfig, WidgetDefinition } from "@/types";
 import { useAuth } from "@/contexts/auth-context";
-import { formatDuration, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+
+// Import new widget components
+import { WidgetRenderer } from "@/components/dashboard/WidgetRenderer";
+import type { BaseWidgetProps } from "@/components/dashboard/types";
 
 const GRID_COLS = 12; // Use 12-column grid for more flexibility
 const GRID_COLS_LAPTOP = 6; // Laptop uses 6 columns for stacking
@@ -228,10 +231,10 @@ export default function OverviewPage() {
     const availableWidgetIds = new Set(availableWidgets.map((w) => w.widget_id));
 
     setWidgets((prev) => {
-      // First, disable all widgets not in preset or not available
+      // Update positions for widgets in preset, preserve enabled state for others
       const updatedWidgets = prev.map((widget) => {
         const presetItem = preset.find((p) => p.widget_id === widget.widget_id);
-        // Only apply preset if widget is available to this user
+        // Only apply preset position if widget is in preset and available to this user
         if (presetItem && availableWidgetIds.has(widget.widget_id)) {
           return {
             ...widget,
@@ -239,11 +242,11 @@ export default function OverviewPage() {
             y: presetItem.y,
             w: presetItem.w,
             h: presetItem.h,
-            enabled: true,
+            enabled: true, // Enable widgets in preset
           };
         }
-        // Disable widgets not in this preset
-        return { ...widget, enabled: false };
+        // Keep widgets not in preset as-is (preserve enabled state)
+        return widget;
       });
 
       // Add any missing widgets from preset that are available
@@ -399,484 +402,16 @@ export default function OverviewPage() {
   const { metrics } = summary;
 
   const renderWidget = (widget: WidgetConfig) => {
-    const commonCardClass = cn(
-      "h-full overflow-hidden",
-      isEditing && "ring-2 ring-blue-500/20 cursor-move"
-    );
+    // Use WidgetRenderer for all widgets
+    const widgetProps: BaseWidgetProps = {
+      summary,
+      recentBuilds,
+      totalRepositories,
+      isEditing,
+      router,
+    };
 
-    switch (widget.widget_id) {
-      case "total_builds":
-        return (
-          <StatCard
-            className={commonCardClass}
-            icon={<Workflow className="h-5 w-5 text-blue-500 flex-shrink-0" />}
-            title={widget.title}
-            value={metrics.total_builds}
-            sublabel="All tracked builds"
-            isEditing={isEditing}
-          />
-        );
-      case "success_rate":
-        return (
-          <StatCard
-            className={commonCardClass}
-            icon={<ShieldCheck className="h-5 w-5 text-emerald-500 flex-shrink-0" />}
-            title={widget.title}
-            value={metrics.success_rate}
-            format="percentage"
-            sublabel="Build success ratio"
-            isEditing={isEditing}
-          />
-        );
-      case "avg_duration":
-        return (
-          <StatCard
-            className={commonCardClass}
-            icon={<Timer className="h-5 w-5 text-orange-500 flex-shrink-0" />}
-            title={widget.title}
-            value={metrics.average_duration_minutes}
-            format="minutes"
-            sublabel="Average build duration"
-            isEditing={isEditing}
-          />
-        );
-      case "active_repos":
-        return (
-          <StatCard
-            className={commonCardClass}
-            icon={<GitBranch className="h-5 w-5 text-purple-500 flex-shrink-0" />}
-            title={widget.title}
-            value={totalRepositories}
-            sublabel="Connected via GitHub"
-            isEditing={isEditing}
-          />
-        );
-      case "repo_distribution":
-        return (
-          <Card className={commonCardClass}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Build count per repository
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0 overflow-auto flex-1">
-              <table className="min-w-full divide-y divide-slate-200 text-xs dark:divide-slate-800">
-                <thead className="bg-slate-50 dark:bg-slate-900/40">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold">Repository</th>
-                    <th className="px-3 py-2 text-left font-semibold">Builds</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {summary.repo_distribution.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-4 text-center text-muted-foreground" colSpan={2}>
-                        No repositories connected yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    summary.repo_distribution.slice(0, 5).map((repo) => (
-                      <tr
-                        key={repo.id}
-                        className="cursor-pointer transition hover:bg-slate-50 dark:hover:bg-slate-900/50"
-                        onClick={() => !isEditing && router.push(`/repositories/${repo.id}/builds`)}
-                      >
-                        <td className="px-3 py-2 font-medium truncate max-w-[150px]">{repo.repository}</td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          {repo.builds.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        );
-      case "recent_builds":
-        return (
-          <Card className={commonCardClass}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Latest builds from repositories
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0 overflow-auto flex-1">
-              <table className="min-w-full divide-y divide-slate-200 text-xs dark:divide-slate-800">
-                <thead className="bg-slate-50 dark:bg-slate-900/40">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold">Build</th>
-                    <th className="px-3 py-2 text-left font-semibold">Repo</th>
-                    <th className="px-3 py-2 text-left font-semibold">Risk</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {recentBuilds.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-4 text-center text-muted-foreground" colSpan={3}>
-                        No recent builds.
-                      </td>
-                    </tr>
-                  ) : (
-                    recentBuilds.slice(0, 5).map((build) => (
-                      <tr
-                        key={build.id}
-                        className="transition hover:bg-slate-50 dark:hover:bg-slate-900/50"
-                      >
-                        <td className="px-3 py-2 font-medium truncate max-w-[80px]">
-                          #{build.build_number || build.commit_sha?.slice(0, 7) || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground truncate max-w-[120px]" title={build.repo_name}>
-                          {build.repo_name || "—"}
-                        </td>
-                        <td className="px-3 py-2">
-                          {build.predicted_label ? (
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${build.predicted_label === "LOW" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                              build.predicted_label === "MEDIUM" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" :
-                                build.predicted_label === "HIGH" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                                  "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                              }`}>
-                              {build.predicted_label}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        );
-      case "risk_trend":
-        // Calculate risk distribution from recent builds
-        const riskCounts = { LOW: 0, MEDIUM: 0, HIGH: 0 };
-        recentBuilds.forEach((b) => {
-          if (b.predicted_label === "LOW") riskCounts.LOW++;
-          else if (b.predicted_label === "MEDIUM") riskCounts.MEDIUM++;
-          else if (b.predicted_label === "HIGH") riskCounts.HIGH++;
-        });
-        const hasRiskData = riskCounts.LOW + riskCounts.MEDIUM + riskCounts.HIGH > 0;
-
-        return (
-          <Card className={commonCardClass}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Recent build risk levels
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-center h-[calc(100%-60px)]">
-              {hasRiskData ? (
-                <div className="w-full space-y-2 px-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs w-12">LOW</span>
-                    <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-800 rounded overflow-hidden">
-                      <div
-                        className="h-full bg-green-500"
-                        style={{ width: `${(riskCounts.LOW / recentBuilds.length) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-xs w-6 text-right">{riskCounts.LOW}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs w-12">MED</span>
-                    <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-800 rounded overflow-hidden">
-                      <div
-                        className="h-full bg-amber-500"
-                        style={{ width: `${(riskCounts.MEDIUM / recentBuilds.length) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-xs w-6 text-right">{riskCounts.MEDIUM}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs w-12">HIGH</span>
-                    <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-800 rounded overflow-hidden">
-                      <div
-                        className="h-full bg-red-500"
-                        style={{ width: `${(riskCounts.HIGH / recentBuilds.length) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-xs w-6 text-right">{riskCounts.HIGH}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center space-y-2">
-                  <ShieldCheck className="h-8 w-8 mx-auto text-muted-foreground/50" />
-                  <p className="text-xs text-muted-foreground">
-                    No prediction data available
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        );
-      case "risk_distribution":
-        // Donut-style display of risk levels
-        const distCounts = { LOW: 0, MEDIUM: 0, HIGH: 0 };
-        recentBuilds.forEach((b) => {
-          if (b.predicted_label === "LOW") distCounts.LOW++;
-          else if (b.predicted_label === "MEDIUM") distCounts.MEDIUM++;
-          else if (b.predicted_label === "HIGH") distCounts.HIGH++;
-        });
-        const totalPredicted = distCounts.LOW + distCounts.MEDIUM + distCounts.HIGH;
-
-        return (
-          <Card className={commonCardClass}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Risk level breakdown
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-center h-[calc(100%-60px)]">
-              {totalPredicted > 0 ? (
-                <div className="flex items-center gap-4">
-                  <div className="flex flex-col items-center">
-                    <div className="text-2xl font-bold text-green-600">{distCounts.LOW}</div>
-                    <div className="text-xs text-muted-foreground">Low</div>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <div className="text-2xl font-bold text-amber-600">{distCounts.MEDIUM}</div>
-                    <div className="text-xs text-muted-foreground">Medium</div>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <div className="text-2xl font-bold text-red-600">{distCounts.HIGH}</div>
-                    <div className="text-xs text-muted-foreground">High</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center space-y-2">
-                  <ShieldCheck className="h-8 w-8 mx-auto text-muted-foreground/50" />
-                  <p className="text-xs text-muted-foreground">
-                    No predictions yet
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        );
-      case "high_risk_builds":
-        const highRiskCount = recentBuilds.filter((b) => b.predicted_label === "HIGH").length;
-        return (
-          <StatCard
-            className={cn(commonCardClass, highRiskCount > 0 && "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-900/20")}
-            icon={<ShieldCheck className={`h-5 w-5 flex-shrink-0 ${highRiskCount > 0 ? "text-red-500" : "text-muted-foreground"}`} />}
-            title={widget.title}
-            value={highRiskCount}
-            sublabel="Predicted as HIGH risk"
-            isEditing={isEditing}
-          />
-        );
-      // Admin-only widgets
-      case "model_pipeline_summary":
-        const pipelineStats = summary?.admin_extras?.model_pipeline;
-        return (
-          <Card className={commonCardClass}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Build Risk Evaluation
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
-              <div className="flex flex-col items-center min-w-0">
-                <FolderGit2 className="h-5 w-5 text-slate-500 mb-1" />
-                <div className="text-xl font-bold text-slate-600">{pipelineStats?.imported_repos ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Imported</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <Database className="h-5 w-5 text-purple-500 mb-1" />
-                <div className="text-xl font-bold text-purple-600">{pipelineStats?.ingested_repos_distinct ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Ingested</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
-                <div className="text-xl font-bold text-green-600">{pipelineStats?.processed_repos ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Processed</div>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      case "training_scenario_summary":
-        const enrichmentStats = summary?.admin_extras?.dataset_enrichment;
-        return (
-          <Card className={commonCardClass}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Dataset Enrichment
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
-              <div className="flex flex-col items-center min-w-0">
-                <Rocket className="h-5 w-5 text-blue-500 mb-1" />
-                <div className="text-xl font-bold text-blue-600">{enrichmentStats?.active_scenarios ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Scenarios</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <Layers className="h-5 w-5 text-indigo-500 mb-1" />
-                <div className="text-xl font-bold text-indigo-600">{enrichmentStats?.total_datasets ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Datasets</div>
-              </div>
-              <div className="flex flex-col items-center min-w-0">
-                <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
-                <div className="text-xl font-bold text-green-600">{enrichmentStats?.exported_datasets ?? 0}</div>
-                <div className="text-[10px] text-muted-foreground truncate">Exported</div>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      case "monitoring_summary":
-        const monitoringStats = summary?.admin_extras?.monitoring;
-        const hasErrors = (monitoringStats?.error_count_24h ?? 0) > 0;
-        return (
-          <Card className={cn(commonCardClass, hasErrors && "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-900/20")}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                System monitoring (24h)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-center gap-4 h-[calc(100%-60px)]">
-              <div className="flex flex-col items-center">
-                <div className={`text-2xl font-bold ${hasErrors ? "text-amber-600" : "text-green-600"}`}>
-                  {monitoringStats?.error_count_24h ?? 0}
-                </div>
-                <div className="text-xs text-muted-foreground">Errors</div>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      case "user_activity":
-        const totalUsers = summary?.admin_extras?.total_users ?? 0;
-        return (
-          <StatCard
-            className={commonCardClass}
-            icon={<GitBranch className="h-5 w-5 text-indigo-500 flex-shrink-0" />}
-            title={widget.title}
-            value={totalUsers}
-            sublabel="Registered users"
-            isEditing={isEditing}
-          />
-        );
-      // User-only widget
-      case "getting_started":
-        const hasRepos = totalRepositories > 0;
-        const hasBuilds = metrics.total_builds > 0;
-        if (hasRepos && hasBuilds) {
-          // User already has data, show minimal widget
-          return (
-            <Card className={commonCardClass}>
-              <CardContent className="flex items-center justify-center h-full">
-                <div className="text-center space-y-2">
-                  <ShieldCheck className="h-8 w-8 mx-auto text-green-500" />
-                  <p className="text-sm font-medium text-green-600">You&apos;re all set!</p>
-                  <p className="text-xs text-muted-foreground">
-                    {totalRepositories} repos, {metrics.total_builds} builds
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        }
-        return (
-          <Card className={cn(commonCardClass, "border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-900/20")}>
-            {isEditing && (
-              <div className="absolute top-2 left-2 z-10">
-                <GripVertical className="h-4 w-4 text-muted-foreground" />
-              </div>
-            )}
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
-              <CardDescription className="text-xs truncate">
-                Quick start guide
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 overflow-auto">
-              <div className="flex items-center gap-2">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${hasRepos ? "bg-green-500 text-white" : "bg-blue-500 text-white"}`}>
-                  {hasRepos ? "✓" : "1"}
-                </div>
-                <span className={`text-sm ${hasRepos ? "line-through text-muted-foreground" : ""}`}>
-                  Import a repository
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${hasBuilds ? "bg-green-500 text-white" : "bg-slate-300 text-slate-600"}`}>
-                  {hasBuilds ? "✓" : "2"}
-                </div>
-                <span className={`text-sm ${hasBuilds ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>
-                  Wait for ingestion
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-slate-300 text-slate-600">
-                  3
-                </div>
-                <span className="text-sm text-muted-foreground">Start processing</span>
-              </div>
-              {!hasRepos && !isEditing && (
-                <button
-                  onClick={() => router.push("/repositories/import")}
-                  className="mt-2 w-full px-3 py-1.5 text-xs font-medium text-white bg-blue-500 rounded hover:bg-blue-600 transition"
-                >
-                  Import Repository
-                </button>
-              )}
-            </CardContent>
-          </Card>
-        );
-      default:
-        return (
-          <Card className={commonCardClass}>
-            <CardContent className="flex items-center justify-center h-full">
-              <p className="text-sm text-muted-foreground truncate">
-                Unknown widget: {widget.widget_id}
-              </p>
-            </CardContent>
-          </Card>
-        );
-    }
+    return <WidgetRenderer widget={widget} {...widgetProps} />;
   };
 
   const layout = enabledWidgets.map((widget) => ({
@@ -1049,56 +584,5 @@ export default function OverviewPage() {
         ))}
       </RGL>
     </div>
-  );
-}
-
-interface StatCardProps {
-  icon: ReactNode;
-  title: string;
-  value: number;
-  format?: "score" | "percentage" | "minutes";
-  sublabel?: string;
-  className?: string;
-  isEditing?: boolean;
-}
-
-function StatCard({
-  icon,
-  title,
-  value,
-  format,
-  sublabel,
-  className,
-  isEditing,
-}: StatCardProps) {
-  const formattedValue =
-    format === "score"
-      ? value.toFixed(2)
-      : format === "percentage"
-        ? `${value.toFixed(1)}%`
-        : format === "minutes"
-          ? formatDuration(value)
-          : value;
-
-  return (
-    <Card className={cn("relative flex flex-col", className)}>
-      {isEditing && (
-        <div className="absolute top-2 left-2 z-10">
-          <GripVertical className="h-4 w-4 text-muted-foreground" />
-        </div>
-      )}
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1 pt-3 px-4">
-        <CardTitle className="text-xs font-medium text-muted-foreground truncate pr-2">
-          {title}
-        </CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent className="pb-3 px-4 flex-1">
-        <div className="text-xl font-bold truncate">{formattedValue}</div>
-        {sublabel ? (
-          <p className="text-[10px] text-muted-foreground truncate">{sublabel}</p>
-        ) : null}
-      </CardContent>
-    </Card>
   );
 }

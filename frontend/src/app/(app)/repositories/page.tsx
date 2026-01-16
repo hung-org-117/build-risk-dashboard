@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Loader2,
   Plus,
+  RefreshCw,
   Trash2,
 } from "lucide-react";
 import {
@@ -240,6 +241,18 @@ export default function AdminReposPage() {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadRepositories(page, true)}
+              disabled={tableLoading}
+              title="Refresh repositories list"
+            >
+              <RefreshCw
+                className={`h-4 w-4 mr-1 ${tableLoading ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
             <div className="relative w-64">
               <Input
                 placeholder="Search repositories..."
