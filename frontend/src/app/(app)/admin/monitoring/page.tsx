@@ -5,7 +5,7 @@ import { useSSE } from "@/contexts/sse-context";
 import {
     SystemStatsCard,
     LogsViewer,
-    GrafanaLinksCard,
+
 } from "@/components/monitoring";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Activity } from "lucide-react";
@@ -221,9 +221,6 @@ export default function MonitoringPage() {
 
             {/* System Stats */}
             <SystemStatsCard stats={systemStats} isLoading={isLoadingStats} />
-
-            {/* Grafana Integration */}
-            <GrafanaLinksCard />
 
             {/* Application Logs - fills remaining space */}
             <div className="flex-1 min-h-0 flex flex-col">

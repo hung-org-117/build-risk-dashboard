@@ -388,3 +388,81 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         )
 
         return result.modified_count
+
+    def aggregate_feature_stats(
+        self,
+        scenario_id: str,
+        feature_name: str,
+    ) -> Dict[str, Any]:
+        """
+        Aggregate feature statistics directly in MongoDB.
+
+        Returns min, max, avg, stdDev, count for a single feature.
+        This is much more efficient than loading all data into Python.
+
+        Args:
+            scenario_id: Scenario ID
+            feature_name: Name of the feature to analyze
+
+        Returns:
+            Dict with 'stats' (min, max, avg, stdDev, count) and 'values' (sampled list)
+        """
+        pipeline = [
+            {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": False}},
+            # Project the feature value, converting to double
+            {
+                "$project": {
+                    "value": {
+                        "$convert": {
+                            "input": f"$fv.features.{feature_name}",
+                            "to": "double",
+                            "onError": None,
+                            "onNull": None,
+                        }
+                    }
+                }
+            },
+            # Filter out nulls
+            {"$match": {"value": {"$ne": None}}},
+            # Calculate stats in single pass
+            {
+                "$facet": {
+                    "stats": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "min": {"$min": "$value"},
+                                "max": {"$max": "$value"},
+                                "avg": {"$avg": "$value"},
+                                "stdDev": {"$stdDevPop": "$value"},
+                                "count": {"$sum": 1},
+                            }
+                        }
+                    ],
+                    # Sample up to 1000 values for histogram calculation
+                    "samples": [
+                        {"$sample": {"size": 1000}},
+                        {"$project": {"_id": 0, "value": 1}},
+                    ],
+                }
+            },
+        ]
+
+        results = list(self.collection.aggregate(pipeline))
+        if not results:
+            return {"stats": None, "samples": []}
+
+        result = results[0]
+        stats = result.get("stats", [{}])[0] if result.get("stats") else None
+        samples = [doc["value"] for doc in result.get("samples", [])]
+
+        return {"stats": stats, "samples": samples}

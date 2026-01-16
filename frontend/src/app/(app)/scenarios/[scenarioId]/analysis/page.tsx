@@ -17,12 +17,26 @@ import {
     TrainingScenarioRecord,
     DataQualityReport,
 } from "@/lib/api/training-scenarios";
-import { statisticsApi, ScanMetricsStatisticsResponse, FeatureDistributionResponse, NumericDistribution } from "@/lib/api/statistics";
+import { statisticsApi, ScanMetricsStatisticsResponse, FeatureDistributionResponse, NumericDistribution, FeatureMetricsResponse } from "@/lib/api/statistics";
 import { FeatureDistributionChart } from "@/components/analysis/feature-distribution-chart";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useSSE } from "@/contexts/sse-context";
+import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+
+
+const ITEMS_PER_PAGE = 6;
+
+const getFeatureCategory = (name: string): string => {
+    if (name.startsWith("git_") || name.startsWith("repo_")) return "Source Code";
+    if (name.startsWith("build_")) return "Build Process";
+    if (name.startsWith("history_") || name.startsWith("temporal_")) return "History & Trends";
+    if (name.startsWith("log_") || name.startsWith("test_") || name.startsWith("devops_")) return "CI/CD & Testing";
+    if (name.startsWith("author_")) return "Collaboration";
+    return "Other";
+};
 
 export default function ScenarioAnalysisPage() {
     const params = useParams<{ scenarioId: string }>();
@@ -38,6 +52,50 @@ export default function ScenarioAnalysisPage() {
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState("features");
 
+    // Feature Distribution UI State
+    const [distributionSearch, setDistributionSearch] = useState("");
+    const [distributionCategory, setDistributionCategory] = useState("All");
+    const [distributionPage, setDistributionPage] = useState(1);
+
+    // Feature Metrics UI State
+    const [metricsData, setMetricsData] = useState<FeatureMetricsResponse | null>(null);
+    const [metricsPage, setMetricsPage] = useState(1);
+    const [metricsSearch, setMetricsSearch] = useState("");
+    const [metricsLoading, setMetricsLoading] = useState(false);
+
+    const fetchDistributions = useCallback(async () => {
+        if (!scenarioId) return;
+        try {
+            const data = await statisticsApi.getDistributions(scenarioId, {
+                page: distributionPage,
+                limit: ITEMS_PER_PAGE,
+                search: distributionSearch,
+                category: distributionCategory
+            });
+            setDistributions(data);
+        } catch (err) {
+            console.error("Failed to fetch distributions:", err);
+        }
+    }, [scenarioId, distributionPage, distributionSearch, distributionCategory]);
+
+    const fetchMetrics = useCallback(async () => {
+        if (!scenarioId) return;
+        setMetricsLoading(true);
+        try {
+            const data = await statisticsApi.getFeatureMetrics(scenarioId, {
+                page: metricsPage,
+                limit: 10,
+                search: metricsSearch
+            });
+            setMetricsData(data);
+        } catch (err) {
+            console.error("Failed to fetch metrics:", err);
+        } finally {
+            setMetricsLoading(false);
+        }
+    }, [scenarioId, metricsPage, metricsSearch]);
+
+    // Initial Data Fetch
     const fetchData = useCallback(async () => {
         try {
             const [scenarioData, qualityData] = await Promise.all([
@@ -47,14 +105,12 @@ export default function ScenarioAnalysisPage() {
             setScenario(scenarioData);
             setQualityReport(qualityData);
 
-            // Fetch statistics if features are extracted (only distributions initially)
+            // Fetch statistics if features are extracted
             if (scenarioData.feature_extraction_completed || scenarioData.status === "processed") {
-                try {
-                    const distributionsData = await statisticsApi.getDistributions(scenarioId);
-                    setDistributions(distributionsData);
-                } catch (err) {
-                    console.warn("Failed to fetch statistics:", err);
-                }
+                await Promise.all([
+                    fetchDistributions(),
+                    fetchMetrics()
+                ]);
             }
         } catch (err) {
             console.error("Failed to fetch analysis data:", err);
@@ -62,26 +118,50 @@ export default function ScenarioAnalysisPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [scenarioId]);
+    }, [scenarioId, fetchDistributions, fetchMetrics]);
+
+    // Effect for Distribution updates (when filters change)
+    useEffect(() => {
+        if (!loading && (scenario?.feature_extraction_completed || scenario?.status === "processed")) {
+            const timer = setTimeout(() => {
+                fetchDistributions();
+            }, 300); // Debounce search
+            return () => clearTimeout(timer);
+        }
+    }, [fetchDistributions, loading, scenario]);
+
+    // Effect for Metrics updates
+    useEffect(() => {
+        if (!loading && (scenario?.feature_extraction_completed || scenario?.status === "processed")) {
+            const timer = setTimeout(() => {
+                fetchMetrics();
+            }, 300); // Debounce search
+            return () => clearTimeout(timer);
+        }
+    }, [fetchMetrics, loading, scenario]);
 
     // Fetch tab-specific data when active tab changes
     useEffect(() => {
         if (!scenarioId || loading) return;
 
         const fetchTabStats = async () => {
-            if (activeTab === "trivy" && !trivyStats) {
-                try {
-                    const data = await statisticsApi.getScanMetrics(scenarioId, "trivy");
-                    setTrivyStats(data);
-                } catch (err) {
-                    console.error("Failed to fetch trivy stats:", err);
+            if (activeTab === "integration") {
+                // Fetch both if they haven't been loaded yet
+                if (!trivyStats) {
+                    try {
+                        const data = await statisticsApi.getScanMetrics(scenarioId, "trivy");
+                        setTrivyStats(data);
+                    } catch (err) {
+                        console.error("Failed to fetch trivy stats:", err);
+                    }
                 }
-            } else if (activeTab === "sonarqube" && !sonarStats) {
-                try {
-                    const data = await statisticsApi.getScanMetrics(scenarioId, "sonarqube");
-                    setSonarStats(data);
-                } catch (err) {
-                    console.error("Failed to fetch sonarqube stats:", err);
+                if (!sonarStats) {
+                    try {
+                        const data = await statisticsApi.getScanMetrics(scenarioId, "sonarqube");
+                        setSonarStats(data);
+                    } catch (err) {
+                        console.error("Failed to fetch sonarqube stats:", err);
+                    }
                 }
             }
         };
@@ -244,10 +324,9 @@ export default function ScenarioAnalysisPage() {
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-                <TabsList>
+                <TabsList className="w-full grid grid-cols-2">
                     <TabsTrigger value="features">Features</TabsTrigger>
-                    <TabsTrigger value="trivy">Trivy Security</TabsTrigger>
-                    <TabsTrigger value="sonarqube">SonarQube Quality</TabsTrigger>
+                    <TabsTrigger value="integration">Integration Tools</TabsTrigger>
                 </TabsList>
 
                 {/* Features Tab (Merged with Data Quality) */}
@@ -340,111 +419,203 @@ export default function ScenarioAnalysisPage() {
                             {/* Feature Summary & Metrics - Only if features exist */}
                             {qualityReport.feature_metrics && qualityReport.feature_metrics.length > 0 && (
                                 <>
+                                    {/* Feature Metrics Table (Server-Side Paginated) */}
+                                    {metricsData && (
+                                        <Card>
+                                            <CardHeader>
+                                                <div className="flex flex-col gap-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <CardTitle>Feature Metrics Detail</CardTitle>
+                                                            <CardDescription>Completeness and quality metrics for each extracted feature</CardDescription>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="relative w-64">
+                                                                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                                                                <Input
+                                                                    placeholder="Search metrics..."
+                                                                    value={metricsSearch}
+                                                                    onChange={(e) => {
+                                                                        setMetricsSearch(e.target.value);
+                                                                        setMetricsPage(1);
+                                                                    }}
+                                                                    className="pl-8"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </CardHeader>
+                                            <CardContent>
+                                                {metricsLoading ? (
+                                                    <div className="py-12 flex justify-center">
+                                                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                                    </div>
+                                                ) : metricsData.items.length === 0 ? (
+                                                    <div className="text-center py-12 text-muted-foreground">No metrics found matching your criteria.</div>
+                                                ) : (
+                                                    <div className="space-y-4">
+                                                        <div className="overflow-x-auto relative rounded-md border">
+                                                            <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+                                                                <thead className="bg-slate-50 dark:bg-slate-900/40">
+                                                                    <tr>
+                                                                        <th className="px-4 py-3 text-left font-medium">Feature Name</th>
+                                                                        <th className="px-4 py-3 text-left font-medium">Type</th>
+                                                                        <th className="px-4 py-3 text-right font-medium">Completeness</th>
+                                                                        <th className="px-4 py-3 text-right font-medium">Null Count</th>
+                                                                        <th className="px-4 py-3 text-right font-medium">Mean</th>
+                                                                        <th className="px-4 py-3 text-right font-medium">Issues</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                                                                    {metricsData.items.map((metric) => (
+                                                                        <tr key={metric.feature_name} className="hover:bg-slate-50 dark:hover:bg-slate-900/40">
+                                                                            <td className="px-4 py-3 font-medium">{metric.feature_name}</td>
+                                                                            <td className="px-4 py-3 text-muted-foreground">{metric.data_type}</td>
+                                                                            <td className="px-4 py-3 text-right">
+                                                                                <span className={metric.completeness < 90 ? "text-amber-600" : "text-green-600"}>
+                                                                                    {metric.completeness.toFixed(1)}%
+                                                                                </span>
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-right text-muted-foreground">
+                                                                                {metric.null_count}
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-right text-muted-foreground">
+                                                                                {metric.mean != null ? metric.mean.toFixed(2) : "—"}
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-right">
+                                                                                {metric.issues_count > 0 ? (
+                                                                                    <Badge variant="destructive" className="text-xs">
+                                                                                        {metric.issues_count}
+                                                                                    </Badge>
+                                                                                ) : (
+                                                                                    <span className="text-muted-foreground">—</span>
+                                                                                )}
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
 
-                                    {/* Feature Summary */}
-                                    <Card>
-                                        <CardHeader>
-                                            <CardTitle>Feature Summary</CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="grid gap-4 md:grid-cols-3">
-                                                <div className="p-4 border rounded-lg text-center">
-                                                    <p className="text-sm text-muted-foreground">Total Features</p>
-                                                    <p className="text-2xl font-bold">{qualityReport.total_features}</p>
-                                                </div>
-                                                <div className="p-4 border rounded-lg text-center">
-                                                    <p className="text-sm text-muted-foreground">With Issues</p>
-                                                    <p className="text-2xl font-bold text-amber-600">{qualityReport.features_with_issues}</p>
-                                                </div>
-                                                <div className="p-4 border rounded-lg text-center">
-                                                    <p className="text-sm text-muted-foreground">DAG Features</p>
-                                                    <p className="text-2xl font-bold">
-                                                        {qualityReport.feature_metrics.filter(m => m.source === "feature").length}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-
-                                    {/* Feature Metrics Table */}
-                                    <Card>
-                                        <CardHeader>
-                                            <CardTitle>Feature Metrics Detail</CardTitle>
-                                            <CardDescription>
-                                                Completeness and quality metrics for each extracted feature
-                                            </CardDescription>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="overflow-x-auto max-h-[500px] overflow-y-auto relative">
-                                                <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                                                    <thead className="bg-slate-50 dark:bg-slate-900/40 sticky top-0 z-10 shadow-sm">
-                                                        <tr>
-                                                            <th className="px-4 py-3 text-left font-medium">Feature Name</th>
-                                                            <th className="px-4 py-3 text-left font-medium">Type</th>
-                                                            <th className="px-4 py-3 text-right font-medium">Completeness</th>
-                                                            <th className="px-4 py-3 text-right font-medium">Null Count</th>
-                                                            <th className="px-4 py-3 text-right font-medium">Mean</th>
-                                                            <th className="px-4 py-3 text-right font-medium">Issues</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                                        {qualityReport.feature_metrics
-                                                            .filter(m => m.source === "feature")
-                                                            .map((metric) => (
-                                                                <tr key={metric.feature_name} className="hover:bg-slate-50 dark:hover:bg-slate-900/40">
-                                                                    <td className="px-4 py-3 font-medium">{metric.feature_name}</td>
-                                                                    <td className="px-4 py-3 text-muted-foreground">{metric.data_type}</td>
-                                                                    <td className="px-4 py-3 text-right">
-                                                                        <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
-                                                                            {metric.completeness_pct.toFixed(1)}%
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-4 py-3 text-right text-muted-foreground">
-                                                                        {metric.null_count}
-                                                                    </td>
-                                                                    <td className="px-4 py-3 text-right text-muted-foreground">
-                                                                        {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
-                                                                    </td>
-                                                                    <td className="px-4 py-3 text-right">
-                                                                        {metric.issues.length > 0 ? (
-                                                                            <Badge variant="destructive" className="text-xs">
-                                                                                {metric.issues.length}
-                                                                            </Badge>
-                                                                        ) : (
-                                                                            <span className="text-muted-foreground">—</span>
-                                                                        )}
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
+                                                        {/* Metrics Pagination */}
+                                                        {metricsData.total_pages > 1 && (
+                                                            <div className="flex items-center justify-between pt-2">
+                                                                <div className="text-sm text-muted-foreground">
+                                                                    Showing {(metricsPage - 1) * 10 + 1} to {Math.min(metricsPage * 10, metricsData.total_items)} of {metricsData.total_items} entries
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => setMetricsPage(p => Math.max(1, p - 1))}
+                                                                        disabled={metricsPage === 1}
+                                                                    >
+                                                                        <ChevronLeft className="h-4 w-4" />
+                                                                    </Button>
+                                                                    <span className="text-sm font-medium">Page {metricsPage} of {metricsData.total_pages}</span>
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => setMetricsPage(p => Math.min(metricsData.total_pages, p + 1))}
+                                                                        disabled={metricsPage === metricsData.total_pages}
+                                                                    >
+                                                                        <ChevronRight className="h-4 w-4" />
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </CardContent>
+                                        </Card>
+                                    )}
 
                                     {/* Feature Distribution Statistics */}
                                     {distributions && Object.keys(distributions.distributions).length > 0 && (
                                         <Card>
                                             <CardHeader>
-                                                <CardTitle>Feature Distribution Statistics</CardTitle>
-                                                <CardDescription>
-                                                    Statistical summary of numeric features across all builds
-                                                </CardDescription>
+                                                <div className="flex flex-col gap-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <CardTitle>Feature Distribution Statistics</CardTitle>
+                                                            <CardDescription>
+                                                                Statistical summary of numeric features across all builds
+                                                            </CardDescription>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="relative w-64">
+                                                                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                                                                <Input
+                                                                    placeholder="Search features..."
+                                                                    value={distributionSearch}
+                                                                    onChange={(e) => {
+                                                                        setDistributionSearch(e.target.value);
+                                                                        setDistributionPage(1);
+                                                                    }}
+                                                                    className="pl-8"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <Tabs value={distributionCategory} onValueChange={(v) => {
+                                                        setDistributionCategory(v);
+                                                        setDistributionPage(1);
+                                                    }} className="w-full">
+                                                        <TabsList className="w-full justify-start overflow-x-auto h-auto min-h-[40px] flex-wrap">
+                                                            {["All", "Source Code", "Build Process", "History & Trends", "CI/CD & Testing", "Collaboration", "Other"].map(category => (
+                                                                <TabsTrigger key={category} value={category}>{category}</TabsTrigger>
+                                                            ))}
+                                                        </TabsList>
+                                                    </Tabs>
+                                                </div>
                                             </CardHeader>
                                             <CardContent>
-                                                <div className="max-h-[600px] overflow-y-auto pr-2">
-                                                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                                        {Object.entries(distributions.distributions)
-                                                            .filter(([, dist]) => (dist as NumericDistribution).bins && (dist as NumericDistribution).bins.length > 0)
-                                                            .map(([name, dist]) => (
-                                                                <FeatureDistributionChart
-                                                                    key={name}
-                                                                    featureName={name}
-                                                                    distribution={dist as NumericDistribution}
-                                                                />
-                                                            ))}
+                                                {distributions.total_items === 0 ? (
+                                                    <div className="text-center py-12 text-muted-foreground">No features found matching your criteria.</div>
+                                                ) : (
+                                                    <div className="space-y-4">
+                                                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                                            {Object.entries(distributions.distributions)
+                                                                .filter(([, dist]) => (dist as NumericDistribution).bins && (dist as NumericDistribution).bins.length > 0)
+                                                                .map(([name, dist]) => (
+                                                                    <FeatureDistributionChart
+                                                                        key={name}
+                                                                        featureName={name}
+                                                                        distribution={dist as NumericDistribution}
+                                                                    />
+                                                                ))}
+                                                        </div>
+
+                                                        {distributions.total_pages > 1 && (
+                                                            <div className="flex items-center justify-between pt-4 border-t">
+                                                                <div className="text-sm text-muted-foreground">
+                                                                    Showing {(distributions.current_page - 1) * ITEMS_PER_PAGE + 1} to {Math.min(distributions.current_page * ITEMS_PER_PAGE, distributions.total_items)} of {distributions.total_items} entries
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => setDistributionPage(p => Math.max(1, p - 1))}
+                                                                        disabled={distributions.current_page === 1}
+                                                                    >
+                                                                        <ChevronLeft className="h-4 w-4" />
+                                                                    </Button>
+                                                                    <span className="text-sm font-medium">Page {distributions.current_page} of {distributions.total_pages}</span>
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => setDistributionPage(p => Math.min(distributions.total_pages, p + 1))}
+                                                                        disabled={distributions.current_page === distributions.total_pages}
+                                                                    >
+                                                                        <ChevronRight className="h-4 w-4" />
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                </div>
+                                                )}
                                             </CardContent>
                                         </Card>
                                     )}
@@ -458,360 +629,267 @@ export default function ScenarioAnalysisPage() {
                     )}
                 </TabsContent>
 
-                {/* Scan Metrics Tab */}
-                <TabsContent value="trivy" className="space-y-4">
-                    {/* Empty State */}
-                    {qualityReport?.scan_metrics_summary?.trivy_builds_scanned === 0 ? (
-                        <Card>
-                            <CardContent className="py-12">
-                                <div className="flex flex-col items-center gap-4 text-center">
-                                    <div className="p-4 rounded-full bg-muted">
-                                        <Shield className="h-8 w-8 text-muted-foreground" />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-semibold">No Trivy Scans Found</h3>
-                                        <p className="text-sm text-muted-foreground mt-1">
+                {/* Integration Tools Tab (Combined) */}
+                <TabsContent value="integration" className="space-y-8">
+                    {/* TRIVY SECTION */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 pb-2 border-b">
+                            <Shield className="h-5 w-5 text-blue-500" />
+                            <h3 className="text-lg font-semibold tracking-tight">Trivy Security Scanning</h3>
+                        </div>
+
+                        {/* Empty State */}
+                        {qualityReport?.scan_metrics_summary?.trivy_builds_scanned === 0 ? (
+                            <Card>
+                                <CardContent className="py-8">
+                                    <div className="flex flex-col items-center gap-4 text-center">
+                                        <p className="text-sm text-muted-foreground">
                                             No Trivy security scans were detected for this scenario.
                                         </p>
                                     </div>
+                                </CardContent>
+                            </Card>
+                        ) : !trivyStats ? (
+                            <div className="flex min-h-[150px] items-center justify-center border rounded-md">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : (
+                            <>
+                                {/* Trivy Overview Cards */}
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <Card>
+                                        <CardHeader className="pb-3">
+                                            <div className="flex items-center justify-between">
+                                                <CardTitle className="text-base">Coverage</CardTitle>
+                                                <Badge className={getBadgeClass(trivyStats.scan_summary.trivy_coverage_pct)}>
+                                                    {trivyStats.scan_summary.trivy_coverage_pct.toFixed(1)}%
+                                                </Badge>
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <Progress value={trivyStats.scan_summary.trivy_coverage_pct} className={`h-2 ${getProgressClass(trivyStats.scan_summary.trivy_coverage_pct)}`} />
+                                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                                <div>
+                                                    <p className="text-muted-foreground">Scanned Builds</p>
+                                                    <p className="font-semibold">{trivyStats.scan_summary.builds_with_trivy} / {trivyStats.scan_summary.total_builds}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-muted-foreground">Secrets Found</p>
+                                                    <p className="font-semibold">{trivyStats.trivy_summary.secrets_count.count}</p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    {/* Vulnerability Summary */}
+                                    <Card>
+                                        <CardHeader className="pb-3">
+                                            <CardTitle className="text-base">Vulnerabilities</CardTitle>
+                                            <CardDescription>
+                                                Avg/Total across {trivyStats.trivy_summary.total_scans} scans
+                                            </CardDescription>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="grid grid-cols-4 gap-2 text-center">
+                                                <div className="p-2 rounded bg-red-50 dark:bg-red-900/10">
+                                                    <p className="text-xs font-semibold text-red-600">Crit</p>
+                                                    <p className="font-mono font-bold text-red-700">{trivyStats.trivy_summary.vuln_critical.sum}</p>
+                                                </div>
+                                                <div className="p-2 rounded bg-orange-50 dark:bg-orange-900/10">
+                                                    <p className="text-xs font-semibold text-orange-600">High</p>
+                                                    <p className="font-mono font-bold text-orange-700">{trivyStats.trivy_summary.vuln_high.sum}</p>
+                                                </div>
+                                                <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/10">
+                                                    <p className="text-xs font-semibold text-amber-600">Med</p>
+                                                    <p className="font-mono font-bold text-amber-700">{trivyStats.trivy_summary.vuln_medium.sum}</p>
+                                                </div>
+                                                <div className="p-2 rounded bg-blue-50 dark:bg-blue-900/10">
+                                                    <p className="text-xs font-semibold text-blue-600">Low</p>
+                                                    <p className="font-mono font-bold text-blue-700">{trivyStats.trivy_summary.vuln_low.sum}</p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
                                 </div>
-                            </CardContent>
-                        </Card>
-                    ) : !trivyStats ? (
-                        <div className="flex min-h-[200px] items-center justify-center">
-                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+
+                                {/* Trivy Metrics Detail Table */}
+                                {(qualityReport.feature_metrics ?? []).filter(m => m.source === "trivy").length > 0 && (
+                                    <Card>
+                                        <CardHeader className="py-4">
+                                            <CardTitle className="text-sm">Detailed Metrics</CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="py-0 pb-4">
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-sm">
+                                                    <thead>
+                                                        <tr className="border-b text-muted-foreground">
+                                                            <th className="px-4 py-2 text-left font-medium">Metric</th>
+                                                            <th className="px-4 py-2 text-right font-medium">Completeness</th>
+                                                            <th className="px-4 py-2 text-right font-medium">Mean</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y">
+                                                        {(qualityReport.feature_metrics ?? [])
+                                                            .filter(m => m.source === "trivy")
+                                                            .map((metric) => (
+                                                                <tr key={metric.feature_name}>
+                                                                    <td className="px-4 py-2 font-medium">{metric.feature_name}</td>
+                                                                    <td className="px-4 py-2 text-right">
+                                                                        <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
+                                                                            {metric.completeness_pct.toFixed(1)}%
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-2 text-right text-muted-foreground">
+                                                                        {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+                            </>
+                        )}
+                    </div>
+
+                    {/* SONARQUBE SECTION */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 pb-2 border-b">
+                            <BarChart3 className="h-5 w-5 text-purple-500" />
+                            <h3 className="text-lg font-semibold tracking-tight">SonarQube Quality Gate</h3>
                         </div>
-                    ) : (
-                        <>
-                            {/* Trivy Card */}
+
+                        {/* Empty State */}
+                        {qualityReport?.scan_metrics_summary?.sonarqube_builds_scanned === 0 ? (
                             <Card>
-                                <CardHeader className="pb-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <CardTitle className="text-base">Trivy Security</CardTitle>
-                                        </div>
-                                        <Badge className={getBadgeClass(trivyStats.scan_summary.trivy_coverage_pct)}>
-                                            {trivyStats.scan_summary.trivy_coverage_pct.toFixed(1)}% Coverage
-                                        </Badge>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <Progress value={trivyStats.scan_summary.trivy_coverage_pct} className={`h-2 ${getProgressClass(trivyStats.scan_summary.trivy_coverage_pct)}`} />
-                                    <div className="grid grid-cols-3 gap-4 text-sm">
-                                        <div className="text-center">
-                                            <p className="text-muted-foreground">Scanned</p>
-                                            <p className="font-semibold">{trivyStats.scan_summary.builds_with_trivy}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-muted-foreground">Total Builds</p>
-                                            <p className="font-semibold">{trivyStats.scan_summary.total_builds}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-muted-foreground">Secrets</p>
-                                            <p className="font-semibold">{trivyStats.trivy_summary.secrets_count.count}</p>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-
-                            {/* Vulnerability Summary */}
-                            <Card>
-                                <CardHeader>
-                                    <div className="flex items-center gap-2">
-                                        <CardTitle className="text-base">Vulnerability Summary</CardTitle>
-                                    </div>
-                                    <CardDescription>
-                                        Aggregated vulnerability counts from {trivyStats.trivy_summary.total_scans} Trivy scans
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="grid grid-cols-4 gap-3 text-center">
-                                        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                                            <p className="text-xs text-red-600 dark:text-red-400">Critical</p>
-                                            <p className="text-xl font-bold text-red-700 dark:text-red-300">
-                                                {trivyStats.trivy_summary.vuln_critical.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {trivyStats.trivy_summary.vuln_critical.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800">
-                                            <p className="text-xs text-orange-600 dark:text-orange-400">High</p>
-                                            <p className="text-xl font-bold text-orange-700 dark:text-orange-300">
-                                                {trivyStats.trivy_summary.vuln_high.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {trivyStats.trivy_summary.vuln_high.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                                            <p className="text-xs text-amber-600 dark:text-amber-400">Medium</p>
-                                            <p className="text-xl font-bold text-amber-700 dark:text-amber-300">
-                                                {trivyStats.trivy_summary.vuln_medium.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {trivyStats.trivy_summary.vuln_medium.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                                            <p className="text-xs text-blue-600 dark:text-blue-400">Low</p>
-                                            <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
-                                                {trivyStats.trivy_summary.vuln_low.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {trivyStats.trivy_summary.vuln_low.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
-                                        <div className="flex items-center gap-1">
-                                            <span className="inline-block w-2 h-2 rounded-full bg-red-500"></span>
-                                            <span>{trivyStats.trivy_summary.has_critical_count} builds with criticals</span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                            <span className="inline-block w-2 h-2 rounded-full bg-orange-500"></span>
-                                            <span>{trivyStats.trivy_summary.has_high_count} builds with highs</span>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-
-                            {/* Trivy Metrics Detail Table */}
-                            {(qualityReport.feature_metrics ?? []).filter(m => m.source === "trivy").length > 0 && (
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>Trivy Metrics Detail</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="overflow-x-auto">
-                                            <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                                                <thead className="bg-slate-50 dark:bg-slate-900/40">
-                                                    <tr>
-                                                        <th className="px-4 py-3 text-left font-medium">Metric Name</th>
-                                                        <th className="px-4 py-3 text-left font-medium">Type</th>
-                                                        <th className="px-4 py-3 text-right font-medium">Completeness</th>
-                                                        <th className="px-4 py-3 text-right font-medium">Mean</th>
-                                                        <th className="px-4 py-3 text-right font-medium">Issues</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                                    {(qualityReport.feature_metrics ?? [])
-                                                        .filter(m => m.source === "trivy")
-                                                        .map((metric) => (
-                                                            <tr key={metric.feature_name} className="hover:bg-slate-50 dark:hover:bg-slate-900/40">
-                                                                <td className="px-4 py-3 font-medium">{metric.feature_name}</td>
-                                                                <td className="px-4 py-3 text-muted-foreground">{metric.data_type}</td>
-                                                                <td className="px-4 py-3 text-right">
-                                                                    <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
-                                                                        {metric.completeness_pct.toFixed(1)}%
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-4 py-3 text-right text-muted-foreground">
-                                                                    {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
-                                                                </td>
-                                                                <td className="px-4 py-3 text-right">
-                                                                    {metric.issues.length > 0 ? (
-                                                                        <Badge variant="destructive" className="text-xs">
-                                                                            {metric.issues.length}
-                                                                        </Badge>
-                                                                    ) : (
-                                                                        <span className="text-muted-foreground">—</span>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            )}
-                        </>
-                    )}
-                </TabsContent>
-
-                <TabsContent value="sonarqube" className="space-y-4">
-                    {/* Empty State */}
-                    {qualityReport?.scan_metrics_summary?.sonarqube_builds_scanned === 0 ? (
-                        <Card>
-                            <CardContent className="py-12">
-                                <div className="flex flex-col items-center gap-4 text-center">
-                                    <div className="p-4 rounded-full bg-muted">
-                                        <BarChart3 className="h-8 w-8 text-muted-foreground" />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-semibold">No SonarQube Scans Found</h3>
-                                        <p className="text-sm text-muted-foreground mt-1">
+                                <CardContent className="py-8">
+                                    <div className="flex flex-col items-center gap-4 text-center">
+                                        <p className="text-sm text-muted-foreground">
                                             No SonarQube quality scans were detected for this scenario.
                                         </p>
                                     </div>
+                                </CardContent>
+                            </Card>
+                        ) : !sonarStats ? (
+                            <div className="flex min-h-[150px] items-center justify-center border rounded-md">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : (
+                            <>
+                                {/* SonarQube Overview Cards */}
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <Card>
+                                        <CardHeader className="pb-3">
+                                            <div className="flex items-center justify-between">
+                                                <CardTitle className="text-base">Coverage</CardTitle>
+                                                <Badge className={getBadgeClass(sonarStats.scan_summary.sonar_coverage_pct)}>
+                                                    {sonarStats.scan_summary.sonar_coverage_pct.toFixed(1)}%
+                                                </Badge>
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <Progress value={sonarStats.scan_summary.sonar_coverage_pct} className={`h-2 ${getProgressClass(sonarStats.scan_summary.sonar_coverage_pct)}`} />
+                                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                                <div>
+                                                    <p className="text-muted-foreground">Scanned Builds</p>
+                                                    <p className="font-semibold">{sonarStats.scan_summary.builds_with_sonar} / {sonarStats.scan_summary.total_builds}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-muted-foreground">Total Issues</p>
+                                                    <p className="font-semibold">{sonarStats.sonar_summary.bugs.sum + sonarStats.sonar_summary.code_smells.sum + sonarStats.sonar_summary.vulnerabilities.sum}</p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card>
+                                        <CardHeader className="pb-3">
+                                            <CardTitle className="text-base">Quality Metrics</CardTitle>
+                                            <CardDescription>
+                                                Aggregated from {sonarStats.sonar_summary.total_scans} scans
+                                            </CardDescription>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="grid grid-cols-4 gap-2 text-center">
+                                                <div className="p-2 rounded bg-red-50 dark:bg-red-900/10">
+                                                    <p className="text-xs font-semibold text-red-600">Bugs</p>
+                                                    <p className="font-mono font-bold text-red-700">{sonarStats.sonar_summary.bugs.sum}</p>
+                                                </div>
+                                                <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/10">
+                                                    <p className="text-xs font-semibold text-amber-600">Smells</p>
+                                                    <p className="font-mono font-bold text-amber-700">{sonarStats.sonar_summary.code_smells.sum}</p>
+                                                </div>
+                                                <div className="p-2 rounded bg-purple-50 dark:bg-purple-900/10">
+                                                    <p className="text-xs font-semibold text-purple-600">Vulns</p>
+                                                    <p className="font-mono font-bold text-purple-700">{sonarStats.sonar_summary.vulnerabilities.sum}</p>
+                                                </div>
+                                                <div className="p-2 rounded bg-orange-50 dark:bg-orange-900/10">
+                                                    <p className="text-xs font-semibold text-orange-600">Hotspots</p>
+                                                    <p className="font-mono font-bold text-orange-700">{sonarStats.sonar_summary.security_hotspots.sum}</p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-3 flex justify-between text-xs text-muted-foreground">
+                                                <div className="flex gap-1">
+                                                    <span>Rel:</span>
+                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary.reliability_rating_avg?.toFixed(1) ?? "N/A"}</span>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <span>Sec:</span>
+                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary.security_rating_avg?.toFixed(1) ?? "N/A"}</span>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <span>Maint:</span>
+                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary.maintainability_rating_avg?.toFixed(1) ?? "N/A"}</span>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
                                 </div>
-                            </CardContent>
-                        </Card>
-                    ) : !sonarStats ? (
-                        <div className="flex min-h-[200px] items-center justify-center">
-                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                        </div>
-                    ) : (
-                        <>
-                            {/* SonarQube Card */}
-                            <Card>
-                                <CardHeader className="pb-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <CardTitle className="text-base">SonarQube Quality</CardTitle>
-                                        </div>
-                                        <Badge className={getBadgeClass(sonarStats.scan_summary.sonar_coverage_pct)}>
-                                            {sonarStats.scan_summary.sonar_coverage_pct.toFixed(1)}% Coverage
-                                        </Badge>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <Progress value={sonarStats.scan_summary.sonar_coverage_pct} className={`h-2 ${getProgressClass(sonarStats.scan_summary.sonar_coverage_pct)}`} />
-                                    <div className="grid grid-cols-3 gap-4 text-sm">
-                                        <div className="text-center">
-                                            <p className="text-muted-foreground">Scanned</p>
-                                            <p className="font-semibold">{sonarStats.scan_summary.builds_with_sonar}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-muted-foreground">Total Builds</p>
-                                            <p className="font-semibold">{sonarStats.scan_summary.total_builds}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-muted-foreground">Issues</p>
-                                            <p className="font-semibold">{sonarStats.sonar_summary.bugs.sum + sonarStats.sonar_summary.code_smells.sum}</p>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
 
-                            {/* SonarQube Code Quality Summary */}
-                            <Card>
-                                <CardHeader>
-                                    <div className="flex items-center gap-2">
-                                        <CardTitle className="text-base">Code Quality Summary</CardTitle>
-                                    </div>
-                                    <CardDescription>
-                                        Aggregated metrics from {sonarStats.sonar_summary.total_scans} SonarQube scans
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="grid grid-cols-4 gap-3 text-center">
-                                        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                                            <p className="text-xs text-red-600 dark:text-red-400">
-                                                <Bug className="h-3 w-3 inline mr-1" />
-                                                Bugs
-                                            </p>
-                                            <p className="text-xl font-bold text-red-700 dark:text-red-300">
-                                                {sonarStats.sonar_summary.bugs.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {sonarStats.sonar_summary.bugs.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                                            <p className="text-xs text-amber-600 dark:text-amber-400">Code Smells</p>
-                                            <p className="text-xl font-bold text-amber-700 dark:text-amber-300">
-                                                {sonarStats.sonar_summary.code_smells.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {sonarStats.sonar_summary.code_smells.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
-                                            <p className="text-xs text-purple-600 dark:text-purple-400">Vulnerabilities</p>
-                                            <p className="text-xl font-bold text-purple-700 dark:text-purple-300">
-                                                {sonarStats.sonar_summary.vulnerabilities.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {sonarStats.sonar_summary.vulnerabilities.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                        <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800">
-                                            <p className="text-xs text-orange-600 dark:text-orange-400">Hotspots</p>
-                                            <p className="text-xl font-bold text-orange-700 dark:text-orange-300">
-                                                {sonarStats.sonar_summary.security_hotspots.sum}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                avg: {sonarStats.sonar_summary.security_hotspots.avg.toFixed(1)}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-                                        <div className="text-center p-2 border rounded-lg">
-                                            <p className="text-muted-foreground">Reliability</p>
-                                            <p className="font-semibold">
-                                                {sonarStats.sonar_summary.reliability_rating_avg?.toFixed(1) ?? "N/A"}
-                                            </p>
-                                        </div>
-                                        <div className="text-center p-2 border rounded-lg">
-                                            <p className="text-muted-foreground">Security</p>
-                                            <p className="font-semibold">
-                                                {sonarStats.sonar_summary.security_rating_avg?.toFixed(1) ?? "N/A"}
-                                            </p>
-                                        </div>
-                                        <div className="text-center p-2 border rounded-lg">
-                                            <p className="text-muted-foreground">Maintainability</p>
-                                            <p className="font-semibold">
-                                                {sonarStats.sonar_summary.maintainability_rating_avg?.toFixed(1) ?? "N/A"}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-
-                            {/* Sonar Metrics Detail Table */}
-                            {(qualityReport.feature_metrics ?? []).filter(m => m.source === "sonarqube").length > 0 && (
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>SonarQube Metrics Detail</CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="overflow-x-auto">
-                                            <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                                                <thead className="bg-slate-50 dark:bg-slate-900/40">
-                                                    <tr>
-                                                        <th className="px-4 py-3 text-left font-medium">Metric Name</th>
-                                                        <th className="px-4 py-3 text-left font-medium">Type</th>
-                                                        <th className="px-4 py-3 text-right font-medium">Completeness</th>
-                                                        <th className="px-4 py-3 text-right font-medium">Mean</th>
-                                                        <th className="px-4 py-3 text-right font-medium">Issues</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                                                    {(qualityReport.feature_metrics ?? [])
-                                                        .filter(m => m.source === "sonarqube")
-                                                        .map((metric) => (
-                                                            <tr key={metric.feature_name} className="hover:bg-slate-50 dark:hover:bg-slate-900/40">
-                                                                <td className="px-4 py-3 font-medium">{metric.feature_name}</td>
-                                                                <td className="px-4 py-3 text-muted-foreground">{metric.data_type}</td>
-                                                                <td className="px-4 py-3 text-right">
-                                                                    <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
-                                                                        {metric.completeness_pct.toFixed(1)}%
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-4 py-3 text-right text-muted-foreground">
-                                                                    {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
-                                                                </td>
-                                                                <td className="px-4 py-3 text-right">
-                                                                    {metric.issues.length > 0 ? (
-                                                                        <Badge variant="destructive" className="text-xs">
-                                                                            {metric.issues.length}
-                                                                        </Badge>
-                                                                    ) : (
-                                                                        <span className="text-muted-foreground">—</span>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            )}
-                        </>
-                    )}
+                                {/* Sonar Metrics Detail Table */}
+                                {(qualityReport.feature_metrics ?? []).filter(m => m.source === "sonarqube").length > 0 && (
+                                    <Card>
+                                        <CardHeader className="py-4">
+                                            <CardTitle className="text-sm">Detailed Metrics</CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="py-0 pb-4">
+                                            <div className="overflow-x-auto">
+                                                <table className="min-w-full text-sm">
+                                                    <thead>
+                                                        <tr className="border-b text-muted-foreground">
+                                                            <th className="px-4 py-2 text-left font-medium">Metric</th>
+                                                            <th className="px-4 py-2 text-right font-medium">Completeness</th>
+                                                            <th className="px-4 py-2 text-right font-medium">Mean</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y">
+                                                        {(qualityReport.feature_metrics ?? [])
+                                                            .filter(m => m.source === "sonarqube")
+                                                            .map((metric) => (
+                                                                <tr key={metric.feature_name}>
+                                                                    <td className="px-4 py-2 font-medium">{metric.feature_name}</td>
+                                                                    <td className="px-4 py-2 text-muted-foreground">{metric.data_type}</td>
+                                                                    <td className="px-4 py-2 text-right">
+                                                                        <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
+                                                                            {metric.completeness_pct.toFixed(1)}%
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-2 text-right text-muted-foreground">
+                                                                        {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </TabsContent>
             </Tabs >
         </div >

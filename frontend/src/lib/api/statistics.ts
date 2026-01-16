@@ -90,6 +90,28 @@ export interface CategoricalDistribution {
 export interface FeatureDistributionResponse {
     scenario_id: string;
     distributions: Record<string, NumericDistribution | CategoricalDistribution>;
+    total_items: number;
+    total_pages: number;
+    current_page: number;
+    items_per_page: number;
+}
+
+export interface FeatureMetricDetail {
+    feature_name: string;
+    data_type: string;
+    completeness: number; // percentage
+    null_count: number;
+    mean?: number;
+    issues_count: number;
+}
+
+export interface FeatureMetricsResponse {
+    scenario_id: string;
+    items: FeatureMetricDetail[];
+    total_items: number;
+    total_pages: number;
+    current_page: number;
+    items_per_page: number;
 }
 
 export interface CorrelationPair {
@@ -182,6 +204,10 @@ export const statisticsApi = {
             features?: string[];
             bins?: number;
             top_n?: number;
+            page?: number;
+            limit?: number;
+            search?: string;
+            category?: string;
         }
     ): Promise<FeatureDistributionResponse> => {
         const response = await api.get<FeatureDistributionResponse>(
@@ -191,6 +217,31 @@ export const statisticsApi = {
                     features: options?.features?.join(","),
                     bins: options?.bins,
                     top_n: options?.top_n,
+                    page: options?.page,
+                    limit: options?.limit,
+                    search: options?.search,
+                    category: options?.category === "All" ? undefined : options?.category,
+                },
+            }
+        );
+        return response.data;
+    },
+
+    getFeatureMetrics: async (
+        scenarioId: string,
+        options?: {
+            page?: number;
+            limit?: number;
+            search?: string;
+        }
+    ): Promise<FeatureMetricsResponse> => {
+        const response = await api.get<FeatureMetricsResponse>(
+            `/scenarios/${scenarioId}/statistics/feature-metrics`,
+            {
+                params: {
+                    page: options?.page,
+                    limit: options?.limit,
+                    search: options?.search,
                 },
             }
         );

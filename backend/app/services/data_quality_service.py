@@ -19,6 +19,7 @@ from pymongo.database import Database
 from app.entities.data_quality import (
     DataQualityMetric,
     DataQualityReport,
+    HistogramBinCache,
     MetricSource,
     QualityEvaluationStatus,
     QualityIssue,
@@ -209,7 +210,7 @@ class DataQualityService:
 
         Returns dict: {feature_name: {data_type, valid_range, valid_values, ...}}
         """
-        all_features = self.feature_service.list_features()
+        all_features = self.feature_service.list_features(include_default=True)
         metadata = {}
 
         for feature in all_features:
@@ -285,76 +286,113 @@ class DataQualityService:
             metric.validity_pct = 100.0  # No values to validate
             return metric
 
-        # Numeric analysis
+        # Select analysis method based on data type
         if data_type in ("integer", "float", "numeric"):
-            numeric_values = []
-            for v in non_null_values:
-                try:
-                    numeric_values.append(float(v))
-                except (ValueError, TypeError):
-                    logger.debug(
-                        f"Skipping non-numeric value '{v}' for feature '{feature_name}'"
-                    )
-
-            if numeric_values:
-                metric.min_value = min(numeric_values)
-                metric.max_value = max(numeric_values)
-                metric.mean_value = statistics.mean(numeric_values)
-                if len(numeric_values) > 1:
-                    metric.std_dev = statistics.stdev(numeric_values)
-
-                # Range validation
-                if valid_range:
-                    min_valid, max_valid = valid_range
-                    out_of_range = [
-                        v for v in numeric_values if v < min_valid or v > max_valid
-                    ]
-                    metric.out_of_range_count = len(out_of_range)
-                    metric.validity_pct = (
-                        (len(numeric_values) - len(out_of_range))
-                        / len(numeric_values)
-                        * 100
-                    )
-
-                    if metric.out_of_range_count > 0:
-                        metric.issues.append(
-                            f"{metric.out_of_range_count} values outside range "
-                            f"[{min_valid}, {max_valid}]"
-                        )
-
-        # String analysis
+            return self._analyze_numeric_feature(
+                metric, feature_name, non_null_values, valid_range
+            )
         elif data_type == "string":
-            string_values = [str(v) for v in non_null_values]
-            metric.unique_count = len(set(string_values))
-            metric.empty_string_count = sum(1 for v in string_values if not v.strip())
+            return self._analyze_string_feature(metric, non_null_values, valid_values)
+        elif data_type == "boolean":
+            return self._analyze_boolean_feature(metric, non_null_values)
+        elif data_type == "list":
+            return self._analyze_list_feature(metric, non_null_values)
 
-            # Value validation for categorical
-            if valid_values:
-                invalid = [v for v in string_values if v not in valid_values]
-                metric.invalid_value_count = len(invalid)
-                metric.validity_pct = (
-                    (len(string_values) - len(invalid)) / len(string_values) * 100
+        return metric
+
+    def _analyze_numeric_feature(
+        self,
+        metric: DataQualityMetric,
+        feature_name: str,
+        values: List[Any],
+        valid_range: Optional[Tuple[float, float]],
+    ) -> DataQualityMetric:
+        """Analyze numeric feature values."""
+        numeric_values = []
+        for v in values:
+            try:
+                numeric_values.append(float(v))
+            except (ValueError, TypeError):
+                logger.debug(
+                    f"Skipping non-numeric value '{v}' for feature '{feature_name}'"
                 )
 
-                if metric.invalid_value_count > 0:
+        if numeric_values:
+            metric.min_value = min(numeric_values)
+            metric.max_value = max(numeric_values)
+            metric.mean_value = statistics.mean(numeric_values)
+            if len(numeric_values) > 1:
+                metric.std_dev = statistics.stdev(numeric_values)
+
+            # Range validation
+            if valid_range:
+                min_valid, max_valid = valid_range
+                out_of_range = [
+                    v for v in numeric_values if v < min_valid or v > max_valid
+                ]
+                metric.out_of_range_count = len(out_of_range)
+                metric.validity_pct = (
+                    (len(numeric_values) - len(out_of_range))
+                    / len(numeric_values)
+                    * 100
+                )
+
+                if metric.out_of_range_count > 0:
                     metric.issues.append(
-                        f"{metric.invalid_value_count} values not in allowed list"
+                        f"{metric.out_of_range_count} values outside range "
+                        f"[{min_valid}, {max_valid}]"
                     )
 
-        # Boolean analysis
-        elif data_type == "boolean":
-            bool_values = [bool(v) for v in non_null_values]
-            true_count = sum(bool_values)
-            metric.unique_count = (
-                2 if true_count > 0 and true_count < len(bool_values) else 1
+        return metric
+
+    def _analyze_string_feature(
+        self,
+        metric: DataQualityMetric,
+        values: List[Any],
+        valid_values: Optional[List[str]],
+    ) -> DataQualityMetric:
+        """Analyze string feature values."""
+        string_values = [str(v) for v in values]
+        metric.unique_count = len(set(string_values))
+        metric.empty_string_count = sum(1 for v in string_values if not v.strip())
+
+        # Value validation for categorical
+        if valid_values:
+            invalid = [v for v in string_values if v not in valid_values]
+            metric.invalid_value_count = len(invalid)
+            metric.validity_pct = (
+                (len(string_values) - len(invalid)) / len(string_values) * 100
             )
-            metric.validity_pct = 100.0  # All booleans are valid
 
-        # List analysis
-        elif data_type == "list":
-            metric.unique_count = len({str(v) for v in non_null_values})
-            metric.validity_pct = 100.0
+            if metric.invalid_value_count > 0:
+                metric.issues.append(
+                    f"{metric.invalid_value_count} values not in allowed list"
+                )
 
+        return metric
+
+    def _analyze_boolean_feature(
+        self,
+        metric: DataQualityMetric,
+        values: List[Any],
+    ) -> DataQualityMetric:
+        """Analyze boolean feature values."""
+        bool_values = [bool(v) for v in values]
+        true_count = sum(bool_values)
+        metric.unique_count = (
+            2 if true_count > 0 and true_count < len(bool_values) else 1
+        )
+        metric.validity_pct = 100.0  # All booleans are valid
+        return metric
+
+    def _analyze_list_feature(
+        self,
+        metric: DataQualityMetric,
+        values: List[Any],
+    ) -> DataQualityMetric:
+        """Analyze list feature values."""
+        metric.unique_count = len({str(v) for v in values})
+        metric.validity_pct = 100.0
         return metric
 
     def _calculate_completeness_score(self, metrics: List[DataQualityMetric]) -> float:
@@ -440,6 +478,10 @@ class DataQualityService:
             # Low completeness for individual features
             if metric.completeness_pct < 30:
                 missing_pct = 100 - metric.completeness_pct
+                miss_msg = f"Low completeness: {missing_pct:.1f}% missing"
+                if miss_msg not in metric.issues:
+                    metric.issues.append(miss_msg)
+
                 issues.append(
                     QualityIssue(
                         severity=QualityIssueSeverity.WARNING,
@@ -615,6 +657,81 @@ class DataQualityService:
             {"scan_metrics_summary": summary.dict()},
         )
 
+    def _calculate_feature_distributions(
+        self,
+        scenario_id: str,
+        feature_metrics: list,
+        bins: int = 20,
+    ) -> None:
+        """
+        Calculate and store histogram distributions for all numeric features.
+
+        Updates feature_metrics in-place with distribution_bins.
+        Uses MongoDB aggregation to efficiently compute histograms.
+        """
+        from app.repositories.training_enrichment_build import (
+            TrainingEnrichmentBuildRepository,
+        )
+
+        build_repo = TrainingEnrichmentBuildRepository(self.db)
+
+        for metric in feature_metrics:
+            if metric.data_type not in ("integer", "float", "numeric"):
+                continue
+
+            # Use aggregation to get stats and samples
+            agg_result = build_repo.aggregate_feature_stats(
+                scenario_id, metric.feature_name
+            )
+            stats = agg_result.get("stats")
+            samples = agg_result.get("samples", [])
+
+            if not stats or stats.get("count", 0) == 0:
+                continue
+
+            # Update metric with aggregated stats
+            metric.min_value = stats.get("min")
+            metric.max_value = stats.get("max")
+            metric.mean_value = stats.get("avg")
+            metric.std_dev = stats.get("stdDev")
+
+            min_val = stats.get("min", 0)
+            max_val = stats.get("max", 0)
+            total_count = stats.get("count", 0)
+
+            # Calculate histogram bins
+            bin_width = (max_val - min_val) / bins if max_val > min_val else 1
+            n = len(samples)
+
+            distribution_bins = []
+            for i in range(bins):
+                bin_min = min_val + i * bin_width
+                bin_max = min_val + (i + 1) * bin_width
+
+                # Count from samples
+                if i == bins - 1:
+                    count = sum(1 for v in samples if bin_min <= v <= bin_max)
+                else:
+                    count = sum(1 for v in samples if bin_min <= v < bin_max)
+
+                # Scale to estimated total
+                estimated_count = int(count * total_count / n) if n > 0 else 0
+
+                distribution_bins.append(
+                    HistogramBinCache(
+                        min_value=round(bin_min, 4),
+                        max_value=round(bin_max, 4),
+                        count=estimated_count,
+                        percentage=(
+                            round(estimated_count / total_count * 100, 1)
+                            if total_count > 0
+                            else 0
+                        ),
+                    )
+                )
+
+            metric.distribution_bins = distribution_bins
+
     def finalize_quality_report(self, scenario_id: str) -> DataQualityReport:
         """
         Finalize quality report after enrichment is complete.
@@ -698,6 +815,9 @@ class DataQualityService:
 
             report.scan_metrics_summary = scan_summary
 
+        # Calculate feature distributions (histogram bins) for numeric features
+        self._calculate_feature_distributions(scenario_id, report.feature_metrics)
+
         # Calculate completeness score from feature metrics
         report.completeness_score = self._calculate_completeness_score(
             report.feature_metrics
@@ -708,7 +828,7 @@ class DataQualityService:
 
         report.mark_completed()
 
-        # Update in DB
+        # Update in DB (including feature_metrics with distributions)
         self.quality_repo.update_one(
             str(report.id),
             {
@@ -726,6 +846,7 @@ class DataQualityService:
                 "failed_builds": report.failed_builds,
                 "total_features": report.total_features,
                 "scan_metrics_summary": report.scan_metrics_summary.dict(),
+                "feature_metrics": [m.dict() for m in report.feature_metrics],
                 "completed_at": report.completed_at,
             },
         )

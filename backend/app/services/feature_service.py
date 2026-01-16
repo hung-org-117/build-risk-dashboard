@@ -436,12 +436,19 @@ class FeatureService:
     def list_features(
         self,
         extractor_node: Optional[str] = None,
+        include_default: bool = False,
     ) -> List[Dict]:
         """List all feature definitions with optional filters."""
         feature_info = self._extract_feature_info()
-        features = [
-            info for name, info in feature_info.items() if name not in DEFAULT_FEATURES
-        ]
+
+        if include_default:
+            features = list(feature_info.values())
+        else:
+            features = [
+                info
+                for name, info in feature_info.items()
+                if name not in DEFAULT_FEATURES
+            ]
 
         if extractor_node:
             features = [f for f in features if f["extractor_node"] == extractor_node]

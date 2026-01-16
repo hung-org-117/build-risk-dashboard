@@ -31,6 +31,8 @@ from app.dtos.statistics import (
     CorrelationPair,
     FeatureCompleteness,
     FeatureDistributionResponse,
+    FeatureMetricDetail,
+    FeatureMetricsResponse,
     HistogramBin,
     NumericDistribution,
     NumericStats,
@@ -111,70 +113,232 @@ class StatisticsService:
             evaluated_at=None,
         )
 
+    def _get_feature_category(self, name: str) -> str:
+        """Categorize feature by name prefix."""
+        if name.startswith(("git_", "repo_")):
+            return "Source Code"
+        if name.startswith("build_"):
+            return "Build Process"
+        if name.startswith(("history_", "temporal_")):
+            return "History & Trends"
+        if name.startswith(("log_", "test_", "devops_")):
+            return "CI/CD & Testing"
+        if name.startswith("author_"):
+            return "Collaboration"
+        return "Other"
+
     def get_feature_distributions(
         self,
         scenario_id: str,
         features: Optional[List[str]] = None,
         bins: int = 20,
         top_n: int = 20,
+        page: int = 1,
+        limit: int = 6,
+        search: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> FeatureDistributionResponse:
         """
-        Get value distributions for selected features.
+        Get value distributions for selected features (paginated).
 
-        Args:
-            scenario_id: Scenario ID
-            features: Optional list of features (defaults to all selected)
-            bins: Number of histogram bins for numeric features
-            top_n: Max categorical values to return
-
-        Returns:
-            FeatureDistributionResponse with distribution data
+        First attempts to read from cached DataQualityReport.
+        Falls back to MongoDB aggregation if cache is not available.
         """
         scenario = self.scenario_repo.find_by_id(scenario_id)
         if not scenario:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
         # Get features to analyze
-        target_features = features or scenario.feature_config.dag_features
-        if not target_features:
+        target_features = features or scenario.feature_config.dag_features or []
+
+        # 1. Filter by search and category
+        filtered_features = self._filter_features(target_features, search, category)
+
+        total_items = len(filtered_features)
+        total_pages = (total_items + limit - 1) // limit
+
+        # 2. Paginate
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_features = filtered_features[start_idx:end_idx]
+
+        if not paginated_features:
             return FeatureDistributionResponse(
-                scenario_id=scenario_id, distributions={}
+                scenario_id=scenario_id,
+                distributions={},
+                total_items=total_items,
+                total_pages=total_pages,
+                current_page=page,
+                items_per_page=limit,
             )
 
-        # Get all builds with features from FeatureVector (as dicts)
-        builds = self.build_repo.find_by_scenario_with_features(scenario_id)
+        # 3. Try to read from cached DataQualityReport first
+        distributions = self._get_cached_distributions(scenario_id, paginated_features)
+
+        # 4. Fallback to aggregation if cache miss
+        if not distributions:
+            distributions = self._calculate_distributions_on_demand(
+                scenario_id, paginated_features, bins, top_n
+            )
+
+        return FeatureDistributionResponse(
+            scenario_id=scenario_id,
+            distributions=distributions,
+            total_items=total_items,
+            total_pages=total_pages,
+            current_page=page,
+            items_per_page=limit,
+        )
+
+    def _filter_features(
+        self, features: List[str], search: Optional[str], category: Optional[str]
+    ) -> List[str]:
+        """Filter features by search term and category."""
+        filtered = []
+        for f in features:
+            if search and search.lower() not in f.lower():
+                continue
+            if category and category != "All":
+                if self._get_feature_category(f) != category:
+                    continue
+            filtered.append(f)
+        return filtered
+
+    def _get_cached_distributions(
+        self, scenario_id: str, feature_names: List[str]
+    ) -> Dict[str, Any]:
+        """Read cached distributions from DataQualityReport."""
+        report = self.quality_repo.find_by_scenario(scenario_id)
+        if not report or not report.feature_metrics:
+            return {}
 
         distributions: Dict[str, Any] = {}
+        metrics_by_name = {m.feature_name: m for m in report.feature_metrics}
 
-        for feature_name in target_features:
-            # Collect all values for this feature
-            values = []
-            for build in builds:
-                build_features = build.get("features", {})
-                if build_features and feature_name in build_features:
-                    values.append(build_features[feature_name])
-
-            if not values:
+        for feature_name in feature_names:
+            metric = metrics_by_name.get(feature_name)
+            if not metric or not metric.distribution_bins:
                 continue
 
-            # Get data type from registry, fallback to inference
-            data_type = get_feature_data_type(feature_name)
-            if data_type == "unknown":
-                data_type = self._infer_data_type(values)
+            # Build distribution from cached data
+            dist = NumericDistribution(
+                feature_name=feature_name,
+                total_count=metric.total_values,
+                null_count=metric.null_count,
+                bins=[
+                    HistogramBin(
+                        min_value=b.min_value,
+                        max_value=b.max_value,
+                        count=b.count,
+                        percentage=b.percentage,
+                    )
+                    for b in metric.distribution_bins
+                ],
+                stats=(
+                    NumericStats(
+                        min=metric.min_value or 0,
+                        max=metric.max_value or 0,
+                        mean=metric.mean_value or 0,
+                        median=metric.mean_value or 0,  # Approximation
+                        std=metric.std_dev or 0,
+                        q1=metric.min_value or 0,
+                        q3=metric.max_value or 0,
+                        iqr=0,
+                    )
+                    if metric.min_value is not None
+                    else None
+                ),
+            )
+            distributions[feature_name] = dist.model_dump()
 
-            if data_type in ("integer", "float"):
-                dist = self._calculate_numeric_distribution(
-                    feature_name, values, bins=bins
+        return distributions
+
+    def _calculate_distributions_on_demand(
+        self,
+        scenario_id: str,
+        feature_names: List[str],
+        bins: int,
+        top_n: int,
+    ) -> Dict[str, Any]:
+        """Calculate distributions using MongoDB aggregation (fallback)."""
+        distributions: Dict[str, Any] = {}
+
+        for feature_name in feature_names:
+            data_type = get_feature_data_type(feature_name)
+
+            if data_type in ("integer", "float", "unknown"):
+                agg_result = self.build_repo.aggregate_feature_stats(
+                    scenario_id, feature_name
+                )
+                stats = agg_result.get("stats")
+                samples = agg_result.get("samples", [])
+
+                if not stats or stats.get("count", 0) == 0:
+                    continue
+
+                dist = self._calculate_numeric_distribution_from_stats(
+                    feature_name, stats, samples, bins=bins
                 )
             else:
-                dist = self._calculate_categorical_distribution(
-                    feature_name, values, top_n=top_n
+                dist = self._calculate_categorical_distribution_aggregated(
+                    scenario_id, feature_name, top_n=top_n
                 )
+                if not dist:
+                    continue
 
             distributions[feature_name] = dist.model_dump()
 
-        return FeatureDistributionResponse(
-            scenario_id=scenario_id, distributions=distributions
+        return distributions
+
+    def get_feature_metrics(
+        self,
+        scenario_id: str,
+        page: int = 1,
+        limit: int = 10,
+        search: Optional[str] = None,
+    ) -> FeatureMetricsResponse:
+        """
+        Get paginated feature metrics details.
+        """
+        # Fetch existing quality report
+        report = self.quality_repo.find_by_scenario(scenario_id)
+        if not report or not report.feature_metrics:
+            return FeatureMetricsResponse(scenario_id=scenario_id)
+
+        # Filter
+        metrics = report.feature_metrics
+        if search:
+            search_lower = search.lower()
+            metrics = [m for m in metrics if search_lower in m.feature_name.lower()]
+
+        total_items = len(metrics)
+        total_pages = (total_items + limit - 1) // limit
+
+        # Paginate
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_metrics = metrics[start_idx:end_idx]
+
+        # Map to DTO
+        items = [
+            FeatureMetricDetail(
+                feature_name=m.feature_name,
+                data_type=m.data_type,
+                completeness=m.completeness_pct,
+                null_count=m.null_count,
+                mean=m.mean_value,
+                issues_count=len(m.issues),
+            )
+            for m in paginated_metrics
+        ]
+
+        return FeatureMetricsResponse(
+            scenario_id=scenario_id,
+            items=items,
+            total_items=total_items,
+            total_pages=total_pages,
+            current_page=page,
+            items_per_page=limit,
         )
 
     def get_correlation_matrix(
@@ -823,6 +987,163 @@ class StatisticsService:
             feature_name=feature_name,
             total_count=len(values),
             null_count=null_count,
+            unique_count=unique_count,
+            values=categorical_values,
+        )
+
+    def _calculate_numeric_distribution_from_stats(
+        self,
+        feature_name: str,
+        stats: Dict[str, Any],
+        samples: List[float],
+        bins: int = 20,
+    ) -> NumericDistribution:
+        """
+        Calculate histogram from pre-aggregated stats and sampled values.
+
+        Uses stats from MongoDB aggregation and samples to build histogram bins.
+        Much more memory efficient than loading all values.
+        """
+        if not stats or stats.get("count", 0) == 0:
+            return NumericDistribution(
+                feature_name=feature_name,
+                total_count=0,
+                null_count=0,
+                bins=[],
+                stats=None,
+            )
+
+        min_val = stats.get("min", 0)
+        max_val = stats.get("max", 0)
+        avg_val = stats.get("avg", 0)
+        std_val = stats.get("stdDev", 0) or 0
+        total_count = stats.get("count", 0)
+
+        # Calculate stats object
+        sorted_samples = sorted(samples) if samples else []
+        n = len(sorted_samples)
+
+        numeric_stats = NumericStats(
+            min=min_val,
+            max=max_val,
+            mean=avg_val,
+            median=sorted_samples[n // 2] if n > 0 else avg_val,
+            std=std_val,
+            q1=sorted_samples[n // 4] if n >= 4 else min_val,
+            q3=sorted_samples[3 * n // 4] if n >= 4 else max_val,
+            iqr=0,
+        )
+        numeric_stats.iqr = numeric_stats.q3 - numeric_stats.q1
+
+        # Create histogram bins from samples
+        bin_width = (max_val - min_val) / bins if max_val > min_val else 1
+
+        histogram_bins: List[HistogramBin] = []
+        for i in range(bins):
+            bin_min = min_val + i * bin_width
+            bin_max = min_val + (i + 1) * bin_width
+
+            # Count from samples (representative)
+            if i == bins - 1:
+                count = sum(1 for v in samples if bin_min <= v <= bin_max)
+            else:
+                count = sum(1 for v in samples if bin_min <= v < bin_max)
+
+            # Scale count to estimated total
+            estimated_count = int(count * total_count / n) if n > 0 else 0
+
+            histogram_bins.append(
+                HistogramBin(
+                    min_value=round(bin_min, 4),
+                    max_value=round(bin_max, 4),
+                    count=estimated_count,
+                    percentage=(
+                        round(estimated_count / total_count * 100, 1)
+                        if total_count > 0
+                        else 0
+                    ),
+                )
+            )
+
+        return NumericDistribution(
+            feature_name=feature_name,
+            total_count=total_count,
+            null_count=0,  # MongoDB already filtered nulls
+            bins=histogram_bins,
+            stats=numeric_stats,
+        )
+
+    def _calculate_categorical_distribution_aggregated(
+        self,
+        scenario_id: str,
+        feature_name: str,
+        top_n: int = 20,
+    ) -> Optional[CategoricalDistribution]:
+        """
+        Calculate categorical distribution using MongoDB aggregation.
+
+        Groups and counts values directly in the database.
+        """
+        pipeline = [
+            {"$match": {"scenario_id": self.build_repo._to_object_id(scenario_id)}},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": False}},
+            {"$project": {"value": {"$toString": f"$fv.features.{feature_name}"}}},
+            {"$match": {"value": {"$ne": None, "$ne": ""}}},
+            {"$group": {"_id": "$value", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": top_n + 1},  # +1 to check for "Other"
+        ]
+
+        results = list(self.build_repo.collection.aggregate(pipeline))
+        if not results:
+            return None
+
+        total_count = sum(r["count"] for r in results)
+        unique_count = len(results)
+
+        # Build categorical values
+        categorical_values = []
+        for r in results[:top_n]:
+            categorical_values.append(
+                CategoricalValue(
+                    value=r["_id"],
+                    count=r["count"],
+                    percentage=(
+                        round(r["count"] / total_count * 100, 1)
+                        if total_count > 0
+                        else 0
+                    ),
+                )
+            )
+
+        # Add "Other" if there are more values
+        if len(results) > top_n:
+            shown_count = sum(v.count for v in categorical_values)
+            other_count = total_count - shown_count
+            categorical_values.append(
+                CategoricalValue(
+                    value="Other",
+                    count=other_count,
+                    percentage=(
+                        round(other_count / total_count * 100, 1)
+                        if total_count > 0
+                        else 0
+                    ),
+                )
+            )
+
+        return CategoricalDistribution(
+            feature_name=feature_name,
+            total_count=total_count,
+            null_count=0,
             unique_count=unique_count,
             values=categorical_values,
         )

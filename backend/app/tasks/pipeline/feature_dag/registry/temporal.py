@@ -1,4 +1,4 @@
-"""Feature definitions for Temporal/History domain."""
+"""Feature definitions for Temporal/History domain (temporal.py extractor)."""
 
 from typing import Dict
 
@@ -10,7 +10,7 @@ from app.tasks.pipeline.feature_dag._types import (
 )
 
 TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
-    # === Build Position (for Splitting/Grouping) ===
+    # === Build Position (from build_position_features) ===
     "percentage_of_builds_before": FeatureDefinition(
         name="percentage_of_builds_before",
         display_name="Percentage of Builds Before",
@@ -30,20 +30,7 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
     ),
-    # === Build History ===
-    "history_prev_build_id": FeatureDefinition(
-        name="history_prev_build_id",
-        display_name="Previous Build ID",
-        description="ID of the previous build for this commit chain",
-        category=FeatureCategory.BUILD_HISTORY,
-        data_type=FeatureDataType.STRING,
-        extractor_node="temporal",
-        required_resources=[
-            FeatureResource.GIT_HISTORY,
-            FeatureResource.RAW_BUILD_RUNS,
-        ],
-        nullable=True,
-    ),
+    # === Build History (from build_history_features) ===
     "history_prev_result": FeatureDefinition(
         name="history_prev_result",
         display_name="Previous Build Result",
@@ -74,6 +61,7 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         unit="days",
         nullable=True,
     ),
+    # === Project Fail History (from project_fail_history_features) ===
     "history_project_fail_rate": FeatureDefinition(
         name="history_project_fail_rate",
         display_name="Project Fail Rate",
@@ -94,45 +82,7 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
-    "history_prev_failed": FeatureDefinition(
-        name="history_prev_failed",
-        display_name="Previous Build Failed",
-        description="Whether the previous build failed",
-        category=FeatureCategory.BUILD_HISTORY,
-        data_type=FeatureDataType.BOOLEAN,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-        nullable=True,
-    ),
-    "history_fail_streak": FeatureDefinition(
-        name="history_fail_streak",
-        display_name="Fail Streak",
-        description="Number of consecutive failed builds before this one",
-        category=FeatureCategory.BUILD_HISTORY,
-        data_type=FeatureDataType.INTEGER,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-    ),
-    "history_fail_rate_10": FeatureDefinition(
-        name="history_fail_rate_10",
-        display_name="Fail Rate Last 10",
-        description="Failure rate in last 10 builds",
-        category=FeatureCategory.BUILD_HISTORY,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-        valid_range=(0.0, 1.0),
-    ),
-    "history_avg_churn_5": FeatureDefinition(
-        name="history_avg_churn_5",
-        display_name="Avg Churn Last 5",
-        description="Average source code churn in last 5 builds",
-        category=FeatureCategory.BUILD_HISTORY,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-    ),
-    # === Author/Committer ===
+    # === Author Fail History (from author_fail_history_features) ===
     "author_fail_rate": FeatureDefinition(
         name="author_fail_rate",
         display_name="Author Fail Rate",
@@ -153,6 +103,7 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
     ),
+    # === Author Experience (from author_experience) ===
     "author_experience": FeatureDefinition(
         name="author_experience",
         display_name="Author Experience",
@@ -161,35 +112,5 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.FLOAT,
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-    ),
-    "author_ownership": FeatureDefinition(
-        name="author_ownership",
-        display_name="Author Ownership",
-        description="Percentage of project commits by this author",
-        category=FeatureCategory.COMMITTER,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-        valid_range=(0.0, 1.0),
-    ),
-    "author_is_new": FeatureDefinition(
-        name="author_is_new",
-        display_name="New Contributor",
-        description="Whether author has fewer than 5 builds in this project",
-        category=FeatureCategory.COMMITTER,
-        data_type=FeatureDataType.BOOLEAN,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-    ),
-    "author_days_since_commit": FeatureDefinition(
-        name="author_days_since_commit",
-        display_name="Days Since Author's Last Commit",
-        description="Days since this author's previous build",
-        category=FeatureCategory.COMMITTER,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="temporal",
-        required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
-        unit="days",
-        nullable=True,
     ),
 }

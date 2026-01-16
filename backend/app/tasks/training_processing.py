@@ -241,9 +241,9 @@ def dispatch_enrichment_batches(
         handler = _create_scenario_failure_handler(scenario_id, self.db)
         handler("failed", str(e))
         # Notify failure
-        from app.services.notification_service import notify_dataset_enrichment_failed
+        from app.services.notification_service import notify_training_scenario_failed
 
-        notify_dataset_enrichment_failed(
+        notify_training_scenario_failed(
             db=self.db,
             scenario_id=scenario_id,
             error_message=str(e),
@@ -498,9 +498,9 @@ def handle_processing_chain_error(
             publish_scenario_updated(updated_scenario, error=error_msg)
 
         # Notify failure
-        from app.services.notification_service import notify_dataset_enrichment_failed
+        from app.services.notification_service import notify_training_scenario_failed
 
-        notify_dataset_enrichment_failed(
+        notify_training_scenario_failed(
             db=self.db,
             scenario_id=scenario_id,
             error_message=error_msg,

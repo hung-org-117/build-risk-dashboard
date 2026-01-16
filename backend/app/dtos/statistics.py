@@ -140,6 +140,32 @@ class FeatureDistributionResponse(BaseModel):
         default_factory=dict,
         description="Map of feature_name -> NumericDistribution or CategoricalDistribution",
     )
+    total_items: int = 0
+    total_pages: int = 0
+    current_page: int = 1
+    items_per_page: int = 0
+
+
+class FeatureMetricDetail(BaseModel):
+    """Detailed metrics for a single feature (paginated view)."""
+
+    feature_name: str
+    data_type: str
+    completeness: float
+    null_count: int
+    mean: Optional[float] = None
+    issues_count: int = 0
+
+
+class FeatureMetricsResponse(BaseModel):
+    """Paginated response for feature metrics detail."""
+
+    scenario_id: str
+    items: List[FeatureMetricDetail] = Field(default_factory=list)
+    total_items: int = 0
+    total_pages: int = 0
+    current_page: int = 1
+    items_per_page: int = 0
 
 
 # Correlation Matrix DTOs

@@ -12,24 +12,6 @@ from app.tasks.pipeline.feature_dag._types import (
 
 CODE_FEATURES: Dict[str, FeatureDefinition] = {
     # === Git Commit Info ===
-    "git_trigger_sha": FeatureDefinition(
-        name="git_trigger_sha",
-        display_name="Trigger Commit SHA",
-        description="Commit SHA that triggered the build",
-        category=FeatureCategory.GIT_HISTORY,
-        data_type=FeatureDataType.STRING,
-        extractor_node="code",
-        required_resources=[FeatureResource.BUILD_RUN],
-    ),
-    "git_branch": FeatureDefinition(
-        name="git_branch",
-        display_name="Branch",
-        description="Branch name that triggered the build",
-        category=FeatureCategory.GIT_HISTORY,
-        data_type=FeatureDataType.STRING,
-        extractor_node="code",
-        required_resources=[FeatureResource.BUILD_RUN],
-    ),
     "git_built_commits": FeatureDefinition(
         name="git_built_commits",
         display_name="All Built Commits",
@@ -60,6 +42,19 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         display_name="Previous Built Commit",
         description="SHA of last commit that was built",
         category=FeatureCategory.GIT_HISTORY,
+        data_type=FeatureDataType.STRING,
+        extractor_node="code",
+        required_resources=[
+            FeatureResource.GIT_HISTORY,
+            FeatureResource.RAW_BUILD_RUNS,
+        ],
+        nullable=True,
+    ),
+    "history_prev_build_id": FeatureDefinition(
+        name="history_prev_build_id",
+        display_name="Previous Build ID",
+        description="ID of the previous build for this commit chain",
+        category=FeatureCategory.BUILD_HISTORY,
         data_type=FeatureDataType.STRING,
         extractor_node="code",
         required_resources=[
@@ -185,37 +180,6 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.BUILD_RUN],
-    ),
-    "git_change_entropy": FeatureDefinition(
-        name="git_change_entropy",
-        display_name="Change Entropy",
-        description="Entropy of file changes in the build",
-        category=FeatureCategory.GIT_DIFF,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="code",
-        required_resources=[FeatureResource.GIT_HISTORY],
-    ),
-    "git_files_modified_ratio": FeatureDefinition(
-        name="git_files_modified_ratio",
-        display_name="Files Modified Ratio",
-        description="Ratio of modified files to total changed files",
-        category=FeatureCategory.GIT_DIFF,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="code",
-        required_resources=[FeatureResource.GIT_HISTORY],
-        valid_range=(0.0, 1.0),
-    ),
-    "git_churn_vs_avg": FeatureDefinition(
-        name="git_churn_vs_avg",
-        display_name="Churn vs Average",
-        description="Current churn relative to project average",
-        category=FeatureCategory.GIT_DIFF,
-        data_type=FeatureDataType.FLOAT,
-        extractor_node="code",
-        required_resources=[
-            FeatureResource.GIT_HISTORY,
-            FeatureResource.RAW_BUILD_RUNS,
-        ],
     ),
     # === Team Metrics ===
     "team_size": FeatureDefinition(

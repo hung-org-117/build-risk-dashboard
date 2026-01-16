@@ -12,6 +12,7 @@ from app.dtos.scan_statistics import ScanMetricsStatisticsResponse
 from app.dtos.statistics import (
     CorrelationMatrixResponse,
     FeatureDistributionResponse,
+    FeatureMetricsResponse,
     VersionStatisticsResponse,
 )
 from app.middleware.rbac import Permission, RequirePermission
@@ -55,6 +56,10 @@ async def get_feature_distributions(
     top_n: int = Query(
         20, ge=5, le=100, description="Max categorical values to return"
     ),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(6, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search term for feature name"),
+    category: Optional[str] = Query(None, description="Filter by feature category"),
     db=Depends(get_db),
     current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
 ):
@@ -75,6 +80,31 @@ async def get_feature_distributions(
         features=features,
         bins=bins,
         top_n=top_n,
+        page=page,
+        limit=limit,
+        search=search,
+        category=category,
+    )
+
+
+@router.get("/feature-metrics", response_model=FeatureMetricsResponse)
+async def get_feature_metrics(
+    scenario_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search term for feature name"),
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """
+    Get paginated feature completeness and quality metrics.
+    """
+    service = StatisticsService(db)
+    return service.get_feature_metrics(
+        scenario_id=scenario_id,
+        page=page,
+        limit=limit,
+        search=search,
     )
 
 

@@ -1,36 +1,3 @@
-"""
-Unified Notification Service - In-app and Gmail API notifications.
-
-Channels:
-- In-app: Always sent, stored in MongoDB for UI display
-- Gmail: Gmail API (OAuth2) for critical alerts only
-
-Gmail API Setup:
-1. Create a project in Google Cloud Console
-2. Enable Gmail API
-3. Create OAuth 2.0 credentials (Desktop app)
-4. Run: python -m app.services.gmail_api_service --setup
-5. Set environment variables:
-   - GOOGLE_CLIENT_ID: OAuth client ID
-   - GOOGLE_CLIENT_SECRET: OAuth client secret
-   - GMAIL_TOKEN_JSON: Token JSON from setup script
-
-Channel Usage Guidelines:
-┌─────────────────────────────────┬─────────┬─────────┐
-│ Event Type                      │ In-App  │ Gmail   │
-├─────────────────────────────────┼─────────┼─────────┤
-│ Pipeline completed              │ ✓       │         │
-│ Pipeline failed                 │ ✓       │         │
-│ Dataset validation completed    │ ✓       │         │
-│ Dataset enrichment completed    │ ✓       │         │
-│ Scan vulnerabilities found      │ ✓       │         │
-│ Rate limit WARNING              │ ✓       │         │
-│ Rate limit EXHAUSTED (all)      │ ✓       │ ✓ *     │
-│ System alerts                   │ ✓       │         │
-└─────────────────────────────────┴─────────┴─────────┘
-* Gmail only for critical alerts when all tokens are exhausted
-"""
-
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -185,7 +152,9 @@ class NotificationService:
                     },
                 )
             except Exception as e:
-                logger.warning(f"Failed to create notification for admin {admin.id}: {e}")
+                logger.warning(
+                    f"Failed to create notification for admin {admin.id}: {e}"
+                )
 
         # Send Gmail alert to admins
         try:
@@ -271,7 +240,9 @@ class NotificationManager:
                 "message": message,
                 "link": link,
                 "metadata": metadata,
-                "created_at": (result.created_at.isoformat() if result.created_at else None),
+                "created_at": (
+                    result.created_at.isoformat() if result.created_at else None
+                ),
             }
             publish_event(EventType.SYSTEM_NOTIFICATION, payload)
         except Exception as e:
@@ -412,9 +383,13 @@ def _send_admin_email(
 
         # Check per-type toggle
         toggles = settings.notifications.email_type_toggles
-        toggle_key = notification_type.replace("-", "_")  # e.g. pipeline-failed -> pipeline_failed
+        toggle_key = notification_type.replace(
+            "-", "_"
+        )  # e.g. pipeline-failed -> pipeline_failed
         if not getattr(toggles, toggle_key, False):
-            logger.debug(f"Admin email for {notification_type} disabled (type toggle off)")
+            logger.debug(
+                f"Admin email for {notification_type} disabled (type toggle off)"
+            )
             return False
 
         # Get recipients
@@ -438,100 +413,6 @@ def _send_admin_email(
 
 
 # =============================================================================
-# Event-Specific Notification Functions
-# =============================================================================
-
-
-def notify_pipeline_completed(
-    db: Database,
-    user_id: ObjectId,
-    repo_name: str,
-    build_id: str,
-    feature_count: int,
-) -> Notification:
-    """Pipeline completed - in-app only (not urgent)."""
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.PIPELINE_COMPLETED,
-        title="Pipeline Completed",
-        message=f"Feature extraction for {repo_name} build #{build_id} completed. {feature_count} features extracted.",
-        link="/admin/repos",
-        metadata={
-            "repo_name": repo_name,
-            "build_id": build_id,
-            "feature_count": feature_count,
-        },
-    )
-
-
-def notify_pipeline_failed(
-    db: Database,
-    user_id: ObjectId,
-    repo_name: str,
-    build_id: str,
-    error: str,
-) -> Notification:
-    """Pipeline failed - in-app only."""
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.PIPELINE_FAILED,
-        title="Pipeline Failed",
-        message=f"Feature extraction for {repo_name} build #{build_id} failed: {error}",
-        link="/admin/repos",
-        metadata={"repo_name": repo_name, "build_id": build_id, "error": error},
-    )
-
-
-def notify_dataset_enrichment_completed(
-    db: Database,
-    user_id: ObjectId,
-    dataset_name: str,
-    scenario_id: str,
-    builds_features_extracted: int,
-    builds_total: int,
-) -> Notification:
-    """Dataset enrichment completed - in-app only."""
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.DATASET_ENRICHMENT_COMPLETED,
-        title="Dataset Enrichment Completed",
-        message=f"Enrichment for '{dataset_name}' completed. {builds_features_extracted}/{builds_total} builds processed.",
-        link=f"/scenarios/{scenario_id}",
-        metadata={
-            "scenario_id": scenario_id,
-            "builds_features_extracted": builds_features_extracted,
-            "builds_total": builds_total,
-        },
-    )
-
-
-def notify_scan_vulnerabilities_found(
-    db: Database,
-    user_id: ObjectId,
-    repo_name: str,
-    scan_type: str,
-    issues_count: int,
-) -> Notification:
-    """Scan found vulnerabilities - in-app only."""
-    return create_notification(
-        db=db,
-        user_id=user_id,
-        type=NotificationType.SCAN_VULNERABILITIES_FOUND,
-        title=f"{scan_type.capitalize()} Scan: Issues Found",
-        message=f"{scan_type.capitalize()} scan for {repo_name} found {issues_count} issues.",
-        link="/admin/repos",
-        metadata={
-            "repo_name": repo_name,
-            "scan_type": scan_type,
-            "issues_count": issues_count,
-        },
-    )
-
-
-# =============================================================================
 # GitHub Token Rate Limit Notifications
 # =============================================================================
 
@@ -545,8 +426,6 @@ def notify_rate_limit_exhausted(
     send_gmail: bool = True,
 ) -> Notification:
     """
-    All tokens exhausted - CRITICAL - in-app + Gmail.
-
     Use when ALL tokens are rate limited and the system cannot make GitHub API calls.
     This is critical because it blocks all data ingestion.
     """
@@ -565,25 +444,6 @@ def notify_rate_limit_exhausted(
             "next_reset_at": reset_str,
         },
     )
-
-    # Gmail - for critical alerts using Handlebars template
-    if send_gmail:
-        manager = get_notification_manager()
-        html_body = render_email(
-            "rate_limit_exhausted",
-            {
-                "exhausted_tokens": exhausted_tokens,
-                "total_tokens": total_tokens,
-                "next_reset_at": reset_str,
-            },
-            subject="🚨 CRITICAL: All GitHub Tokens Exhausted",
-        )
-        manager.send_gmail(
-            subject="🚨 CRITICAL: All GitHub Tokens Exhausted",
-            html_body=html_body,
-            # TODO: Add to_recipients here
-            to_recipients=["hunglaithe117@gmail.com"],
-        )
 
     return notification
 
@@ -649,7 +509,9 @@ def notify_system_error_to_admins(
                 },
             )
         except Exception as e:
-            logger.warning(f"Failed to create error notification for admin {admin.id}: {e}")
+            logger.warning(
+                f"Failed to create error notification for admin {admin.id}: {e}"
+            )
 
     # Email notification (if enabled via system_alerts toggle)
     _send_admin_email(
@@ -786,21 +648,21 @@ def notify_users_for_repo(
             # HIGH RISK DETECTED notifications
             if high_risk_builds and len(high_risk_builds) > 0:
                 high_risk_sub = subscriptions.get("high_risk_detected", {})
-                send_in_app = high_risk_sub.get("in_app", True) if high_risk_sub else True
-                send_email = high_risk_sub.get("email", False) if high_risk_sub else False
+                send_email = (
+                    high_risk_sub.get("email", False) if high_risk_sub else False
+                )
 
                 ci_run_ids = [b.get("ci_run_id", "") for b in high_risk_builds]
                 count = len(ci_run_ids)
 
-                # In-app notification
-                if send_in_app:
-                    notify_high_risk_builds_batch(
-                        db=db,
-                        user_id=user.id,
-                        repo_name=repo_name,
-                        repo_id=repo_id,
-                        ci_run_ids=ci_run_ids,
-                    )
+                # In-app notification - ALWAYS SEND
+                notify_high_risk_builds_batch(
+                    db=db,
+                    user_id=user.id,
+                    repo_name=repo_name,
+                    repo_id=repo_id,
+                    ci_run_ids=ci_run_ids,
+                )
 
                 # Email notification (if user enabled and subscribed)
                 if send_email and email_enabled and user_email:
@@ -812,21 +674,20 @@ def notify_users_for_repo(
                         count=count,
                     )
 
-            # BUILD PREDICTION READY notifications
             if prediction_summary:
                 pred_sub = subscriptions.get("build_prediction_ready", {})
-                send_in_app = pred_sub.get("in_app", True) if pred_sub else True
+                send_email = pred_sub.get("email", False) if pred_sub else True
 
-                if send_in_app:
-                    notify_prediction_ready(
-                        db=db,
-                        user_id=user.id,
-                        repo_name=repo_name,
-                        repo_id=repo_id,
-                        high_count=prediction_summary.get("high", 0),
-                        medium_count=prediction_summary.get("medium", 0),
-                        low_count=prediction_summary.get("low", 0),
-                    )
+                # In-app notification - ALWAYS SEND
+                notify_prediction_ready(
+                    db=db,
+                    user_id=user.id,
+                    repo_name=repo_name,
+                    repo_id=repo_id,
+                    high_count=prediction_summary.get("high", 0),
+                    medium_count=prediction_summary.get("medium", 0),
+                    low_count=prediction_summary.get("low", 0),
+                )
 
         except Exception as e:
             logger.warning(f"Failed to notify user {user.id} for repo {repo_name}: {e}")
@@ -870,66 +731,20 @@ def _send_high_risk_email(
 
 
 # =============================================================================
-# Admin Notifications - Model Pipeline
+# Admin Notifications - System Errors
 # =============================================================================
 
 
-def notify_pipeline_completed_to_admins(
-    db: Database,
-    repo_name: str,
-    predicted_count: int,
-    failed_count: int,
-    high_count: int = 0,
-    medium_count: int = 0,
-    low_count: int = 0,
-) -> None:
-    """
-    Notify all admins when Model Pipeline prediction phase completes.
-
-    Called from finalize_prediction task.
-    """
-    from app.repositories.user import UserRepository
-
-    user_repo = UserRepository(db)
-    admin_users = user_repo.find_by_role("admin")
-
-    total = high_count + medium_count + low_count
-    message = f"{repo_name}: {predicted_count}/{total} predicted."
-    if failed_count > 0:
-        message += f" {failed_count} failed."
-    if high_count > 0:
-        message += f" {high_count} HIGH risk."
-
-    for admin in admin_users:
-        try:
-            create_notification(
-                db=db,
-                user_id=admin.id,
-                type=NotificationType.PIPELINE_COMPLETED,
-                title="Risky Build Prediction Complete",
-                message=message,
-                link="/repositories",
-                metadata={
-                    "repo_name": repo_name,
-                    "predicted": predicted_count,
-                    "failed": failed_count,
-                    "high": high_count,
-                    "medium": medium_count,
-                    "low": low_count,
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to notify admin {admin.id}: {e}")
-
-
-def notify_pipeline_failed_to_admins(
+def notify_model_pipeline_failed_to_admins(
     db: Database,
     repo_name: str,
     error_message: str,
 ) -> None:
     """
-    Notify all admins when Model Pipeline fails completely.
-    Sends in-app notification to all admins and optionally email if enabled.
+    Notify all admins when Model Pipeline (prediction pipeline) fails.
+
+    Model Pipeline: Risky Build Prediction flow.
+    - Import GitHub repos → Feature Extraction → Prediction
     """
     from app.repositories.user import UserRepository
 
@@ -942,11 +757,12 @@ def notify_pipeline_failed_to_admins(
             create_notification(
                 db=db,
                 user_id=admin.id,
-                type=NotificationType.PIPELINE_FAILED,
-                title="Risky Build Prediction Failed",
-                message=f"{repo_name}: {error_message[:200]}",
+                type=NotificationType.SYSTEM,
+                title="⚠️ Model Pipeline Failed",
+                message=f"Repository '{repo_name}' processing failed: {error_message[:150]}",
                 link="/repositories",
                 metadata={
+                    "pipeline_type": "model_pipeline",
                     "repo_name": repo_name,
                     "error": error_message,
                 },
@@ -954,25 +770,8 @@ def notify_pipeline_failed_to_admins(
         except Exception as e:
             logger.warning(f"Failed to notify admin {admin.id}: {e}")
 
-    # Email notification (if enabled)
-    _send_admin_email(
-        db=db,
-        notification_type="pipeline_failed",
-        template_name="pipeline_failed",
-        subject=f"Risky Build Prediction Failed: {repo_name}",
-        context={
-            "repo_name": repo_name,
-            "error_message": error_message[:500],
-        },
-    )
 
-
-# =============================================================================
-# Admin Notifications - Dataset Enrichment
-# =============================================================================
-
-
-def notify_dataset_enrichment_failed(
+def notify_training_scenario_failed(
     db: Database,
     scenario_id: str,
     error_message: str,
@@ -980,9 +779,13 @@ def notify_dataset_enrichment_failed(
     failed_count: int = 0,
 ) -> None:
     """
-    Notify scenario creator when enrichment processing chain fails.
+    Notify all admins when Training Scenario processing fails.
+
+    Training Scenario: Dataset creation flow for model training.
+    - Filter builds → Ingestion → Feature Extraction → Dataset Export
     """
     from app.repositories.training_scenario import TrainingScenarioRepository
+    from app.repositories.user import UserRepository
 
     scenario_repo = TrainingScenarioRepository(db)
     scenario = scenario_repo.find_by_id(scenario_id)
@@ -990,32 +793,38 @@ def notify_dataset_enrichment_failed(
         logger.warning(f"Scenario {scenario_id} not found for failure notification")
         return
 
-    if not scenario.created_by:
-        logger.warning(f"Scenario {scenario_id} has no creator to notify")
-        return
+    user_repo = UserRepository(db)
+    admin_users = user_repo.find_by_role("admin")
 
-    message = f"{scenario.name}: {completed_count} completed, {failed_count} failed."
+    message = f"Scenario '{scenario.name}' failed: {completed_count} completed, {failed_count} failed."
     if error_message:
         # Truncate long error messages
-        short_error = error_message[:100] + "..." if len(error_message) > 100 else error_message
+        short_error = (
+            error_message[:100] + "..." if len(error_message) > 100 else error_message
+        )
         message += f" Error: {short_error}"
 
-    create_notification(
-        db=db,
-        user_id=scenario.created_by,
-        type=NotificationType.DATASET_ENRICHMENT_FAILED,
-        title="⚠️ Enrichment Failed",
-        message=message,
-        link=f"/scenarios/{scenario_id}",
-        metadata={
-            "dataset_name": scenario.name,
-            "scenario_id": scenario_id,
-            "completed_count": completed_count,
-            "failed_count": failed_count,
-            "error": error_message,
-            "status": "failed",
-        },
-    )
+    for admin in admin_users:
+        try:
+            create_notification(
+                db=db,
+                user_id=admin.id,
+                type=NotificationType.SYSTEM,
+                title="⚠️ Training Scenario Failed",
+                message=message,
+                link=f"/scenarios/{scenario_id}",
+                metadata={
+                    "pipeline_type": "training_scenario",
+                    "scenario_name": scenario.name,
+                    "scenario_id": scenario_id,
+                    "completed_count": completed_count,
+                    "failed_count": failed_count,
+                    "error": error_message,
+                    "status": "failed",
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify admin {admin.id}: {e}")
 
 
 def check_and_notify_enrichment_completed(
@@ -1023,9 +832,9 @@ def check_and_notify_enrichment_completed(
     scenario_id: str,
 ) -> bool:
     """
-    Check if enrichment is fully complete (features + scan metrics) and send notification.
+    Check if enrichment is fully complete (features + scan metrics) and finalize quality report.
 
-    Returns True if notification was sent, False if still pending.
+    Returns True if enrichment is complete, False if still pending.
     """
     from app.repositories.training_scenario import TrainingScenarioRepository
 
@@ -1044,19 +853,6 @@ def check_and_notify_enrichment_completed(
     scans_done = scenario.scan_extraction_completed
 
     if features_done and scans_done:
-        # Check if already notified/completed status to avoid spam if called multiple times?
-        # The calling task usually handles state transitions.
-        # But we can send the notification.
-
-        notify_dataset_enrichment_completed(
-            db=db,
-            user_id=scenario.created_by,
-            dataset_name=scenario.name,
-            scenario_id=scenario_id,
-            builds_features_extracted=scenario.builds_features_extracted,
-            builds_total=scenario.builds_total,
-        )
-
         # Finalize quality report after enrichment is complete
         try:
             from app.services.data_quality_service import DataQualityService

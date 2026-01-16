@@ -65,6 +65,15 @@ class ScanMetricsSummary(BaseModel):
     sonarqube_metrics_count: int = 0  # Number of unique SonarQube metric keys
 
 
+class HistogramBinCache(BaseModel):
+    """Cached histogram bin for distribution visualization."""
+
+    min_value: float
+    max_value: float
+    count: int
+    percentage: float = 0.0
+
+
 class DataQualityMetric(BaseModel):
     """Quality metrics for a single feature or scan metric."""
 
@@ -96,6 +105,9 @@ class DataQualityMetric(BaseModel):
 
     # Issues specific to this feature
     issues: List[str] = Field(default_factory=list)
+
+    # Pre-calculated distribution histogram (for numeric features)
+    distribution_bins: List[HistogramBinCache] = Field(default_factory=list)
 
 
 class DataQualityReport(BaseEntity):

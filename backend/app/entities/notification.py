@@ -11,14 +11,6 @@ from app.entities.base import BaseEntity, PyObjectId
 class NotificationType(str, Enum):
     """Types of notifications."""
 
-    # Model Pipeline (Admin)
-    PIPELINE_COMPLETED = "pipeline_completed"
-    PIPELINE_FAILED = "pipeline_failed"
-
-    # Dataset Enrichment (Admin)
-    DATASET_ENRICHMENT_COMPLETED = "dataset_enrichment_completed"
-    DATASET_ENRICHMENT_FAILED = "dataset_enrichment_failed"
-
     # System (Admin)
     RATE_LIMIT_EXHAUSTED = "rate_limit_exhausted"
     SYSTEM = "system"

@@ -278,20 +278,6 @@ export function GitHubTokensTab() {
       {/* Header with Actions */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {poolStatus && (
-            <Badge
-              variant="outline"
-              className={`text-sm px-3 py-1 ${poolStatus.estimated_requests_available === 0
-                ? 'border-red-500 text-red-600'
-                : poolStatus.estimated_requests_available < 1000
-                  ? 'border-yellow-500 text-yellow-600'
-                  : 'border-green-500 text-green-600'
-                }`}
-            >
-              <Activity className="w-4 h-4 mr-2" />
-              {poolStatus.estimated_requests_available.toLocaleString()} requests remaining
-            </Badge>
-          )}
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
@@ -325,7 +311,7 @@ export function GitHubTokensTab() {
             <Activity className={`w-4 h-4 mr-2 ${loading ? 'animate-pulse' : ''}`} />
             Sync Rate Limits
           </Button>
-          <Button size="sm" onClick={() => setShowAddModal(true)}>
+          <Button size="sm" onClick={() => setShowAddModal(true)} className="bg-green-600 hover:bg-green-700 text-white">
             <Plus className="w-4 h-4 mr-2" />
             Add Token
           </Button>
@@ -382,7 +368,7 @@ export function GitHubTokensTab() {
             </div>
           </CardHeader>
           <CardContent>
-            <Progress value={quotaPercentage} className="h-2" />
+            <Progress value={quotaPercentage} className="h-2" indicatorClassName="bg-green-600" />
             <div className="flex justify-between mt-1 text-xs text-muted-foreground">
               <span>0%</span>
               <span>{Math.round(quotaPercentage)}% of max capacity</span>

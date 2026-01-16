@@ -72,7 +72,7 @@ export function FeatureDistributionChart({
                                 allowDecimals={false}
                             />
                             <Tooltip
-                                cursor={{ fill: "var(--muted)" }}
+                                cursor={{ fill: "hsl(var(--muted))", opacity: 0.2 }}
                                 content={({ active, payload, label }) => {
                                     if (active && payload && payload.length) {
                                         return (
@@ -105,7 +105,7 @@ export function FeatureDistributionChart({
                                 dataKey="count"
                                 fill="currentColor"
                                 radius={[4, 4, 0, 0]}
-                                className="fill-primary"
+                                className="fill-blue-600"
                             />
                         </BarChart>
                     </ResponsiveContainer>

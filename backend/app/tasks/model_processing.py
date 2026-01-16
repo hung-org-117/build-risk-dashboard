@@ -645,20 +645,6 @@ def finalize_prediction(
                     f"{corr_prefix} Sent notifications: {high_count} HIGH, "
                     f"{medium_count} MEDIUM, {low_count} LOW"
                 )
-
-                from app.services.notification_service import (
-                    notify_pipeline_completed_to_admins,
-                )
-
-                notify_pipeline_completed_to_admins(
-                    db=self.db,
-                    repo_name=repo_config.full_name,
-                    predicted_count=predicted_count,
-                    failed_count=prediction_failed,
-                    high_count=high_count,
-                    medium_count=medium_count,
-                    low_count=low_count,
-                )
         except Exception as e:
             # Don't fail the task if notifications fail
             logger.warning(f"{corr_prefix} Failed to send user notifications: {e}")
@@ -1145,11 +1131,13 @@ def handle_processing_chain_error(
 
     # Notify admins about processing failure
     try:
-        from app.services.notification_service import notify_pipeline_failed_to_admins
+        from app.services.notification_service import (
+            notify_model_pipeline_failed_to_admins,
+        )
 
         repo_config = repo_config_repo.find_by_id(repo_config_id)
         repo_name = repo_config.full_name if repo_config else repo_config_id
-        notify_pipeline_failed_to_admins(
+        notify_model_pipeline_failed_to_admins(
             db=self.db,
             repo_name=repo_name,
             error_message=f"Processing failed: {error_msg}",

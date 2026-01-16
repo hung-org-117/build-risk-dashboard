@@ -26,69 +26,12 @@ const USER_NOTIFICATION_TYPES = [
   },
 ];
 
-// Additional notification types available to admins
-const ADMIN_NOTIFICATION_TYPES = [
-  {
-    category: 'Model Pipeline',
-    description: 'Feature extraction and prediction notifications',
-    toggles: [
-      {
-        key: 'pipeline_completed',
-        label: 'Pipeline Completed',
-        description: 'Notify when feature extraction completes successfully',
-      },
-      {
-        key: 'pipeline_failed',
-        label: 'Pipeline Failed',
-        description: 'Notify when feature extraction pipeline fails',
-        isCritical: true,
-      },
-    ],
-  },
-  {
-    category: 'Dataset Enrichment',
-    description: 'Dataset enrichment notifications',
-    toggles: [
-      {
-        key: 'dataset_enrichment_completed',
-        label: 'Enrichment Completed',
-        description: 'Notify when dataset enrichment process completes',
-      },
-      {
-        key: 'dataset_enrichment_failed',
-        label: 'Enrichment Failed',
-        description: 'Notify when dataset enrichment process fails',
-        isCritical: true,
-      },
-    ],
-  },
-  {
-    category: 'System & Rate Limits',
-    description: 'GitHub token rate limits and system alerts',
-    toggles: [
-      {
-        key: 'rate_limit_exhausted',
-        label: 'Rate Limit Exhausted',
-        description: 'Notify when all GitHub tokens have exhausted their quota',
-        isCritical: true,
-      },
-      {
-        key: 'system_alerts',
-        label: 'System Alerts',
-        description: 'Important system notifications',
-        isCritical: true,
-      },
-    ],
-  },
-];
 
 export function NotificationsTab() {
   const [user, setUser] = useState<UserAccount | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
-
-  const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     loadUser()
@@ -213,12 +156,12 @@ export function NotificationsTab() {
         </CardContent>
       </Card>
 
-      {/* User Notification Types */}
+      {/* User Notification Types - Email Preferences */}
       <Card>
         <CardHeader>
-          <CardTitle>Notification Preferences</CardTitle>
+          <CardTitle>Email Notifications for Events</CardTitle>
           <CardDescription>
-            Choose which events you want to be notified about
+            All events are shown in-app by default. Configure which events should also be sent via email.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -238,24 +181,14 @@ export function NotificationsTab() {
                   </div>
                   <p className="text-xs text-muted-foreground">{type.description}</p>
                 </div>
-                <div className="flex gap-4">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor={`${type.key}-inapp`} className="text-xs text-muted-foreground">In-App</Label>
-                    <Switch
-                      id={`${type.key}-inapp`}
-                      checked={sub.in_app}
-                      onCheckedChange={(checked) => handleSubscriptionChange(type.key, 'in_app', checked)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor={`${type.key}-email`} className="text-xs text-muted-foreground">Email</Label>
-                    <Switch
-                      id={`${type.key}-email`}
-                      checked={sub.email}
-                      disabled={!user.email_notifications_enabled}
-                      onCheckedChange={(checked) => handleSubscriptionChange(type.key, 'email', checked)}
-                    />
-                  </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor={`${type.key}-email`} className="text-xs text-muted-foreground">Send Email</Label>
+                  <Switch
+                    id={`${type.key}-email`}
+                    checked={sub.email}
+                    disabled={!user.email_notifications_enabled}
+                    onCheckedChange={(checked) => handleSubscriptionChange(type.key, 'email', checked)}
+                  />
                 </div>
               </div>
             )
@@ -263,69 +196,7 @@ export function NotificationsTab() {
         </CardContent>
       </Card>
 
-      {/* Admin-only Notification Types */}
-      {isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Admin Notifications</CardTitle>
-            <CardDescription>
-              System and pipeline notifications (admin only)
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {ADMIN_NOTIFICATION_TYPES.map((category) => (
-              <div key={category.category} className="space-y-3">
-                {/* Category Header */}
-                <div className="border-b pb-2">
-                  <h4 className="font-semibold text-sm">{category.category}</h4>
-                  <p className="text-xs text-muted-foreground">{category.description}</p>
-                </div>
-                {/* Category Toggles */}
-                <div className="space-y-3">
-                  {category.toggles.map((toggle) => {
-                    const sub = user.subscriptions[toggle.key] || { in_app: true, email: false }
-                    return (
-                      <div key={toggle.key} className="flex items-center justify-between py-1 pl-2">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <Label>{toggle.label}</Label>
-                            {'isCritical' in toggle && toggle.isCritical && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                                <AlertTriangle className="h-3 w-3" />
-                                Critical
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground">{toggle.description}</p>
-                        </div>
-                        <div className="flex gap-4">
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor={`${toggle.key}-inapp`} className="text-xs text-muted-foreground">In-App</Label>
-                            <Switch
-                              id={`${toggle.key}-inapp`}
-                              checked={sub.in_app}
-                              onCheckedChange={(checked) => handleSubscriptionChange(toggle.key, 'in_app', checked)}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor={`${toggle.key}-email`} className="text-xs text-muted-foreground">Email</Label>
-                            <Switch
-                              id={`${toggle.key}-email`}
-                              checked={sub.email}
-                              disabled={!user.email_notifications_enabled}
-                              onCheckedChange={(checked) => handleSubscriptionChange(toggle.key, 'email', checked)}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+
 
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>

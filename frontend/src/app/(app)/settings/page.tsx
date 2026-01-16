@@ -33,63 +33,6 @@ const USER_NOTIFICATION_TYPES = [
     },
 ];
 
-// Admin-only notification types
-const ADMIN_NOTIFICATION_TYPES = [
-    {
-        category: 'Model Pipeline',
-        description: 'Feature extraction and prediction notifications',
-        events: [
-            {
-                key: 'pipeline_completed',
-                label: 'Pipeline Completed',
-                description: 'When feature extraction completes successfully',
-                isCritical: false,
-            },
-            {
-                key: 'pipeline_failed',
-                label: 'Pipeline Failed',
-                description: 'When feature extraction pipeline fails',
-                isCritical: true,
-            },
-        ],
-    },
-    {
-        category: 'Dataset Enrichment',
-        description: 'Dataset enrichment notifications',
-        events: [
-            {
-                key: 'dataset_enrichment_completed',
-                label: 'Enrichment Completed',
-                description: 'When dataset enrichment process completes',
-                isCritical: false,
-            },
-            {
-                key: 'dataset_enrichment_failed',
-                label: 'Enrichment Failed',
-                description: 'When dataset enrichment process fails',
-                isCritical: true,
-            },
-        ],
-    },
-    {
-        category: 'System',
-        description: 'System and rate limit notifications',
-        events: [
-            {
-                key: 'rate_limit_exhausted',
-                label: 'Rate Limit Exhausted',
-                description: 'When all GitHub tokens are rate limited',
-                isCritical: true,
-            },
-            {
-                key: 'system_alerts',
-                label: 'System Alerts',
-                description: 'Important system notifications',
-                isCritical: true,
-            },
-        ],
-    },
-];
 
 export default function SettingsPage() {
     const { toast } = useToast();
@@ -146,7 +89,7 @@ export default function SettingsPage() {
             return;
         }
         const hasChanges =
-            user.browser_notifications !== originalUser.browser_notifications ||
+
             user.email_notifications_enabled !== originalUser.email_notifications_enabled ||
             user.notification_email !== originalUser.notification_email ||
             JSON.stringify(user.subscriptions) !== JSON.stringify(originalUser.subscriptions);
@@ -160,7 +103,7 @@ export default function SettingsPage() {
         setIsSaving(true);
         try {
             const updatedUser = await usersApi.updateCurrentUser({
-                browser_notifications: user.browser_notifications,
+                browser_notifications: true, // Always enable logic-wise, though UI is gone
                 email_notifications_enabled: user.email_notifications_enabled,
                 notification_email: user.notification_email,
                 subscriptions: user.subscriptions,
@@ -182,10 +125,7 @@ export default function SettingsPage() {
         }
     }, [user, toast]);
 
-    const handleBrowserNotificationsChange = (checked: boolean) => {
-        if (!user) return;
-        setUser({ ...user, browser_notifications: checked });
-    };
+
 
     const handleEmailNotificationsChange = (checked: boolean) => {
         if (!user) return;
@@ -244,7 +184,7 @@ export default function SettingsPage() {
             </div>
 
             <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="notifications" className="flex items-center gap-2">
                         <Bell className="h-4 w-4" />
                         Notifications
@@ -256,70 +196,21 @@ export default function SettingsPage() {
                 </TabsList>
 
                 <TabsContent value="notifications" className="space-y-6">
-                    {/* Browser Notifications */}
-                    <Card>
-                        <CardHeader>
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="space-y-1">
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Bell className="h-5 w-5" />
-                                        Browser Notifications
-                                    </CardTitle>
-                                    <CardDescription>
-                                        Receive in-app alerts in this browser.
-                                    </CardDescription>
-                                </div>
-                                <Badge
-                                    variant="outline"
-                                    className={
-                                        user.browser_notifications
-                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                            : 'border-slate-200 bg-slate-50 text-slate-600'
-                                    }
-                                >
-                                    {user.browser_notifications ? 'Enabled' : 'Paused'}
-                                </Badge>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="flex items-center justify-between">
-                                <Label htmlFor="browser-notifications">
-                                    Enable Browser Notifications
-                                </Label>
-                                <Switch
-                                    id="browser-notifications"
-                                    checked={user.browser_notifications}
-                                    onCheckedChange={handleBrowserNotificationsChange}
-                                />
-                            </div>
-                        </CardContent>
-                    </Card>
+
 
 
 
                     {/* Email Notifications */}
                     <Card>
                         <CardHeader>
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="space-y-1">
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Mail className="h-5 w-5" />
-                                        Email Notifications
-                                    </CardTitle>
-                                    <CardDescription>
-                                        Receive important alerts via email.
-                                    </CardDescription>
-                                </div>
-                                <Badge
-                                    variant="outline"
-                                    className={
-                                        user.email_notifications_enabled
-                                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                            : 'border-slate-200 bg-slate-50 text-slate-600'
-                                    }
-                                >
-                                    {user.email_notifications_enabled ? 'Enabled' : 'Disabled'}
-                                </Badge>
+                            <div className="space-y-1">
+                                <CardTitle className="flex items-center gap-2">
+                                    <Mail className="h-5 w-5" />
+                                    Email Notifications
+                                </CardTitle>
+                                <CardDescription>
+                                    Receive important alerts via email.
+                                </CardDescription>
                             </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -351,29 +242,23 @@ export default function SettingsPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Event Subscriptions */}
+                    {/* Event Subscriptions - Email Preferences */}
                     <Card>
                         <CardHeader>
-                            <CardTitle>Event Subscriptions</CardTitle>
+                            <CardTitle>Email Notifications for Events</CardTitle>
                             <CardDescription>
-                                Choose which events you want to be notified about.
+                                All events are shown in-app by default. Configure which events should also be sent via email.
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-4">
-                                {/* Header */}
-                                <div className="grid grid-cols-[1fr,80px,80px] gap-2 text-xs font-medium text-muted-foreground border-b pb-2">
-                                    <div>Event</div>
-                                    <div className="text-center">In-App</div>
-                                    <div className="text-center">Email</div>
-                                </div>
                                 {/* Event rows */}
                                 {USER_NOTIFICATION_TYPES.map((event) => {
                                     const sub = user.subscriptions[event.key] || { in_app: true, email: false };
                                     return (
                                         <div
                                             key={event.key}
-                                            className="grid grid-cols-[1fr,80px,80px] gap-2 items-center py-2"
+                                            className="flex items-center justify-between py-2 border-b last:border-0"
                                         >
                                             <div className="space-y-0.5">
                                                 <div className="flex items-center gap-2">
@@ -389,16 +274,12 @@ export default function SettingsPage() {
                                                     {event.description}
                                                 </p>
                                             </div>
-                                            <div className="flex justify-center">
+                                            <div className="flex items-center gap-2">
+                                                <Label htmlFor={`${event.key}-email`} className="text-xs text-muted-foreground">
+                                                    Send Email
+                                                </Label>
                                                 <Switch
-                                                    checked={sub.in_app}
-                                                    onCheckedChange={(checked) =>
-                                                        handleSubscriptionChange(event.key, 'in_app', checked)
-                                                    }
-                                                />
-                                            </div>
-                                            <div className="flex justify-center">
-                                                <Switch
+                                                    id={`${event.key}-email`}
                                                     checked={sub.email}
                                                     disabled={!user.email_notifications_enabled}
                                                     onCheckedChange={(checked) =>
@@ -417,81 +298,6 @@ export default function SettingsPage() {
                             )}
                         </CardContent>
                     </Card>
-
-                    {/* Admin Event Subscriptions - Only visible for admins */}
-                    {user.role === 'admin' && (
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    Admin Notifications
-                                    <Badge variant="secondary" className="text-xs">Admin Only</Badge>
-                                </CardTitle>
-                                <CardDescription>
-                                    System and pipeline notifications for administrators.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-6">
-                                {ADMIN_NOTIFICATION_TYPES.map((category) => (
-                                    <div key={category.category} className="space-y-3">
-                                        <div className="border-b pb-2">
-                                            <h4 className="font-semibold text-sm">{category.category}</h4>
-                                            <p className="text-xs text-muted-foreground">{category.description}</p>
-                                        </div>
-                                        <div className="space-y-2">
-                                            {/* Header for this category */}
-                                            <div className="grid grid-cols-[1fr,80px,80px] gap-2 text-xs font-medium text-muted-foreground">
-                                                <div>Event</div>
-                                                <div className="text-center">In-App</div>
-                                                <div className="text-center">Email</div>
-                                            </div>
-                                            {/* Event rows */}
-                                            {category.events.map((event) => {
-                                                const sub = user.subscriptions[event.key] || { in_app: true, email: false };
-                                                return (
-                                                    <div
-                                                        key={event.key}
-                                                        className="grid grid-cols-[1fr,80px,80px] gap-2 items-center py-2"
-                                                    >
-                                                        <div className="space-y-0.5">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-medium text-sm">{event.label}</span>
-                                                                {event.isCritical && (
-                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                                                                        <AlertTriangle className="h-3 w-3" />
-                                                                        Critical
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            <p className="text-xs text-muted-foreground">
-                                                                {event.description}
-                                                            </p>
-                                                        </div>
-                                                        <div className="flex justify-center">
-                                                            <Switch
-                                                                checked={sub.in_app}
-                                                                onCheckedChange={(checked) =>
-                                                                    handleSubscriptionChange(event.key, 'in_app', checked)
-                                                                }
-                                                            />
-                                                        </div>
-                                                        <div className="flex justify-center">
-                                                            <Switch
-                                                                checked={sub.email}
-                                                                disabled={!user.email_notifications_enabled}
-                                                                onCheckedChange={(checked) =>
-                                                                    handleSubscriptionChange(event.key, 'email', checked)
-                                                                }
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                ))}
-                            </CardContent>
-                        </Card>
-                    )}
 
                     {/* Save Button Section */}
                     <div className="flex items-center justify-end gap-3 pt-4">
