@@ -1,15 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import {
-    AlertCircle,
-    CheckCircle2,
-    TrendingDown,
-    TrendingUp,
-    Loader2,
-    ShieldCheck,
-    RefreshCw,
-} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
     Card,
     CardContent,
@@ -17,24 +9,28 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { buildApi } from "@/lib/api";
-import { useRepo } from "../RepoContext";
 import type { UnifiedBuild } from "@/types";
 import {
-    AreaChart,
+    Loader2,
+    RefreshCw,
+    ShieldCheck
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
     Area,
+    AreaChart,
+    CartesianGrid,
+    Cell,
+    Legend,
+    Pie,
+    PieChart,
+    ResponsiveContainer,
+    Tooltip,
     XAxis,
     YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer,
-    Legend,
-    PieChart,
-    Pie,
-    Cell,
 } from "recharts";
+import { useRepo } from "../RepoContext";
 
 export function AnalyticsTab() {
     const { repoId, repo } = useRepo();
@@ -108,14 +104,6 @@ export function AnalyticsTab() {
     // Sort dates and get last 30 days
     const sortedDates = Object.keys(buildsByDate).sort().slice(-30);
 
-    // Calculate risk trend (is it improving or worsening?)
-    const recentBuilds = sortedDates.slice(-7);
-    const olderBuilds = sortedDates.slice(0, Math.max(0, sortedDates.length - 7));
-
-    const recentHighRisk = recentBuilds.reduce((sum, d) => sum + buildsByDate[d].HIGH, 0);
-    const olderHighRisk = olderBuilds.reduce((sum, d) => sum + buildsByDate[d].HIGH, 0);
-    const isImproving = recentHighRisk < olderHighRisk;
-
     // Risk by branch
     const riskByBranch: Record<string, { LOW: number; MEDIUM: number; HIGH: number; total: number }> = {};
     buildsWithPredictions.forEach((b) => {
@@ -158,7 +146,7 @@ export function AnalyticsTab() {
             </div>
 
             {/* Key Metrics Row */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="shadow-sm">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -203,38 +191,6 @@ export function AnalyticsTab() {
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                             {totalPredicted > 0 ? ((riskCounts.HIGH / totalPredicted) * 100).toFixed(1) : 0}% of predictions
-                        </p>
-                    </CardContent>
-                </Card>
-
-                <Card className="shadow-sm">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                            Risk Trend
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="flex items-center gap-2">
-                            {sortedDates.length >= 2 ? (
-                                <>
-                                    {isImproving ? (
-                                        <div className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded-full flex items-center gap-1 text-sm font-medium">
-                                            <TrendingDown className="h-4 w-4" />
-                                            Improving
-                                        </div>
-                                    ) : (
-                                        <div className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 px-2 py-1 rounded-full flex items-center gap-1 text-sm font-medium">
-                                            <TrendingUp className="h-4 w-4" />
-                                            Worsening
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <span className="text-muted-foreground text-sm font-medium">Not enough data</span>
-                            )}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-2">
-                            Compared to last 7 days
                         </p>
                     </CardContent>
                 </Card>

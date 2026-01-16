@@ -27,19 +27,45 @@ import {
 import { buildApi } from "@/lib/api";
 import type { BuildDetail } from "@/types";
 
+enum BuildStatus {
+    SUCCESS = "success",
+    PASSED = "passed",
+    FAILURE = "failure",
+    CANCELLED = "cancelled",
+    SKIPPED = "skipped",
+    TIMED_OUT = "timed_out",
+    NEUTRAL = "neutral",
+    UNKNOWN = "unknown",
+}
+
+enum ExtractionStatus {
+    PENDING = "pending",
+    COMPLETED = "completed",
+    PARTIAL = "partial",
+    FAILED = "failed",
+}
+
 function StatusBadge({ status }: { status: string }) {
     const s = status.toLowerCase();
-    if (s === "success" || s === "passed") {
+
+    if (s === BuildStatus.SUCCESS || s === BuildStatus.PASSED) {
         return (
             <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
                 <CheckCircle2 className="h-3 w-3" /> Passed
             </Badge>
         );
     }
-    if (s === "failure" || s === "failed") {
+    if (s === BuildStatus.FAILURE || s === "failed") {
         return (
             <Badge variant="destructive" className="gap-1">
                 <XCircle className="h-3 w-3" /> Failed
+            </Badge>
+        );
+    }
+    if ([BuildStatus.CANCELLED, "canceled"].includes(s as BuildStatus)) {
+        return (
+            <Badge variant="secondary" className="gap-1">
+                <XCircle className="h-3 w-3" /> Cancelled
             </Badge>
         );
     }
@@ -52,28 +78,29 @@ function StatusBadge({ status }: { status: string }) {
 
 function ExtractionStatusBadge({ status }: { status: string }) {
     const s = status.toLowerCase();
-    if (s === "completed") {
+
+    if (s === ExtractionStatus.COMPLETED) {
         return (
             <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
                 <CheckCircle2 className="h-3 w-3" /> Completed
             </Badge>
         );
     }
-    if (s === "partial") {
+    if (s === ExtractionStatus.PARTIAL) {
         return (
             <Badge variant="outline" className="border-amber-500 text-amber-600 gap-1">
                 <AlertTriangle className="h-3 w-3" /> Partial
             </Badge>
         );
     }
-    if (s === "failed") {
+    if (s === ExtractionStatus.FAILED) {
         return (
             <Badge variant="destructive" className="gap-1">
                 <XCircle className="h-3 w-3" /> Failed
             </Badge>
         );
     }
-    if (s === "pending") {
+    if (s === ExtractionStatus.PENDING) {
         return (
             <Badge variant="secondary" className="gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" /> Pending
@@ -81,26 +108,6 @@ function ExtractionStatusBadge({ status }: { status: string }) {
         );
     }
     return <Badge variant="secondary">{status}</Badge>;
-}
-
-function formatDateTime(value?: string | null): string {
-    if (!value) return "—";
-    try {
-        return new Intl.DateTimeFormat(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-        }).format(new Date(value));
-    } catch {
-        return value;
-    }
-}
-
-function formatDuration(seconds?: number | null): string {
-    if (!seconds) return "—";
-    if (seconds < 60) return `${seconds.toFixed(1)}s`;
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    return `${mins}m ${secs}s`;
 }
 
 function RiskBadge({ level, confidence }: { level: string; confidence?: number }) {
@@ -131,6 +138,70 @@ function RiskBadge({ level, confidence }: { level: string; confidence?: number }
     return <Badge variant="secondary">{level}</Badge>;
 }
 
+function formatDateTime(value?: string | null): string {
+    if (!value) return "—";
+    try {
+        return new Intl.DateTimeFormat(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+        }).format(new Date(value));
+    } catch {
+        return value;
+    }
+}
+
+function formatDuration(seconds?: number | null): string {
+    if (!seconds) return "—";
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${mins}m ${secs}s`;
+}
+
+function FeatureValue({ value }: { value: unknown }) {
+    if (value === null || value === undefined) {
+        return <span className="text-muted-foreground italic">null</span>;
+    }
+
+    if (typeof value === "boolean") {
+        return (
+            <Badge variant={value ? "default" : "secondary"} className="font-mono">
+                {value ? "true" : "false"
+                }
+            </Badge>
+        );
+    }
+
+    if (typeof value === "number") {
+        return <span className="font-mono">{value}</span>;
+    }
+
+    if (typeof value === "object") {
+        const jsonStr = JSON.stringify(value, null, 2);
+        return (
+            <div className="max-w-[400px] overflow-x-auto">
+                <pre className="font-mono text-xs whitespace-pre bg-slate-50 dark:bg-slate-900/50 rounded px-2 py-1">
+                    {jsonStr}
+                </pre>
+            </div>
+        );
+    }
+
+    const strValue = String(value);
+
+    if (strValue.length > 60 || strValue.includes("#")) {
+        return (
+            <div className="max-w-[400px] overflow-x-auto">
+                <code className="font-mono text-xs whitespace-nowrap bg-slate-50 dark:bg-slate-900/50 rounded px-2 py-1 block">
+                    {strValue}
+                </code>
+            </div>
+        );
+    }
+
+    return <span className="font-mono">{strValue}</span>;
+}
+
 export default function UserBuildDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -139,23 +210,21 @@ export default function UserBuildDetailPage() {
 
     const [build, setBuild] = useState<BuildDetail | null>(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [featureSearch, setFeatureSearch] = useState("");
 
     useEffect(() => {
         const loadBuild = async () => {
             setLoading(true);
-            setError(null);
             try {
                 const data = await buildApi.getById(repoId, buildId);
                 setBuild(data);
             } catch (err) {
                 console.error(err);
-                setError("Unable to load build details.");
             } finally {
                 setLoading(false);
             }
         };
+
         loadBuild();
     }, [repoId, buildId]);
 
@@ -177,22 +246,24 @@ export default function UserBuildDetailPage() {
         );
     }
 
-    if (error || !build) {
+    if (!build) {
         return (
             <div className="space-y-6">
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => router.push(`/repos/${repoId}/builds`)}
+                    onClick={() => router.push(`/my-repos/${repoId}/builds`)}
                     className="gap-2"
                 >
                     <ArrowLeft className="h-4 w-4" />
                     Back to Builds
                 </Button>
-                <Card className="border-red-200 bg-red-50/60 dark:border-red-800 dark:bg-red-900/20">
+                <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-900/20">
                     <CardHeader>
-                        <CardTitle className="text-red-700 dark:text-red-300">Error</CardTitle>
-                        <CardDescription>{error || "Build not found"}</CardDescription>
+                        <CardTitle className="text-amber-700 dark:text-amber-300">
+                            Build Not Found
+                        </CardTitle>
+                        <CardDescription>The requested build could not be loaded.</CardDescription>
                     </CardHeader>
                 </Card>
             </div>
@@ -236,13 +307,15 @@ export default function UserBuildDetailPage() {
                 </div>
             </div>
 
-            {/* Build Info */}
+            {/* Build Run Information */}
             <Card>
                 <CardHeader>
-                    <CardTitle>Build Information</CardTitle>
+                    <CardTitle>Build Run Information</CardTitle>
+                    <CardDescription>Details from the CI provider</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="rounded-lg border p-4 space-y-2">
+                <CardContent className="space-y-6">
+                    {/* Commit Info */}
+                    <div className="rounded-lg border p-4 space-y-3">
                         <div className="flex items-center gap-2 text-sm">
                             <GitCommit className="h-4 w-4 text-muted-foreground" />
                             <span className="font-mono text-sm">{build.commit_sha}</span>
@@ -258,18 +331,35 @@ export default function UserBuildDetailPage() {
                         )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                    {/* Metadata Grid */}
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                        <div className="rounded-lg border p-4">
+                            <p className="text-xs text-muted-foreground">CI Build ID</p>
+                            <p className="font-mono text-sm mt-1 truncate" title={build.build_id}>
+                                {build.build_id}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border p-4">
+                            <p className="text-xs text-muted-foreground">Provider</p>
+                            <p className="font-medium mt-1 capitalize">
+                                {build.provider.replace("_", " ")}
+                            </p>
+                        </div>
                         <div className="rounded-lg border p-4">
                             <p className="text-xs text-muted-foreground">Duration</p>
                             <p className="font-medium mt-1">{formatDuration(build.duration_seconds)}</p>
                         </div>
-                        <div className="rounded-lg border p-4">
-                            <p className="text-xs text-muted-foreground">Created</p>
-                            <p className="font-medium mt-1 text-sm">{formatDateTime(build.created_at)}</p>
+                    </div>
+
+                    {/* Timestamps */}
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span className="text-muted-foreground">Created:</span>{" "}
+                            <span>{formatDateTime(build.created_at)}</span>
                         </div>
-                        <div className="rounded-lg border p-4">
-                            <p className="text-xs text-muted-foreground">Completed</p>
-                            <p className="font-medium mt-1 text-sm">{formatDateTime(build.completed_at)}</p>
+                        <div>
+                            <span className="text-muted-foreground">Completed:</span>{" "}
+                            <span>{formatDateTime(build.completed_at)}</span>
                         </div>
                     </div>
                 </CardContent>
@@ -336,7 +426,7 @@ export default function UserBuildDetailPage() {
                                     <p className="text-xs text-muted-foreground">Uncertainty</p>
                                     <p className="font-medium mt-1">
                                         {build.prediction_uncertainty
-                                            ? build.prediction_uncertainty.toFixed(3)
+                                            ? `${(build.prediction_uncertainty * 100).toFixed(1)}%`
                                             : "—"}
                                     </p>
                                 </div>
@@ -367,7 +457,7 @@ export default function UserBuildDetailPage() {
                 </CardHeader>
                 <CardContent>
                     {!build.has_training_data ? (
-                        <div className="rounded-lg border bg-slate-50 p-6 text-center dark:bg-slate-900/50">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
                             <p className="text-muted-foreground">Feature extraction not started yet.</p>
                         </div>
                     ) : build.extraction_status === "failed" ? (
@@ -377,7 +467,7 @@ export default function UserBuildDetailPage() {
                             </p>
                         </div>
                     ) : build.extraction_status === "pending" ? (
-                        <div className="rounded-lg border bg-slate-50 p-6 text-center dark:bg-slate-900/50">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
                             <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
                             <p className="text-muted-foreground mt-2">Extraction in progress...</p>
                         </div>
@@ -392,15 +482,14 @@ export default function UserBuildDetailPage() {
                                     className="pl-9"
                                 />
                             </div>
-
-                            <div className="max-h-[500px] overflow-y-auto rounded-lg border">
-                                <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                                    <thead className="bg-slate-50 dark:bg-slate-900/50 sticky top-0">
-                                        <tr>
-                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                            <div className="rounded-lg border overflow-hidden max-h-[500px] overflow-y-auto relative">
+                                <table className="w-full text-sm relative">
+                                    <thead className="sticky top-0 z-10">
+                                        <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+                                            <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
                                                 Feature Name
                                             </th>
-                                            <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground bg-slate-50 dark:bg-slate-900">
                                                 Value
                                             </th>
                                         </tr>
@@ -408,13 +497,11 @@ export default function UserBuildDetailPage() {
                                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                         {featureEntries.map(([key, value]) => (
                                             <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                                                <td className="px-4 py-3 font-mono text-sm">{key}</td>
-                                                <td className="px-4 py-3 text-right font-mono text-sm">
-                                                    {value === null || value === undefined
-                                                        ? <span className="text-muted-foreground">null</span>
-                                                        : typeof value === "boolean"
-                                                            ? value ? "true" : "false"
-                                                            : String(value)}
+                                                <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
+                                                    {key}
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <FeatureValue value={value} />
                                                 </td>
                                             </tr>
                                         ))}
@@ -423,7 +510,7 @@ export default function UserBuildDetailPage() {
                             </div>
                         </div>
                     ) : (
-                        <div className="rounded-lg border bg-slate-50 p-6 text-center dark:bg-slate-900/50">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
                             <p className="text-muted-foreground">No features extracted.</p>
                         </div>
                     )}

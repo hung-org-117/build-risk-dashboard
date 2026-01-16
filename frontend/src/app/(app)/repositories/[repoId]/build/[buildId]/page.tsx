@@ -425,7 +425,7 @@ export default function BuildDetailPage() {
                                     <p className="text-xs text-muted-foreground">Uncertainty</p>
                                     <p className="font-medium mt-1">
                                         {build.prediction_uncertainty
-                                            ? build.prediction_uncertainty.toFixed(3)
+                                            ? `${(build.prediction_uncertainty * 100).toFixed(1)}%`
                                             : "—"}
                                     </p>
                                 </div>

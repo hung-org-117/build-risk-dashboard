@@ -89,7 +89,6 @@ const PRESET_LAYOUTS = {
     { widget_id: "recent_builds", x: 6, y: 1, w: 6, h: 3 },
     { widget_id: "risk_distribution", x: 0, y: 4, w: 6, h: 2 },
     { widget_id: "high_risk_builds", x: 6, y: 4, w: 3, h: 1 },
-    { widget_id: "getting_started", x: 9, y: 4, w: 3, h: 2 },
   ],
   // 2/3 split: 2 wide on left, 1 on right
   twoThirdSplit: [
@@ -132,6 +131,7 @@ export default function OverviewPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1200);
   const [recentBuilds, setRecentBuilds] = useState<Build[]>([]);
+  const originalWidgetsRef = useRef<WidgetConfig[]>([]);
 
   // Check if user is admin
   const isAdmin = user?.role === "admin";
@@ -538,7 +538,10 @@ export default function OverviewPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setIsEditing(false)}
+                onClick={() => {
+                  setWidgets(originalWidgetsRef.current);
+                  setIsEditing(false);
+                }}
               >
                 Cancel
               </Button>
@@ -554,7 +557,10 @@ export default function OverviewPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                originalWidgetsRef.current = widgets;
+                setIsEditing(true);
+              }}
             >
               <Settings2 className="h-4 w-4 mr-1" />
               Customize

@@ -226,19 +226,7 @@ def get_available_widgets(
 
     # User-only widgets (when user has no data, show onboarding)
     # Note: getting_started is dynamically shown based on user data, not permissions
-    user_widgets = [
-        (
-            WidgetDefinition(
-                widget_id="getting_started",
-                widget_type="card",
-                title="Getting Started",
-                description="Quick start guide for new users",
-                default_w=3,
-                default_h=2,
-            ),
-            Permission.VIEW_OWN_DASHBOARD,
-        ),
-    ]
+    user_widgets = []
 
     # Filter widgets based on user's role permissions
     result = []

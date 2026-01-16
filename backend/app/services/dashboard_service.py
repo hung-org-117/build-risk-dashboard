@@ -128,7 +128,7 @@ class DashboardService:
         Returns:
             Tuple of (repo_ids list, repo_id->full_name dict) or None if no repos
         """
-        repo_filter = {"is_private": False}  # Public repos only
+        repo_filter = {}
 
         # Add accessible repos filter for non-admin users
         if not user_context["is_admin"] and user_context["accessible_repos"]:

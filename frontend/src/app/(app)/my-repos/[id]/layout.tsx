@@ -216,7 +216,7 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
     const isOverviewActive = pathname === `/my-repos/${repoId}` || pathname.endsWith("/overview");
     const isBuildsActive = pathname.includes("/builds");
     const isAnalyticsActive = pathname.includes("/analytics");
-    const isBuildDetailPage = pathname.includes("/build/") || (pathname.includes("/builds/") && pathname.split("/").length > 5);
+    const isBuildDetailPage = pathname.includes("/build/") || (pathname.includes("/builds/") && pathname.split("/").length > 4);
     // my-repos/[id]/builds/[buildId] -> length is roughly 5 or 6 parts depending on splitting
 
     const contextValue: RepoContextType = {
