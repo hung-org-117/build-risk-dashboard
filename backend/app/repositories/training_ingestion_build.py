@@ -333,3 +333,109 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
             {"_id": 1},
         )
         return [str(doc["_id"]) for doc in docs]
+
+    # ========== Task Failure Handling Methods ==========
+
+    def mark_builds_failed_by_commits(
+        self,
+        scenario_id: str,
+        commit_shas: List[str],
+        error_message: str,
+    ) -> int:
+        """
+        Mark builds as FAILED based on commit SHAs.
+
+        Used by IngestionTask when a task fails and needs to mark
+        affected builds based on the commits it was processing.
+
+        Args:
+            scenario_id: TrainingScenario ID
+            commit_shas: List of commit SHAs whose builds should be marked
+            error_message: Error message to store
+
+        Returns:
+            Number of builds marked as failed
+        """
+        if not commit_shas:
+            return 0
+
+        result = self.collection.update_many(
+            {
+                "scenario_id": self._to_object_id(scenario_id),
+                "commit_sha": {"$in": commit_shas},
+                "status": IngestionStatus.INGESTING.value,
+            },
+            {
+                "$set": {
+                    "status": IngestionStatus.FAILED.value,
+                    "ingestion_error": error_message[:500],
+                }
+            },
+        )
+        return result.modified_count
+
+    def mark_all_ingesting_failed(
+        self,
+        scenario_id: str,
+        error_message: str,
+    ) -> int:
+        """
+        Mark ALL currently INGESTING builds as FAILED.
+
+        Used when a repo-wide failure occurs (e.g., clone failed)
+        that affects all builds for the scenario.
+
+        Args:
+            scenario_id: TrainingScenario ID
+            error_message: Error message to store
+
+        Returns:
+            Number of builds marked as failed
+        """
+        result = self.collection.update_many(
+            {
+                "scenario_id": self._to_object_id(scenario_id),
+                "status": IngestionStatus.INGESTING.value,
+            },
+            {
+                "$set": {
+                    "status": IngestionStatus.FAILED.value,
+                    "ingestion_error": error_message[:500],
+                }
+            },
+        )
+        return result.modified_count
+
+    def update_status_by_ci_run_ids(
+        self,
+        scenario_id: str,
+        ci_run_ids: List[str],
+        from_status: str,
+        updates: dict,
+    ) -> int:
+        """
+        Update build status for builds matching specific CI run IDs.
+
+        Used by IngestionTask to mark specific builds as FAILED on task failure.
+
+        Args:
+            scenario_id: TrainingScenario ID
+            ci_run_ids: List of CI run IDs to update
+            from_status: Current status to filter (e.g., INGESTING)
+            updates: Fields to update (e.g., status, ingestion_error)
+
+        Returns:
+            Number of builds updated
+        """
+        if not ci_run_ids:
+            return 0
+
+        result = self.collection.update_many(
+            {
+                "scenario_id": self._to_object_id(scenario_id),
+                "status": from_status,
+                "ci_run_id": {"$in": ci_run_ids},
+            },
+            {"$set": updates},
+        )
+        return result.modified_count

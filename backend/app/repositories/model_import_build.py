@@ -740,3 +740,75 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
                     summary[resource][item["_id"]] = item["count"]
 
         return summary
+
+    # ========== Task Failure Handling Methods ==========
+
+    def mark_builds_failed_by_commits(
+        self,
+        config_id: str,
+        commit_shas: List[str],
+        error_message: str,
+    ) -> int:
+        """
+        Mark builds as FAILED based on commit SHAs.
+
+        Used by IngestionTask when a task fails and needs to mark
+        affected builds based on the commits it was processing.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            commit_shas: List of commit SHAs whose builds should be marked
+            error_message: Error message to store
+
+        Returns:
+            Number of builds marked as failed
+        """
+        if not commit_shas:
+            return 0
+
+        result = self.collection.update_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "commit_sha": {"$in": commit_shas},
+                "status": ModelImportBuildStatus.INGESTING.value,
+            },
+            {
+                "$set": {
+                    "status": ModelImportBuildStatus.FAILED.value,
+                    "ingestion_error": error_message[:500],
+                }
+            },
+        )
+        return result.modified_count
+
+    def mark_all_ingesting_failed(
+        self,
+        config_id: str,
+        error_message: str,
+    ) -> int:
+        """
+        Mark ALL currently INGESTING builds as FAILED.
+
+        Used when a repo-wide failure occurs (e.g., clone failed)
+        that affects all builds for the repo.
+
+        Args:
+            config_id: ModelRepoConfig ID
+            error_message: Error message to store
+
+        Returns:
+            Number of builds marked as failed
+        """
+        result = self.collection.update_many(
+            {
+                "model_repo_config_id": ObjectId(config_id),
+                "status": ModelImportBuildStatus.INGESTING.value,
+            },
+            {
+                "$set": {
+                    "status": ModelImportBuildStatus.FAILED.value,
+                    "ingestion_error": error_message[:500],
+                }
+            },
+        )
+        return result.modified_count

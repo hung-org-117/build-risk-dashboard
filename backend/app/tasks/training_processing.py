@@ -28,7 +28,7 @@ from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
 from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
-from app.tasks.base import PipelineTask, SafeTask, TaskState
+from app.tasks.base import PipelineTask, SafeTask, ScenarioProcessingTask, TaskState
 from app.tasks.shared.events import (
     publish_scenario_processing_updated,
     publish_scenario_updated,
@@ -518,7 +518,7 @@ def handle_processing_chain_error(
 
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=ScenarioProcessingTask,
     name="app.tasks.training_processing.process_single_enrichment",
     queue="scenario_processing",
     soft_time_limit=300,
@@ -526,7 +526,7 @@ def handle_processing_chain_error(
     max_retries=2,
 )
 def process_single_enrichment(
-    self: SafeTask,
+    self: ScenarioProcessingTask,
     scenario_id: str,
     enrichment_build_id: str,
     selected_features: List[str],
@@ -579,7 +579,30 @@ def process_single_enrichment(
     if not scenario:
         return {"status": "error", "error": "Scenario not found"}
 
-    try:
+    def _mark_failed(exc: Exception) -> None:
+        """Mark build as FAILED and update stats."""
+        error_msg = str(exc)
+        logger.error(f"{corr_prefix} Error for {enrichment_build_id}: {error_msg}")
+        enrichment_build_repo.update_extraction_status(
+            enrichment_build_id,
+            ExtractionStatus.FAILED,
+            error_message=error_msg,
+        )
+        scenario_repo.increment_counter(scenario_id, "builds_features_extracted_failed")
+
+        publish_scenario_processing_updated(
+            scenario_id=scenario_id,
+            build_id=enrichment_build_id,
+            extraction_status="failed",
+            error=error_msg,
+            ci_run_id=str(raw_build_run.ci_run_id) if raw_build_run else None,
+            commit_sha=raw_build_run.commit_sha if raw_build_run else None,
+            repo_full_name=raw_repo.full_name if raw_repo else None,
+            enriched_at=datetime.utcnow().isoformat(),
+        )
+
+    def _work(state: TaskState) -> Dict[str, Any]:
+        """Feature extraction work function."""
         # Mark as in progress
         enrichment_build_repo.update_extraction_status(
             enrichment_build_id,
@@ -655,16 +678,11 @@ def process_single_enrichment(
             "feature_count": result.get("feature_count", 0),
         }
 
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"{corr_prefix} Error for {enrichment_build_id}: {error_msg}")
-        enrichment_build_repo.update_extraction_status(
-            enrichment_build_id,
-            ExtractionStatus.FAILED,
-            error_message=error_msg,
-        )
-        scenario_repo.increment_counter(scenario_id, "builds_features_extracted_failed")
-        raise
+    return self.run_safe(
+        job_id=enrichment_build_id,
+        work=_work,
+        mark_failed_fn=_mark_failed,
+    )
 
 
 @celery_app.task(
@@ -766,14 +784,14 @@ def finalize_feature_extraction(
 
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=ScenarioProcessingTask,
     name="app.tasks.training_processing.reprocess_failed_feature_extraction",
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=360,
 )
 def reprocess_failed_feature_extraction(
-    self: SafeTask,
+    self: ScenarioProcessingTask,
     scenario_id: str,
 ) -> Dict[str, Any]:
     """

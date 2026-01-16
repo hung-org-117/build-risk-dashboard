@@ -193,6 +193,32 @@ def clone_repo(
             except Exception as e:
                 logger.warning(f"{log_ctx} Failed to mark FAILED: {e}")
 
+            # Mark all INGESTING builds as FAILED (build-level)
+            # Clone failure affects all builds for this repo
+            try:
+                if pipeline_type == "model":
+                    from app.repositories.model_import_build import (
+                        ModelImportBuildRepository,
+                    )
+
+                    repo = ModelImportBuildRepository(self.db)
+                    failed_count = repo.mark_all_ingesting_failed(
+                        pipeline_id, error_msg
+                    )
+                    logger.info(f"{log_ctx} Marked {failed_count} builds as FAILED")
+                else:
+                    from app.repositories.training_ingestion_build import (
+                        TrainingIngestionBuildRepository,
+                    )
+
+                    repo = TrainingIngestionBuildRepository(self.db)
+                    failed_count = repo.mark_all_ingesting_failed(
+                        pipeline_id, error_msg
+                    )
+                    logger.info(f"{log_ctx} Marked {failed_count} builds as FAILED")
+            except Exception as e:
+                logger.warning(f"{log_ctx} Failed to mark builds as FAILED: {e}")
+
         if pipeline_id:
             publish_ingestion_progress(
                 repo_id=pipeline_id,
@@ -478,6 +504,38 @@ def create_worktree_chunk(
             _save_worktree_progress(
                 self.db, pipeline_id, pipeline_type, raw_repo_id, result, log_ctx
             )
+
+            # Mark builds with failed commits as FAILED (build-level)
+            if all_failed:
+                try:
+                    if pipeline_type == "model":
+                        from app.repositories.model_import_build import (
+                            ModelImportBuildRepository,
+                        )
+
+                        repo = ModelImportBuildRepository(self.db)
+                        failed_count = repo.mark_builds_failed_by_commits(
+                            pipeline_id, all_failed, error_msg
+                        )
+                        logger.info(
+                            f"{log_ctx} Marked {failed_count} builds as FAILED "
+                            f"for {len(all_failed)} failed commits"
+                        )
+                    else:
+                        from app.repositories.training_ingestion_build import (
+                            TrainingIngestionBuildRepository,
+                        )
+
+                        repo = TrainingIngestionBuildRepository(self.db)
+                        failed_count = repo.mark_builds_failed_by_commits(
+                            pipeline_id, all_failed, error_msg
+                        )
+                        logger.info(
+                            f"{log_ctx} Marked {failed_count} builds as FAILED "
+                            f"for {len(all_failed)} failed commits"
+                        )
+                except Exception as e:
+                    logger.warning(f"{log_ctx} Failed to mark builds as FAILED: {e}")
 
     return self.run_safe(
         job_id=f"{pipeline_id}:{raw_repo_id}:chunk{chunk_index}",
@@ -1159,6 +1217,57 @@ def download_logs_chunk(
             _save_logs_progress(
                 self.db, pipeline_id, pipeline_type, raw_repo_id, result, log_ctx
             )
+
+            # Mark builds with failed logs as FAILED (build-level)
+            # Note: expired logs are MISSING_RESOURCE, not FAILED
+            if all_failed:
+                try:
+                    if pipeline_type == "model":
+                        from app.entities.model_import_build import (
+                            ModelImportBuildStatus,
+                        )
+                        from app.repositories.model_import_build import (
+                            ModelImportBuildRepository,
+                        )
+
+                        repo = ModelImportBuildRepository(self.db)
+                        failed_count = repo.update_status_by_ci_run_ids(
+                            pipeline_id,
+                            all_failed,
+                            ModelImportBuildStatus.INGESTING.value,
+                            {
+                                "status": ModelImportBuildStatus.FAILED.value,
+                                "ingestion_error": error_msg[:500],
+                            },
+                        )
+                        logger.info(
+                            f"{log_ctx} Marked {failed_count} builds as FAILED "
+                            f"for {len(all_failed)} failed log downloads"
+                        )
+                    else:
+                        from app.entities.training_ingestion_build import (
+                            IngestionStatus,
+                        )
+                        from app.repositories.training_ingestion_build import (
+                            TrainingIngestionBuildRepository,
+                        )
+
+                        repo = TrainingIngestionBuildRepository(self.db)
+                        failed_count = repo.update_status_by_ci_run_ids(
+                            pipeline_id,
+                            all_failed,
+                            IngestionStatus.INGESTING.value,
+                            {
+                                "status": IngestionStatus.FAILED.value,
+                                "ingestion_error": error_msg[:500],
+                            },
+                        )
+                        logger.info(
+                            f"{log_ctx} Marked {failed_count} builds as FAILED "
+                            f"for {len(all_failed)} failed log downloads"
+                        )
+                except Exception as e:
+                    logger.warning(f"{log_ctx} Failed to mark builds as FAILED: {e}")
 
             # Publish error event via unified progress event
             from app.tasks.shared.events import publish_ingestion_progress

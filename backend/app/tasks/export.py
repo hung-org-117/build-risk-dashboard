@@ -9,7 +9,7 @@ from pathlib import Path
 from app.celery_app import celery_app
 from app.config import settings
 from app.entities.export_job import ExportStatus
-from app.tasks.base import PipelineTask
+from app.tasks.base import ModelExportTask, PipelineTask
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 @celery_app.task(
     bind=True,
-    base=PipelineTask,
+    base=ModelExportTask,
     name="app.tasks.export.process_export_job",
     queue="processing",
     soft_time_limit=600,
@@ -40,7 +40,11 @@ def process_export_job(self, job_id: str):
 
     from app.repositories.export_job import ExportJobRepository
     from app.repositories.model_training_build import ModelTrainingBuildRepository
-    from app.utils.export_utils import format_feature_row, write_csv_file, write_json_file
+    from app.utils.export_utils import (
+        format_feature_row,
+        write_csv_file,
+        write_json_file,
+    )
 
     job_repo = ExportJobRepository(self.db)
     job = job_repo.find_by_id(job_id)
@@ -94,10 +98,17 @@ def process_export_job(self, job_id: str):
 
         if job.format == "csv":
             write_csv_file(
-                file_path, cursor, format_feature_row, job.features, all_feature_keys, on_progress
+                file_path,
+                cursor,
+                format_feature_row,
+                job.features,
+                all_feature_keys,
+                on_progress,
             )
         else:
-            write_json_file(file_path, cursor, format_feature_row, job.features, on_progress)
+            write_json_file(
+                file_path, cursor, format_feature_row, job.features, on_progress
+            )
 
         # Get file size
         file_size = file_path.stat().st_size
@@ -113,7 +124,8 @@ def process_export_job(self, job_id: str):
         )
 
         logger.info(
-            f"Export job {job_id} completed: {total} rows, " f"size={file_size / 1024:.1f}KB"
+            f"Export job {job_id} completed: {total} rows, "
+            f"size={file_size / 1024:.1f}KB"
         )
 
         return {

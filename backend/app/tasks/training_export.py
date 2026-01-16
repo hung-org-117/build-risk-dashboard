@@ -32,7 +32,7 @@ from app.repositories.training_dataset_split import TrainingDatasetSplitReposito
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.services.splitting_strategy_service import SplittingStrategyService
-from app.tasks.base import SafeTask, TaskState
+from app.tasks.base import ExportTask, TaskState
 from app.tasks.shared.events import publish_export_updated
 
 logger = logging.getLogger(__name__)
@@ -62,21 +62,17 @@ def _create_export_failure_handler(export_id: str, scenario_id: str, db):
     return handler
 
 
-# ============================================================================
 # EXPORT GENERATION TASK
-# ============================================================================
-
-
 @celery_app.task(
     bind=True,
-    base=SafeTask,
+    base=ExportTask,
     name="app.tasks.training_export.generate_export_dataset",
     queue="scenario_processing",
     soft_time_limit=600,
     time_limit=720,
 )
 def generate_export_dataset(
-    self: SafeTask,
+    self: ExportTask,
     scenario_id: str,
     export_id: str,
     correlation_id: str = "",
