@@ -6,7 +6,9 @@ Uses async scan mode - results are delivered via webhook after scan completes.
 """
 
 import logging
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,7 +35,9 @@ class SonarQubeTool(IntegrationTool):
     Configuration loaded from DB settings (initialized from ENV on first run).
     """
 
-    def __init__(self, project_key: Optional[str] = None, github_repo_id: Optional[int] = None):
+    def __init__(
+        self, project_key: Optional[str] = None, github_repo_id: Optional[int] = None
+    ):
         """
         Initialize SonarQube tool.
 
@@ -155,7 +159,9 @@ class SonarQubeTool(IntegrationTool):
                 result["status"] = health_data.get("health", "UNKNOWN")
             else:
                 # Try system/status as fallback
-                status_resp = self.session.get(f"{self.host}/api/system/status", timeout=10)
+                status_resp = self.session.get(
+                    f"{self.host}/api/system/status", timeout=10
+                )
                 if status_resp.status_code == 200:
                     status_data = status_resp.json()
                     result["connected"] = status_data.get("status") == "UP"
@@ -182,7 +188,9 @@ class SonarQubeTool(IntegrationTool):
     def get_metric_keys(self) -> List[str]:
         return [m.key for m in self._metrics]
 
-    def get_metrics_by_category(self, category: MetricCategory) -> List[MetricDefinition]:
+    def get_metrics_by_category(
+        self, category: MetricCategory
+    ) -> List[MetricDefinition]:
         return [m for m in self._metrics if m.category == category]
 
     # =========================================================================
@@ -211,7 +219,9 @@ class SonarQubeTool(IntegrationTool):
             component_key: SonarQube component key for this scan
         """
         if not self.project_key and not component_key:
-            raise ValueError("project_key is required for scanning if component_key not provided")
+            raise ValueError(
+                "project_key is required for scanning if component_key not provided"
+            )
 
         if not component_key:
             component_key = f"{self.project_key}_{commit_sha}"
@@ -220,6 +230,22 @@ class SonarQubeTool(IntegrationTool):
         if self._project_exists(component_key):
             logger.info(f"Component {component_key} already exists, skipping scan.")
             return component_key
+
+        temp_config_file = None
+        # Use default config if no explicit config provided
+        if not config_file_path and self._default_config:
+            try:
+                # Create temp file for default config
+                temp_fd, temp_path = tempfile.mkstemp(
+                    suffix=".properties", prefix="sonar-project-"
+                )
+                with os.fdopen(temp_fd, "w") as f:
+                    f.write(self._default_config)
+                temp_config_file = Path(temp_path)
+                config_file_path = temp_config_file
+                logger.debug(f"Using default sonarqube config from DB: {temp_path}")
+            except Exception as e:
+                logger.error(f"Failed to create temp config file: {e}")
 
         try:
             # Use provided worktree or ensure one exists
@@ -232,18 +258,31 @@ class SonarQubeTool(IntegrationTool):
                 if not worktree:
                     raise ValueError(f"Failed to create worktree for {commit_sha}")
             else:
-                raise ValueError("Shared worktree path or github_repo_id + full_name required")
+                raise ValueError(
+                    "Shared worktree path or github_repo_id + full_name required"
+                )
 
             cmd = self._build_scan_command(component_key, worktree, config_file_path)
             logger.info(f"Scanning {component_key}...")
 
-            subprocess.run(cmd, cwd=worktree, check=True, capture_output=True, text=True)
+            subprocess.run(
+                cmd, cwd=worktree, check=True, capture_output=True, text=True
+            )
 
             return component_key
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Scan failed: {e.stderr}")
             raise
+        finally:
+            # Cleanup temp config file
+            if temp_config_file and temp_config_file.exists():
+                try:
+                    os.unlink(temp_config_file)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove temp config file {temp_config_file}: {e}"
+                    )
 
     def fetch_metrics(
         self, component_key: str, selected_metrics: Optional[List[str]] = None
@@ -252,7 +291,9 @@ class SonarQubeTool(IntegrationTool):
         from app.integrations.tools.sonarqube.exporter import MetricsExporter
 
         exporter = MetricsExporter()
-        return exporter.collect_metrics(component_key, selected_metrics=selected_metrics)
+        return exporter.collect_metrics(
+            component_key, selected_metrics=selected_metrics
+        )
 
     # =========================================================================
     # Private Methods
@@ -293,7 +334,9 @@ class SonarQubeTool(IntegrationTool):
         # Mount config file if provided
         if config_file_path:
             config_path_str = str(config_file_path.absolute())
-            docker_args.extend(["-v", f"{config_path_str}:/tmp/sonar-project.properties:ro"])
+            docker_args.extend(
+                ["-v", f"{config_path_str}:/tmp/sonar-project.properties:ro"]
+            )
 
         docker_args.extend(
             [

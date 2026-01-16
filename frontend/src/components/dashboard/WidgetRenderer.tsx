@@ -30,7 +30,6 @@ import { RecentBuildsWidget } from "./widgets/common/RecentBuildsWidget";
 import { RiskDistributionWidget } from "./widgets/user/RiskDistributionWidget";
 import { RiskTrendWidget } from "./widgets/user/RiskTrendWidget";
 import { HighRiskBuildsWidget } from "./widgets/user/HighRiskBuildsWidget";
-import { GettingStartedWidget } from "./widgets/user/GettingStartedWidget";
 
 // Import Admin Widgets
 import { ModelPipelineSummaryWidget } from "./widgets/admin/ModelPipelineSummaryWidget";
@@ -56,7 +55,6 @@ const WIDGET_REGISTRY: Record<WidgetId, React.ComponentType<BaseWidgetProps>> = 
   risk_distribution: RiskDistributionWidget,
   risk_trend: RiskTrendWidget,
   high_risk_builds: HighRiskBuildsWidget,
-  getting_started: GettingStartedWidget,
 
   // Admin widgets (ADMIN_FULL, VIEW_DATASETS, MANAGE_USERS)
   // These require admin_extras which is null for non-admin users

@@ -23,7 +23,7 @@ export function FeatureDistributionChart({
     distribution,
 }: FeatureDistributionChartProps) {
     const chartData = useMemo(() => {
-        return distribution.bins.map((bin) => ({
+        return (distribution.bins || []).map((bin) => ({
             name: `${bin.min_value.toFixed(1)}-${bin.max_value.toFixed(1)}`,
             count: bin.count,
             min: bin.min_value,
@@ -47,90 +47,94 @@ export function FeatureDistributionChart({
             </CardHeader>
             <CardContent className="flex-1 pb-2">
                 <div className="h-[200px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.5} />
-                            <XAxis
-                                dataKey="name"
-                                stroke="#888888"
-                                fontSize={10}
-                                tickLine={false}
-                                axisLine={false}
-                                tickFormatter={(value, index) => {
-                                    // Show only first, middle, last ticks to avoid clutter
-                                    if (index === 0 || index === chartData.length - 1 || index === Math.floor(chartData.length / 2)) {
-                                        return value;
-                                    }
-                                    return "";
-                                }}
-                            />
-                            <YAxis
-                                stroke="#888888"
-                                fontSize={10}
-                                tickLine={false}
-                                axisLine={false}
-                                allowDecimals={false}
-                            />
-                            <Tooltip
-                                cursor={{ fill: "hsl(var(--muted))", opacity: 0.2 }}
-                                content={({ active, payload, label }) => {
-                                    if (active && payload && payload.length) {
-                                        return (
-                                            <div className="rounded-lg border bg-background p-2 shadow-sm">
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-[0.70rem] uppercase text-muted-foreground">
-                                                            Range
-                                                        </span>
-                                                        <span className="font-bold text-muted-foreground">
-                                                            {label}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex flex-col">
-                                                        <span className="text-[0.70rem] uppercase text-muted-foreground">
-                                                            Count
-                                                        </span>
-                                                        <span className="font-bold">
-                                                            {payload[0].value}
-                                                        </span>
+                    {chartData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.5} />
+                                <XAxis
+                                    dataKey="name"
+                                    stroke="#888888"
+                                    fontSize={10}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    tickFormatter={(value, index) => {
+                                        // Show only first, middle, last ticks to avoid clutter
+                                        if (index === 0 || index === chartData.length - 1 || index === Math.floor(chartData.length / 2)) {
+                                            return value;
+                                        }
+                                        return "";
+                                    }}
+                                />
+                                <YAxis
+                                    stroke="#888888"
+                                    fontSize={10}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    allowDecimals={false}
+                                />
+                                <Tooltip
+                                    cursor={{ fill: "hsl(var(--muted))", opacity: 0.2 }}
+                                    content={({ active, payload, label }) => {
+                                        if (active && payload && payload.length) {
+                                            return (
+                                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[0.70rem] uppercase text-muted-foreground">
+                                                                Range
+                                                            </span>
+                                                            <span className="font-bold text-muted-foreground">
+                                                                {label}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[0.70rem] uppercase text-muted-foreground">
+                                                                Count
+                                                            </span>
+                                                            <span className="font-bold">
+                                                                {payload[0].value}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    }
-                                    return null;
-                                }}
-                            />
-                            <Bar
-                                dataKey="count"
-                                fill="currentColor"
-                                radius={[4, 4, 0, 0]}
-                                className="fill-blue-600"
-                            />
-                        </BarChart>
-                    </ResponsiveContainer>
+                                            );
+                                        }
+                                        return null;
+                                    }}
+                                />
+                                <Bar
+                                    dataKey="count"
+                                    fill="currentColor"
+                                    radius={[4, 4, 0, 0]}
+                                    className="fill-blue-600"
+                                />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground bg-muted/10 rounded-md border border-dashed">
+                            No distribution data
+                        </div>
+                    )}
                 </div>
 
-                {stats && (
-                    <div className="mt-4 grid grid-cols-4 gap-2 text-xs border-t pt-2">
-                        <div className="flex flex-col">
-                            <span className="text-muted-foreground">Min</span>
-                            <span className="font-mono font-medium">{stats.min.toFixed(2)}</span>
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-muted-foreground">Max</span>
-                            <span className="font-mono font-medium">{stats.max.toFixed(2)}</span>
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-muted-foreground">Mean</span>
-                            <span className="font-mono font-medium">{stats.mean.toFixed(2)}</span>
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-muted-foreground">Std</span>
-                            <span className="font-mono font-medium">{stats.std.toFixed(2)}</span>
-                        </div>
+                <div className="mt-4 grid grid-cols-4 gap-2 text-xs border-t pt-2">
+                    <div className="flex flex-col">
+                        <span className="text-muted-foreground">Min</span>
+                        <span className="font-mono font-medium">{stats?.min != null ? stats.min.toFixed(2) : "—"}</span>
                     </div>
-                )}
+                    <div className="flex flex-col">
+                        <span className="text-muted-foreground">Max</span>
+                        <span className="font-mono font-medium">{stats?.max != null ? stats.max.toFixed(2) : "—"}</span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-muted-foreground">Mean</span>
+                        <span className="font-mono font-medium">{stats?.mean != null ? stats.mean.toFixed(2) : "—"}</span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-muted-foreground">Std</span>
+                        <span className="font-mono font-medium">{stats?.std != null ? stats.std.toFixed(2) : "—"}</span>
+                    </div>
+                </div>
             </CardContent>
         </Card>
     );

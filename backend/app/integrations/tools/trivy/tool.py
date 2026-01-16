@@ -1,13 +1,8 @@
-"""
-Trivy Integration Tool
-
-Provides security scanning via Trivy Server mode.
-Scans for vulnerabilities, misconfigurations, and secrets.
-"""
-
 import json
 import logging
+import os
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -180,7 +175,8 @@ class TrivyTool(IntegrationTool):
         Args:
             target_path: Path to scan (usually a git worktree)
             scan_types: Types of scans to run (default: ["vuln", "misconfig", "secret"])
-            config_file_path: External config file path (trivy.yaml)
+            config_file_path: External config file path (trivy.yaml).
+                              If None, and default_config exists in DB, it will be used.
 
         Returns:
             Dict with scan results and metrics
@@ -190,19 +186,36 @@ class TrivyTool(IntegrationTool):
             scan_types = ["vuln", "misconfig", "secret"]
 
         start_time = time.time()
+        temp_config_file = None
 
-        # Build command
-        cmd = self._build_scan_command(
-            target_path=target_path,
-            scan_types=scan_types,
-            config_file_path=config_file_path,
-        )
+        # Use default config if no explicit config provided
+        if not config_file_path and self._default_config:
+            try:
+                # Create temp file for default config
+                temp_fd, temp_path = tempfile.mkstemp(
+                    suffix=".yaml", prefix="trivy-default-"
+                )
+                with os.fdopen(temp_fd, "w") as f:
+                    f.write(self._default_config)
+                temp_config_file = Path(temp_path)
+                config_file_path = temp_config_file
+                logger.debug(f"Using default trivy config from DB: {temp_path}")
+            except Exception as e:
+                logger.error(f"Failed to create temp config file: {e}")
 
         try:
-            logger.info(
-                f"Running Trivy scan (server mode) on {target_path} " f"with scanners: {scan_types}"
+            # Build command
+            cmd = self._build_scan_command(
+                target_path=target_path,
+                scan_types=scan_types,
+                config_file_path=config_file_path,
             )
-            logger.debug(f"Command: {' '.join(cmd)}")
+
+            logger.info(
+                f"Running Trivy scan (server mode) on {target_path} "
+                f"with scanners: {scan_types}"
+            )
+            # logger.debug(f"Command: {' '.join(cmd)}")
 
             result = subprocess.run(
                 cmd,
@@ -256,6 +269,15 @@ class TrivyTool(IntegrationTool):
                 "error": f"JSON parse error: {e}",
                 "status": "failed",
             }
+        finally:
+            # Cleanup temp config file if we created one
+            if temp_config_file and temp_config_file.exists():
+                try:
+                    os.unlink(temp_config_file)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to remove temp config file {temp_config_file}: {e}"
+                    )
 
     def scan_commit(
         self,
@@ -368,7 +390,9 @@ class TrivyTool(IntegrationTool):
 
         return docker_cmd
 
-    def _parse_results(self, raw_results: Dict[str, Any], scan_duration_ms: int) -> Dict[str, Any]:
+    def _parse_results(
+        self, raw_results: Dict[str, Any], scan_duration_ms: int
+    ) -> Dict[str, Any]:
         """Parse Trivy JSON output into structured metrics (vuln, misconfig, secret)."""
         vuln_counts = {
             "critical": 0,
@@ -426,7 +450,8 @@ class TrivyTool(IntegrationTool):
             "scan_duration_ms": scan_duration_ms,
             "packages_scanned": packages_scanned,
             "files_scanned": files_scanned,
-            "has_critical": vuln_counts["critical"] > 0 or misconfig_counts["critical"] > 0,
+            "has_critical": vuln_counts["critical"] > 0
+            or misconfig_counts["critical"] > 0,
             "has_high": vuln_counts["high"] > 0 or misconfig_counts["high"] > 0,
         }
 

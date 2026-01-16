@@ -136,31 +136,52 @@ class StatisticsService:
         page: int = 1,
         limit: int = 6,
         search: Optional[str] = None,
-        category: Optional[str] = None,
     ) -> FeatureDistributionResponse:
         """
-        Get value distributions for selected features (paginated).
+        Get value distributions for numeric features from DataQualityReport.
 
-        First attempts to read from cached DataQualityReport.
-        Falls back to MongoDB aggregation if cache is not available.
+        Only returns features with numeric data types (integer, float)
+        that have distribution buckets calculated.
         """
-        scenario = self.scenario_repo.find_by_id(scenario_id)
-        if not scenario:
-            raise HTTPException(status_code=404, detail="Scenario not found")
+        # 1. Fetch report first to know what filters to apply
+        report = self.quality_repo.find_by_scenario(scenario_id)
+        if not report or not report.feature_metrics:
+            return FeatureDistributionResponse(
+                scenario_id=scenario_id,
+                distributions={},
+                total_items=0,
+                total_pages=0,
+                current_page=page,
+                items_per_page=limit,
+            )
 
-        # Get features to analyze
-        target_features = features or scenario.feature_config.dag_features or []
+        # 2. Filter for numeric features available in the report
+        available_features = [
+            m.feature_name
+            for m in report.feature_metrics
+            if m.data_type in ("integer", "float", "numeric")
+            and m.distribution_bins  # Ensure bins exist
+        ]
 
-        # 1. Filter by search and category
-        filtered_features = self._filter_features(target_features, search, category)
+        # 3. Apply filters
+        # Filter by requested features if provided
+        if features:
+            available_features = [f for f in available_features if f in features]
 
-        total_items = len(filtered_features)
+        # Filter by search term
+        if search:
+            search_lower = search.lower()
+            available_features = [
+                f for f in available_features if search_lower in f.lower()
+            ]
+
+        total_items = len(available_features)
         total_pages = (total_items + limit - 1) // limit
 
-        # 2. Paginate
+        # 4. Paginate
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
-        paginated_features = filtered_features[start_idx:end_idx]
+        paginated_features = available_features[start_idx:end_idx]
 
         if not paginated_features:
             return FeatureDistributionResponse(
@@ -172,57 +193,18 @@ class StatisticsService:
                 items_per_page=limit,
             )
 
-        # 3. Try to read from cached DataQualityReport first
-        distributions = self._get_cached_distributions(scenario_id, paginated_features)
-
-        # 4. Fallback to aggregation if cache miss
-        if not distributions:
-            distributions = self._calculate_distributions_on_demand(
-                scenario_id, paginated_features, bins, top_n
-            )
-
-        return FeatureDistributionResponse(
-            scenario_id=scenario_id,
-            distributions=distributions,
-            total_items=total_items,
-            total_pages=total_pages,
-            current_page=page,
-            items_per_page=limit,
-        )
-
-    def _filter_features(
-        self, features: List[str], search: Optional[str], category: Optional[str]
-    ) -> List[str]:
-        """Filter features by search term and category."""
-        filtered = []
-        for f in features:
-            if search and search.lower() not in f.lower():
-                continue
-            if category and category != "All":
-                if self._get_feature_category(f) != category:
-                    continue
-            filtered.append(f)
-        return filtered
-
-    def _get_cached_distributions(
-        self, scenario_id: str, feature_names: List[str]
-    ) -> Dict[str, Any]:
-        """Read cached distributions from DataQualityReport."""
-        report = self.quality_repo.find_by_scenario(scenario_id)
-        if not report or not report.feature_metrics:
-            return {}
-
+        # 5. Extract distributions from report
         distributions: Dict[str, Any] = {}
         metrics_by_name = {m.feature_name: m for m in report.feature_metrics}
 
-        for feature_name in feature_names:
+        for feature_name in paginated_features:
             metric = metrics_by_name.get(feature_name)
             if not metric or not metric.distribution_bins:
                 continue
 
-            # Build distribution from cached data
             dist = NumericDistribution(
                 feature_name=feature_name,
+                data_type=metric.data_type,
                 total_count=metric.total_values,
                 null_count=metric.null_count,
                 bins=[
@@ -239,7 +221,7 @@ class StatisticsService:
                         min=metric.min_value or 0,
                         max=metric.max_value or 0,
                         mean=metric.mean_value or 0,
-                        median=metric.mean_value or 0,  # Approximation
+                        median=metric.mean_value or 0,
                         std=metric.std_dev or 0,
                         q1=metric.min_value or 0,
                         q3=metric.max_value or 0,
@@ -251,44 +233,14 @@ class StatisticsService:
             )
             distributions[feature_name] = dist.model_dump()
 
-        return distributions
-
-    def _calculate_distributions_on_demand(
-        self,
-        scenario_id: str,
-        feature_names: List[str],
-        bins: int,
-        top_n: int,
-    ) -> Dict[str, Any]:
-        """Calculate distributions using MongoDB aggregation (fallback)."""
-        distributions: Dict[str, Any] = {}
-
-        for feature_name in feature_names:
-            data_type = get_feature_data_type(feature_name)
-
-            if data_type in ("integer", "float", "unknown"):
-                agg_result = self.build_repo.aggregate_feature_stats(
-                    scenario_id, feature_name
-                )
-                stats = agg_result.get("stats")
-                samples = agg_result.get("samples", [])
-
-                if not stats or stats.get("count", 0) == 0:
-                    continue
-
-                dist = self._calculate_numeric_distribution_from_stats(
-                    feature_name, stats, samples, bins=bins
-                )
-            else:
-                dist = self._calculate_categorical_distribution_aggregated(
-                    scenario_id, feature_name, top_n=top_n
-                )
-                if not dist:
-                    continue
-
-            distributions[feature_name] = dist.model_dump()
-
-        return distributions
+        return FeatureDistributionResponse(
+            scenario_id=scenario_id,
+            distributions=distributions,
+            total_items=total_items,
+            total_pages=total_pages,
+            current_page=page,
+            items_per_page=limit,
+        )
 
     def get_feature_metrics(
         self,
@@ -1114,7 +1066,7 @@ class StatisticsService:
         for r in results[:top_n]:
             categorical_values.append(
                 CategoricalValue(
-                    value=r["_id"],
+                    value=str(r["_id"]) if r["_id"] is not None else "Unknown",
                     count=r["count"],
                     percentage=(
                         round(r["count"] / total_count * 100, 1)

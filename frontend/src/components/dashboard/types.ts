@@ -31,7 +31,7 @@ export interface BaseWidgetProps {
 /**
  * Widget IDs - categorized by permission level
  */
-export type WidgetId = 
+export type WidgetId =
   // Common widgets (VIEW_BUILDS, VIEW_REPOS permissions)
   | "total_builds"
   | "success_rate"
@@ -43,7 +43,6 @@ export type WidgetId =
   | "risk_distribution"
   | "risk_trend"
   | "high_risk_builds"
-  | "getting_started"
   // Admin widgets (ADMIN_FULL, VIEW_DATASETS, MANAGE_USERS)
   | "model_pipeline_summary"
   | "training_scenario_summary"

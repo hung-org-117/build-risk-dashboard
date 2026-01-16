@@ -389,23 +389,27 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
 
         return result.modified_count
 
-    def aggregate_feature_stats(
+    def aggregate_numeric_stats_and_distribution(
         self,
         scenario_id: str,
         feature_name: str,
+        bins: int = 20,
     ) -> Dict[str, Any]:
         """
-        Aggregate feature statistics directly in MongoDB.
+        Aggregate numeric stats AND histogram distribution using $bucketAuto.
 
-        Returns min, max, avg, stdDev, count for a single feature.
-        This is much more efficient than loading all data into Python.
+        This provides a much more accurate distribution than sampling,
+        as it considers ALL documents in the collection.
 
         Args:
             scenario_id: Scenario ID
-            feature_name: Name of the feature to analyze
+            feature_name: Name of the feature
+            bins: Number of histogram bins
 
         Returns:
-            Dict with 'stats' (min, max, avg, stdDev, count) and 'values' (sampled list)
+            Dict containing:
+                - stats: {min, max, avg, stdDev, count}
+                - bins: List of {min, max, count}
         """
         pipeline = [
             {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
@@ -433,7 +437,7 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
             },
             # Filter out nulls
             {"$match": {"value": {"$ne": None}}},
-            # Calculate stats in single pass
+            # Calculate stats and distribution in parallel
             {
                 "$facet": {
                     "stats": [
@@ -448,10 +452,18 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
                             }
                         }
                     ],
-                    # Sample up to 1000 values for histogram calculation
-                    "samples": [
-                        {"$sample": {"size": 1000}},
-                        {"$project": {"_id": 0, "value": 1}},
+                    "buckets": [
+                        {
+                            "$bucketAuto": {
+                                "groupBy": "$value",
+                                "buckets": bins,
+                                "output": {
+                                    "count": {"$sum": 1},
+                                    "min": {"$min": "$value"},
+                                    "max": {"$max": "$value"},
+                                },
+                            }
+                        }
                     ],
                 }
             },
@@ -459,10 +471,12 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
 
         results = list(self.collection.aggregate(pipeline))
         if not results:
-            return {"stats": None, "samples": []}
+            return {"stats": None, "bins": []}
 
         result = results[0]
         stats = result.get("stats", [{}])[0] if result.get("stats") else None
-        samples = [doc["value"] for doc in result.get("samples", [])]
+        buckets = result.get("buckets", [])
 
-        return {"stats": stats, "samples": samples}
+        # Post-process buckets to ensure continuity/ordering
+        # $bucketAuto returns buckets sorted by min value
+        return {"stats": stats, "bins": buckets}

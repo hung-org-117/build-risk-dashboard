@@ -54,84 +54,131 @@ export function ActionProgressBanner({
     const isIngesting = status === "ingesting" || syncLoading || retryIngestionLoading;
     const isProcessing = status === "processing" || processingLoading || retryProcessingLoading;
     const isFailed = status === "failed";
-    const isProcessed = status === "processed";
-    const isIngested = status === "ingested";
 
-    const isActive = isFetching || isIngesting || isProcessing || isIngested || isProcessed || isFailed;
+    // Show banner ONLY if active or failed. 
+    // "ingested" and "processed" are considered idle/done and hidden.
+    const isActive = isFetching || isIngesting || isProcessing || isFailed;
 
-    if (!isActive && status !== "queued") return null;
-
+    if (!isActive) return null;
 
     // --- METRICS CALCULATION ---
-
-    // 1. Fetching (Phase 1)
-    // "import_builds.total" roughly equals fetched builds count
     const fetchedCount = progress?.import_builds.total || 0;
 
-    // 2. Ingestion (Phase 2)
     const ingestionTotal = progress?.import_builds.total || 0;
     const ingestionDone = progress?.import_builds.ingested || 0;
     const ingestionPercent = ingestionTotal > 0
         ? Math.round((ingestionDone / ingestionTotal) * 100)
         : 0;
-    const isIngestionCompleted = (status === "ingested" || status === "processing" || status === "processed") && ingestionPercent >= 100;
 
-    // 3. Processing (Phase 3)
-    const processingTotal = progress?.training_builds.total || 0; // Should match ingested
+    const processingTotal = progress?.training_builds.total || 0;
     const processingDone = (progress?.training_builds.completed || 0) + (progress?.training_builds.partial || 0);
     const processingPercent = processingTotal > 0
         ? Math.round((processingDone / processingTotal) * 100)
         : 0;
-    const isProcessingCompleted = status === "processed" || (status === "processing" && processingPercent >= 100);
-
-    // Current active phase for highlighting
-    // Fetching -> Ingestion -> Processing
-    let activePhase = "idle";
-    if (isFetching) activePhase = "fetching";
-    else if (isIngesting) activePhase = "ingestion";
-    else if (isProcessing) activePhase = "processing";
 
 
-    // Overall Banner State
+    // --- DISPLAY CONFIGURATION ---
     let bannerTitle = "Pipeline Status";
     let bannerColor = "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800";
     let MainIcon = Loader2;
     let iconColor = "text-blue-500";
     let isSpinning = true;
+    let Content = null;
 
     if (isFailed) {
         bannerTitle = "Pipeline Failed";
         bannerColor = "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800";
-        MainIcon = RotateCcw; // Or AlertCircle
+        MainIcon = RotateCcw;
         iconColor = "text-red-500";
         isSpinning = false;
-    } else if (isProcessed) {
-        bannerTitle = "Pipeline Completed";
-        bannerColor = "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800";
-        MainIcon = CheckCircle2;
-        iconColor = "text-green-500";
-        isSpinning = false;
+
+        Content = (
+            <div className="text-sm text-muted-foreground">
+                <p>The pipeline encountered an error. Please check the logs or try retrying the failed step.</p>
+            </div>
+        );
+
     } else if (isProcessing) {
-        bannerTitle = "Processing Builds";
+        bannerTitle = retryProcessingLoading ? "Retrying Processing" : "Processing Builds";
         bannerColor = "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800";
         MainIcon = Play;
         iconColor = "text-green-500";
-        isSpinning = false; // The individual items will spin/animate
-    } else if (isIngesting || isFetching) {
-        bannerTitle = isFetching ? "Fetching Builds" : "Ingesting Builds";
+        isSpinning = false;
+
+        Content = (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Progress</span>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-green-500" />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                        {processingDone}/{processingTotal} builds
+                    </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
+                    <div
+                        className="h-full bg-emerald-500 transition-all duration-500 ease-in-out"
+                        style={{ width: `${processingPercent}%` }}
+                    />
+                </div>
+                {/* Real-time sub-status text */}
+                <p className="text-xs text-muted-foreground italic">
+                    {currentPhase === "prediction"
+                        ? "Running risk predictions..."
+                        : currentPhase === "extraction"
+                            ? `Extracting features...`
+                            : "Processing pipeline running..."}
+                    {currentBuildProgress?.buildNumber && ` (Build #${currentBuildProgress.buildNumber})`}
+                </p>
+            </div>
+        );
+
+    } else if (isIngesting) {
+        bannerTitle = retryIngestionLoading ? "Retrying Ingestion" : "Ingesting Builds";
         bannerColor = "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800";
         MainIcon = RefreshCw;
         iconColor = "text-blue-500";
         isSpinning = true;
-    }
 
-    // Reuse Retry Loading override
-    if (retryIngestionLoading) {
-        bannerTitle = "Retrying Ingestion";
+        Content = (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Progress</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                        {ingestionDone}/{ingestionTotal} builds
+                    </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
+                    <div
+                        className="h-full bg-blue-500 transition-all duration-500 ease-in-out"
+                        style={{ width: `${ingestionPercent}%` }}
+                    />
+                </div>
+            </div>
+        );
+
+    } else if (isFetching) {
+        bannerTitle = "Fetching Builds";
+        bannerColor = "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800";
+        MainIcon = Loader2;
+        iconColor = "text-blue-500";
         isSpinning = true;
-    } else if (retryProcessingLoading) {
-        bannerTitle = "Retrying Processing";
-        isSpinning = true;
+
+        Content = (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Found</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                        {fetchedCount} builds
+                    </span>
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -149,91 +196,7 @@ export function ActionProgressBanner({
                             </span>
                         )}
                     </div>
-
-                    {/* --- PHASE 1: FETCHING --- */}
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium">1. Fetch Builds</span>
-                                {fetchedCount > 0 && !isFetching ? (
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                                ) : isFetching ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
-                                ) : null}
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                                {fetchedCount} found
-                            </span>
-                        </div>
-                        {/* No progress bar for fetching (usually) or could use indeterminate */}
-                    </div>
-
-                    {/* --- PHASE 2: INGESTION --- */}
-                    {(ingestionTotal > 0 || isIngesting || status === "ingested") && (
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium">2. Ingestion</span>
-                                    {isIngestionCompleted ? (
-                                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                                    ) : isIngesting ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
-                                    ) : null}
-                                </div>
-                                <span className="text-xs text-muted-foreground">
-                                    {ingestionDone}/{ingestionTotal} builds
-                                </span>
-                            </div>
-                            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
-                                <div
-                                    className={cn(
-                                        "h-full transition-all duration-500 ease-in-out",
-                                        isIngestionCompleted ? "bg-green-500" : "bg-blue-500"
-                                    )}
-                                    style={{ width: `${ingestionPercent}%` }}
-                                />
-                            </div>
-                        </div>
-                    )}
-
-                    {/* --- PHASE 3: PROCESSING --- */}
-                    {(isProcessing || isProcessed || processingTotal > 0) && (
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium">3. Processing</span>
-                                    {isProcessingCompleted ? (
-                                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                                    ) : isProcessing ? (
-                                        <Play className="h-3.5 w-3.5 text-green-500" />
-                                    ) : null}
-                                </div>
-                                <span className="text-xs text-muted-foreground">
-                                    {processingDone}/{processingTotal} builds
-                                </span>
-                            </div>
-                            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
-                                <div
-                                    className={cn(
-                                        "h-full transition-all duration-500 ease-in-out",
-                                        isProcessingCompleted ? "bg-green-500" : "bg-emerald-500"
-                                    )}
-                                    style={{ width: `${processingPercent}%` }}
-                                />
-                            </div>
-                            {/* Real-time sub-status text */}
-                            {isProcessing && !isProcessingCompleted && (
-                                <p className="text-xs text-muted-foreground italic">
-                                    {currentPhase === "prediction"
-                                        ? "Running risk predictions..."
-                                        : currentPhase === "extraction"
-                                            ? `Extracting features...`
-                                            : "Processing pipeline running..."}
-                                    {currentBuildProgress?.buildNumber && ` (Build #${currentBuildProgress.buildNumber})`}
-                                </p>
-                            )}
-                        </div>
-                    )}
+                    {Content}
                 </div>
             </div>
         </div>

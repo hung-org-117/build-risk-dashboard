@@ -59,7 +59,6 @@ async def get_feature_distributions(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(6, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search term for feature name"),
-    category: Optional[str] = Query(None, description="Filter by feature category"),
     db=Depends(get_db),
     current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
 ):
@@ -83,7 +82,6 @@ async def get_feature_distributions(
         page=page,
         limit=limit,
         search=search,
-        category=category,
     )
 
 

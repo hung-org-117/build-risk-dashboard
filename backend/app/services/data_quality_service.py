@@ -667,7 +667,7 @@ class DataQualityService:
         Calculate and store histogram distributions for all numeric features.
 
         Updates feature_metrics in-place with distribution_bins.
-        Uses MongoDB aggregation to efficiently compute histograms.
+        Uses MongoDB aggregation ($bucketAuto) to efficiently compute histograms.
         """
         from app.repositories.training_enrichment_build import (
             TrainingEnrichmentBuildRepository,
@@ -679,56 +679,61 @@ class DataQualityService:
             if metric.data_type not in ("integer", "float", "numeric"):
                 continue
 
-            # Use aggregation to get stats and samples
-            agg_result = build_repo.aggregate_feature_stats(
-                scenario_id, metric.feature_name
+            # Use new $bucketAuto aggregation for accurate histograms
+            agg_result = build_repo.aggregate_numeric_stats_and_distribution(
+                scenario_id, metric.feature_name, bins=bins
             )
+
             stats = agg_result.get("stats")
-            samples = agg_result.get("samples", [])
+            buckets = agg_result.get("bins", [])
 
             if not stats or stats.get("count", 0) == 0:
                 continue
 
-            # Update metric with aggregated stats
+            # Update metric with aggregated stats if not already set or more accurate
             metric.min_value = stats.get("min")
             metric.max_value = stats.get("max")
             metric.mean_value = stats.get("avg")
             metric.std_dev = stats.get("stdDev")
 
-            min_val = stats.get("min", 0)
-            max_val = stats.get("max", 0)
             total_count = stats.get("count", 0)
 
-            # Calculate histogram bins
-            bin_width = (max_val - min_val) / bins if max_val > min_val else 1
-            n = len(samples)
-
             distribution_bins = []
-            for i in range(bins):
-                bin_min = min_val + i * bin_width
-                bin_max = min_val + (i + 1) * bin_width
 
-                # Count from samples
-                if i == bins - 1:
-                    count = sum(1 for v in samples if bin_min <= v <= bin_max)
-                else:
-                    count = sum(1 for v in samples if bin_min <= v < bin_max)
+            for b in buckets:
+                # $bucketAuto returns _id with min/max bounds
+                id_bounds = b.get("_id", {})
+                b_min = id_bounds.get("min")
+                b_max = id_bounds.get("max")
 
-                # Scale to estimated total
-                estimated_count = int(count * total_count / n) if n > 0 else 0
+                # Fallback to explicit output projection
+                if b_min is None:
+                    b_min = b.get("min")
+                if b_max is None:
+                    b_max = b.get("max")
+
+                if b_min is None:
+                    continue
+                if b_max is None:
+                    b_max = b_min
+
+                count = b.get("count", 0)
 
                 distribution_bins.append(
                     HistogramBinCache(
-                        min_value=round(bin_min, 4),
-                        max_value=round(bin_max, 4),
-                        count=estimated_count,
+                        min_value=round(float(b_min), 4),
+                        max_value=round(float(b_max), 4),
+                        count=count,
                         percentage=(
-                            round(estimated_count / total_count * 100, 1)
+                            round(count / total_count * 100, 1)
                             if total_count > 0
                             else 0
                         ),
                     )
                 )
+
+            # Sort bins by min_value
+            distribution_bins.sort(key=lambda x: x.min_value)
 
             metric.distribution_bins = distribution_bins
 
@@ -815,8 +820,11 @@ class DataQualityService:
 
             report.scan_metrics_summary = scan_summary
 
-        # Calculate feature distributions (histogram bins) for numeric features
-        self._calculate_feature_distributions(scenario_id, report.feature_metrics)
+        # Calculate distributions for numeric features
+        if report.feature_metrics:
+            self._calculate_feature_distributions(scenario_id, report.feature_metrics)
+
+        report.mark_completed()
 
         # Calculate completeness score from feature metrics
         report.completeness_score = self._calculate_completeness_score(

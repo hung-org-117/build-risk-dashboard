@@ -54,7 +54,6 @@ export default function ScenarioAnalysisPage() {
 
     // Feature Distribution UI State
     const [distributionSearch, setDistributionSearch] = useState("");
-    const [distributionCategory, setDistributionCategory] = useState("All");
     const [distributionPage, setDistributionPage] = useState(1);
 
     // Feature Metrics UI State
@@ -68,15 +67,15 @@ export default function ScenarioAnalysisPage() {
         try {
             const data = await statisticsApi.getDistributions(scenarioId, {
                 page: distributionPage,
-                limit: ITEMS_PER_PAGE,
+                limit: 6, // Hardcoded limit as per previous const
                 search: distributionSearch,
-                category: distributionCategory
+                category: "All" // Defaulting to All since UI filter is removed
             });
             setDistributions(data);
         } catch (err) {
             console.error("Failed to fetch distributions:", err);
         }
-    }, [scenarioId, distributionPage, distributionSearch, distributionCategory]);
+    }, [scenarioId, distributionPage, distributionSearch]);
 
     const fetchMetrics = useCallback(async () => {
         if (!scenarioId) return;
@@ -95,7 +94,7 @@ export default function ScenarioAnalysisPage() {
         }
     }, [scenarioId, metricsPage, metricsSearch]);
 
-    // Initial Data Fetch
+    // Initial Data Fetch - ONLY fetches Scenario & Quality Report
     const fetchData = useCallback(async () => {
         try {
             const [scenarioData, qualityData] = await Promise.all([
@@ -105,20 +104,19 @@ export default function ScenarioAnalysisPage() {
             setScenario(scenarioData);
             setQualityReport(qualityData);
 
-            // Fetch statistics if features are extracted
-            if (scenarioData.feature_extraction_completed || scenarioData.status === "processed") {
-                await Promise.all([
-                    fetchDistributions(),
-                    fetchMetrics()
-                ]);
-            }
+            // Note: We deliberately DO NOT fetch metrics/distributions here.
+            // They are handled by their own useEffects which trigger when:
+            // 1. loading becomes false (initial load)
+            // 2. scenario reference changes (SSE updates)
+            // 3. local state changes (pagination/search)
+
         } catch (err) {
             console.error("Failed to fetch analysis data:", err);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [scenarioId, fetchDistributions, fetchMetrics]);
+    }, [scenarioId]); // Removed dependencies on fetchDistributions/fetchMetrics
 
     // Effect for Distribution updates (when filters change)
     useEffect(() => {
@@ -559,16 +557,6 @@ export default function ScenarioAnalysisPage() {
                                                         </div>
                                                     </div>
 
-                                                    <Tabs value={distributionCategory} onValueChange={(v) => {
-                                                        setDistributionCategory(v);
-                                                        setDistributionPage(1);
-                                                    }} className="w-full">
-                                                        <TabsList className="w-full justify-start overflow-x-auto h-auto min-h-[40px] flex-wrap">
-                                                            {["All", "Source Code", "Build Process", "History & Trends", "CI/CD & Testing", "Collaboration", "Other"].map(category => (
-                                                                <TabsTrigger key={category} value={category}>{category}</TabsTrigger>
-                                                            ))}
-                                                        </TabsList>
-                                                    </Tabs>
                                                 </div>
                                             </CardHeader>
                                             <CardContent>
@@ -578,7 +566,7 @@ export default function ScenarioAnalysisPage() {
                                                     <div className="space-y-4">
                                                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                                                             {Object.entries(distributions.distributions)
-                                                                .filter(([, dist]) => (dist as NumericDistribution).bins && (dist as NumericDistribution).bins.length > 0)
+                                                                .filter(([, dist]) => (dist as NumericDistribution).bins)
                                                                 .map(([name, dist]) => (
                                                                     <FeatureDistributionChart
                                                                         key={name}
@@ -591,7 +579,7 @@ export default function ScenarioAnalysisPage() {
                                                         {distributions.total_pages > 1 && (
                                                             <div className="flex items-center justify-between pt-4 border-t">
                                                                 <div className="text-sm text-muted-foreground">
-                                                                    Showing {(distributions.current_page - 1) * ITEMS_PER_PAGE + 1} to {Math.min(distributions.current_page * ITEMS_PER_PAGE, distributions.total_items)} of {distributions.total_items} entries
+                                                                    Showing {(distributions.current_page - 1) * 6 + 1} to {Math.min(distributions.current_page * 6, distributions.total_items)} of {distributions.total_items} entries
                                                                 </div>
                                                                 <div className="flex items-center gap-2">
                                                                     <Button
