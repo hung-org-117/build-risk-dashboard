@@ -182,10 +182,10 @@ export function LogsViewer({
                 </div>
             </CardHeader>
 
-            <CardContent className="flex-1 overflow-hidden p-0">
+            <CardContent className="flex-1 p-0">
                 <ScrollArea
                     ref={scrollRef}
-                    className="h-full"
+                    className="h-[500px]"
                     onScroll={handleScroll}
                 >
                     <div className="p-4 font-mono text-xs space-y-1">

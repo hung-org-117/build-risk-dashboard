@@ -317,8 +317,8 @@ class ModelBuildService:
             current_user.get("github_accessible_repos", []) if current_user else []
         )
 
-        # Build repository filter - MUST be imported repos
-        repo_filter: dict = {"status": "imported"}
+        # Build repository filter - query model_repo_configs
+        repo_filter: dict = {}
 
         # For non-admin users, also filter by accessible repos
         if user_role != "admin" and accessible_repos:
@@ -327,12 +327,12 @@ class ModelBuildService:
             # User has no accessible repos, return empty
             return []
 
-        # Get raw_repo_ids from imported repositories only
-        repos = list(self.db.repositories.find(repo_filter, {"raw_repo_id": 1}))
+        # Get raw_repo_ids from model_repo_configs
+        repos = list(self.db.model_repo_configs.find(repo_filter, {"raw_repo_id": 1}))
         raw_repo_ids = [r["raw_repo_id"] for r in repos if r.get("raw_repo_id")]
 
         if not raw_repo_ids:
-            # No imported repos found, return empty
+            # No repos found, return empty
             return []
 
         # Query raw_build_runs filtered by imported repos

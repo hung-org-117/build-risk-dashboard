@@ -55,7 +55,7 @@ class SplittingStrategyService:
         self,
         df: pd.DataFrame,
         config: ExportSplittingConfig,
-        label_column: str = "outcome",
+        label_column: str = "build_status_num",
     ) -> SplitResult:
         """
         Apply single-split strategy to a DataFrame.
@@ -86,7 +86,7 @@ class SplittingStrategyService:
         self,
         df: pd.DataFrame,
         config: ExportSplittingConfig,
-        label_column: str = "outcome",
+        label_column: str = "build_status_num",
     ) -> Iterator[CVFold]:
         """
         Apply CV strategy to a DataFrame, yielding multiple folds.
@@ -157,13 +157,31 @@ class SplittingStrategyService:
             group_by_str == "percentage_of_builds_before"
             or group_by == GroupByDimension.PERCENTAGE_OF_BUILDS_BEFORE
         ):
-            return create_equal_width_bins(df, "percentage_of_builds_before", num_bins)
+            # Use existing feature column directly
+            source_col = "percentage_of_builds_before"
+            if source_col in df.columns:
+                return create_equal_width_bins(df, source_col, num_bins)
+            else:
+                logger.warning(
+                    f"Column '{source_col}' not found. Ensure features are extracted."
+                )
+                df["_pct_builds"] = 0.0
+                return create_equal_width_bins(df, "_pct_builds", num_bins)
 
         if (
             group_by_str == "number_of_builds_before"
             or group_by == GroupByDimension.NUMBER_OF_BUILDS_BEFORE
         ):
-            return create_equal_width_bins(df, "number_of_builds_before", num_bins)
+            # Use existing feature column directly
+            source_col = "number_of_builds_before"
+            if source_col in df.columns:
+                return create_equal_width_bins(df, source_col, num_bins)
+            else:
+                logger.warning(
+                    f"Column '{source_col}' not found. Ensure features are extracted."
+                )
+                df["_num_builds"] = 0
+                return create_equal_width_bins(df, "_num_builds", num_bins)
 
         if group_by_str == "time_of_day" or group_by == GroupByDimension.TIME_OF_DAY:
             return create_time_slots(df, time_slots)

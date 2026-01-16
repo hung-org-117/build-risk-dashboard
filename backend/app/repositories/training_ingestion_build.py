@@ -304,3 +304,32 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
 
         result = self.collection.update_many(query, {"$set": update_fields})
         return result.modified_count
+
+    def get_build_ids_by_commits(
+        self,
+        scenario_id: str,
+        commits: List[str],
+    ) -> List[str]:
+        """
+        Get TrainingIngestionBuild IDs matching specific commit SHAs.
+
+        Used by SSE events to send build_ids for frontend delta merge.
+
+        Args:
+            scenario_id: TrainingScenario ID
+            commits: List of commit SHAs
+
+        Returns:
+            List of TrainingIngestionBuild IDs (as strings)
+        """
+        if not commits:
+            return []
+
+        docs = self.collection.find(
+            {
+                "scenario_id": self._to_object_id(scenario_id),
+                "commit_sha": {"$in": commits},
+            },
+            {"_id": 1},
+        )
+        return [str(doc["_id"]) for doc in docs]

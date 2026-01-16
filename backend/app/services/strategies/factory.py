@@ -19,8 +19,6 @@ from app.services.strategies.time_series import TimeSeriesSplitStrategy
 CV_STRATEGIES = {
     SplitStrategy.L1GO_CV,
     SplitStrategy.L2GO_CV,
-    SplitStrategy.EXTREME_NOVELTY_CV,
-    SplitStrategy.IMBALANCED_KFOLD_CV,
 }
 
 

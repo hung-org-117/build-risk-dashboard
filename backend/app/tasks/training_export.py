@@ -247,6 +247,14 @@ def generate_export_dataset(
                         file_size = file_path.stat().st_size
                         class_dist = split_df[label_column].value_counts().to_dict()
 
+                        # Filter metadata to only include integer values for group_distribution
+                        # (entity requires Dict[str, int])
+                        group_dist = {
+                            k: v
+                            for k, v in (fold.metadata or {}).items()
+                            if isinstance(v, int)
+                        }
+
                         split_repo.create_split(
                             export_id=export_id,
                             scenario_id=scenario_id,
@@ -257,7 +265,7 @@ def generate_export_dataset(
                             class_distribution={
                                 str(k): v for k, v in class_dist.items()
                             },
-                            group_distribution=fold.metadata,
+                            group_distribution=group_dist,
                             file_path=str(file_path.relative_to(paths.DATA_DIR)),
                             file_size_bytes=file_size,
                             file_format=fmt,

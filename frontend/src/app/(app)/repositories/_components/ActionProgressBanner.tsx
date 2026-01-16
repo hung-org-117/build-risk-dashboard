@@ -103,7 +103,7 @@ export function ActionProgressBanner({
 
         // Use real-time progress if available
         if (currentPhase === "extraction" && currentBuildProgress?.featureCount !== undefined && currentBuildProgress?.expectedFeatureCount) {
-            description = `Extracting features: ${currentBuildProgress.featureCount}/${currentBuildProgress.expectedFeatureCount} (Build ${extractionDone + 1}/${extractionTotal})`;
+            description = `Build: ${extractionDone + 1}/${extractionTotal}`;
             const featureProgress = Math.round((currentBuildProgress.featureCount / currentBuildProgress.expectedFeatureCount) * 100);
             progressValue = featureProgress;
         } else if (currentPhase === "prediction" || isPredictionPhase) {

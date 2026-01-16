@@ -10,8 +10,6 @@ from app.entities.enums import SplitStrategy
 from app.entities.training_dataset_export import ExportSplittingConfig
 from app.services.strategies.cv_generators import (
     BaseCVGenerator,
-    ExtremeNoveltyCrossValidator,
-    ImbalancedKFoldCV,
     L1GOCrossValidator,
     L2GOCrossValidator,
 )
@@ -61,28 +59,6 @@ class CVGeneratorFactory:
                 df=df,
                 group_column=group_column,
                 label_column=label_column,
-                internal_val_ratio=internal_val_ratio,
-                random_state=random_state,
-            )
-
-        elif strategy == SplitStrategy.EXTREME_NOVELTY_CV:
-            return ExtremeNoveltyCrossValidator(
-                df=df,
-                group_column=group_column,
-                label_column=label_column,
-                target_label=config.novelty_target_label,
-                internal_val_ratio=internal_val_ratio,
-                random_state=random_state,
-            )
-
-        elif strategy == SplitStrategy.IMBALANCED_KFOLD_CV:
-            return ImbalancedKFoldCV(
-                df=df,
-                group_column=group_column,
-                label_column=label_column,
-                n_folds=config.n_folds,
-                drop_rate=config.imbalance_drop_rate,
-                drop_label=config.imbalance_drop_label,
                 internal_val_ratio=internal_val_ratio,
                 random_state=random_state,
             )

@@ -287,7 +287,9 @@ export interface ExportSplittingConfig {
     strategy: string;
     group_by: string;
     ratios: { train: number; val: number; test: number };
-    num_bins: number;
+    stratify_by?: string;
+    // Dynamic binning
+    num_bins?: number;
     time_slots: number;
     n_folds: number;
     internal_val_ratio: number;

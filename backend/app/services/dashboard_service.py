@@ -46,7 +46,9 @@ class DashboardService:
         self.layout_repo = UserDashboardLayoutRepository(db)
         self._scenario_repo = TrainingScenarioRepository(db)
 
-    def get_summary(self, current_user: Optional[dict] = None) -> DashboardSummaryResponse:
+    def get_summary(
+        self, current_user: Optional[dict] = None
+    ) -> DashboardSummaryResponse:
         """Get dashboard summary with RBAC filtering.
 
         Returns aggregated metrics from public repositories:
@@ -82,7 +84,9 @@ class DashboardService:
         dataset_count = self.db[self.BUILD_SOURCES_COLLECTION].count_documents({})
 
         # Admin extras (only if user is admin)
-        admin_extras = self._fetch_admin_pipeline_stats() if user_context["is_admin"] else None
+        admin_extras = (
+            self._fetch_admin_pipeline_stats() if user_context["is_admin"] else None
+        )
 
         return DashboardSummaryResponse(
             metrics=DashboardMetrics(
@@ -134,7 +138,9 @@ class DashboardService:
             return None
 
         repos = list(
-            self.db[self.RAW_REPOS_COLLECTION].find(repo_filter, {"_id": 1, "full_name": 1})
+            self.db[self.RAW_REPOS_COLLECTION].find(
+                repo_filter, {"_id": 1, "full_name": 1}
+            )
         )
 
         if not repos:
@@ -214,8 +220,12 @@ class DashboardService:
 
         return {
             "total_builds": total_builds,
-            "success_rate": (successful_builds / total_builds * 100) if total_builds > 0 else 0.0,
-            "avg_duration_minutes": avg_duration_seconds / 60 if avg_duration_seconds else 0.0,
+            "success_rate": (
+                (successful_builds / total_builds * 100) if total_builds > 0 else 0.0
+            ),
+            "avg_duration_minutes": (
+                avg_duration_seconds / 60 if avg_duration_seconds else 0.0
+            ),
         }
 
     def _calculate_repo_distribution(
@@ -302,7 +312,9 @@ class DashboardService:
                 "$group": {
                     "_id": None,
                     "total_scenarios": {"$sum": 1},
-                    "queued_count": {"$sum": {"$cond": [{"$eq": ["$status", "queued"]}, 1, 0]}},
+                    "queued_count": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "queued"]}, 1, 0]}
+                    },
                     "processing_count": {
                         "$sum": {
                             "$cond": [
@@ -332,7 +344,9 @@ class DashboardService:
         result = list(self.db[self.TRAINING_SCENARIOS_COLLECTION].aggregate(pipeline))
         group = result[0] if result else {}
 
-        total_enriched_builds = self.db[self.SOURCE_BUILDS_COLLECTION].count_documents({})
+        total_enriched_builds = self.db[self.SOURCE_BUILDS_COLLECTION].count_documents(
+            {}
+        )
 
         # Dataset export stats
         total_datasets = self.db["training_dataset_exports"].count_documents({})
@@ -357,7 +371,9 @@ class DashboardService:
                 "$group": {
                     "_id": None,
                     "total_repos": {"$sum": 1},
-                    "fetching_count": {"$sum": {"$cond": [{"$eq": ["$status", "fetching"]}, 1, 0]}},
+                    "fetching_count": {
+                        "$sum": {"$cond": [{"$eq": ["$status", "fetching"]}, 1, 0]}
+                    },
                     "ingesting_count": {
                         "$sum": {"$cond": [{"$eq": ["$status", "ingesting"]}, 1, 0]}
                     },
@@ -374,14 +390,13 @@ class DashboardService:
         result = list(self.db[self.MODEL_REPO_CONFIGS_COLLECTION].aggregate(pipeline))
         group = result[0] if result else {}
 
-        # New: explicit import/ingest metrics
-        imported_repos = self.db["repositories"].count_documents({"status": "imported"})
-        # Distinct count of raw_repo_ids that have ingested builds
-        ingested_repos_distinct = len(
-            list(
-                self.db["raw_build_runs"].distinct("raw_repo_id")
-            )
-        )
+        # New: explicit import/ingest metrics from model_repo_configs
+        # Imported = total repos in model pipeline (all statuses)
+        imported_repos = self.db[self.MODEL_REPO_CONFIGS_COLLECTION].count_documents({})
+        # Count repos in model_repo_configs with status = 'ingested'
+        ingested_repos_distinct = self.db[
+            self.MODEL_REPO_CONFIGS_COLLECTION
+        ].count_documents({"status": "ingested"})
 
         return ModelPipelineStats(
             total_repos=group.get("total_repos", 0),

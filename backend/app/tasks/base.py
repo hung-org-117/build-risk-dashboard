@@ -283,14 +283,219 @@ class SafeTask(PipelineTask):
         self, kwargs: dict
     ) -> Optional[Callable[[str, str], None]]:
         """
-        Override in subclasses to provide entity-specific failure handling.
+        Auto-detect entity type from kwargs and return appropriate failure handler.
 
-        Should return a callable(status: str, error_message: str) -> None
+        Checks for these keys in priority order (more specific first):
+        1. Build-level IDs (most granular):
+           - enrichment_build_id → TrainingEnrichmentBuild
+           - ingestion_build_id → TrainingIngestionBuild
+        2. Parent-level IDs:
+           - repo_config_id → ModelRepoConfig
+           - scenario_id → TrainingScenario (but not if also has commit_sha → ScanTask)
+           - export_id → TrainingDatasetExport
+
+        Returns a callable(status: str, error_message: str) -> None
         that updates the relevant entity to FAILED status.
-
-        Returns None if no entity failure handling is needed.
         """
+        # Skip if this is a ScanTask (handled by ScanTask subclass)
+        if kwargs.get("commit_sha") and kwargs.get("scenario_id"):
+            # Likely a scan task - let ScanTask handle it
+            return None
+
+        # === BUILD-LEVEL HANDLERS (most granular - check first) ===
+
+        # Check for TrainingEnrichmentBuild (feature extraction)
+        enrichment_build_id = kwargs.get("enrichment_build_id")
+        if enrichment_build_id:
+            return self._create_enrichment_build_failure_handler(enrichment_build_id)
+
+        # Check for TrainingIngestionBuild (ingestion)
+        # ingestion_build_id = kwargs.get("ingestion_build_id")
+        # if ingestion_build_id:
+        #     return self._create_ingestion_build_failure_handler(ingestion_build_id)
+
+        # === PARENT-LEVEL HANDLERS ===
+
+        # Check for ModelRepoConfig (Model Pipeline)
+        repo_config_id = kwargs.get("repo_config_id")
+        if repo_config_id:
+            return self._create_model_repo_config_failure_handler(repo_config_id)
+
+        # Check for TrainingScenario (Training Pipeline)
+        scenario_id = kwargs.get("scenario_id")
+        if scenario_id:
+            return self._create_training_scenario_failure_handler(scenario_id)
+
+        # Check for TrainingDatasetExport (Export)
+        export_id = kwargs.get("export_id")
+        if export_id:
+            return self._create_training_export_failure_handler(export_id)
+
         return None
+
+    def _create_enrichment_build_failure_handler(
+        self, enrichment_build_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingEnrichmentBuild (feature extraction)."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.enums import ExtractionStatus
+                from app.repositories.training_enrichment_build import (
+                    TrainingEnrichmentBuildRepository,
+                )
+
+                db = get_database()
+                repo = TrainingEnrichmentBuildRepository(db)
+                repo.update_extraction_status(
+                    enrichment_build_id,
+                    ExtractionStatus.FAILED,
+                    error_message=error_message[:500],
+                )
+                logger.info(
+                    f"Marked TrainingEnrichmentBuild {enrichment_build_id[:8]} as FAILED: "
+                    f"{error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingEnrichmentBuild {enrichment_build_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+    def _create_ingestion_build_failure_handler(
+        self, ingestion_build_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingIngestionBuild (ingestion)."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.training_ingestion_build import IngestionStatus
+                from app.repositories.training_ingestion_build import (
+                    TrainingIngestionBuildRepository,
+                )
+
+                db = get_database()
+                repo = TrainingIngestionBuildRepository(db)
+                repo.update_one(
+                    ingestion_build_id,
+                    {
+                        "status": IngestionStatus.FAILED.value,
+                        "ingestion_error": error_message[:500],
+                    },
+                )
+                logger.info(
+                    f"Marked TrainingIngestionBuild {ingestion_build_id[:8]} as FAILED: "
+                    f"{error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingIngestionBuild {ingestion_build_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+    def _create_model_repo_config_failure_handler(
+        self, repo_config_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for ModelRepoConfig."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.model_repo_config import ModelImportStatus
+                from app.repositories.model_repo_config import ModelRepoConfigRepository
+                from app.tasks.shared.events import publish_model_repo_updated
+
+                db = get_database()
+                repo = ModelRepoConfigRepository(db)
+                repo.update_one(
+                    repo_config_id,
+                    {
+                        "status": ModelImportStatus.FAILED.value,
+                        "error_message": error_message[:500],
+                    },
+                )
+                publish_model_repo_updated(
+                    repo_config_id, ModelImportStatus.FAILED.value, error=error_message
+                )
+                logger.info(
+                    f"Marked ModelRepoConfig {repo_config_id[:8]} as FAILED: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark ModelRepoConfig {repo_config_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+    def _create_training_scenario_failure_handler(
+        self, scenario_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingScenario."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.training_scenario import ScenarioStatus
+                from app.repositories.training_scenario import (
+                    TrainingScenarioRepository,
+                )
+                from app.tasks.shared.events import publish_scenario_updated
+
+                db = get_database()
+                repo = TrainingScenarioRepository(db)
+                repo.update_one(
+                    scenario_id,
+                    {
+                        "status": ScenarioStatus.FAILED.value,
+                        "error_message": error_message[:500],
+                    },
+                )
+                publish_scenario_updated(
+                    scenario_id, ScenarioStatus.FAILED.value, error=error_message
+                )
+                logger.info(
+                    f"Marked TrainingScenario {scenario_id[:8]} as FAILED: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingScenario {scenario_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
+
+    def _create_training_export_failure_handler(
+        self, export_id: str
+    ) -> Callable[[str, str], None]:
+        """Create failure handler for TrainingDatasetExport."""
+
+        def update_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.entities.training_dataset_export import ExportStatus
+                from app.repositories.training_export import TrainingExportRepository
+
+                db = get_database()
+                repo = TrainingExportRepository(db)
+                repo.update_one(
+                    export_id,
+                    {
+                        "status": ExportStatus.FAILED.value,
+                        "error_message": error_message[:500],
+                    },
+                )
+                logger.info(
+                    f"Marked TrainingDatasetExport {export_id[:8]} as FAILED: {error_message[:100]}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark TrainingDatasetExport {export_id[:8]} as FAILED: {e}"
+                )
+
+        return update_failed
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Handle task failure by calling entity failure handler if defined."""
@@ -437,3 +642,131 @@ class SafeTask(PipelineTask):
             cleanup_fn(state)
         except Exception as cleanup_exc:
             logger.warning(f"{log_prefix} Cleanup failed: {cleanup_exc}")
+
+
+# =============================================================================
+# ScanTask - Task with Entity Failure Handler for Scans
+# =============================================================================
+
+
+class ScanTask(SafeTask):
+    """
+    Task for scan operations (Trivy, SonarQube) with entity failure handling.
+
+    When a scan task exhausts all retries (e.g., due to SoftTimeLimitExceeded),
+    this class ensures the scan entity is properly marked as FAILED instead of
+    being stuck at SCANNING status.
+
+    Usage:
+        @celery_app.task(bind=True, base=ScanTask, ...)
+        def my_scan_task(self, scenario_id: str, commit_sha: str, ...):
+            ...
+
+    The task must pass scenario_id and commit_sha as kwargs for failure handling.
+    """
+
+    abstract = True
+
+    def get_entity_failure_handler(
+        self, kwargs: dict
+    ) -> Optional[Callable[[str, str], None]]:
+        """
+        Override to provide scan-specific failure handling.
+
+        Extracts scenario_id, commit_sha, and tool_type from kwargs
+        and returns a handler that marks the scan as failed.
+        """
+        scenario_id = kwargs.get("scenario_id")
+        commit_sha = kwargs.get("commit_sha")
+        tool_type = kwargs.get("tool_type", self._detect_tool_type())
+
+        if not scenario_id or not commit_sha:
+            return None
+
+        return self._create_scan_failure_handler(scenario_id, commit_sha, tool_type)
+
+    def _detect_tool_type(self) -> str:
+        """Detect tool type from task name."""
+        task_name = self.name or ""
+        if "trivy" in task_name.lower():
+            return "trivy"
+        elif "sonar" in task_name.lower():
+            return "sonarqube"
+        return "unknown"
+
+    def _create_scan_failure_handler(
+        self, scenario_id: str, commit_sha: str, tool_type: str
+    ) -> Callable[[str, str], None]:
+        """
+        Create a failure handler that marks scan record as FAILED.
+
+        Args:
+            scenario_id: Scenario ID
+            commit_sha: Commit SHA being scanned
+            tool_type: "trivy" or "sonarqube"
+
+        Returns:
+            Handler function(status, error_message) -> None
+        """
+
+        def update_scan_failed(status: str, error_message: str) -> None:
+            try:
+                from app.database.mongo import get_database
+                from app.tasks.shared.events import publish_scenario_scan_updated
+                from app.tasks.shared.scan_context_helpers import (
+                    check_and_mark_scans_completed,
+                    increment_scan_failed,
+                )
+
+                db = get_database()
+
+                # Mark scan as failed in the appropriate repository
+                if tool_type == "trivy":
+                    from app.repositories.trivy_commit_scan import (
+                        TrivyCommitScanRepository,
+                    )
+
+                    scan_repo = TrivyCommitScanRepository(db)
+                    scan = scan_repo.find_by_scenario_and_commit(
+                        scenario_id, commit_sha
+                    )
+                    if scan:
+                        scan_repo.mark_failed(scan.id, error_message)
+                        logger.info(
+                            f"Marked Trivy scan {scan.id} as FAILED: {error_message[:100]}"
+                        )
+                elif tool_type == "sonarqube":
+                    from app.repositories.sonar_commit_scan import (
+                        SonarCommitScanRepository,
+                    )
+
+                    scan_repo = SonarCommitScanRepository(db)
+                    scan = scan_repo.find_by_scenario_and_commit(
+                        scenario_id, commit_sha
+                    )
+                    if scan:
+                        scan_repo.mark_failed(scan.id, error_message)
+                        logger.info(
+                            f"Marked SonarQube scan {scan.id} as FAILED: {error_message[:100]}"
+                        )
+
+                # Publish event and update counters
+                publish_scenario_scan_updated(
+                    scenario_id=scenario_id,
+                    scan_id="",  # May not have scan_id at this point
+                    commit_sha=commit_sha,
+                    tool_type=tool_type,
+                    status="failed",
+                    error=error_message,
+                )
+
+                increment_scan_failed(db, scenario_id)
+                check_and_mark_scans_completed(db, scenario_id)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to mark {tool_type} scan as failed for "
+                    f"{scenario_id[:8]}/{commit_sha[:8]}: {e}"
+                )
+
+        return update_scan_failed

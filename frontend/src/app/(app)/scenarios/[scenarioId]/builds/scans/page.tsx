@@ -144,8 +144,26 @@ export default function ScansPage() {
         }
     }, [scenarioId, trivyPage, sonarPage, activeTab]);
 
+    // Fetch scenario to initialize scan progress
+    const fetchScenario = useCallback(async () => {
+        try {
+            const scenario = await trainingScenariosApi.get(scenarioId);
+            setScanProgress({
+                scans_total: scenario.scans_total ?? 0,
+                scans_completed: scenario.scans_completed ?? 0,
+                scans_failed: scenario.scans_failed ?? 0,
+                scan_extraction_completed: scenario.scan_extraction_completed ?? false,
+            });
+        } catch (err) {
+            console.error("Failed to fetch scenario:", err);
+        }
+    }, [scenarioId]);
+
     useEffect(() => {
-        if (scenarioId) fetchScans();
+        if (scenarioId) {
+            fetchScenario();
+            fetchScans();
+        }
         return () => {
             if (pollingRef.current) clearInterval(pollingRef.current);
         };
@@ -521,34 +539,6 @@ export default function ScansPage() {
 
     return (
         <div className="space-y-4">
-            {/* Scan Progress Banner */}
-            {scanProgress && scanProgress.scans_total > 0 && (
-                <Card>
-                    <CardContent className="py-4">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium">Scan Progress</span>
-                            <span className="text-sm text-muted-foreground">
-                                {scanProgress.scans_completed}/{scanProgress.scans_total}
-                                {scanProgress.scans_failed > 0 && (
-                                    <span className="text-red-500 ml-1">({scanProgress.scans_failed} failed)</span>
-                                )}
-                            </span>
-                        </div>
-                        <Progress
-                            value={
-                                scanProgress.scans_total > 0
-                                    ? ((scanProgress.scans_completed + scanProgress.scans_failed) / scanProgress.scans_total) * 100
-                                    : 0
-                            }
-                            className="h-2"
-                        />
-                        {scanProgress.scan_extraction_completed && (
-                            <p className="text-xs text-green-600 mt-1">✓ All scans complete</p>
-                        )}
-                    </CardContent>
-                </Card>
-            )}
-
             <Card>
                 <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
@@ -559,40 +549,22 @@ export default function ScansPage() {
                             </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
-                            {sonarFailedCount > 0 && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleRetryTool("sonarqube")}
-                                    disabled={retryingTool !== null}
-                                >
-                                    {retryingTool === "sonarqube" ? (
-                                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                    ) : (
-                                        <BarChart3 className="h-4 w-4 mr-1 text-blue-600" />
-                                    )}
-                                    Retry SonarQube ({sonarFailedCount})
-                                </Button>
-                            )}
-                            {trivyFailedCount > 0 && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleRetryTool("trivy")}
-                                    disabled={retryingTool !== null}
-                                >
-                                    {retryingTool === "trivy" ? (
-                                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                    ) : (
-                                        <Shield className="h-4 w-4 mr-1 text-green-600" />
-                                    )}
-                                    Retry Trivy ({trivyFailedCount})
-                                </Button>
-                            )}
                             <Button variant="outline" size="sm" onClick={() => fetchScans()}>
-                                <RefreshCw className="h-4 w-4 mr-1" />
+                                <RefreshCw className="h-4 w-4 mr-2" />
                                 Refresh
                             </Button>
+                            {(scanProgress?.scans_failed || 0) > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleRetryTool(activeTab as "trivy" | "sonarqube")}
+                                    disabled={retryingTool !== null}
+                                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
+                                >
+                                    <RefreshCw className={cn("h-4 w-4 mr-2", retryingTool && "animate-spin")} />
+                                    Retry Failed Scans
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </CardHeader>

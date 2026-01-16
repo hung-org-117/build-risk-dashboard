@@ -83,6 +83,9 @@ class SourceBuildResponse(BaseModel):
     validated_at: Optional[datetime]
     raw_repo_id: Optional[str]
     raw_run_id: Optional[str]
+    # Build info from RawBuildRun
+    commit_sha: Optional[str] = None
+    web_url: Optional[str] = None
 
 
 class SourceRepoStatsResponse(BaseModel):

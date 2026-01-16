@@ -33,6 +33,8 @@ interface SourceBuild {
     status: "pending" | "found" | "not_found" | "filtered";
     raw_repo_id?: string;
     raw_run_id?: string;
+    commit_sha?: string;
+    web_url?: string;
 }
 
 interface BuildSourceDetail {
@@ -197,24 +199,33 @@ export default function SourceDetailPage() {
             ),
         },
         {
-            key: "status",
-            header: "Status",
-            render: (item) => getBuildStatusBadge(item.status),
+            key: "commit_sha",
+            header: "Commit",
+            render: (item) =>
+                item.commit_sha ? (
+                    <code className="text-xs font-mono text-muted-foreground">
+                        {item.commit_sha.substring(0, 8)}
+                    </code>
+                ) : (
+                    <span className="text-muted-foreground text-sm">—</span>
+                ),
         },
         {
-            key: "raw_run_id",
-            header: "In Warehouse",
+            key: "web_url",
+            header: "CI Link",
             render: (item) =>
-                item.raw_run_id ? (
-                    <div className="flex items-center gap-2 text-green-600">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span className="text-sm">Yes</span>
-                    </div>
+                item.web_url ? (
+                    <a
+                        href={item.web_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline text-sm"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        View Build
+                    </a>
                 ) : (
-                    <div className="flex items-center gap-2 text-red-600">
-                        <XCircle className="w-4 h-4" />
-                        <span className="text-sm">No</span>
-                    </div>
+                    <span className="text-muted-foreground text-sm">—</span>
                 ),
         },
     ];

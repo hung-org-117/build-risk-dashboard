@@ -95,19 +95,21 @@ export default function ProcessingBuildsPage() {
         const unsubscribeScenario = subscribe("SCENARIO.UPDATED", (payload: Partial<TrainingScenarioRecord> & { scenario_id?: string }) => {
             if (payload.scenario_id === scenarioId) {
                 // Merge scenario stats directly instead of refetch
-                setScenario((prev) =>
-                    prev
-                        ? {
-                            ...prev,
-                            ...payload,
-                            status: payload.status || prev.status,
-                        }
-                        : prev
-                );
-                // Only debounced refetch when processing status changes
-                if (payload.status && ["processing", "processed", "failed"].includes(payload.status)) {
-                    debouncedFetchBuilds();
-                }
+                setScenario((prev) => {
+                    if (!prev) return prev;
+                    // Only trigger refetch when status changes to final states
+                    const statusChanged = payload.status && payload.status !== prev.status;
+                    const isTerminalStatus = payload.status && ["processed", "failed"].includes(payload.status);
+                    if (statusChanged && isTerminalStatus) {
+                        // Delay refetch slightly to allow final delta merges
+                        setTimeout(() => debouncedFetchBuilds(), 500);
+                    }
+                    return {
+                        ...prev,
+                        ...payload,
+                        status: payload.status || prev.status,
+                    };
+                });
             }
         });
 

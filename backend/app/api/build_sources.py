@@ -235,21 +235,40 @@ def get_source_builds(
     service: BuildSourceService = Depends(get_build_source_service),
 ):
     """Get builds for a source with optional status filter."""
+    from app.repositories.raw_build_run import RawBuildRunRepository
+
+    db = get_database()
+    raw_build_run_repo = RawBuildRunRepository(db)
+
     builds, total = service.get_builds(source_id, status=status, skip=skip, limit=limit)
-    items = [
-        SourceBuildResponse(
-            id=str(b.id),
-            source_id=str(b.source_id),
-            build_id_from_source=b.build_id_from_source,
-            repo_name_from_source=b.repo_name_from_source,
-            status=b.status.value if hasattr(b.status, "value") else b.status,
-            validation_error=b.validation_error,
-            validated_at=b.validated_at,
-            raw_repo_id=str(b.raw_repo_id) if b.raw_repo_id else None,
-            raw_run_id=str(b.raw_run_id) if b.raw_run_id else None,
+
+    # Collect raw_run_ids that exist
+    raw_run_ids = [str(b.raw_run_id) for b in builds if b.raw_run_id]
+
+    # Batch fetch RawBuildRun records
+    raw_runs_map = {}
+    if raw_run_ids:
+        raw_runs = raw_build_run_repo.find_by_ids(raw_run_ids)
+        raw_runs_map = {str(r.id): r for r in raw_runs}
+
+    items = []
+    for b in builds:
+        raw_run = raw_runs_map.get(str(b.raw_run_id)) if b.raw_run_id else None
+        items.append(
+            SourceBuildResponse(
+                id=str(b.id),
+                source_id=str(b.source_id),
+                build_id_from_source=b.build_id_from_source,
+                repo_name_from_source=b.repo_name_from_source,
+                status=b.status.value if hasattr(b.status, "value") else b.status,
+                validation_error=b.validation_error,
+                validated_at=b.validated_at,
+                raw_repo_id=str(b.raw_repo_id) if b.raw_repo_id else None,
+                raw_run_id=str(b.raw_run_id) if b.raw_run_id else None,
+                commit_sha=raw_run.commit_sha if raw_run else None,
+                web_url=raw_run.web_url if raw_run else None,
+            )
         )
-        for b in builds
-    ]
     return PaginatedSourceBuildResponse(
         items=items,
         total=total,

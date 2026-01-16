@@ -13,8 +13,6 @@ from app.services.strategies.cv_factory import CVGeneratorFactory
 from app.services.strategies.cv_generators import (
     BaseCVGenerator,
     CVFold,
-    ExtremeNoveltyCrossValidator,
-    ImbalancedKFoldCV,
     L1GOCrossValidator,
     L2GOCrossValidator,
 )
@@ -40,8 +38,6 @@ __all__ = [
     # CV generators
     "L1GOCrossValidator",
     "L2GOCrossValidator",
-    "ExtremeNoveltyCrossValidator",
-    "ImbalancedKFoldCV",
     # Factories
     "SplittingStrategyFactory",
     "CVGeneratorFactory",

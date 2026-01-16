@@ -3,6 +3,7 @@
 // =============================================================================
 
 export interface ExportConfig {
+    name: string;
     // Preprocessing
     missing_values_strategy: "drop_row" | "fill_mean" | "fill_median" | "fill_zero";
     normalization: "none" | "z_score" | "min_max" | "robust";
@@ -10,6 +11,7 @@ export interface ExportConfig {
     strategy: string;
     group_by: string;
     ratios: { train: number; val: number; test: number };
+    stratify_by: string;
     // Dynamic binning
     num_bins: number;
     time_slots: number;
@@ -49,11 +51,13 @@ export interface GroupByOption {
 // =============================================================================
 
 export const DEFAULT_CONFIG: ExportConfig = {
+    name: "",
     missing_values_strategy: "drop_row",
     normalization: "z_score",
     strategy: "stratified_within_group",
     group_by: "repo_language",
     ratios: { train: 0.7, val: 0.15, test: 0.15 },
+    stratify_by: "build_status_num",
     num_bins: 4,
     time_slots: 4,
     n_folds: 5,
@@ -136,19 +140,6 @@ export const STRATEGY_OPTIONS: StrategyOption[] = [
         description: "Leave-Two-Groups-Out: Each pair of groups as test set",
         requiresGroupBy: true,
         minGroups: 3,
-    },
-    {
-        value: "extreme_novelty_cv",
-        label: "Extreme Novelty CV",
-        description: "Zero-shot detection: Isolate target label per group for testing",
-        requiresGroupBy: true,
-        minGroups: 1,
-    },
-    {
-        value: "imbalanced_kfold_cv",
-        label: "Imbalanced K-Fold CV",
-        description: "K-Fold with controlled label imbalance in training set",
-        requiresGroupBy: false,
     },
 ];
 

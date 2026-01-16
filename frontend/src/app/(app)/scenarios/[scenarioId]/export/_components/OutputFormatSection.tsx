@@ -29,7 +29,7 @@ export function OutputFormatSection({ config, updateConfig }: OutputFormatSectio
                 <CardTitle className="text-lg">3. Output Format</CardTitle>
             </CardHeader>
             <CardContent>
-                <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-4">
                     <div className="space-y-2">
                         <Label>File Format</Label>
                         <Select

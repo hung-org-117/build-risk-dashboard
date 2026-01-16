@@ -510,7 +510,7 @@ export default function OverviewPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm truncate">{widget.title}</CardTitle>
               <CardDescription className="text-xs truncate">
-                Latest builds from public repositories
+                Latest builds from repositories
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0 overflow-auto flex-1">

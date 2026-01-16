@@ -60,8 +60,6 @@ class SplitStrategy(str, Enum):
     STRATIFIED_WITHIN_GROUP = "stratified_within_group"
     L1GO_CV = "l1go_cv"
     L2GO_CV = "l2go_cv"
-    EXTREME_NOVELTY_CV = "extreme_novelty_cv"
-    IMBALANCED_KFOLD_CV = "imbalanced_kfold_cv"
 
 
 class GroupByDimension(str, Enum):

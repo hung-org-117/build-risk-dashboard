@@ -627,6 +627,17 @@ class DataQualityService:
             # If no report exists, run full evaluation
             return self.evaluate_version(scenario_id)
 
+        # If feature_metrics is empty, run full evaluation to calculate proper scores
+        # This handles the case where incremental updates were not used
+        if not report.feature_metrics:
+            logger.info(
+                f"No feature_metrics found for scenario {scenario_id}, "
+                "running full evaluation"
+            )
+            # Delete the existing empty report first
+            self.quality_repo.delete_by_scenario(scenario_id)
+            return self.evaluate_version(scenario_id)
+
         # Get scenario for build counts
         scenario = self.scenario_repo.find_by_id(scenario_id)
         if scenario:

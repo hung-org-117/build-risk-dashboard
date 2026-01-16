@@ -68,7 +68,7 @@ def build_position_features(
         builds_before = raw_build_runs.count_documents(
             {
                 "raw_repo_id": repo_id,
-                "created_at": {"$lt": build_run.created_at},
+                "run_created_at": {"$lt": build_run.created_at},
             }
         )
 

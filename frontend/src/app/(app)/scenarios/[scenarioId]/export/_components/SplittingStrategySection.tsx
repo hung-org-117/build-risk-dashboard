@@ -46,7 +46,6 @@ import { RatioSlider } from "@/components/ui/ratio-slider";
 interface SplittingStrategySectionProps {
     config: ExportConfig;
     updateConfig: (updates: Partial<ExportConfig>) => void;
-    updateRatios: (key: "train" | "val" | "test", value: number) => void;
     groupsPreview: GroupPreview | null;
     loadingGroups: boolean;
     fetchGroupsPreview: () => void;
@@ -56,7 +55,6 @@ interface SplittingStrategySectionProps {
 export function SplittingStrategySection({
     config,
     updateConfig,
-    updateRatios,
     groupsPreview,
     loadingGroups,
     fetchGroupsPreview,
@@ -134,6 +132,33 @@ export function SplittingStrategySection({
                             </div>
                         </div>
                     )}
+
+                    {/* Stratified By (Visible only for stratified strategies) */}
+                    <div className="space-y-2">
+                        <Label className={!config.strategy.includes("stratified") ? "text-muted-foreground" : ""}>Stratified By</Label>
+                        {config.strategy.includes("stratified") ? (
+                            <>
+                                <Select
+                                    value={config.stratify_by || "build_status_num"}
+                                    onValueChange={(v) => updateConfig({ stratify_by: v })}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Build Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="build_status_num">Build Status</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-[11px] text-muted-foreground pt-1">
+                                    Target label for stratification
+                                </p>
+                            </>
+                        ) : (
+                            <div className="p-2 h-10 border rounded-md bg-muted/50 text-sm text-muted-foreground flex items-center px-3">
+                                Not applicable for this strategy
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Dynamic Binning Options */}
@@ -148,12 +173,14 @@ export function SplittingStrategySection({
                                         <span className="text-sm font-medium">{config.num_bins}</span>
                                     </div>
                                     <Slider
+                                        className="[&_.bg-primary]:bg-blue-600 [&_.border-primary]:border-blue-600"
                                         value={[config.num_bins]}
                                         onValueChange={([v]: number[]) => updateConfig({ num_bins: v })}
                                         min={2}
                                         max={10}
                                         step={1}
                                     />
+
                                 </div>
                             )}
                             {showTimeSlots && (
@@ -163,6 +190,7 @@ export function SplittingStrategySection({
                                         <span className="text-sm font-medium">{config.time_slots}</span>
                                     </div>
                                     <Slider
+                                        className="[&_.bg-primary]:bg-blue-600 [&_.border-primary]:border-blue-600"
                                         value={[config.time_slots]}
                                         onValueChange={([v]: number[]) => updateConfig({ time_slots: v })}
                                         min={2}
@@ -200,10 +228,10 @@ export function SplittingStrategySection({
                                 )}
                             </Button>
                         </div>
-                        <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
+                        <div className="border rounded-lg overflow-hidden max-h-48 overflow-y-auto relative">
+                            <table className="w-full caption-bottom text-sm">
+                                <TableHeader className="sticky top-0 z-10 bg-card">
+                                    <TableRow className="hover:bg-transparent">
                                         <TableHead>Group</TableHead>
                                         <TableHead className="text-right">Count</TableHead>
                                     </TableRow>
@@ -214,16 +242,11 @@ export function SplittingStrategySection({
                                             <TableCell className="font-medium">{g.label || g.value}</TableCell>
                                             <TableCell className="text-right">
                                                 {g.count.toLocaleString()}
-                                                {g.warning && (
-                                                    <Badge variant="outline" className="ml-2 text-xs text-amber-600">
-                                                        Small sample
-                                                    </Badge>
-                                                )}
                                             </TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
-                            </Table>
+                            </table>
                         </div>
                     </div>
                 )}
@@ -243,6 +266,7 @@ export function SplittingStrategySection({
                                     </span>
                                 </div>
                                 <Slider
+                                    className="[&_.bg-primary]:bg-blue-600 [&_.border-primary]:border-blue-600"
                                     value={[config.internal_val_ratio * 100]}
                                     onValueChange={([v]: number[]) =>
                                         updateConfig({ internal_val_ratio: v / 100 })
@@ -297,6 +321,7 @@ export function SplittingStrategySection({
                                     <span className="text-sm font-medium">{config.n_folds}</span>
                                 </div>
                                 <Slider
+                                    className="[&_.bg-primary]:bg-blue-600 [&_.border-primary]:border-blue-600"
                                     value={[config.n_folds]}
                                     onValueChange={([v]: number[]) => updateConfig({ n_folds: v })}
                                     min={2}
@@ -312,6 +337,7 @@ export function SplittingStrategySection({
                                     </span>
                                 </div>
                                 <Slider
+                                    className="[&_.bg-primary]:bg-blue-600 [&_.border-primary]:border-blue-600"
                                     value={[config.imbalance_drop_rate * 100]}
                                     onValueChange={([v]: number[]) =>
                                         updateConfig({ imbalance_drop_rate: v / 100 })

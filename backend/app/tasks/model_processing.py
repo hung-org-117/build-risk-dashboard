@@ -11,7 +11,6 @@ from app.core.tracing import TracingContext
 from app.entities.enums import ExtractionStatus
 from app.entities.feature_audit_log import AuditLogCategory
 from app.entities.model_repo_config import ModelImportStatus
-from app.repositories.dataset_template_repository import DatasetTemplateRepository
 from app.repositories.model_import_build import ModelImportBuildRepository
 from app.repositories.model_repo_config import ModelRepoConfigRepository
 from app.repositories.model_training_build import ModelTrainingBuildRepository
@@ -761,6 +760,16 @@ def process_workflow_run(
     def _work(state: TaskState) -> Dict[str, Any]:
         """Feature extraction work function."""
         if state.phase == "START":
+            # Get template features to report expected count
+            from app.services.dataset_template_service import DatasetTemplateService
+
+            template_service = DatasetTemplateService(self.db)
+            template = template_service.get_template_by_name("Risk Prediction")
+
+            # Use combined_feature_names which includes template features + defaults
+            combined_features = template.combined_feature_names
+            state.meta["feature_names"] = combined_features
+
             # Mark as IN_PROGRESS
             model_build_repo.update_one(
                 build_id, {"extraction_status": ExtractionStatus.IN_PROGRESS.value}
@@ -769,16 +778,21 @@ def process_workflow_run(
                 repo_id=repo_config_id,
                 build_id=build_id,
                 extraction_status=ExtractionStatus.IN_PROGRESS.value,
+                expected_feature_count=len(combined_features),
                 ci_run_id=raw_build_run.ci_run_id,
                 commit_sha=raw_build_run.commit_sha,
             )
             state.phase = "EXTRACTING"
 
         if state.phase == "EXTRACTING":
-            # Get template features
-            template_repo = DatasetTemplateRepository(self.db)
-            template = template_repo.find_by_name("Risk Prediction")
-            feature_names = template.feature_names if template else []
+            feature_names = state.meta.get("feature_names", [])
+            # Fallback if not in meta
+            if not feature_names:
+                from app.services.dataset_template_service import DatasetTemplateService
+
+                template_service = DatasetTemplateService(self.db)
+                template = template_service.get_template_by_name("Risk Prediction")
+                feature_names = template.combined_feature_names
 
             # Extract features
             result = extract_features_for_build(

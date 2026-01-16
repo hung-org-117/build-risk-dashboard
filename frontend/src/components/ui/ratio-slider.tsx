@@ -220,10 +220,6 @@ export function RatioSlider({ ratios, onChange }: RatioSliderProps) {
                     </div>
                 </div>
             </div>
-
-            <p className="text-xs text-muted-foreground text-center">
-                Drag sliders to adjust split ratios
-            </p>
         </div>
     );
 }

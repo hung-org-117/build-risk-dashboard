@@ -41,9 +41,9 @@ class RawBuildRunDocument(TypedDict, total=False):
     effective_sha: Optional[str]
     status: str
     conclusion: str
-    created_at: Optional[datetime]
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    run_created_at: Optional[datetime]
+    run_started_at: Optional[datetime]
+    run_completed_at: Optional[datetime]
     duration_seconds: Optional[float]
     web_url: Optional[str]
     logs_available: Optional[bool]

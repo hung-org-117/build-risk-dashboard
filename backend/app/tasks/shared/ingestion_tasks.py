@@ -561,10 +561,28 @@ def _publish_worktree_update(
     completed_build_ids = None
     failed_build_ids = None
 
-    if pipeline_type == "model" and db:
+    if pipeline_type == "model" and db is not None:
         from app.repositories.model_import_build import ModelImportBuildRepository
 
         repo = ModelImportBuildRepository(db)
+        created_commits = result.get("created_commits") or []
+        failed_commits = result.get("failed_commits") or []
+
+        if created_commits:
+            completed_build_ids = repo.get_build_ids_by_commits(
+                pipeline_id, created_commits
+            )
+        if failed_commits:
+            failed_build_ids = repo.get_build_ids_by_commits(
+                pipeline_id, failed_commits
+            )
+
+    elif pipeline_type == "dataset" and db is not None:
+        from app.repositories.training_ingestion_build import (
+            TrainingIngestionBuildRepository,
+        )
+
+        repo = TrainingIngestionBuildRepository(db)
         created_commits = result.get("created_commits") or []
         failed_commits = result.get("failed_commits") or []
 

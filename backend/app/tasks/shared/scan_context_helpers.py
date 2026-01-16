@@ -37,6 +37,13 @@ def increment_scan_completed(db: Database, context_id: str) -> bool:
     scenario = scenario_repo.find_by_id(context_id)
     if scenario:
         scenario_repo.increment_scans_completed(context_id)
+
+        # Refresh and publish SSE update for real-time progress
+        from app.tasks.shared.events import publish_scenario_updated
+
+        updated_scenario = scenario_repo.find_by_id(context_id)
+        if updated_scenario:
+            publish_scenario_updated(updated_scenario)
         return True
 
     logger.warning(f"Context {context_id} not found in TrainingScenario")
@@ -63,6 +70,13 @@ def increment_scan_failed(db: Database, context_id: str) -> bool:
     scenario = scenario_repo.find_by_id(context_id)
     if scenario:
         scenario_repo.increment_scans_failed(context_id)
+
+        # Refresh and publish SSE update for real-time progress
+        from app.tasks.shared.events import publish_scenario_updated
+
+        updated_scenario = scenario_repo.find_by_id(context_id)
+        if updated_scenario:
+            publish_scenario_updated(updated_scenario)
         return True
 
     logger.warning(f"Context {context_id} not found in TrainingScenario")
@@ -98,10 +112,12 @@ def check_and_mark_scans_completed(db: Database, context_id: str) -> bool:
                 scenario_repo.mark_scan_extraction_completed(context_id)
                 logger.info(f"TrainingScenario {context_id} scan extraction completed")
 
-                # Publish SSE update for scan completion
+                # Refresh and publish SSE update with latest data
                 from app.tasks.shared.events import publish_scenario_updated
 
-                publish_scenario_updated(scenario)
+                updated_scenario = scenario_repo.find_by_id(context_id)
+                if updated_scenario:
+                    publish_scenario_updated(updated_scenario)
             return True
         return False
 

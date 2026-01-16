@@ -17,6 +17,8 @@ import {
     Code
 } from "lucide-react";
 
+import { getStrategyOption, MISSING_VALUES_OPTIONS, GROUP_BY_OPTIONS } from "./types";
+
 import { Button } from "@/components/ui/button";
 import {
     Table,
@@ -203,7 +205,7 @@ export function ExportsListSection({
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant="secondary" className="font-mono text-xs">
-                                                        {strategy}
+                                                        {getStrategyOption(strategy)?.label || strategy}
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell>
@@ -249,7 +251,9 @@ export function ExportsListSection({
                                                                 </h4>
                                                                 <div className="grid grid-cols-2 gap-2 text-muted-foreground">
                                                                     <span>Missing Values:</span>
-                                                                    <span className="font-medium text-foreground">{exp.preprocessing_config?.missing_values_strategy || "—"}</span>
+                                                                    <span className="font-medium text-foreground">
+                                                                        {MISSING_VALUES_OPTIONS.find(o => o.value === exp.preprocessing_config?.missing_values_strategy)?.label || exp.preprocessing_config?.missing_values_strategy || "—"}
+                                                                    </span>
 
                                                                     <span>Normalization:</span>
                                                                     <span className="font-medium text-foreground">{getNormalizationLabel(exp.preprocessing_config?.normalization)}</span>
@@ -260,7 +264,9 @@ export function ExportsListSection({
                                                                     {exp.splitting_config?.group_by && (
                                                                         <>
                                                                             <span>Group By:</span>
-                                                                            <span className="font-medium text-foreground">{exp.splitting_config.group_by}</span>
+                                                                            <span className="font-medium text-foreground">
+                                                                                {GROUP_BY_OPTIONS.find(o => o.value === exp.splitting_config.group_by)?.label || exp.splitting_config.group_by}
+                                                                            </span>
                                                                         </>
                                                                     )}
                                                                 </div>

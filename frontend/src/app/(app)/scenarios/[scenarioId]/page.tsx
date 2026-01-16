@@ -243,7 +243,6 @@ export default function ScenarioOverviewPage() {
                             <div className="flex justify-between p-2 bg-blue-50 dark:bg-blue-950/30 rounded-md">
                                 <div className="flex flex-col">
                                     <span className="text-muted-foreground">Datasets</span>
-                                    <span className="text-[10px] text-muted-foreground -mt-1">Generated datasets</span>
                                 </div>
                                 <span className="font-bold text-lg text-blue-600">{exportsCount}</span>
                             </div>
