@@ -174,55 +174,17 @@ The **Training Scenarios Summary** widget displays real-time status metrics for 
 |--------|---------|------------------|
 | **Active** | Total training scenarios created | `training_scenarios` (all records) |
 | **Queued** | Scenarios waiting to start ingestion | `training_scenarios` with status=QUEUED |
-| **Processing** | Scenarios currently extracting features or generating datasets | `training_scenarios` with status IN (FILTERING, INGESTING, PROCESSING, SPLITTING) |
-| **Completed** | Scenarios finished and ready for export | `training_scenarios` with status=COMPLETED |
-| **Enriched** | Total source builds that have been processed | `source_builds` (all records) |
+| **Processing** | Scenarios currently filtering, ingesting, or extracting features | `training_scenarios` with status IN (FILTERING, INGESTING, PROCESSING) |
+| **Processed** | Scenarios finished feature extraction (exports are tracked separately) | `training_scenarios` with status=PROCESSED |
 
 These metrics help admins track dataset preparation progress and manage training workflows.
 
 ---
 
-## Phase 0: Build Source Upload
+## Phase 0: Build Source Upload (tóm tắt)
 
-**Files**: 
-- [backend/app/api/build_sources.py](backend/app/api/build_sources.py)
-- [backend/app/tasks/source_validation.py](backend/app/tasks/source_validation.py)
-
-**Mục đích**: Thu thập validated builds vào warehouse (raw_build_runs)
-
-### 0.1 Tasks Overview
-
-| Task | Queue | Timeout | Mô Tả |
-|------|-------|---------|-------|
-| `validate_build_source` | validation | 3600s | Parse CSV, dispatch validation |
-| `validate_repo_batch` | validation | 600s | Validate repos on GitHub |
-| `validate_builds_batch` | validation | 600s | Validate builds on CI |
-| `aggregate_build_source_validation` | validation | 120s | Aggregate validation results |
-
-### 0.2 Upload Flow
-
-```
-Admin uploads CSV (build_id, repo_name columns)
-       │
-       ▼
-POST /api/build-sources/upload
-│
-├─ Parse CSV, create BuildSource entity
-├─ Create SourceBuild records (PENDING)
-└─ Dispatch validate_build_source
-       │
-       ▼
-validate_build_source
-│
-├─ Group builds by repo
-├─ For each repo:
-│   ├─ validate_repo_batch → RawRepository
-│   └─ validate_builds_batch → RawBuildRun
-│
-└─ Aggregate results
-    ├─ Mark SourceBuild as FOUND/NOT_FOUND
-    └─ Update BuildSource validation stats
-```
+- CSV upload → validate repos/builds → persist to RawRepository/RawBuildRun.
+- Tasks: `validate_build_source` + batch validators; output stats on found/not_found/filtered.
 
 ### 0.3 Data Structures (Phase 0)
 
@@ -312,7 +274,9 @@ DataSourceConfig = {
     date_start: "2024-01-01",
     date_end: "2024-12-31",
     conclusions: ["success", "failure"],
-    ci_provider: "all" | "github_actions" | "circleci",
+    ci_provider: "all" | "github_actions" | "circleci",  # legacy single-provider field
+    ci_providers: ["github_actions"],      # optional list override used by API
+    build_source_ids: ["<build_source_id>"]  # optional: scope to uploaded sources
 }
 ```
 
@@ -462,7 +426,7 @@ retry_failed_scenario_scans (tool_type: "trivy" | "sonarqube")
 
 ### 2.C Feature Config
 
-> **Note:** Features are selected via UI from the Feature Graph. The UI displays explicit feature names grouped by category. Wildcard patterns (e.g., `build_*`) are NOT supported in the current UI flow.
+> **Note:** The UI allows selecting explicit feature names; backend expands simple wildcard patterns (e.g., `gh_*`, `tr_*`) before extraction, matching the `_expand_feature_patterns` helper in `training_processing.py`.
 
 ```python
 FeatureConfig = {
@@ -811,92 +775,9 @@ class ExtractionStatus(str, Enum):
 
 ## Frontend UI Flow
 
-**Files**: [frontend/src/app/(app)/scenarios/](frontend/src/app/(app)/scenarios/)
-
-### Page Structure
-
-```
-/scenarios
-├── page.tsx                   # Scenario list
-├── sources/                   # Build Source management
-│   ├── page.tsx               # Sources list
-│   └── upload/                # BuildSource upload wizard
-│       ├── page.tsx
-│       └── _components/
-├── create/                    # Scenario creation wizard
-│   ├── page.tsx
-│   └── _components/
-│       ├── StepDataSource.tsx     # Step 1: Filter config
-│       ├── StepFeatures.tsx       # Step 2: Feature selection
-│       ├── BuildSourceSelector.tsx # Build source selection
-│       └── WizardContext.tsx      # Wizard state management
-└── [scenarioId]/
-    ├── layout.tsx             # Tabs navigation
-    ├── page.tsx               # Overview/Dashboard
-    ├── builds/                # Ingestion + Enrichment builds list
-    │   ├── ingestion/         # Ingestion phase builds
-    │   ├── processing/        # Processing phase builds
-    │   └── scans/             # Scan metrics (Trivy/SonarQube)
-    │       └── page.tsx       # Tabs for Trivy/SonarQube with separate retry buttons
-    ├── analysis/              # Feature analysis & visualization
-    └── export/                # Download splits
-        └── page.tsx
-```
-
-### Scans Page
-
-```
-/scenarios/{id}/builds/scans
-├── Header
-│   ├── [Retry SonarQube (N)] button  # Only shown if sonar failures > 0
-│   ├── [Retry Trivy (N)] button      # Only shown if trivy failures > 0
-│   └── [Refresh] button
-├── Tabs
-│   ├── SonarQube Tab
-│   │   └── Paginated table of sonar commit scans
-│   └── Trivy Tab
-│       └── Paginated table of trivy commit scans
-└── Scan Progress Badge (completed/total)
-
-### Create Wizard Flow
-
-```
-Step 1: Data Source (Filter builds from warehouse)
-┌──────────────────────────────────────────────────────────────┐
-│ Filters                      │  Preview                      │
-│ ┌───────────────────────────┐│ ┌─────────────────────────┐  │
-│ │ Languages: [Python ▼]    ││ │ Total: 5,230 builds     │  │
-│ │ CI Provider: [All ▼]     ││ │ Repos: 45               │  │
-│ │ Conclusions: [☑ Success] ││ │ Success: 3,800 (72%)    │  │
-│ │            [☑ Failure]   ││ │ Failure: 1,430 (28%)    │  │
-│ │ Date Range: [2024-01-01] ││ └─────────────────────────┘  │
-│ │         to: [2024-12-31] ││                              │
-│ └───────────────────────────┘│ [Apply Filters]              │
-│                                                              │
-│                                               [Next: Features]│
-└──────────────────────────────────────────────────────────────┘
-
-Step 2: Features (Select DAG features + scan metrics)
-Step 3: Splitting (Configure train/val/test ratios)
-Step 4: Preprocessing (Missing values, normalization)
-Step 5: Review & Start
-```
-
-### Export Page
-
-```
-/scenarios/{id}/export
-├── Dataset Summary Card
-│   ├─ Total Splits: 3
-│   ├─ Total Records: 4,500
-│   ├─ Features: 45
-│   └─ Total Size: 12.5 MB
-├── Split Files Table
-│   ├─ train.parquet (3,150 records, 8.7 MB) [Download]
-│   ├─ val.parquet (675 records, 1.9 MB) [Download]
-│   └─ test.parquet (675 records, 1.9 MB) [Download]
-└── Class Distribution Chart
-```
+- Pages: `/scenarios` list, `/scenarios/sources` (upload/validate), `/scenarios/create` wizard, `/scenarios/[id]/overview|builds|scans|analysis|export`.
+- Key actions: start ingestion, start processing, retry failed ingestion/processing/scans, trigger export generation.
+- Scans page: two tabs (SonarQube, Trivy) with retry buttons when failures exist.
 
 ---
 

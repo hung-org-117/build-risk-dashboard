@@ -109,19 +109,15 @@ ModelRepoConfig Status Flow:
 
 ## Dashboard Statistics
 
-### Model Pipeline Widget (Admin Only)
+Minimal metrics shown on the admin widget:
 
-The **Model Pipeline Summary** widget displays real-time status metrics for the entire MODEL PIPELINE:
-
-| Metric | Meaning | Source Collection |
-|--------|---------|------------------|
-| **Total** | Total repositories imported into the system | `model_repo_configs` (all records) |
-| **Fetching** | Repos currently fetching builds from CI | `model_repo_configs` with status=FETCHING |
-| **Ingesting** | Repos currently downloading resources (git, logs) | `model_repo_configs` with status=INGESTING |
-| **Processing** | Repos currently extracting features | `model_repo_configs` with status=PROCESSING |
-| **Processed** | Repos with completed predictions | `model_repo_configs` with status=PROCESSED |
-
-These metrics help admins track the pipeline progress and identify bottlenecks.
+| Metric | Meaning |
+|--------|---------|
+| Total | Repositories imported (`model_repo_configs`) |
+| Fetching | Status=FETCHING |
+| Ingesting | Status=INGESTING |
+| Processing | Status=PROCESSING |
+| Processed | Status=PROCESSED |
 
 ---
 
@@ -239,7 +235,6 @@ fetch_kwargs = {
     "limit": batch_size,        # Builds per page (default: 100)
     "page": page,               # Pagination
     "exclude_bots": True,       # Skip bot commits
-    "only_with_logs": False,    # Optional: only if logs available
     "only_completed": True,     # Only completed builds
 }
 
@@ -249,56 +244,11 @@ fetch_kwargs = {
 # - build_id is not null
 ```
 
-### 1.4 Data Structures Created (Phase 1)
+### 1.4 Data Structures (Phase 1)
 
-**RawRepository** (từ GitHub API):
-```python
-{
-    full_name: "owner/repo",
-    github_repo_id: int,
-    default_branch: str,
-    is_private: bool,
-    main_lang: str,
-    github_metadata: dict,
-}
-```
-
-**RawBuildRun** (từ CI API):
-```python
-{
-    raw_repo_id: ObjectId,
-    ci_run_id: str,            # Unique build ID from CI
-    build_id: str,             # CI provider build identifier
-    provider: str,             # "github_actions", "circleci", etc.
-    build_number: int,
-    branch: str,
-    commit_sha: str,
-    commit_message: str,
-    commit_author: str,
-    status: BuildStatus,
-    conclusion: BuildConclusion,
-    created_at: datetime,
-    duration_seconds: int,
-    logs_available: bool,
-}
-```
-
-**ModelImportBuild** (tracking record):
-```python
-{
-    model_repo_config_id: ObjectId,
-    raw_build_run_id: ObjectId,
-    status: ModelImportBuildStatus,  # PENDING → FETCHED → INGESTING → INGESTED
-    ci_run_id: str,
-    commit_sha: str,
-    resource_status: {               # Per-resource tracking
-        "git_history": ResourceStatusEntry,
-        "git_worktree": ResourceStatusEntry,
-        "build_logs": ResourceStatusEntry,
-    },
-    required_resources: List[str],
-}
-```
+- RawRepository: identity + github_metadata, main_lang, default_branch
+- RawBuildRun: ci_run_id, commit_sha, status, conclusion, created_at, logs_available
+- ModelImportBuild: links repo_config + raw_build_run, status (fetched/ingesting/ingested/failed/missing_resource), per-resource status map
 
 ---
 
@@ -391,14 +341,14 @@ class ResourceStatusEntry(BaseModel):
 ### 2.5 ModelImportBuild Status Flow
 
 ```
-    PENDING ───► FETCHED ───► INGESTING ───► INGESTED
-                                   │              │
-                                   ▼              ▼
-                              FAILED       (Ready for Processing)
-                                   │
-                                   ▼
-                         MISSING_RESOURCE
-                         (Not retryable)
+        FETCHED ───► INGESTING ───► INGESTED
+                        │              │
+                        ▼              ▼
+                    FAILED       (Ready for Processing)
+                        │
+                        ▼
+                MISSING_RESOURCE
+                (Not retryable)
 ```
 
 ---
@@ -799,145 +749,9 @@ class ExtractionStatus(str, Enum):
 
 ## Frontend UI Flow
 
-**Files**: [frontend/src/app/(app)/repositories/](frontend/src/app/(app)/repositories/)
-
-### Page Structure
-
-```
-/repositories
-├── page.tsx                   # Repository list with import progress display
-├── layout.tsx                 # Main layout
-├── _components/
-│   ├── ActionProgressBanner.tsx    # Progress banner with retry buttons
-│   ├── CollectionCard.tsx          # Ingestion stats display
-│   ├── CurrentPhaseCard.tsx        # Active phase details card
-│   ├── MiniStepper.tsx             # 4-phase indicator component
-│   ├── ProcessingCard.tsx          # Processing stats display
-│   └── StatBox.tsx                 # Stat box component
-├── import/
-│   └── page.tsx               # Import wizard (2 steps)
-└── [repoId]/
-    ├── layout.tsx             # Repo context & tabs navigation
-    ├── page.tsx               # Redirect to overview
-    ├── overview/
-    │   └── page.tsx           # Pipeline overview (uses OverviewTab)
-    ├── analytics/
-    │   └── page.tsx           # Analytics dashboard (uses AnalyticsTab)
-    ├── builds/
-    │   ├── page.tsx           # Unified builds list with UnifiedBuildsTable
-    │   ├── layout.tsx         # Builds layout
-    │   └── _components/
-    │       └── ...            # Build-related components
-    └── build/
-        └── [buildId]/
-            └── page.tsx       # Single build detail page
-
-# Shared Components (in src/components/repositories/)
-├── tabs/
-│   ├── OverviewTab.tsx        # Overview tab component
-│   ├── AnalyticsTab.tsx       # Analytics/charts tab component
-│   └── UnifiedBuildsTable.tsx # Unified builds table (ingestion + processing)
-└── ImportProgressDisplay.tsx  # Import progress in list view
-```
-
-### Import Flow UI
-
-```
-Step 1: Select Repositories
-┌──────────────────────────────────────────────────────────────┐
-│ ┌─────────────────────────────────────────────────────────┐  │
-│ │ Search: [_________________________] 🔍                  │  │
-│ └─────────────────────────────────────────────────────────┘  │
-│                                                              │
-│ Private Repositories          │  Selected (3)               │
-│ ┌───────────────────────────┐ │ ┌─────────────────────────┐ │
-│ │ ☐ org/private-repo-1      │ │ │ ✓ org/selected-repo-1   │ │
-│ │ ☑ org/private-repo-2      │ │ │ ✓ org/selected-repo-2   │ │
-│ └───────────────────────────┘ │ │ ✓ user/public-repo-1    │ │
-│                               │ └─────────────────────────┘ │
-│ Public Repositories           │                             │
-│ ┌───────────────────────────┐ │                             │
-│ │ ☑ user/public-repo-1      │ │                             │
-│ │ ☐ user/public-repo-2      │ │                             │
-│ └───────────────────────────┘ │                             │
-│                                                              │
-│                                               [Back] [Next →]│
-└──────────────────────────────────────────────────────────────┘
-
-Step 2: Configure & Import
-┌──────────────────────────────────────────────────────────────┐
-│ Repository Configuration      │  Feature Extraction Plan    │
-│ ┌───────────────────────────┐ │ ┌─────────────────────────┐ │
-│ │ org/selected-repo-1       │ │ │ Template: Risk Predict  │ │
-│ │ CI: [GitHub Actions ▼]    │ │ │                         │ │
-│ │ Max builds: [100    ]     │ │ │ Features:               │ │
-│ │ Since days: [90     ]     │ │ │ ├─ git_commit_count     │ │
-│ ├───────────────────────────┤ │ │ ├─ git_diff_lines       │ │
-│ │ org/selected-repo-2       │ │ │ ├─ build_duration       │ │
-│ │ CI: [GitHub Actions ▼]    │ │ │ └─ ...                  │ │
-│ └───────────────────────────┘ │ └─────────────────────────┘ │
-│                                                              │
-│                                    [← Back] [Import 3 Repos] │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Tabs & Navigation
-
-Repository detail page (`/repositories/[repoId]`) có các tabs:
-- **Overview**: Pipeline overview với MiniStepper, CollectionCard, ProcessingCard
-- **Builds**: Unified builds table hiển thị tất cả builds với ingestion & processing status
-- **Analytics**: Time-series charts showing builds by risk level over time
-
-### Overview Tab Components
-
-```
-OverviewTab (in src/components/repositories/tabs/OverviewTab.tsx)
-├── MiniStepper          # 4-phase indicator (Fetch → Ingest → Extract → Predict)
-├── CollectionCard       # Ingestion stats (fetched, ingested, missing_resource counts)
-│   ├── Fetched count
-│   ├── Ingested count
-│   ├── Missing Resource count
-│   └── Checkpoint info (last processed, accepted failed)
-├── ProcessingCard       # Processing stats
-│   ├── Extracted count / total
-│   ├── Predicted count / total
-│   ├── Failed extraction count
-│   ├── Failed prediction count
-│   └── Last processed build ID
-└── Repository Info      # Branch, language, CI provider, visibility
-```
-
-### Builds Page Components
-
-```
-BuildsPage (in builds/page.tsx)
-├── ActionProgressBanner   # Progress banner shown during active phases
-│   ├── Phase indicator (Ingesting/Processing/Predicting)
-│   ├── Progress bar
-│   ├── [Retry Failed Ingestion] button (when applicable)
-│   └── [Retry Failed Processing] button (when applicable)
-└── UnifiedBuildsTable     # Combined builds table
-    ├── Build info (ID, branch, commit)
-    ├── CI status (success/failure)
-    ├── Ingestion status (ingested, missing_resource, failed)
-    ├── Extraction status (completed, partial, failed)
-    ├── Prediction result (LOW, MEDIUM, HIGH risk)
-    └── Expandable row with details
-```
-
-### Analytics Tab Components
-
-```
-AnalyticsTab (in _tabs/AnalyticsTab.tsx)
-├── Summary Stats Cards
-│   ├── Total Builds with Predictions
-│   ├── Risk Distribution (LOW/MEDIUM/HIGH counts)
-│   └── Trend indicators
-└── Time Series Chart
-    ├── Stacked area chart by risk level
-    ├── Time range filter
-    └── Interactive tooltips
-```
+- Pages: `/repositories` list, `/repositories/import` wizard, `/repositories/[id]/overview|builds|analytics`.
+- Key components: MiniStepper, CollectionCard, ProcessingCard, UnifiedBuildsTable, ActionProgressBanner.
+- Actions: import repos, start processing, retry failed ingestion/processing, view unified builds and analytics.
 
 ---
 
@@ -982,197 +796,20 @@ handle_processing_chain_error:
 
 ## SSE Real-time Updates
 
-### Event Naming Convention
+- Event name format: `{PIPELINE}.{ENTITY}.{ACTION}`.
+- Model events: `MODEL.REPO.UPDATED`, `MODEL.INGESTION.PROGRESS`, `MODEL.PROCESSING.UPDATED`, `MODEL.PREDICTION.UPDATED` (legacy events removed).
+- Payloads carry ids, status, counts; frontend merges via delta update (see `UnifiedBuildsTable`).
+- Backend uses helpers in `app/tasks/shared/events.py` to publish.
 
-Events follow the format: `{PIPELINE}.{ENTITY}.{ACTION}`
+<details>
+<summary>Minimal payload examples</summary>
 
-- **PIPELINE**: `MODEL` (Model Training Pipeline) or `SCENARIO` (Training Scenario Pipeline)
-- **ENTITY**: `REPO`, `BUILD`, `INGESTION`, `PROCESSING`, `PREDICTION`, `SCAN`
-- **ACTION**: `UPDATED`, `PROGRESS`, `ERROR`
-
-### Event Types
-
-Model Pipeline publishes the following SSE events:
-
-| Event Type | Purpose | When Published |
-|------------|---------|----------------|
-| `MODEL.REPO.UPDATED` | Repository status change | Status transitions (QUEUED → FETCHING → INGESTING → etc.) |
-| `MODEL.INGESTION.PROGRESS` | Resource ingestion progress | Git clone, worktree creation, log download chunks, errors |
-| `MODEL.PROCESSING.UPDATED` | Feature extraction progress | Per-build extraction status with feature_count |
-| `MODEL.PREDICTION.UPDATED` | Prediction progress | Per-build prediction with label and confidence |
-
-> [!NOTE]
-> `MODEL.BUILD.UPDATED` and `MODEL.INGESTION.ERROR` were deprecated and merged into `MODEL.PROCESSING.UPDATED`, `MODEL.PREDICTION.UPDATED`, and `MODEL.INGESTION.PROGRESS` respectively.
-
-### Event Payloads
-
-```python
-# MODEL.REPO.UPDATED - Repository status change
-{
-    "type": "MODEL.REPO.UPDATED",
-    "payload": {
-        "repo_id": "...",
-        "status": "ingesting",
-        "message": "Preparing resources for 50 builds...",
-        "stats": {
-            "builds_fetched": 100,
-            "builds_ingested": 50,
-            "builds_missing_resource": 5,
-        }
-    }
-}
-
-# MODEL.INGESTION.PROGRESS - Resource ingestion progress
-{
-    "type": "MODEL.INGESTION.PROGRESS",
-    "payload": {
-        "repo_id": "...",
-        "resource": "git_worktree",  # git_history | git_worktree | build_logs
-        "status": "in_progress",     # in_progress | completed | failed | completed_with_errors
-        "builds_affected": 10,
-        "chunk_index": 2,
-        "total_chunks": 5,
-        "completed_commit_shas": ["abc123", "def456"],
-        "failed_commit_shas": []
-    }
-}
-
-# MODEL.PROCESSING.UPDATED - Feature extraction progress
-{
-    "type": "MODEL.PROCESSING.UPDATED",
-    "payload": {
-        "repo_id": "...",
-        "build_id": "...",
-        "extraction_status": "completed",  # pending | in_progress | completed | partial | failed
-        "feature_count": 45,
-        "expected_feature_count": 45,
-        "ci_run_id": "12345",
-        "commit_sha": "abc123"
-    }
-}
-
-# MODEL.PREDICTION.UPDATED - Prediction progress
-{
-    "type": "MODEL.PREDICTION.UPDATED",
-    "payload": {
-        "repo_id": "...",
-        "build_id": "...",
-        "prediction_status": "completed",  # pending | in_progress | completed | failed
-        "predicted_label": "LOW",          # LOW | MEDIUM | HIGH
-        "prediction_confidence": 0.85,
-        "ci_run_id": "12345",
-        "commit_sha": "abc123"
-    }
-}
+```json
+{ "type": "MODEL.REPO.UPDATED", "payload": { "repo_id": "...", "status": "processing" } }
+{ "type": "MODEL.PROCESSING.UPDATED", "payload": { "repo_id": "...", "build_id": "...", "extraction_status": "completed", "feature_count": 45 } }
 ```
 
-### Frontend SSE Subscription with Delta Merge
-
-Frontend uses SSE subscriptions with delta merge pattern for efficient real-time updates:
-
-```tsx
-// In UnifiedBuildsTable.tsx - Subscribe to all 3 phase events
-useEffect(() => {
-    // Phase 1: Ingestion progress
-    const unsubIngestion = subscribe("MODEL.INGESTION.PROGRESS", (data) => {
-        if (data.repo_id === repoId) {
-            // Delta merge: update affected builds without full refetch
-            setBuilds((prev) => prev.map((build) => {
-                if (data.completed_commit_shas?.includes(build.commit_sha)) {
-                    return { ...build, resource_status: data.resource, status: "completed" };
-                }
-                return build;
-            }));
-        }
-    });
-
-    // Phase 2: Processing/Extraction progress
-    const unsubProcessing = subscribe("MODEL.PROCESSING.UPDATED", (data) => {
-        if (data.repo_id === repoId) {
-            // Delta merge: update specific build extraction status
-            setBuilds((prev) => prev.map((build) =>
-                build.id === data.build_id
-                    ? { ...build, extraction_status: data.extraction_status, 
-                        feature_count: data.feature_count }
-                    : build
-            ));
-        }
-    });
-
-    // Phase 3: Prediction progress
-    const unsubPrediction = subscribe("MODEL.PREDICTION.UPDATED", (data) => {
-        if (data.repo_id === repoId) {
-            // Delta merge: update prediction results
-            setBuilds((prev) => prev.map((build) =>
-                build.id === data.build_id
-                    ? { ...build, prediction_status: data.prediction_status,
-                        predicted_label: data.predicted_label,
-                        prediction_confidence: data.prediction_confidence }
-                    : build
-            ));
-        }
-    });
-
-    return () => {
-        unsubIngestion();
-        unsubProcessing();
-        unsubPrediction();
-    };
-}, [subscribe, repoId]);
-```
-
-### Backend Event Publishing
-
-Events are published via shared utility functions in `app/tasks/shared/events.py`:
-
-```python
-from app.tasks.shared.events import (
-    publish_model_repo_updated,
-    publish_ingestion_progress,
-    publish_model_processing_updated,
-    publish_model_prediction_updated,
-)
-
-# Publish repo status update
-publish_model_repo_updated(
-    repo_id=str(repo_config.id),
-    status="ingesting",
-    message=f"Processing {count} builds...",
-    stats={"builds_fetched": 100, "builds_ingested": 50}
-)
-
-# Publish ingestion progress (shared function for both pipelines)
-publish_ingestion_progress(
-    repo_id=str(repo_config.id),
-    resource="git_worktree",
-    status="completed",
-    pipeline_type="model",  # or "dataset" for Scenario pipeline
-    builds_affected=10,
-    chunk_index=2,
-    total_chunks=5,
-    completed_commit_shas=["abc123"]
-)
-
-# Publish extraction progress
-publish_model_processing_updated(
-    repo_id=str(repo_config.id),
-    build_id=str(build.id),
-    extraction_status="completed",
-    feature_count=45,
-    expected_feature_count=45
-)
-
-# Publish prediction result
-publish_model_prediction_updated(
-    repo_id=str(repo_config.id),
-    build_id=str(build.id),
-    prediction_status="completed",
-    predicted_label="LOW",
-    prediction_confidence=0.85
-)
-```
-
----
+</details>
 
 ## Performance Optimization
 
