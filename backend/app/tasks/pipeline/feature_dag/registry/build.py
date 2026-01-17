@@ -86,6 +86,7 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        valid_values=["github_actions", "travis_ci", "circleci"],
     ),
     "build_day_of_week": FeatureDefinition(
         name="build_day_of_week",

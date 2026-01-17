@@ -36,6 +36,7 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.GIT_HISTORY,
             FeatureResource.RAW_BUILD_RUNS,
         ],
+        valid_range=(0, None),
     ),
     "git_prev_commit_sha": FeatureDefinition(
         name="git_prev_commit_sha",
@@ -90,6 +91,7 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        valid_range=(0, None),
     ),
     "git_diff_test_churn": FeatureDefinition(
         name="git_diff_test_churn",
@@ -99,6 +101,7 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        valid_range=(0, None),
     ),
     "git_diff_files_added": FeatureDefinition(
         name="git_diff_files_added",
@@ -193,6 +196,7 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.GIT_HISTORY,
             FeatureResource.RAW_BUILD_RUNS,
         ],
+        valid_range=(1, None),
     ),
     "team_is_core_member": FeatureDefinition(
         name="team_is_core_member",

@@ -8,6 +8,7 @@ Evaluates enriched datasets and calculates individual scores for:
 - Coverage: % successfully enriched builds
 """
 
+from app.entities import ScenarioStatus
 import logging
 import statistics
 from typing import Any, Dict, List, Optional, Tuple
@@ -70,10 +71,8 @@ class DataQualityService:
             raise HTTPException(status_code=404, detail="Scenario not found")
 
         # Check status (should be PROCESSED before quality check makes sense)
-        if scenario.status != "processed" and scenario.status != "completed":
-            # Allowed in processed or completed (if re-running)
-            pass
-            # Or raise error if strict
+        if scenario.status != ScenarioStatus.PROCESSED:
+            raise Exception("Scenario must be processed before quality evaluation")
 
         report = DataQualityReport(
             scenario_id=ObjectId(scenario_id),
@@ -308,6 +307,17 @@ class DataQualityService:
         valid_range: Optional[Tuple[float, float]],
     ) -> DataQualityMetric:
         """Analyze numeric feature values."""
+        # Auto-fetch valid_range from registry if not explicitly provided
+        if valid_range is None:
+            from app.tasks.pipeline.feature_dag._feature_definitions import (
+                get_feature_definition,
+            )
+
+            defn = get_feature_definition(feature_name)
+            if defn and defn.valid_range:
+                valid_range = defn.valid_range
+                metric.expected_range = valid_range
+
         numeric_values = []
         for v in values:
             try:
@@ -327,9 +337,12 @@ class DataQualityService:
             # Range validation
             if valid_range:
                 min_valid, max_valid = valid_range
-                out_of_range = [
-                    v for v in numeric_values if v < min_valid or v > max_valid
-                ]
+                out_of_range = []
+                for v in numeric_values:
+                    if min_valid is not None and v < min_valid:
+                        out_of_range.append(v)
+                    elif max_valid is not None and v > max_valid:
+                        out_of_range.append(v)
                 metric.out_of_range_count = len(out_of_range)
                 metric.validity_pct = (
                     (len(numeric_values) - len(out_of_range))
@@ -338,9 +351,9 @@ class DataQualityService:
                 )
 
                 if metric.out_of_range_count > 0:
+                    range_str = f"[{min_valid}, {max_valid}]"
                     metric.issues.append(
-                        f"{metric.out_of_range_count} values outside range "
-                        f"[{min_valid}, {max_valid}]"
+                        f"{metric.out_of_range_count} values outside range {range_str}"
                     )
 
         return metric

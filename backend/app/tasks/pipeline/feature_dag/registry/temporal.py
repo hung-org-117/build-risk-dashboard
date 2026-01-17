@@ -40,6 +40,7 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         nullable=True,
+        valid_values=["passed", "failed", "cancelled", "errored", "unknown"],
     ),
     "history_same_committer": FeatureDefinition(
         name="history_same_committer",

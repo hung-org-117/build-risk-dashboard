@@ -58,6 +58,7 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.FLOAT,
         extractor_node="collaboration",
         required_resources=[FeatureResource.GIT_HISTORY],
+        valid_range=(0.0, None),
     ),
     "git_files_modified_ratio": FeatureDefinition(
         name="git_files_modified_ratio",
