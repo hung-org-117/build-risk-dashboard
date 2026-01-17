@@ -46,26 +46,23 @@ export function TrainingScenarioSummaryWidget({ summary, isEditing, className }:
       <CardHeader className="pb-2">
         <CardTitle className="text-sm truncate">Dataset Enrichment</CardTitle>
         <CardDescription className="text-xs truncate">
-          Training Scenario Pipeline
+          Pipeline Status
         </CardDescription>
       </CardHeader>
       <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
         <div className="flex flex-col items-center min-w-0">
-          <Rocket className="h-5 w-5 text-blue-500 mb-1" />
           <div className="text-xl font-bold text-blue-600">
             {enrichmentStats.active_scenarios ?? 0}
           </div>
           <div className="text-[10px] text-muted-foreground truncate">Scenarios</div>
         </div>
         <div className="flex flex-col items-center min-w-0">
-          <Layers className="h-5 w-5 text-indigo-500 mb-1" />
           <div className="text-xl font-bold text-indigo-600">
             {enrichmentStats.total_datasets ?? 0}
           </div>
           <div className="text-[10px] text-muted-foreground truncate">Datasets</div>
         </div>
         <div className="flex flex-col items-center min-w-0">
-          <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
           <div className="text-xl font-bold text-green-600">
             {enrichmentStats.exported_datasets ?? 0}
           </div>

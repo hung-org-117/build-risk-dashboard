@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { AlertTriangle, CheckCircle2, Circle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -141,7 +142,7 @@ export function MiniStepper({ status, progress }: MiniStepperProps) {
                     const isLast = i === STEPS.length - 1;
 
                     return (
-                        <div key={step.id} className="flex items-center flex-1">
+                        <Fragment key={step.id}>
                             <div className="flex items-center gap-2">
                                 <StepIcon state={state} />
                                 <div className="flex flex-col">
@@ -167,7 +168,7 @@ export function MiniStepper({ status, progress }: MiniStepperProps) {
                                     state !== "completed" && state !== "warning" && "bg-slate-200 dark:bg-slate-700"
                                 )} />
                             )}
-                        </div>
+                        </Fragment>
                     );
                 })}
             </div>

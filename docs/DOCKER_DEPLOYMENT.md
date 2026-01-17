@@ -77,7 +77,7 @@ Mở file `.env` và cập nhật các giá trị sau:
 **1. Domain & URLs**
 - `DOMAIN_NAME`: IP hoặc Domain của server (VD: `10.128.0.9`). Đây là biến helper để tự điền các URL bên dưới.
 - `NEXT_PUBLIC_API_URL`: `http://{DOMAIN}:8000/api`
-- `NEXT_PUBLIC_WS_URL`: `ws://{DOMAIN}:8000/api/ws/events`
+
 - `FRONTEND_BASE_URL`: `http://{DOMAIN}:3000`
 
 **2. GitHub Configuration (BẮT BUỘC)**
@@ -200,10 +200,22 @@ gcloud compute firewall-rules create allow-build-risk-dashboard \
 
 Hoặc qua **GCP Console**:
 1. VPC Network → Firewall → Create Firewall Rule
-2. **Name**: `allow-build-risk-dashboard`
-3. **Targets**: All instances (hoặc chọn specific tag)
-4. **Source IP ranges**: `0.0.0.0/0`
-5. **Protocols and ports**: `tcp:3000,8000,3001,9000`
+6. **Name**: `allow-build-risk-dashboard`
+7. **Targets**: All instances (hoặc chọn specific tag)
+8. **Source IP ranges**: `0.0.0.0/0`
+9. **Protocols and ports**: `tcp:3000,8000,3001,9000`
+
+> **Lưu ý:** Để bảo mật, khi không cần thiết, bạn nên tắt hoặc xóa rule này.
+>
+> **Tắt truy cập (Disable):**
+> ```bash
+> gcloud compute firewall-rules update allow-build-risk-dashboard --disabled
+> ```
+>
+> **Bật lại (Enable):**
+> ```bash
+> gcloud compute firewall-rules update allow-build-risk-dashboard --no-disabled
+> ```
 
 ### 4.2 Access URLs
 
@@ -223,7 +235,7 @@ Cập nhật `.env` với external IP của GCP server:
 ```env
 DOMAIN_NAME=YOUR_GCP_EXTERNAL_IP
 NEXT_PUBLIC_API_URL=http://YOUR_GCP_EXTERNAL_IP:8000/api
-NEXT_PUBLIC_WS_URL=ws://YOUR_GCP_EXTERNAL_IP:8000/api/ws/events
+
 FRONTEND_BASE_URL=http://YOUR_GCP_EXTERNAL_IP:3000
 ```
 
@@ -286,7 +298,7 @@ http://GCP_IP:8000/api/webhook/github
 3. **Update URLs** trong `.env`:
    ```env
    NEXT_PUBLIC_API_URL=https://yourdomain.com/api
-   NEXT_PUBLIC_WS_URL=wss://yourdomain.com/api/ws/events
+
    ```
 
 ### 6.2 Restrict Source IPs (Optional)

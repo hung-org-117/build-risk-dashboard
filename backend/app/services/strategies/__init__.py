@@ -17,6 +17,7 @@ from app.services.strategies.cv_generators import (
     L2GOCrossValidator,
 )
 from app.services.strategies.factory import CV_STRATEGIES, SplittingStrategyFactory
+from app.services.strategies.no_split import NoSplitStrategy
 from app.services.strategies.random import RandomSplitStrategy
 from app.services.strategies.stratified import StratifiedSplitStrategy
 from app.services.strategies.stratified_within_group import (
@@ -31,6 +32,7 @@ __all__ = [
     "BaseCVGenerator",
     "CVFold",
     # Single-split strategies
+    "NoSplitStrategy",
     "RandomSplitStrategy",
     "TimeSeriesSplitStrategy",
     "StratifiedSplitStrategy",

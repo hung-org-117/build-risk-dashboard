@@ -147,8 +147,8 @@ def start_processing_phase(
             f"checkpoint will be set to {last_build_id} after completion"
         )
 
-        # Extract raw_build_run_ids
-        raw_build_run_ids = [str(b.raw_build_run_id) for b in pending_builds]
+        # Extract model_import_build_ids (pass ID directly to avoid re-querying by secondary key)
+        model_import_build_ids = [str(b.id) for b in pending_builds]
 
         # Update status to PROCESSING only (checkpoint set AFTER processing completes)
         repo_config_repo.update_repository(
@@ -160,24 +160,24 @@ def start_processing_phase(
         dispatch_build_processing.delay(
             repo_config_id=repo_config_id,
             raw_repo_id=str(repo_config.raw_repo_id),
-            raw_build_run_ids=raw_build_run_ids,
+            model_import_build_ids=model_import_build_ids,
             correlation_id=correlation_id,
             last_import_build_id=str(last_build_id),
         )
 
         logger.info(
-            f"{log_ctx} Dispatched processing for {len(raw_build_run_ids)} builds"
+            f"{log_ctx} Dispatched processing for {len(model_import_build_ids)} builds"
         )
 
         publish_status(
             repo_config_id,
             "processing",
-            f"Processing {len(raw_build_run_ids)} builds...",
+            f"Processing {len(model_import_build_ids)} builds...",
         )
 
         return {
             "status": "dispatched",
-            "builds": len(raw_build_run_ids),
+            "builds": len(model_import_build_ids),
             "ingested": ingested_count,
             "failed": failed_count,
             "pending_checkpoint_id": str(last_build_id),
@@ -203,15 +203,14 @@ def dispatch_build_processing(
     self: SafeTask,
     repo_config_id: str,
     raw_repo_id: str,
-    raw_build_run_ids: List[str],
+    model_import_build_ids: List[str],
     correlation_id: str = "",
     last_import_build_id: str = "",
 ) -> Dict[str, Any]:
     """
     Create ModelTrainingBuild docs and dispatch feature extraction tasks.
 
-    Looks up ModelImportBuild for each raw_build_run_id to get the
-    model_import_build_id reference.
+    Looks up ModelImportBuild directly by ID.
 
     Flow:
     1. Create ModelTrainingBuild for each raw_build_run (with PENDING status)
@@ -225,6 +224,8 @@ def dispatch_build_processing(
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
+        from datetime import timezone
+
         from celery import chain
 
         from app.entities.enums import ExtractionStatus
@@ -240,7 +241,7 @@ def dispatch_build_processing(
         raw_build_run_repo = RawBuildRunRepository(self.db)
         import_build_repo = ModelImportBuildRepository(self.db)
 
-        if not raw_build_run_ids:
+        if not model_import_build_ids:
             logger.info(
                 f"{corr_prefix} No builds to process for repo config {repo_config_id}"
             )
@@ -251,18 +252,15 @@ def dispatch_build_processing(
             publish_status(repo_config_id, "processed", "No new builds to process")
             return {"repo_config_id": repo_config_id, "dispatched": 0}
 
+        ingested_builds = import_build_repo.find_many(
+            {"_id": {"$in": [ObjectId(bid) for bid in model_import_build_ids]}},
+            sort=[("run_created_at", 1)],
+        )
+
+        # Then get raw_build_run_ids from them to fetch RawBuildRuns
+        raw_build_run_ids = [str(b.raw_build_run_id) for b in ingested_builds]
         raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
         build_run_map = {str(r.id): r for r in raw_build_runs}
-
-        ingested_builds = import_build_repo.find_by_raw_build_run_ids(
-            repo_config_id, raw_build_run_ids
-        )
-
-        # Sort by created_at ascending (oldest first) for temporal features
-        ingested_builds.sort(
-            key=lambda ib: build_run_map.get(str(ib.raw_build_run_id), ib).created_at
-            or ib.created_at
-        )
 
         run_oids = [
             ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)
@@ -591,15 +589,25 @@ def finalize_prediction(
         predicted_count = prediction_stats.get("predicted", 0)
         prediction_failed = prediction_stats.get("failed", 0)
 
-        # Set final status to PROCESSED
+        # Re-fetch extraction stats to get total failures
+        extraction_stats = model_build_repo.aggregate_stats_by_repo_config(
+            ObjectId(repo_config_id)
+        )
+        extraction_failed = extraction_stats.get("builds_processing_failed", 0)
+        total_failed = extraction_failed + prediction_failed
+
+        # Set final status to PROCESSED and update failures count definitively
         repo_config_repo.update_repository(
             repo_config_id,
-            {"status": ModelImportStatus.PROCESSED.value},
+            {
+                "status": ModelImportStatus.PROCESSED.value,
+                "builds_processing_failed": total_failed,
+            },
         )
 
         logger.info(
             f"{corr_prefix} Prediction complete: {predicted_count} predicted, "
-            f"{prediction_failed} failed out of {total_builds} total"
+            f"{prediction_failed} prediction failed. Total processing failures: {total_failed}"
         )
 
         publish_status(
@@ -609,6 +617,7 @@ def finalize_prediction(
             stats={
                 "predicted": predicted_count,
                 "prediction_failed": prediction_failed,
+                "builds_processing_failed": total_failed,
             },
         )
 

@@ -345,7 +345,9 @@ class SafeTask(PipelineTask):
                     },
                 )
                 publish_model_repo_updated(
-                    repo_config_id, ModelImportStatus.FAILED.value, error=error_message
+                    repo_config_id,
+                    ModelImportStatus.FAILED.value,
+                    message=error_message,
                 )
                 logger.info(
                     f"Marked ModelRepoConfig {repo_config_id[:8]} as FAILED: {error_message[:100]}"
@@ -380,9 +382,9 @@ class SafeTask(PipelineTask):
                         "error_message": error_message[:500],
                     },
                 )
-                publish_scenario_updated(
-                    scenario_id, ScenarioStatus.FAILED.value, error=error_message
-                )
+                scenario = repo.find_by_id(scenario_id)
+                if scenario:
+                    publish_scenario_updated(scenario, error=error_message)
                 logger.info(
                     f"Marked TrainingScenario {scenario_id[:8]} as FAILED: {error_message[:100]}"
                 )

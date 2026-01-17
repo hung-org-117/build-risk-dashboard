@@ -109,6 +109,11 @@ class ModelImportBuild(BaseEntity):
         description="Commit SHA (denormalized from RawBuildRun)",
     )
 
+    run_created_at: Optional[datetime] = Field(
+        None,
+        description="When the CI workflow was created/queued (denormalized from RawBuildRun)",
+    )
+
     # Timestamps for tracking
     fetched_at: datetime = Field(
         default_factory=datetime.utcnow,

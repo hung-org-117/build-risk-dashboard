@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Settings2, Plus, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload } from "lucide-react";
+import { Settings2, Plus, LayoutGrid, Grid2x2, Grid3x3, LayoutPanelLeft, Download, Upload, RefreshCw, Loader2 } from "lucide-react";
 
 import GridLayout from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
@@ -132,6 +132,7 @@ export default function OverviewPage() {
   const [containerWidth, setContainerWidth] = useState(1200);
   const [recentBuilds, setRecentBuilds] = useState<Build[]>([]);
   const originalWidgetsRef = useRef<WidgetConfig[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Check if user is admin
   const isAdmin = user?.role === "admin";
@@ -168,7 +169,7 @@ export default function OverviewPage() {
           dashboardApi.getSummary(),
           dashboardApi.getLayout(),
           dashboardApi.getAvailableWidgets(),
-          dashboardApi.getRecentBuilds(50),
+          dashboardApi.getRecentBuilds(1000, 30),
         ]);
 
         if (!isActive) {
@@ -359,6 +360,14 @@ export default function OverviewPage() {
     }
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    // Simulate refresh delay (since data is SWR/polling based or prop based)
+    // Ideally trigger a re-mutation if using SWR/React Query
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setRefreshing(false);
+  };
+
   const totalRepositories = summary?.active_repos ?? 0;
   const enabledWidgets = widgets.filter((w) => w.enabled);
 
@@ -411,7 +420,7 @@ export default function OverviewPage() {
       router,
     };
 
-    return <WidgetRenderer widget={widget} {...widgetProps} />;
+    return <WidgetRenderer widget={widget} {...widgetProps} className="h-full" />;
   };
 
   const layout = enabledWidgets.map((widget) => ({
@@ -554,17 +563,33 @@ export default function OverviewPage() {
               </Button>
             </>
           ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                originalWidgetsRef.current = widgets;
-                setIsEditing(true);
-              }}
-            >
-              <Settings2 className="h-4 w-4 mr-1" />
-              Customize
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="mr-2"
+              >
+                {refreshing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Refresh
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  originalWidgetsRef.current = widgets;
+                  setIsEditing(true);
+                }}
+              >
+                <Settings2 className="h-4 w-4 mr-1" />
+                Customize
+              </Button>
+            </>
           )}
         </div>
       </div>

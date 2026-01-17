@@ -46,26 +46,23 @@ export function ModelPipelineSummaryWidget({ summary, isEditing, className }: Ba
       <CardHeader className="pb-2">
         <CardTitle className="text-sm truncate">Build Risk Evaluation</CardTitle>
         <CardDescription className="text-xs truncate">
-          Model Pipeline Status
+          Pipeline Status
         </CardDescription>
       </CardHeader>
       <CardContent className="flex items-center justify-around gap-2 h-[calc(100%-60px)] px-2">
         <div className="flex flex-col items-center min-w-0">
-          <FolderGit2 className="h-5 w-5 text-slate-500 mb-1" />
           <div className="text-xl font-bold text-slate-600">
             {pipelineStats.imported_repos ?? 0}
           </div>
           <div className="text-[10px] text-muted-foreground truncate">Imported</div>
         </div>
         <div className="flex flex-col items-center min-w-0">
-          <Database className="h-5 w-5 text-purple-500 mb-1" />
           <div className="text-xl font-bold text-purple-600">
             {pipelineStats.ingested_repos_distinct ?? 0}
           </div>
           <div className="text-[10px] text-muted-foreground truncate">Ingested</div>
         </div>
         <div className="flex flex-col items-center min-w-0">
-          <CheckCircle2 className="h-5 w-5 text-green-500 mb-1" />
           <div className="text-xl font-bold text-green-600">
             {pipelineStats.processed_repos ?? 0}
           </div>

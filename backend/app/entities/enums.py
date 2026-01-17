@@ -54,6 +54,7 @@ class FeatureVectorScope(str, Enum):
 class SplitStrategy(str, Enum):
     """Available splitting strategies."""
 
+    NO_SPLIT = "no_split"
     RANDOM_SPLIT = "random_split"
     TIME_SERIES_SPLIT = "time_series_split"
     STRATIFIED_SPLIT = "stratified_split"

@@ -355,8 +355,8 @@ export function SplittingStrategySection({
                     </div>
                 )}
 
-                {/* Ratios - show for non-CV strategies */}
-                {!isCV && (
+                {/* Ratios - show for non-CV strategies except NO_SPLIT */}
+                {!isCV && config.strategy !== STRATEGY.NO_SPLIT && (
                     <div className="space-y-4 pt-4 border-t">
                         <Label>Train / Validation / Test Ratios</Label>
                         <RatioSlider

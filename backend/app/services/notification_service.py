@@ -371,7 +371,7 @@ def _send_admin_email(
     Returns True if email was sent, False otherwise.
     """
     try:
-        from app.repositories.settings import SettingsRepository
+        from app.repositories.settings_repository import SettingsRepository
 
         settings_repo = SettingsRepository(db)
         settings = settings_repo.get_settings()

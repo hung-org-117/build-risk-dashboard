@@ -304,7 +304,10 @@ class ModelBuildService:
         )
 
     def get_recent_builds(
-        self, limit: int = 10, current_user: Optional[dict] = None
+        self,
+        limit: int = 10,
+        days: Optional[int] = None,
+        current_user: Optional[dict] = None,
     ) -> List[BuildSummary]:
         """Get most recent builds across repos accessible to user.
 
@@ -312,6 +315,8 @@ class ModelBuildService:
         - Admin: sees all imported repos
         - User: sees only repos in their github_accessible_repos that are imported
         """
+        from datetime import datetime, timedelta
+
         user_role = current_user.get("role", "user") if current_user else "admin"
         accessible_repos = (
             current_user.get("github_accessible_repos", []) if current_user else []
@@ -336,7 +341,12 @@ class ModelBuildService:
             return []
 
         # Query raw_build_runs filtered by imported repos
-        query = {"raw_repo_id": {"$in": raw_repo_ids}}
+        query: Dict[str, Any] = {"raw_repo_id": {"$in": raw_repo_ids}}
+
+        # Add date filter if days is provided
+        if days:
+            start_date = datetime.utcnow() - timedelta(days=days)
+            query["run_created_at"] = {"$gte": start_date}
 
         raw_cursor = (
             self.db.raw_build_runs.find(query).sort("run_created_at", -1).limit(limit)

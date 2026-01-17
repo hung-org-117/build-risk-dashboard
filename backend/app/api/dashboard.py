@@ -30,12 +30,13 @@ async def get_dashboard_summary(
 @router.get("/recent-builds", response_model=list[BuildSummary])
 async def get_recent_builds(
     limit: int = 10,
+    days: int = None,
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Return recent builds across repositories accessible to the user."""
     build_service = ModelBuildService(db)
-    return build_service.get_recent_builds(limit, current_user)
+    return build_service.get_recent_builds(limit, days, current_user)
 
 
 @router.get("/layout", response_model=DashboardLayoutResponse)

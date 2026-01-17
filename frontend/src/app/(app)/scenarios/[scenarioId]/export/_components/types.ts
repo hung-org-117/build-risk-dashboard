@@ -70,6 +70,7 @@ export const DEFAULT_CONFIG: ExportConfig = {
 
 // Strategy value constants - use these instead of inline strings
 export const STRATEGY = {
+    NO_SPLIT: "no_split",
     STRATIFIED_WITHIN_GROUP: "stratified_within_group",
     STRATIFIED_SPLIT: "stratified_split",
     RANDOM_SPLIT: "random_split",
@@ -103,6 +104,12 @@ export const NORMALIZATION_OPTIONS = [
 ] as const;
 
 export const STRATEGY_OPTIONS: StrategyOption[] = [
+    {
+        value: "no_split",
+        label: "No Split (Full Dataset)",
+        description: "Export entire dataset as a single file without splitting",
+        requiresGroupBy: false,
+    },
     {
         value: "stratified_within_group",
         label: "Stratified Within Group",

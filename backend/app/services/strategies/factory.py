@@ -8,6 +8,7 @@ This factory handles non-CV strategies (random, stratified, time_series).
 from app.entities.enums import SplitStrategy
 from app.entities.training_dataset_export import ExportSplittingConfig
 from app.services.strategies.base import BaseSplittingStrategy
+from app.services.strategies.no_split import NoSplitStrategy
 from app.services.strategies.random import RandomSplitStrategy
 from app.services.strategies.stratified import StratifiedSplitStrategy
 from app.services.strategies.stratified_within_group import (
@@ -26,6 +27,7 @@ class SplittingStrategyFactory:
     """Factory for creating splitting strategy instances."""
 
     STRATEGY_MAP = {
+        SplitStrategy.NO_SPLIT: NoSplitStrategy,
         SplitStrategy.RANDOM_SPLIT: RandomSplitStrategy,
         SplitStrategy.TIME_SERIES_SPLIT: TimeSeriesSplitStrategy,
         SplitStrategy.STRATIFIED_SPLIT: StratifiedSplitStrategy,

@@ -46,7 +46,10 @@ from app.tasks.base import PipelineTask, SafeTask, TaskState, TransientError
 from app.tasks.model_processing import publish_status
 from app.tasks.pipeline.resource_dag import get_ingestion_tasks_by_level
 from app.tasks.shared import ModelPipelineContext, build_workflow_with_context
-from app.tasks.shared.events import publish_ingestion_progress, publish_model_repo_updated
+from app.tasks.shared.events import (
+    publish_ingestion_progress,
+    publish_model_repo_updated,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +102,9 @@ def start_model_processing(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -195,7 +200,9 @@ def ingest_model_builds(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -220,7 +227,9 @@ def ingest_model_builds(
         if not repo_config:
             raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
 
-        logger.info(f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}")
+        logger.info(
+            f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}"
+        )
 
         # Update repo_config status
         repo_config_repo.update_repository(
@@ -256,7 +265,11 @@ def ingest_model_builds(
         fetch_tasks = []
         remaining = max_builds
         for page in range(1, estimated_pages + 1):
-            api_limit = min(effective_batch_size, remaining) if remaining else effective_batch_size
+            api_limit = (
+                min(effective_batch_size, remaining)
+                if remaining
+                else effective_batch_size
+            )
             fetch_tasks.append(
                 fetch_builds_batch.si(
                     repo_config_id=repo_config_id,
@@ -329,7 +342,9 @@ def fetch_builds_until_existing(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -358,10 +373,9 @@ def fetch_builds_until_existing(
         if not raw_repo:
             return {"status": "error", "error": "RawRepository not found"}
 
-        # Get newest existing build's created_at for "since" filter
-        # This ensures we only fetch builds NEWER than what we already have
-        newest_build = build_run_repo.get_latest_run(ObjectId(raw_repo_id))
-        since_dt = newest_build.created_at if newest_build else None
+        # Get run_created_at of the newest INGESTED build for this config
+        # This ensures we only fetch builds NEWER than what we already have ingested
+        since_dt = import_build_repo.get_latest_ingested_run_created_at(repo_config_id)
 
         if since_dt:
             logger.info(f"{log_ctx} Fetching builds newer than {since_dt.isoformat()}")
@@ -421,7 +435,9 @@ def fetch_builds_until_existing(
                     continue
 
                 # Check if RawBuildRun already exists - if so, skip it (already imported)
-                existing_run = build_run_repo.find_by_repo_and_build_id(raw_repo_id, build.build_id)
+                existing_run = build_run_repo.find_by_repo_and_build_id(
+                    raw_repo_id, build.build_id
+                )
 
                 if existing_run:
                     # Build already exists in database, count as existing and skip
@@ -442,9 +458,9 @@ def fetch_builds_until_existing(
                     status=build.status,
                     conclusion=build.conclusion,
                     run_created_at=build.created_at or datetime.now(timezone.utc),
-                    run_started_at=build.started_at,
+                    run_started_at=build.started_at or datetime.now(timezone.utc),
                     run_completed_at=build.completed_at
-                    or build.created_at
+                    or build.started_at
                     or datetime.now(timezone.utc),
                     duration_seconds=build.duration_seconds,
                     web_url=build.web_url,
@@ -469,7 +485,9 @@ def fetch_builds_until_existing(
                 all_ci_run_ids.append(build.build_id)
 
             total_new_builds += new_on_page
-            logger.info(f"{log_ctx} Page {page}: {new_on_page} new, {existing_on_page} existing")
+            logger.info(
+                f"{log_ctx} Page {page}: {new_on_page} new, {existing_on_page} existing"
+            )
 
             # Stop if we hit ANY existing build
             if existing_on_page > 0:
@@ -480,7 +498,9 @@ def fetch_builds_until_existing(
 
             # Stop if no more pages
             if len(builds) < batch_size:
-                logger.info(f"{log_ctx} No more pages (got {len(builds)} < {batch_size})")
+                logger.info(
+                    f"{log_ctx} No more pages (got {len(builds)} < {batch_size})"
+                )
                 break
 
             page += 1
@@ -564,7 +584,9 @@ def fetch_builds_batch(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -582,7 +604,11 @@ def fetch_builds_batch(
         raw_repo_id = str(repo_config.raw_repo_id)
         full_name = repo_config.full_name
 
-        since_dt = datetime.now(timezone.utc) - timedelta(days=since_days) if since_days else None
+        since_dt = (
+            datetime.now(timezone.utc) - timedelta(days=since_days)
+            if since_days
+            else None
+        )
 
         # Get CI provider instance
         ci_provider_enum = CIProvider(ci_provider)
@@ -669,7 +695,9 @@ def fetch_builds_batch(
             )
 
             # Check if ModelImportBuild already exists
-            existing = import_build_repo.find_by_business_key(repo_config_id, str(raw_build_run.id))
+            existing = import_build_repo.find_by_business_key(
+                repo_config_id, str(raw_build_run.id)
+            )
             if existing:
                 continue  # Already created
 
@@ -680,6 +708,7 @@ def fetch_builds_batch(
                 status=ModelImportBuildStatus.FETCHED,
                 ci_run_id=raw_build_run.ci_run_id,
                 commit_sha=build.commit_sha or "",
+                run_created_at=raw_build_run.run_created_at,
                 ingestion_started_at=None,
                 ingested_at=None,
                 ingestion_error=None,
@@ -691,7 +720,9 @@ def fetch_builds_batch(
             import_build_repo.bulk_insert(import_builds_to_insert)
 
         has_more = len(builds) >= batch_size
-        logger.info(f"{log_ctx} Saved {len(import_builds_to_insert)} builds, has_more={has_more}")
+        logger.info(
+            f"{log_ctx} Saved {len(import_builds_to_insert)} builds, has_more={has_more}"
+        )
 
         return {
             "page": page,
@@ -728,7 +759,9 @@ def aggregate_fetch_results(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -763,7 +796,9 @@ def aggregate_fetch_results(
 
         # Log discrepancy if any (shouldn't happen with chord)
         if total_fetched != total_from_results:
-            logger.warning(f"{log_ctx} Discrepancy: chord={total_from_results}, db={total_fetched}")
+            logger.warning(
+                f"{log_ctx} Discrepancy: chord={total_from_results}, db={total_fetched}"
+            )
 
         logger.info(f"{log_ctx} Found {total_fetched} fetched builds in DB")
 
@@ -907,7 +942,9 @@ def dispatch_ingestion(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -955,7 +992,9 @@ def dispatch_ingestion(
                 pipeline_type="model",
             )
 
-        logger.info(f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}")
+        logger.info(
+            f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}"
+        )
 
         # Create context for this repo
         ctx = ModelPipelineContext(
@@ -1031,7 +1070,9 @@ def aggregate_model_ingestion_results(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -1115,7 +1156,9 @@ def aggregate_model_ingestion_results(
         # Count by status to determine final state
         status_counts = import_build_repo.count_by_status(repo_config_id)
         ingested = status_counts.get(ModelImportBuildStatus.INGESTED.value, 0)
-        missing_resource = status_counts.get(ModelImportBuildStatus.MISSING_RESOURCE.value, 0)
+        missing_resource = status_counts.get(
+            ModelImportBuildStatus.MISSING_RESOURCE.value, 0
+        )
         failed = status_counts.get(ModelImportBuildStatus.FAILED.value, 0)
 
         # Determine final ingestion status - always INGESTED
@@ -1211,7 +1254,9 @@ def handle_ingestion_chord_error(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     error_msg = str(exc) if exc else "Unknown ingestion error"
 
-    logger.error(f"{corr_prefix} Ingestion chord failed for {repo_config_id}: {error_msg}")
+    logger.error(
+        f"{corr_prefix} Ingestion chord failed for {repo_config_id}: {error_msg}"
+    )
 
     import_build_repo = ModelImportBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -1307,7 +1352,9 @@ def reingest_failed_builds(
     """
 
     def mark_failed(e: Exception):
-        handler = _create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = _create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -1322,7 +1369,9 @@ def reingest_failed_builds(
 
         # Find FAILED builds after checkpoint (not MISSING_RESOURCE - those are not retryable)
         checkpoint_id = repo_config.last_processed_import_build_id
-        failed_builds = import_build_repo.find_failed_builds(repo_config_id, after_id=checkpoint_id)
+        failed_builds = import_build_repo.find_failed_builds(
+            repo_config_id, after_id=checkpoint_id
+        )
 
         if not failed_builds:
             # Also count missing_resource for user feedback
@@ -1331,7 +1380,9 @@ def reingest_failed_builds(
             )
             msg = "No failed builds to retry"
             if missing_count > 0:
-                msg += f" ({missing_count} builds have missing resources - not retryable)"
+                msg += (
+                    f" ({missing_count} builds have missing resources - not retryable)"
+                )
             logger.info(f"{msg} for {repo_config_id}")
             return {
                 "status": "no_failed_builds",
@@ -1383,7 +1434,9 @@ def reingest_failed_builds(
         )
 
         # Get raw repo info
-        raw_repo = RawRepositoryRepository(self.db).find_by_id(str(repo_config.raw_repo_id))
+        raw_repo = RawRepositoryRepository(self.db).find_by_id(
+            str(repo_config.raw_repo_id)
+        )
         if not raw_repo:
             logger.error(f"Raw repo not found: {repo_config.raw_repo_id}")
             return {"status": "error", "message": "Raw repo not found"}
@@ -1458,7 +1511,8 @@ def ingest_webhook_build(
     corr_prefix = f"[corr={correlation_id}][webhook]"
 
     logger.info(
-        f"{corr_prefix} Starting webhook ingestion for build {ci_run_id} " f"in repo {full_name}"
+        f"{corr_prefix} Starting webhook ingestion for build {ci_run_id} "
+        f"in repo {full_name}"
     )
 
     import_build_repo = ModelImportBuildRepository(self.db)
@@ -1480,19 +1534,26 @@ def ingest_webhook_build(
     github_repo_id = github_repo_id or raw_repo.github_repo_id
 
     # Create or get ModelImportBuild
-    existing_import = import_build_repo.find_by_business_key(repo_config_id, raw_build_run_id)
+    existing_import = import_build_repo.find_by_business_key(
+        repo_config_id, raw_build_run_id
+    )
 
     if existing_import:
         logger.info(f"{corr_prefix} Build {ci_run_id} already ingested, skipping")
         return {"status": "already_ingested", "build_id": ci_run_id}
 
     # Create new ModelImportBuild with FETCHED status
+    # Get RawBuildRun to populate run_created_at
+    raw_build_run = RawBuildRunRepository(self.db).find_by_id(raw_build_run_id)
+    run_created_at = raw_build_run.run_created_at if raw_build_run else None
+
     import_build = ModelImportBuild(
         model_repo_config_id=ObjectId(repo_config_id),
         raw_build_run_id=ObjectId(raw_build_run_id),
         status=ModelImportBuildStatus.FETCHED,
         ci_run_id=ci_run_id,
         commit_sha=commit_sha,
+        run_created_at=run_created_at,
         ingestion_started_at=None,
         ingested_at=None,
         ingestion_error=None,

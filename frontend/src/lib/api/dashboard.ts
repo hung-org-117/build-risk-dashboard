@@ -39,9 +39,9 @@ export const dashboardApi = {
         );
         return response.data;
     },
-    getRecentBuilds: async (limit: number = 10) => {
+    getRecentBuilds: async (limit: number = 10, days?: number) => {
         const response = await api.get<Build[]>("/dashboard/recent-builds", {
-            params: { limit },
+            params: { limit, days },
         });
         return response.data;
     },

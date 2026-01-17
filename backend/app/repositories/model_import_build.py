@@ -812,3 +812,36 @@ class ModelImportBuildRepository(BaseRepository[ModelImportBuild]):
             },
         )
         return result.modified_count
+
+    def get_latest_ingested_run_created_at(
+        self,
+        config_id: str,
+    ) -> Optional[datetime]:
+        """
+        Get the run_created_at of the most recent INGESTED build for a repo config.
+
+        Uses denormalized run_created_at field for efficient query without joins.
+
+        Args:
+            config_id: ModelRepoConfig ID
+
+        Returns:
+            run_created_at datetime from the newest ingested build,
+            or None if no ingested builds exist
+        """
+        doc = (
+            self.collection.find(
+                {
+                    "model_repo_config_id": ObjectId(config_id),
+                    "status": ModelImportBuildStatus.INGESTED.value,
+                },
+                {"run_created_at": 1},  # Only project the field we need
+            )
+            .sort("run_created_at", -1)
+            .limit(1)
+        )
+        docs = list(doc)
+        if not docs:
+            return None
+
+        return docs[0].get("run_created_at")

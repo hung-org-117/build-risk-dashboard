@@ -21,6 +21,7 @@ import {
     Activity,
     Filter,
     Cpu,
+    RefreshCw,
 } from "lucide-react";
 import {
     trainingScenariosApi,
@@ -104,10 +105,12 @@ export default function ScenarioOverviewPage() {
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [exportsCount, setExportsCount] = useState(0);
 
     // Fetch scenario
-    const fetchScenario = useCallback(async () => {
+    const fetchScenario = useCallback(async (showRefreshing = false) => {
+        if (showRefreshing) setRefreshing(true);
         try {
             const data = await trainingScenariosApi.get(scenarioId);
             setScenario(data);
@@ -119,8 +122,11 @@ export default function ScenarioOverviewPage() {
             console.error("Failed to fetch scenario:", err);
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     }, [scenarioId]);
+
+    const handleRefresh = () => fetchScenario(true);
 
     useEffect(() => {
         fetchScenario();
@@ -171,6 +177,24 @@ export default function ScenarioOverviewPage() {
         <div className="space-y-6">
             {/* Stepper */}
             <Card>
+                <CardHeader className="pb-0">
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg">Pipeline Status</CardTitle>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleRefresh}
+                            disabled={refreshing}
+                        >
+                            {refreshing ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <RefreshCw className="h-4 w-4" />
+                            )}
+                            <span className="ml-2">Refresh</span>
+                        </Button>
+                    </div>
+                </CardHeader>
                 <CardContent className="pt-6">
                     <ScenarioStepper status={scenario.status} />
                 </CardContent>

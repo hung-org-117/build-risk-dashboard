@@ -5,6 +5,7 @@ import {
     Clock,
     GitCommit,
     Loader2,
+    RefreshCw,
     XCircle,
     AlertCircle,
 } from "lucide-react";
@@ -92,6 +93,7 @@ export default function UserBuildsPage() {
     const [builds, setBuilds] = useState<Build[]>([]);
     const [loading, setLoading] = useState(true);
     const [tableLoading, setTableLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
 
@@ -140,6 +142,12 @@ export default function UserBuildsPage() {
         }
     };
 
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await loadBuilds(page, true);
+        setRefreshing(false);
+    };
+
     if (loading) {
         return (
             <div className="flex h-40 items-center justify-center">
@@ -163,7 +171,18 @@ export default function UserBuildsPage() {
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Build History</CardTitle>
+                    <div className="flex items-center justify-between">
+                        <CardTitle>Build History</CardTitle>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleRefresh}
+                            disabled={refreshing || tableLoading}
+                        >
+                            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                            Refresh
+                        </Button>
+                    </div>
                     <CardDescription>Click a build to view details and extracted features</CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">

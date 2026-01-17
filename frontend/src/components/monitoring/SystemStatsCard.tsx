@@ -1,8 +1,7 @@
-"use client";
-
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import {
     Activity,
     Database,
@@ -122,6 +121,7 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
                         </span>
                         <Badge
                             variant={stats.celery.status === "online" ? "default" : "destructive"}
+                            className={cn(stats.celery.status === "online" && "bg-green-600 hover:bg-green-700")}
                         >
                             {stats.celery.status}
                         </Badge>
@@ -161,6 +161,7 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
                     <div className="flex items-baseline gap-2">
                         <Badge
                             variant={stats.redis.connected ? "default" : "destructive"}
+                            className={cn(stats.redis.connected && "bg-green-600 hover:bg-green-700")}
                         >
                             {stats.redis.connected ? "Connected" : "Disconnected"}
                         </Badge>
@@ -195,6 +196,7 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
                     <div className="flex items-baseline gap-2">
                         <Badge
                             variant={stats.mongodb.connected ? "default" : "destructive"}
+                            className={cn(stats.mongodb.connected && "bg-green-600 hover:bg-green-700")}
                         >
                             {stats.mongodb.connected ? "Connected" : "Disconnected"}
                         </Badge>
@@ -232,6 +234,7 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
                     <div className="flex items-baseline gap-2">
                         <Badge
                             variant={stats.trivy?.connected ? "default" : "destructive"}
+                            className={cn(stats.trivy?.connected && "bg-green-600 hover:bg-green-700")}
                         >
                             {stats.trivy?.connected ? "Connected" : "Disconnected"}
                         </Badge>
@@ -272,6 +275,7 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
                     <div className="flex items-baseline gap-2">
                         <Badge
                             variant={stats.sonarqube?.connected ? "default" : "destructive"}
+                            className={cn(stats.sonarqube?.connected && "bg-green-600 hover:bg-green-700")}
                         >
                             {stats.sonarqube?.connected ? "Connected" : "Disconnected"}
                         </Badge>

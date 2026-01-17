@@ -145,6 +145,13 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                             training_builds: {
                                 ...prev.training_builds,
                                 completed: data.stats?.builds_processed ?? prev.training_builds.completed,
+                                // Sync failure counts if provided (fixes optimistic update mismatches)
+                                failed: (typeof data.stats?.builds_processing_failed === 'number' && typeof data.stats?.prediction_failed === 'number')
+                                    ? Math.max(0, data.stats.builds_processing_failed - data.stats.prediction_failed)
+                                    : (data.stats?.builds_processing_failed === 0 ? 0 : prev.training_builds.failed),
+                                prediction_failed: (typeof data.stats?.prediction_failed === 'number')
+                                    ? data.stats.prediction_failed
+                                    : (data.stats?.builds_processing_failed === 0 ? 0 : prev.training_builds.prediction_failed),
                             },
                         };
                     });

@@ -2,6 +2,14 @@
 
 import { ShieldCheck, GripVertical } from "lucide-react";
 import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  Legend,
+} from "recharts";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -32,6 +40,12 @@ export function RiskDistributionWidget({ recentBuilds, isEditing, className }: B
   });
   const totalPredicted = distCounts.LOW + distCounts.MEDIUM + distCounts.HIGH;
 
+  const data = [
+    { name: "Low", value: distCounts.LOW, color: "#16a34a" }, // green-600
+    { name: "Medium", value: distCounts.MEDIUM, color: "#d97706" }, // amber-600
+    { name: "High", value: distCounts.HIGH, color: "#dc2626" }, // red-600
+  ].filter(d => d.value > 0);
+
   return (
     <Card className={cn("h-full overflow-hidden", isEditing && "ring-2 ring-blue-500/20 cursor-move", className)}>
       {isEditing && (
@@ -45,25 +59,43 @@ export function RiskDistributionWidget({ recentBuilds, isEditing, className }: B
           Risk level breakdown
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex items-center justify-center h-[calc(100%-60px)]">
+      <CardContent className="h-[calc(100%-60px)] min-h-[160px]">
         {totalPredicted > 0 ? (
-          <div className="flex items-center gap-4">
-            <div className="flex flex-col items-center">
-              <div className="text-2xl font-bold text-green-600">{distCounts.LOW}</div>
-              <div className="text-xs text-muted-foreground">Low</div>
-            </div>
-            <div className="flex flex-col items-center">
-              <div className="text-2xl font-bold text-amber-600">{distCounts.MEDIUM}</div>
-              <div className="text-xs text-muted-foreground">Medium</div>
-            </div>
-            <div className="flex flex-col items-center">
-              <div className="text-2xl font-bold text-red-600">{distCounts.HIGH}</div>
-              <div className="text-xs text-muted-foreground">High</div>
-            </div>
-          </div>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={data}
+                cx="50%"
+                cy="50%"
+                innerRadius={40}
+                outerRadius={60}
+                paddingAngle={2}
+                dataKey="value"
+              >
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "hsl(var(--popover))",
+                  border: "1px solid hsl(var(--border))",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                }}
+                itemStyle={{ color: "hsl(var(--popover-foreground))" }}
+              />
+              <Legend
+                verticalAlign="bottom"
+                height={36}
+                iconType="circle"
+                wrapperStyle={{ fontSize: "11px", paddingTop: "10px" }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
         ) : (
-          <div className="text-center space-y-2">
-            <ShieldCheck className="h-8 w-8 mx-auto text-muted-foreground/50" />
+          <div className="flex flex-col items-center justify-center h-full space-y-2">
+            <ShieldCheck className="h-8 w-8 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">No predictions yet</p>
           </div>
         )}
@@ -71,3 +103,4 @@ export function RiskDistributionWidget({ recentBuilds, isEditing, className }: B
     </Card>
   );
 }
+

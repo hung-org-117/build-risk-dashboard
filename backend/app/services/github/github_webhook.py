@@ -42,7 +42,9 @@ def verify_signature(signature: str | None, body: bytes) -> None:
         )
 
 
-def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict[str, object]:
+def _handle_workflow_run_event(
+    db: Database, payload: Dict[str, object]
+) -> Dict[str, object]:
     """Handle workflow_run events."""
     action = payload.get("action")
     # Only process completed runs; we additionally filter by conclusion below.
@@ -82,7 +84,9 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
     # Save/Update RawBuildRun
     build_run_repo = RawBuildRunRepository(db)
 
-    existing_run = build_run_repo.find_by_business_key(repo_id, build_id, CIProvider.GITHUB)
+    existing_run = build_run_repo.find_by_business_key(
+        repo_id, build_id, CIProvider.GITHUB_ACTIONS
+    )
 
     if existing_run:
         # Update existing run but don't reprocess (avoid duplicate processing)
@@ -109,7 +113,9 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
     else:
         # New build run - insert and trigger processing
         created_at = workflow_run.get("created_at")
+        started_at = workflow_run.get("run_started_at")
         completed_at = workflow_run.get("updated_at")
+        head_commit = workflow_run.get("head_commit", {})
 
         # Map GitHub status to normalized status
         status = BuildStatus.COMPLETED
@@ -117,9 +123,37 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
         # Map GitHub conclusion to normalized conclusion
         gh_conclusion = workflow_run.get("conclusion", "").lower()
         try:
-            conclusion = BuildConclusion(gh_conclusion) if gh_conclusion else BuildConclusion.NONE
+            conclusion = (
+                BuildConclusion(gh_conclusion)
+                if gh_conclusion
+                else BuildConclusion.NONE
+            )
         except (ValueError, KeyError):
             conclusion = BuildConclusion.UNKNOWN
+
+        # Parse timestamps
+        run_created = (
+            datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            if created_at
+            else datetime.now(timezone.utc)
+        )
+        run_started = (
+            datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            if started_at
+            else run_created
+        )
+        run_completed = (
+            datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+            if completed_at
+            else datetime.now(timezone.utc)
+        )
+
+        # Calculate duration
+        duration_seconds = None
+        if run_started and run_completed:
+            duration_seconds = (run_completed - run_started).total_seconds()
+
+        commit_sha = workflow_run.get("head_sha", "")
 
         new_run = RawBuildRun(
             raw_repo_id=ObjectId(repo_id),
@@ -127,38 +161,32 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
             build_number=workflow_run.get("run_number"),
             repo_name=full_name,
             branch=workflow_run.get("head_branch", ""),
-            commit_sha=workflow_run.get("head_sha", ""),
-            commit_message=None,
-            commit_author=None,
+            commit_sha=commit_sha,
+            commit_message=head_commit.get("message"),
+            commit_author=head_commit.get("author", {}).get("name"),
             status=status,
             conclusion=conclusion,
-            created_at=(
-                datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                if created_at
-                else datetime.now(timezone.utc)
-            ),
-            started_at=None,
-            completed_at=(
-                datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
-                if completed_at
-                else datetime.now(timezone.utc)
-            ),
-            duration_seconds=None,
+            run_created_at=run_created,
+            run_started_at=run_started,
+            run_completed_at=run_completed,
+            duration_seconds=duration_seconds,
             web_url=workflow_run.get("html_url"),
-            logs_url=None,
+            logs_url=workflow_run.get("logs_url"),
             logs_available=False,
             logs_path=None,
             provider=CIProvider.GITHUB_ACTIONS,
             raw_data=workflow_run,
             is_bot_commit=is_bot,
         )
-        build_run_repo.insert_one(new_run)
+        result = build_run_repo.insert_one(new_run)
 
         # Find ModelRepoConfig for this raw_repo
         from app.repositories.model_repo_config import ModelRepoConfigRepository
 
         model_repo_config_repo = ModelRepoConfigRepository(db)
-        repo_config = model_repo_config_repo.find_one({"raw_repo_id": ObjectId(repo_id)})
+        repo_config = model_repo_config_repo.find_one(
+            {"raw_repo_id": ObjectId(repo_id)}
+        )
 
         if not repo_config:
             return {
@@ -182,7 +210,7 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
         ingest_webhook_build.delay(
             repo_config_id=repo_config_id,
             raw_repo_id=repo_id,
-            raw_build_run_id=str(new_run.id),
+            raw_build_run_id=str(result.id),
             full_name=full_name,
             ci_provider=(
                 repo_config.ci_provider.value
@@ -202,7 +230,9 @@ def _handle_workflow_run_event(db: Database, payload: Dict[str, object]) -> Dict
     }
 
 
-def handle_github_event(db: Database, event: str, payload: Dict[str, object]) -> Dict[str, object]:
+def handle_github_event(
+    db: Database, event: str, payload: Dict[str, object]
+) -> Dict[str, object]:
     if event in {"installation", "installation_repositories"}:
         # return _handle_installation_event(db, event, payload)
         return {"status": "ignored", "reason": "installation_management_removed"}
