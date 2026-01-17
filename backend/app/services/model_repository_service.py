@@ -860,6 +860,7 @@ class RepositoryService:
         start_date=None,
         end_date=None,
         build_status: Optional[str] = None,
+        current_user: dict = None,
     ):
         """
         Stream export builds as CSV or JSON.
@@ -878,6 +879,20 @@ class RepositoryService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
             )
+
+        # Check access control
+        if current_user:
+            user_id = ObjectId(current_user["_id"])
+            user_role = current_user.get("role", "user")
+            github_accessible_repos = current_user.get("github_accessible_repos", [])
+
+            if not self.repo_config.can_user_access(
+                ObjectId(repo_id), user_id, user_role, github_accessible_repos
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access this repository",
+                )
 
         build_repo = ModelTrainingBuildRepository(self.db)
 
@@ -906,6 +921,19 @@ class RepositoryService:
         if not repo_doc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
+            )
+
+        # Check access control
+        user_id = ObjectId(current_user["_id"])
+        user_role = current_user.get("role", "user")
+        github_accessible_repos = current_user.get("github_accessible_repos", [])
+
+        if not self.repo_config.can_user_access(
+            ObjectId(repo_id), user_id, user_role, github_accessible_repos
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to access this repository",
             )
 
         build_repo = ModelTrainingBuildRepository(self.db)
@@ -940,6 +968,7 @@ class RepositoryService:
         start_date=None,
         end_date=None,
         build_status: Optional[str] = None,
+        current_user: dict = None,
     ) -> dict:
         """
         Create background export job for large datasets.
@@ -956,6 +985,20 @@ class RepositoryService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Repository not found"
             )
+
+        # Check access control
+        if current_user:
+            user_id_obj = ObjectId(current_user["_id"])
+            user_role = current_user.get("role", "user")
+            github_accessible_repos = current_user.get("github_accessible_repos", [])
+
+            if not self.repo_config.can_user_access(
+                ObjectId(repo_id), user_id_obj, user_role, github_accessible_repos
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access this repository",
+                )
 
         build_repo = ModelTrainingBuildRepository(self.db)
         total = build_repo.count_for_export(
@@ -993,7 +1036,7 @@ class RepositoryService:
             "total_rows": total,
         }
 
-    def get_export_job(self, job_id: str) -> dict:
+    def get_export_job(self, job_id: str, current_user: dict = None) -> dict:
         """Get export job status."""
         from app.repositories.export_job import ExportJobRepository
 
@@ -1004,6 +1047,17 @@ class RepositoryService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found"
             )
+
+        # Check access control
+        if current_user:
+            user_id = ObjectId(current_user["_id"])
+            user_role = current_user.get("role", "user")
+
+            if user_role != "admin" and str(job.user_id) != str(user_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to view this export job",
+                )
 
         return {
             "id": str(job.id),
@@ -1021,9 +1075,23 @@ class RepositoryService:
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         }
 
-    def list_export_jobs(self, repo_id: str, limit: int = 10) -> list:
+    def list_export_jobs(self, repo_id: str, limit: int = 10, current_user: dict = None) -> list:
         """List export jobs for a repository."""
         from app.repositories.export_job import ExportJobRepository
+
+        # Check repo access control
+        if current_user:
+            user_id = ObjectId(current_user["_id"])
+            user_role = current_user.get("role", "user")
+            github_accessible_repos = current_user.get("github_accessible_repos", [])
+
+            if not self.repo_config.can_user_access(
+                ObjectId(repo_id), user_id, user_role, github_accessible_repos
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to access this repository",
+                )
 
         job_repo = ExportJobRepository(self.db)
         jobs = job_repo.list_by_repo(repo_id, limit)
@@ -1042,7 +1110,7 @@ class RepositoryService:
             for j in jobs
         ]
 
-    def get_export_download_path(self, job_id: str, user_id: str) -> str:
+    def get_export_download_path(self, job_id: str, user_id: str, current_user: dict = None) -> str:
         """Get file path for completed export job."""
         from app.repositories.export_job import ExportJobRepository
 
@@ -1054,11 +1122,14 @@ class RepositoryService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found"
             )
 
-        if str(job.user_id) != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to download this export",
-            )
+        # Check access control
+        if current_user:
+            user_role = current_user.get("role", "user")
+            if user_role != "admin" and str(job.user_id) != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to download this export",
+                )
 
         if job.status != "completed":
             raise HTTPException(

@@ -37,6 +37,9 @@ class Permission(str, Enum):
     START_SCANS = "start:scans"
     EXPORT_DATA = "export:data"
 
+    # Repository export permissions (Admin + User for their own repos)
+    EXPORT_BUILDS = "export:builds"
+
     # User's own dashboard
     VIEW_OWN_DASHBOARD = "view:own_dashboard"
 
@@ -60,6 +63,7 @@ ROLE_PERMISSIONS: dict[str, Set[Permission]] = {
         Permission.MANAGE_DATASETS,
         Permission.START_SCANS,
         Permission.EXPORT_DATA,
+        Permission.EXPORT_BUILDS,
         Permission.VIEW_OWN_DASHBOARD,
         Permission.VIEW_NOTIFICATIONS,
         Permission.MANAGE_NOTIFICATIONS,
@@ -70,6 +74,7 @@ ROLE_PERMISSIONS: dict[str, Set[Permission]] = {
         Permission.VIEW_DASHBOARD,
         Permission.VIEW_REPOS,
         Permission.VIEW_BUILDS,
+        Permission.EXPORT_BUILDS,  # Can export their own accessible repos
         Permission.VIEW_OWN_DASHBOARD,
         Permission.VIEW_NOTIFICATIONS,
         Permission.MANAGE_NOTIFICATIONS,
@@ -151,3 +156,4 @@ require_manage_repos = RequirePermission(Permission.MANAGE_REPOS)
 require_manage_datasets = RequirePermission(Permission.MANAGE_DATASETS)
 require_start_scans = RequirePermission(Permission.START_SCANS)
 require_export = RequirePermission(Permission.EXPORT_DATA)
+require_export_builds = RequirePermission(Permission.EXPORT_BUILDS)

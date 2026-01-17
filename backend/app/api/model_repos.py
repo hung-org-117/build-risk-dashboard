@@ -21,7 +21,7 @@ from app.dtos.build import (
     UnifiedBuildListResponse,
 )
 from app.middleware.auth import get_current_user
-from app.middleware.rbac import Permission, RequirePermission
+from app.middleware.rbac import Permission, RequirePermission, require_export_builds
 from app.services.model_build_service import ModelBuildService
 from app.services.model_repository_service import RepositoryService
 
@@ -381,6 +381,7 @@ def get_export_preview(
     repo_id: str = Path(..., description="Repository id"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_export_builds),
 ):
     """Preview exportable data with sample rows and available features."""
     service = RepositoryService(db)
@@ -396,6 +397,7 @@ def export_builds_stream(
     ),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_export_builds),
 ):
     """
     Stream export builds as CSV.
@@ -414,6 +416,7 @@ def export_builds_stream(
         repo_id=repo_id,
         format=format,
         features=feature_list,
+        current_user=current_user,
     )
 
     from datetime import datetime
@@ -438,6 +441,7 @@ def create_async_export(
     ),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_export_builds),
 ):
     """
     Create background export job for large datasets.
@@ -455,6 +459,7 @@ def create_async_export(
         user_id=str(current_user["_id"]),
         format=format,
         features=feature_list,
+        current_user=current_user,
     )
 
 
@@ -464,10 +469,11 @@ def list_repo_export_jobs(
     limit: int = Query(default=10, ge=1, le=50),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_export_builds),
 ):
     """List export jobs for a repository."""
     service = RepositoryService(db)
-    return service.list_export_jobs(repo_id, limit)
+    return service.list_export_jobs(repo_id, limit, current_user)
 
 
 @router.get("/export/jobs/{job_id}")
@@ -475,10 +481,11 @@ def get_export_job_status(
     job_id: str = Path(..., description="Export job id"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_export_builds),
 ):
     """Get status of an export job."""
     service = RepositoryService(db)
-    return service.get_export_job(job_id)
+    return service.get_export_job(job_id, current_user)
 
 
 @router.get("/export/jobs/{job_id}/download")
@@ -486,6 +493,7 @@ def download_export_file(
     job_id: str = Path(..., description="Export job id"),
     db: Database = Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_export_builds),
 ):
     """Download completed export file."""
     from pathlib import Path as FilePath
@@ -494,7 +502,7 @@ def download_export_file(
 
     service = RepositoryService(db)
     user_id = str(current_user["_id"])
-    file_path = service.get_export_download_path(job_id, user_id)
+    file_path = service.get_export_download_path(job_id, user_id, current_user)
 
     path = FilePath(file_path)
     return FileResponse(

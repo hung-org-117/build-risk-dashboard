@@ -27,6 +27,7 @@ import { buildApi } from "@/lib/api";
 import { formatTimestamp } from "@/lib/utils";
 import type { Build } from "@/types";
 import { useRepo } from "@/components/repositories/RepoContext";
+import { ExportPanel } from "./_components/ExportPanel";
 
 const PAGE_SIZE = 20;
 
@@ -167,22 +168,23 @@ export default function UserBuildsPage() {
                         className="h-9"
                     />
                 </div>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRefresh}
+                        disabled={refreshing || tableLoading}
+                    >
+                        <RefreshCw className={`mr-2 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                        Refresh
+                    </Button>
+                    <ExportPanel repoId={repoId} repoName={`my-repos-${repoId}`} />
+                </div>
             </div>
 
             <Card>
                 <CardHeader>
-                    <div className="flex items-center justify-between">
-                        <CardTitle>Build History</CardTitle>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleRefresh}
-                            disabled={refreshing || tableLoading}
-                        >
-                            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-                            Refresh
-                        </Button>
-                    </div>
+                    <CardTitle>Build History</CardTitle>
                     <CardDescription>Click a build to view details and extracted features</CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
