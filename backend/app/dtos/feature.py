@@ -102,6 +102,7 @@ class ConfigFieldSpec(BaseModel):
     options: Optional[Any] = (
         None  # Flexible: list, dict (grouped), or any structure for UI
     )
+    required_by: Optional[List[str]] = None  # Feature names that require this config
 
 
 class ConfigRequirementsRequest(BaseModel):

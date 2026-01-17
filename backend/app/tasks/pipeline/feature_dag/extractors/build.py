@@ -17,7 +17,8 @@ from app.tasks.pipeline.feature_dag._inputs import (
     GitHubClientInput,
     RepoInput,
 )
-from app.tasks.pipeline.feature_dag._metadata import requires_config
+from app.tasks.pipeline.feature_dag._metadata import ConfigSpec, requires_config
+from app.tasks.pipeline.feature_dag.languages.registry import LanguageRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -154,13 +155,14 @@ def repo_language(repo: RepoInput) -> Optional[str]:
 
 @tag(group="repo")
 @requires_config(
-    source_languages={
-        "type": "list",
-        "scope": "repo",
-        "required": False,
-        "description": "Programming languages used in the repository",
-        "default": [],
-    }
+    source_languages=ConfigSpec(
+        type="list",
+        scope="repo",
+        required=False,
+        description="Programming languages used in the repository",
+        default=[],
+        options=LanguageRegistry.get_supported_languages(),
+    )
 )
 def repo_languages_all(
     feature_config: FeatureConfigInput, repo: RepoInput

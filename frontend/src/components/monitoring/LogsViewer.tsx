@@ -116,53 +116,13 @@ export function LogsViewer({
                                 className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
                             />
                         </Button>
-                        <a
-                            href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/monitoring/logs/export?format=json`}
-                            download
-                            className="inline-flex"
-                        >
-                            <Button variant="outline" size="sm">
-                                Export JSON
-                            </Button>
-                        </a>
-                        <a
-                            href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}/monitoring/logs/export?format=csv`}
-                            download
-                            className="inline-flex"
-                        >
-                            <Button variant="outline" size="sm">
-                                Export CSV
-                            </Button>
-                        </a>
+
                     </div>
                 </div>
 
                 {/* Filters */}
                 <div className="flex items-center gap-2 mt-2">
-                    <Select value={containerFilter} onValueChange={onContainerFilterChange}>
-                        <SelectTrigger className="w-[150px]">
-                            <SelectValue placeholder="Container" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Containers</SelectItem>
-                            <SelectItem value="backend">Backend</SelectItem>
-                            <SelectItem value="celery-worker">Celery Worker</SelectItem>
-                            <SelectItem value="celery-beat">Celery Beat</SelectItem>
-                        </SelectContent>
-                    </Select>
 
-                    <Select value={levelFilter} onValueChange={onLevelFilterChange}>
-                        <SelectTrigger className="w-[120px]">
-                            <SelectValue placeholder="Level" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Levels</SelectItem>
-                            <SelectItem value="INFO">INFO</SelectItem>
-                            <SelectItem value="WARNING">WARNING</SelectItem>
-                            <SelectItem value="ERROR">ERROR</SelectItem>
-                            <SelectItem value="DEBUG">DEBUG</SelectItem>
-                        </SelectContent>
-                    </Select>
 
                     <div className="relative flex-1">
                         <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />

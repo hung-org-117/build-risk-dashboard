@@ -156,17 +156,14 @@ def get_config_requirements(request: ConfigRequirementsRequest):
     """
     from app.tasks.pipeline.constants import HAMILTON_MODULES
     from app.tasks.pipeline.feature_dag._metadata import collect_config_requirements
-    from app.tasks.pipeline.feature_dag.languages.registry import LanguageRegistry
-    from app.tasks.pipeline.feature_dag.log_parsers import LogParserRegistry
 
     # Collect requirements from features
     requirements = collect_config_requirements(
         request.selected_features, HAMILTON_MODULES
     )
 
-    # Build response with enhanced options from registries
+    # Build response with options from spec
     fields = []
-    log_parser_registry = LogParserRegistry()
 
     for field_name, spec in requirements.items():
         field_spec = ConfigFieldSpec(
@@ -176,19 +173,9 @@ def get_config_requirements(request: ConfigRequirementsRequest):
             required=spec["required"],
             description=spec["description"],
             default=spec.get("default"),
-            options=None,
+            options=spec.get("options"),
+            required_by=spec.get("required_by"),
         )
-
-        # Add options for known fields
-        if field_name == "source_languages":
-            field_spec.options = LanguageRegistry.get_supported_languages()
-        elif field_name == "test_frameworks":
-            # Grouped by language for custom UI rendering
-            field_spec.options = log_parser_registry.get_frameworks_by_language()
-        elif field_name == "ci_provider":
-            from app.ci_providers.factory import CIProviderRegistry
-
-            field_spec.options = [p.value for p in CIProviderRegistry.get_all_types()]
 
         fields.append(field_spec)
 

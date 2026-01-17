@@ -21,7 +21,7 @@ from app.tasks.pipeline.feature_dag._inputs import (
     FeatureConfigInput,
     GitHistoryInput,
 )
-from app.tasks.pipeline.feature_dag._metadata import requires_config
+from app.tasks.pipeline.feature_dag._metadata import ConfigSpec, requires_config
 from app.tasks.pipeline.feature_dag.log_parsers.registry import TestLogParser
 
 logger = logging.getLogger(__name__)
@@ -45,13 +45,14 @@ logger = logging.getLogger(__name__)
 )
 @tag(group="log")
 @requires_config(
-    test_frameworks={
-        "type": "list",
-        "scope": "repo",
-        "required": False,
-        "description": "Test frameworks to detect (leave empty for auto-detection)",
-        "default": [],
-    },
+    test_frameworks=ConfigSpec(
+        type="list",
+        scope="repo",
+        required=False,
+        description="Test frameworks to detect (leave empty for auto-detection)",
+        default=[],
+        options=TestLogParser.FRAMEWORKS_BY_LANG,
+    ),
 )
 def test_log_features(
     build_logs: BuildLogsInput,

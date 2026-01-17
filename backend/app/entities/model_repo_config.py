@@ -7,12 +7,11 @@ Flow: GitHub import → Build ingestion → Feature extraction → Model trainin
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import Field
 
-from app.entities.base import PyObjectId
-from app.entities.repo_config_base import FeatureConfigBase
+from app.entities.base import BaseEntity, PyObjectId
 
 
 class ModelImportStatus(str, Enum):
@@ -29,10 +28,19 @@ class ModelImportStatus(str, Enum):
     FAILED = "failed"  # Critical error, pipeline failed
 
 
-class ModelRepoConfig(FeatureConfigBase):
+class ModelRepoConfig(BaseEntity):
     class Config:
         collection = "model_repo_configs"
         use_enum_values = True
+
+    feature_configs: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Feature extractors to run",
+    )
+    dag_features: list[str] = Field(
+        default_factory=list,
+        description="List of enabled features for extraction",
+    )
 
     # === IDENTITY ===
     full_name: str = Field(

@@ -955,3 +955,14 @@ export interface DatasetTemplateListResponse {
   items: DatasetTemplateRecord[];
   total: number;
 }
+
+export interface ConfigFieldSpec {
+  name: string;
+  type: string;
+  scope: string;
+  required: boolean;
+  description: string;
+  default: unknown;
+  options: any; // Flexible options
+  required_by?: string[]; // Feature names that require this config
+}

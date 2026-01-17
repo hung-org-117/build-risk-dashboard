@@ -8,12 +8,11 @@ import {
     Building2,
     Globe,
     Loader2,
-    Maximize2,
     Search,
     X,
+    Folder,
 } from "lucide-react";
 
-import { FeatureDAGVisualization, type FeatureDAGData } from "@/components/features";
 import { FeatureConfigForm, type FeatureConfigsData } from "@/components/features/config/FeatureConfigForm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,21 +25,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
 import { useDebounce } from "@/hooks/use-debounce";
-import { featuresApi, reposApi, templatesApi } from "@/lib/api";
+import { reposApi, templatesApi } from "@/lib/api";
 import {
     CIProvider,
     FeatureDefinitionSummary,
@@ -48,48 +34,9 @@ import {
     RepoSuggestion
 } from "@/types";
 
-// Hook to detect languages for repos
-function useRepoLanguages(repos: Array<{ id: string; full_name: string }>) {
-    const [repoLanguages, setRepoLanguages] = useState<Record<string, string[]>>({});
-    const [loading, setLoading] = useState<Record<string, boolean>>({});
+import { useRepoLanguages } from "@/hooks/use-repo-languages";
 
-    useEffect(() => {
-        if (repos.length === 0) return;
-
-        const detectLanguagesForRepos = async () => {
-            for (const repo of repos) {
-                if (repoLanguages[repo.id] !== undefined || loading[repo.id]) {
-                    continue;
-                }
-
-                setLoading(prev => ({ ...prev, [repo.id]: true }));
-                try {
-                    const result = await reposApi.detectLanguages(repo.full_name);
-                    setRepoLanguages(prev => ({
-                        ...prev,
-                        [repo.id]: result.languages.map((l: string) => l.toLowerCase()),
-                    }));
-                } catch (err) {
-                    console.error(`Failed to detect languages for ${repo.full_name}:`, err);
-                    setRepoLanguages(prev => ({ ...prev, [repo.id]: [] }));
-                } finally {
-                    setLoading(prev => ({ ...prev, [repo.id]: false }));
-                }
-            }
-        };
-
-        detectLanguagesForRepos();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [repos]);
-
-    return { repoLanguages, loading };
-}
-
-type FeatureCategoryGroup = {
-    category: string;
-    display_name: string;
-    features: FeatureDefinitionSummary[];
-};
+import { useFeatureSelector } from "@/components/features";
 
 export default function ImportRepositoriesPage() {
     const router = useRouter();
@@ -117,22 +64,42 @@ export default function ImportRepositoriesPage() {
             since_days?: number | null;
         }>
     >({});
-
-    // Features data
-    const [featuresData, setFeaturesData] = useState<FeatureCategoryGroup[] | null>(null);
-    const [featuresLoading, setFeaturesLoading] = useState(false);
-
     const [importing, setImporting] = useState(false);
     const [activeRepo, setActiveRepo] = useState<string | null>(null);
 
-    // Templates state
-    const [templatesLoading, setTemplatesLoading] = useState(false);
 
+    // Feature Selector Hook
+    const featureSelector = useFeatureSelector();
 
-    // DAG state
-    const [dagData, setDagData] = useState<FeatureDAGData | null>(null);
-    const [dagLoading, setDagLoading] = useState(false);
-    const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
+    // Track if template has been applied (to avoid double API call)
+    const [templateApplied, setTemplateApplied] = useState(false);
+
+    // Initialize default template if empty
+    useEffect(() => {
+        const loadDefaultTemplate = async () => {
+            if (featureSelector.loading) return;
+
+            // Load Risk Prediction template if on step 2 (Configure)
+            // Even if defaults are loaded, we want to ensure Risk Prediction is used.
+            // Check if we already applied a template or if selection is just defaults
+            if (step === 2 && !templateApplied) {
+                try {
+                    const template = await templatesApi.getByName("Risk Prediction");
+                    if (template.feature_names) {
+                        featureSelector.applyTemplate(template.feature_names);
+                    }
+                } catch (err) {
+                    console.error("Failed to load Risk Prediction template", err);
+                } finally {
+                    setTemplateApplied(true);
+                }
+            }
+        };
+
+        if (step === 2) {
+            loadDefaultTemplate();
+        }
+    }, [step, featureSelector.loading, templateApplied]);
 
     const performSearch = useCallback(async (query: string, force = false) => {
         if (!force && query === lastSearchedTerm.current) return;
@@ -151,61 +118,6 @@ export default function ImportRepositoriesPage() {
             setIsSearching(false);
         }
     }, []);
-
-    const loadFeatures = useCallback(async () => {
-        if (featuresLoading || featuresData) return;
-        setFeaturesLoading(true);
-        try {
-            const data = await featuresApi.list({ is_active: true });
-            const grouped: Record<string, FeatureCategoryGroup> = {};
-            data.items.forEach((feat: FeatureDefinitionSummary) => {
-                const key = feat.category || "uncategorized";
-                if (!grouped[key]) {
-                    grouped[key] = {
-                        category: key,
-                        display_name: key,
-                        features: [],
-                    };
-                }
-                grouped[key].features.push(feat);
-            });
-
-            const categories = Object.values(grouped).sort((a, b) =>
-                a.display_name.localeCompare(b.display_name)
-            );
-            setFeaturesData(categories);
-        } finally {
-            setFeaturesLoading(false);
-        }
-    }, [featuresData, featuresLoading]);
-
-    const loadDAG = useCallback(async () => {
-        if (dagLoading || dagData) return;
-        setDagLoading(true);
-        try {
-            const data = await featuresApi.getDAG();
-            setDagData(data);
-        } catch (err) {
-            console.error("Failed to load DAG:", err);
-        } finally {
-            setDagLoading(false);
-        }
-    }, [dagData, dagLoading]);
-
-    const loadSelectedTemplate = useCallback(async () => {
-        if (templatesLoading) return;
-        if (selectedFeatures.length > 0) return;
-        setTemplatesLoading(true);
-        try {
-            const template = await templatesApi.getByName("Risk Prediction");
-            setSelectedFeatures(template.feature_names || []);
-        } catch (err) {
-            console.error("Failed to load selected template:", err);
-        } finally {
-            setTemplatesLoading(false);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [templatesLoading]);
 
     useEffect(() => {
         if (debouncedSearchTerm === searchTerm) {
@@ -256,21 +168,17 @@ export default function ImportRepositoriesPage() {
         }
     }, [selectedList, activeRepo, selectedRepos]);
 
-    useEffect(() => {
-        if (step < 2) return;
-        void loadFeatures();
-        if (step === 2) {
-            void loadDAG();
-            void loadSelectedTemplate();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [step, selectedList.length]);
-
     const handleImport = async () => {
         if (!selectedList.length) return;
         setImporting(true);
 
         try {
+            // Prepare global configs including all selected features
+            const finalGlobalConfig: Record<string, any> = { ...featureConfigs.global };
+
+            // Get selected features for backend
+            const featureIds = Array.from(featureSelector.selectedFeatures);
+
             const payloads: RepoImportPayload[] = selectedList.map((repo) => {
                 const repoId = String(repo.github_repo_id);
                 const baseConfig = baseConfigs[repoId];
@@ -283,11 +191,12 @@ export default function ImportRepositoriesPage() {
                     max_builds: baseConfig.max_builds ?? null,
                     since_days: baseConfig.since_days ?? null,
                     feature_configs: {
-                        global: featureConfigs.global,
+                        global: finalGlobalConfig,
                         repos: {
                             [repoId]: dynamicRepoConfig,
                         },
                     },
+                    feature_ids: featureIds,
                 };
             });
 
@@ -300,26 +209,13 @@ export default function ImportRepositoriesPage() {
         }
     };
 
-    const featureFormFeatures = useMemo(() => new Set(selectedFeatures), [selectedFeatures]);
+    const featureFormFeatures = useMemo(() => featureSelector.selectedFeatures, [featureSelector.selectedFeatures]);
 
     const featureFormRepos = useMemo(() => selectedList.map(r => ({
         id: String(r.github_repo_id),
         full_name: r.full_name,
         validation_status: "unknown"
     })), [selectedList]);
-
-    // Build feature descriptions map for tooltips
-    const featureDescriptions = useMemo(() => {
-        const map: Record<string, string> = {};
-        if (featuresData) {
-            for (const group of featuresData) {
-                for (const feature of group.features) {
-                    map[feature.name] = feature.description || feature.display_name || feature.name;
-                }
-            }
-        }
-        return map;
-    }, [featuresData]);
 
     // Detect languages for selected repos
     const { repoLanguages } = useRepoLanguages(featureFormRepos);
@@ -337,14 +233,14 @@ export default function ImportRepositoriesPage() {
                     <div>
                         <h1 className="text-lg font-semibold">Import Repositories</h1>
                         <p className="text-sm text-muted-foreground">
-                            Step {step} of 2: {step === 1 ? "Select repositories" : "Configure & Import"}
+                            Step {step} of 2: {step === 1 ? "Select Repositories" : "Configure & Import"}
                         </p>
                     </div>
                 </div>
 
                 {/* Step Indicator */}
                 <div className="hidden md:flex items-center gap-2">
-                    <StepIndicator step={1} currentStep={step} label="Select" />
+                    <StepIndicator step={1} currentStep={step} label="Repos" />
                     <div className="w-8 h-px bg-border" />
                     <StepIndicator step={2} currentStep={step} label="Configure" />
                 </div>
@@ -357,7 +253,7 @@ export default function ImportRepositoriesPage() {
                             Back
                         </Button>
                     )}
-                    {step === 1 ? (
+                    {step < 2 ? (
                         <Button onClick={() => setStep(2)} disabled={selectedList.length === 0}>
                             Next
                             <ArrowRight className="h-4 w-4 ml-1" />
@@ -372,7 +268,7 @@ export default function ImportRepositoriesPage() {
             </div>
 
             {/* Main Content - Split View */}
-            <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_400px] min-h-0 overflow-hidden">
+            <div className={`flex-1 grid grid-cols-1 ${step === 1 ? "lg:grid-cols-[1fr_400px]" : ""} min-h-0 overflow-hidden`}>
                 {/* Left Panel */}
                 <div className="overflow-y-auto p-6">
                     {step === 1 ? (
@@ -387,7 +283,7 @@ export default function ImportRepositoriesPage() {
                             toggleSelection={toggleSelection}
                         />
                     ) : (
-                        <Step2Content
+                        <ConfigurationStep
                             selectedList={selectedList}
                             activeRepo={activeRepo}
                             setActiveRepo={setActiveRepo}
@@ -397,33 +293,27 @@ export default function ImportRepositoriesPage() {
                             featureFormRepos={featureFormRepos}
                             setFeatureConfigs={setFeatureConfigs}
                             repoLanguages={repoLanguages}
+                            templateApplied={templateApplied}
                         />
                     )}
                 </div>
 
-                {/* Right Panel - Preview */}
-                <div className="hidden lg:flex flex-col border-l bg-slate-50 dark:bg-slate-900/30 overflow-y-auto">
-                    <div className="p-4 border-b bg-background">
-                        <h3 className="font-semibold text-sm">
-                            {step === 1 ? "Selected Repositories" : "Feature Extraction Plan"}
-                        </h3>
-                    </div>
-                    <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-                        {step === 1 ? (
+                {/* Right Panel - Preview (Only for Step 1) */}
+                {step === 1 && (
+                    <div className="hidden lg:flex flex-col border-l bg-slate-50 dark:bg-slate-900/30 overflow-y-auto">
+                        <div className="p-4 border-b bg-background">
+                            <h3 className="font-semibold text-sm">
+                                Selected Repositories
+                            </h3>
+                        </div>
+                        <div className="flex-1 p-4 space-y-4 overflow-y-auto">
                             <SelectedReposPreview
                                 selectedList={selectedList}
                                 onRemove={(repo) => toggleSelection(repo)}
                             />
-                        ) : (
-                            <ExtractionPreview
-                                dagData={dagData}
-                                dagLoading={dagLoading || templatesLoading}
-                                selectedFeatures={selectedFeatures}
-                                featureDescriptions={featureDescriptions}
-                            />
-                        )}
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
         </div>
     );
@@ -565,9 +455,13 @@ interface Step2Props {
     featureFormRepos: { id: string; full_name: string; validation_status: string }[];
     setFeatureConfigs: React.Dispatch<React.SetStateAction<FeatureConfigsData>>;
     repoLanguages: Record<string, string[]>;
+    templateApplied: boolean;
 }
 
-function Step2Content({
+// Step 3 Content (was Step 2)
+interface ConfigurationStepProps extends Step2Props { }
+
+function ConfigurationStep({
     selectedList,
     activeRepo,
     setActiveRepo,
@@ -577,9 +471,14 @@ function Step2Content({
     featureFormRepos,
     setFeatureConfigs,
     repoLanguages,
-}: Step2Props) {
+    templateApplied,
+}: ConfigurationStepProps) {
     return (
-        <div className="space-y-6 max-w-3xl">
+        <div className="space-y-6 max-w-5xl mx-auto">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
+                <Folder className="h-4 w-4" />
+                Configure general settings and feature parameters.
+            </div>
             {/* Repo Tabs */}
             <div className="flex gap-2 overflow-x-auto pb-2">
                 {selectedList.map((repo) => (
@@ -654,14 +553,16 @@ function Step2Content({
                         </CardContent>
                     </Card>
 
-                    {/* Feature Config */}
-                    <FeatureConfigForm
-                        selectedFeatures={featureFormFeatures}
-                        repos={featureFormRepos}
-                        repoLanguages={repoLanguages}
-                        onChange={setFeatureConfigs}
-                        showValidationStatusColumn={false}
-                    />
+                    {/* Feature Config - only render after template is applied */}
+                    {templateApplied && (
+                        <FeatureConfigForm
+                            selectedFeatures={featureFormFeatures}
+                            repos={featureFormRepos}
+                            repoLanguages={repoLanguages}
+                            onChange={setFeatureConfigs}
+                            showValidationStatusColumn={false}
+                        />
+                    )}
                 </div>
             )}
         </div>
@@ -750,147 +651,6 @@ function SelectedReposPreview({
                     </Button>
                 </div>
             ))}
-        </div>
-    );
-}
-
-// Extraction Preview
-function ExtractionPreview({
-    dagData,
-    dagLoading,
-    selectedFeatures,
-    featureDescriptions,
-}: {
-    dagData: FeatureDAGData | null;
-    dagLoading: boolean;
-    selectedFeatures: string[];
-    featureDescriptions: Record<string, string>;
-}) {
-    // Feature list state
-    const [expandedFeatures, setExpandedFeatures] = useState(false);
-    // DAG modal state
-    const [isDagOpen, setIsDagOpen] = useState(false);
-
-    const DISPLAY_LIMIT = 20;
-
-    const visibleFeatures = expandedFeatures
-        ? selectedFeatures
-        : selectedFeatures.slice(0, DISPLAY_LIMIT);
-
-    const hasMore = selectedFeatures.length > DISPLAY_LIMIT;
-
-    if (dagLoading) {
-        return (
-            <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-        );
-    }
-
-    if (!dagData || selectedFeatures.length === 0) {
-        return (
-            <div className="text-sm text-muted-foreground text-center py-12">
-                No features selected for extraction
-            </div>
-        );
-    }
-
-
-
-    return (
-        <div className="space-y-4">
-            {/* DAG Visualization */}
-            <div className="rounded-lg border bg-background overflow-hidden relative group">
-                <FeatureDAGVisualization
-                    dagData={dagData}
-                    selectedFeatures={selectedFeatures}
-                    onFeaturesChange={() => { }}
-                    className="h-[350px]"
-                />
-
-                {/* Maximize Button Overlay */}
-                <Dialog open={isDagOpen} onOpenChange={setIsDagOpen}>
-                    <DialogTrigger asChild>
-                        <Button
-                            variant="secondary"
-                            size="icon"
-                            className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 hover:bg-white border shadow-sm"
-                            title="Maximize Graph"
-                        >
-                            <Maximize2 className="h-4 w-4" />
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-[90vw] h-[90vh] flex flex-col p-0 gap-0">
-                        <DialogHeader className="px-6 py-4 border-b flex flex-row items-center justify-between space-y-0">
-                            <DialogTitle>Feature Extraction Dependency Graph</DialogTitle>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setIsDagOpen(false)}
-                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            >
-                                <X className="h-4 w-4" />
-                            </Button>
-                        </DialogHeader>
-                        <div className="flex-1 bg-slate-50 p-4 overflow-hidden">
-                            <FeatureDAGVisualization
-                                dagData={dagData}
-                                selectedFeatures={selectedFeatures}
-                                onFeaturesChange={() => { }}
-                                className="h-full w-full"
-                            />
-                        </div>
-                    </DialogContent>
-                </Dialog>
-            </div>
-
-            {/* Selected Features */}
-            <div className="rounded-lg border bg-background p-3">
-                <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold">Selected Features</span>
-                    <Badge variant="secondary" className="text-xs">{selectedFeatures.length}</Badge>
-                </div>
-                <TooltipProvider delayDuration={200}>
-                    <div className="flex flex-wrap gap-1 max-h-[300px] overflow-y-auto">
-                        {visibleFeatures.map(feat => (
-                            <Tooltip key={feat}>
-                                <TooltipTrigger>
-                                    <Badge
-                                        variant="outline"
-                                        className="text-[10px] cursor-help hover:bg-muted"
-                                    >
-                                        {feat}
-                                    </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p className="font-semibold">{feat}</p>
-                                    <p className="text-xs text-muted-foreground">{featureDescriptions[feat] || "No description available"}</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        ))}
-
-                        {hasMore && !expandedFeatures && (
-                            <Badge
-                                variant="secondary"
-                                className="text-[10px] cursor-pointer hover:bg-secondary/80"
-                                onClick={() => setExpandedFeatures(true)}
-                            >
-                                +{selectedFeatures.length - DISPLAY_LIMIT} more
-                            </Badge>
-                        )}
-
-                        {expandedFeatures && hasMore && (
-                            <Badge
-                                variant="secondary"
-                                className="text-[10px] cursor-pointer hover:bg-secondary/80"
-                                onClick={() => setExpandedFeatures(false)}
-                            >
-                                Show less
-                            </Badge>
-                        )}
-                    </div>
-                </TooltipProvider>
-            </div>
         </div>
     );
 }

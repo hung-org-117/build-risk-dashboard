@@ -61,6 +61,12 @@ export const reposApi = {
         });
         return response.data;
     },
+    detectLanguagesBatch: async (fullNames: string[]) => {
+        const response = await api.post<Record<string, string[]>>("/repos/languages/batch", {
+            full_names: fullNames,
+        });
+        return response.data;
+    },
     delete: async (repoId: string) => {
         await api.delete(`/repos/${repoId}`);
     },

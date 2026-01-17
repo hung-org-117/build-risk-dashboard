@@ -3,9 +3,22 @@ Feature metadata decorators for Hamilton DAG.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, TypedDict, TypeVar
 
 F = TypeVar("F", bound=Callable)
+
+
+class ConfigSpec(TypedDict, total=False):
+    """
+    Type definition for configuration field specification.
+    """
+
+    type: str  # "string", "integer", "boolean", "list"
+    scope: str  # "global" or "repo"
+    required: bool
+    description: str
+    default: Any
+    options: Any  # List[str] or Dict[str, List[str]]
 
 
 class FeatureCategory(str, Enum):
@@ -215,15 +228,12 @@ def format_features_for_storage(
     return result
 
 
-# =============================================================================
 # Config Requirements Decorator
-# =============================================================================
-
 # Global registry to store config requirements
 _CONFIG_REQUIREMENTS: Dict[str, List[Dict[str, Any]]] = {}
 
 
-def requires_config(**field_specs: Dict[str, Any]) -> Callable[[F], F]:
+def requires_config(**field_specs: ConfigSpec) -> Callable[[F], F]:
     """
     Decorator to mark features that need user config input.
 
@@ -236,20 +246,20 @@ def requires_config(**field_specs: Dict[str, Any]) -> Callable[[F], F]:
 
     Example:
         @requires_config(
-            lookback_days={
-                "type": "integer",
-                "scope": "global",
-                "required": False,
-                "description": "Days to look back for commit history",
-                "default": 90
-            },
-            source_languages={
-                "type": "list",
-                "scope": "repo",
-                "required": True,
-                "description": "Main programming languages",
-                "default": []
-            }
+            lookback_days=ConfigSpec(
+                type="integer",
+                scope="global",
+                required=False,
+                description="Days to look back for commit history",
+                default=90
+            ),
+            source_languages=ConfigSpec(
+                type="list",
+                scope="repo",
+                required=True,
+                description="Main programming languages",
+                default=[]
+            )
         )
         @tag(group="git")
         def my_feature(feature_config: FeatureConfigInput, ...):
@@ -258,7 +268,7 @@ def requires_config(**field_specs: Dict[str, Any]) -> Callable[[F], F]:
 
     Args:
         **field_specs: Keyword arguments where key is field name and value
-                      is a dict with keys: type, scope, required, description, default
+                      is a ConfigSpec dict.
 
     Returns:
         Decorator function that attaches config requirements to the function
@@ -277,6 +287,7 @@ def requires_config(**field_specs: Dict[str, Any]) -> Callable[[F], F]:
                     "required": spec.get("required", True),
                     "description": spec.get("description", ""),
                     "default": spec.get("default"),
+                    "options": spec.get("options"),
                 }
             )
 
@@ -350,6 +361,17 @@ def collect_config_requirements(
 
             # If this feature is selected and has config requirements
             if is_selected and hasattr(obj, "_config_requirements"):
+                # Determine the feature name (could be the function or extracted fields)
+                feature_display_names = []
+                transforms = getattr(obj, "transform", [])
+                for t in transforms:
+                    if hasattr(t, "fields") and isinstance(t.fields, dict):
+                        for field_name in t.fields.keys():
+                            if field_name in feature_names:
+                                feature_display_names.append(field_name)
+                if not feature_display_names:
+                    feature_display_names = [name]
+
                 for req in obj._config_requirements:
                     field_name = req["field"]
                     if field_name in all_fields:
@@ -357,7 +379,13 @@ def collect_config_requirements(
                         all_fields[field_name]["required"] = (
                             all_fields[field_name]["required"] or req["required"]
                         )
+                        # Add to required_by list
+                        for fn in feature_display_names:
+                            if fn not in all_fields[field_name]["required_by"]:
+                                all_fields[field_name]["required_by"].append(fn)
                     else:
-                        all_fields[field_name] = req.copy()
+                        field_data = req.copy()
+                        field_data["required_by"] = list(feature_display_names)
+                        all_fields[field_name] = field_data
 
     return all_fields

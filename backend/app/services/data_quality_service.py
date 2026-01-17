@@ -8,7 +8,6 @@ Evaluates enriched datasets and calculates individual scores for:
 - Coverage: % successfully enriched builds
 """
 
-from app.entities import ScenarioStatus
 import logging
 import statistics
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,6 +16,7 @@ from bson import ObjectId
 from fastapi import HTTPException
 from pymongo.database import Database
 
+from app.entities import ScenarioStatus
 from app.entities.data_quality import (
     DataQualityMetric,
     DataQualityReport,

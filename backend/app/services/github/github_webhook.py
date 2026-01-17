@@ -53,10 +53,19 @@ def _handle_workflow_run_event(
 
     repo_data = payload.get("repository", {})
     full_name = repo_data.get("full_name")
+    github_repo_id = repo_data.get("id")
     workflow_run = payload.get("workflow_run", {})
 
     if not full_name or not workflow_run:
         return {"status": "ignored", "reason": "missing_data"}
+
+    # Check if we are tracking this repo
+    raw_repo = RawRepositoryRepository(db)
+    query = {"$or": [{"github_repo_id": github_repo_id}, {"full_name": full_name}]}
+    repo = raw_repo.find_one(query)
+
+    if not repo:
+        return {"status": "ignored", "reason": "repo_not_imported"}
 
     # Filter by conclusion - only accept conclusions that have logs
     conclusion_val = (workflow_run.get("conclusion") or "").lower()
@@ -71,12 +80,6 @@ def _handle_workflow_run_event(
     triggering_actor = workflow_run.get("triggering_actor", {})
     actor_type = triggering_actor.get("type")
     is_bot = actor_type == "Bot"
-
-    # Check if we are tracking this repo
-    raw_repo = RawRepositoryRepository(db)
-    repo = raw_repo.find_one({"full_name": full_name})
-    if not repo:
-        return {"status": "ignored", "reason": "repo_not_imported"}
 
     repo_id = str(repo.id)
     build_id = str(workflow_run.get("id"))

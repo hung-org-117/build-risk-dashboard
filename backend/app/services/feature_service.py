@@ -356,17 +356,13 @@ class FeatureService:
             "execution_levels": execution_levels,
             "total_features": sum(len(f) for f in node_features.values()),
             "total_nodes": len(node_features),
-            "default_features": sorted(list(DEFAULT_FEATURES)),
+            "default_features": sorted(DEFAULT_FEATURES),
         }
 
     def get_features_by_node(self) -> Dict:
         """Get features grouped by extractor node."""
         feature_info = self._extract_feature_info()
-        features = [
-            (name, info)
-            for name, info in feature_info.items()
-            if name not in DEFAULT_FEATURES
-        ]
+        features = list(feature_info.items())
 
         by_node: Dict[str, List[Dict]] = defaultdict(list)
 

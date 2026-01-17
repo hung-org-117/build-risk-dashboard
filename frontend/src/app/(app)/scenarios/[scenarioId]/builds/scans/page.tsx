@@ -553,18 +553,21 @@ export default function ScansPage() {
                                 <RefreshCw className="h-4 w-4 mr-2" />
                                 Refresh
                             </Button>
-                            {(scanProgress?.scans_failed || 0) > 0 && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleRetryTool(activeTab as "trivy" | "sonarqube")}
-                                    disabled={retryingTool !== null}
-                                    className="text-amber-600 border-amber-300 hover:bg-amber-50"
-                                >
-                                    <RefreshCw className={cn("h-4 w-4 mr-2", retryingTool && "animate-spin")} />
-                                    Retry Failed Scans
-                                </Button>
-                            )}
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleRetryTool(activeTab as "trivy" | "sonarqube")}
+                                disabled={retryingTool !== null || (scanProgress?.scans_failed || 0) === 0}
+                                className={cn(
+                                    "transition-colors",
+                                    (scanProgress?.scans_failed || 0) > 0
+                                        ? "text-amber-600 border-amber-300 hover:bg-amber-50"
+                                        : "text-muted-foreground border-slate-200"
+                                )}
+                            >
+                                <RefreshCw className={cn("h-4 w-4 mr-2", retryingTool && "animate-spin")} />
+                                Retry Failed Scans
+                            </Button>
                         </div>
                     </div>
                 </CardHeader>

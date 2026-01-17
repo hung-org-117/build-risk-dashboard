@@ -381,8 +381,8 @@ class TrivyTool(IntegrationTool):
         # Mount config file if provided
         if config_file_path:
             config_abs = str(config_file_path.absolute())
-            docker_cmd.extend(["-v", f"{config_abs}:/work/trivy.yaml:ro"])
-            trivy_args.extend(["--config", "/work/trivy.yaml"])
+            docker_cmd.extend(["-v", f"{config_abs}:/tmp/trivy.yaml:ro"])
+            trivy_args.extend(["--config", "/tmp/trivy.yaml"])
 
         # Add image and args
         docker_cmd.append("aquasec/trivy:latest")

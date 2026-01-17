@@ -1,9 +1,23 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
     Table,
@@ -14,32 +28,21 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
     ChevronLeft,
     ChevronRight,
-    Search,
     Folder,
-    Check,
-    ArrowRight,
+    Search,
     Settings,
-    Loader2,
 } from "lucide-react";
-import { ScanConfigOverrideModal, RepoScanConfig } from "./ScanConfigOverrideModal";
-import { reposApi } from "@/lib/api";
+import { useCallback, useMemo, useState } from "react";
+import { DynamicConfigField } from "./DynamicConfigField";
+import { RepoScanConfig, ScanConfigOverrideModal } from "./ScanConfigOverrideModal";
 
 interface RepoInfo {
     id: string;
@@ -50,15 +53,7 @@ interface RepoInfo {
 // Dynamic config: field name -> array of selected values
 type RepoConfig = Record<string, string[]>;
 
-interface ConfigFieldSpec {
-    name: string;
-    type: string;
-    scope: string;
-    required: boolean;
-    description: string;
-    default: unknown;
-    options: unknown; // Flexible: string[] (flat) or Record<string, string[]> (grouped)
-}
+import { ConfigFieldSpec } from "@/types";
 
 interface RepoConfigSectionProps {
     repos: RepoInfo[];
@@ -317,7 +312,48 @@ export function RepoConfigSection({
                                 )}
                                 {listFields.map(field => (
                                     <TableHead key={field.name}>
-                                        {formatFieldName(field.name)}
+                                        <div className="flex flex-col gap-0.5">
+                                            <span>{formatFieldName(field.name)}</span>
+                                            {/* Show feature badges in header */}
+                                            {field.required_by && field.required_by.length > 0 && (
+                                                <div className="flex flex-wrap gap-0.5">
+                                                    <TooltipProvider delayDuration={100}>
+                                                        {field.required_by.slice(0, 2).map((featureName) => (
+                                                            <Tooltip key={featureName}>
+                                                                <TooltipTrigger asChild>
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className="text-[9px] px-1 py-0 cursor-help font-normal"
+                                                                    >
+                                                                        {featureName}
+                                                                    </Badge>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top" className="max-w-xs">
+                                                                    <p className="font-medium">{featureName}</p>
+                                                                    <p className="text-xs text-muted-foreground">Feature requires this configuration</p>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        ))}
+                                                        {field.required_by.length > 2 && (
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <Badge variant="outline" className="text-[9px] px-1 py-0 cursor-help font-normal">
+                                                                        +{field.required_by.length - 2}
+                                                                    </Badge>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top" className="max-w-xs">
+                                                                    <div className="space-y-1">
+                                                                        {field.required_by.slice(2).map(f => (
+                                                                            <p key={f} className="text-xs">{f}</p>
+                                                                        ))}
+                                                                    </div>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        )}
+                                                    </TooltipProvider>
+                                                </div>
+                                            )}
+                                        </div>
                                     </TableHead>
                                 ))}
                                 {showScanConfig && (
@@ -432,85 +468,24 @@ export function RepoConfigSection({
                             const repoLangs = editingRepo ? (effectiveRepoLanguages[editingRepo] || []) : [];
                             const filteredOptions = getFilteredOptions(field, repoLangs);
 
-                            return (
-                                <div key={field.name} className="space-y-3">
-                                    <label className="text-sm font-medium">{formatFieldName(field.name)}</label>
+                            // Create a field spec with filtered options
+                            const fieldWithFilteredOptions: ConfigFieldSpec = {
+                                ...field,
+                                options: filteredOptions,
+                            };
 
-                                    {field.name === "test_frameworks" ? (
-                                        // Grouped by language - filtered for this repo
-                                        <div className="space-y-4 max-h-[300px] overflow-y-auto">
-                                            {Object.entries(filteredOptions as Record<string, string[]>).map(([group, options]) => (
-                                                <div key={group} className="space-y-2">
-                                                    <span className="text-xs text-muted-foreground capitalize font-medium">
-                                                        {group}
-                                                    </span>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {options.map(option => {
-                                                            const isSelected = (editValues[field.name] || []).includes(option);
-                                                            return (
-                                                                <Badge
-                                                                    key={option}
-                                                                    variant={isSelected ? "default" : "outline"}
-                                                                    className="cursor-pointer transition-colors hover:bg-primary/80"
-                                                                    onClick={() => toggleEditOption(field.name, option)}
-                                                                >
-                                                                    {isSelected && <Check className="h-3 w-3 mr-1" />}
-                                                                    {option}
-                                                                </Badge>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            {Object.keys(filteredOptions as Record<string, string[]>).length === 0 && (
-                                                <div className="text-xs text-muted-foreground italic">
-                                                    No matching frameworks for this repo&apos;s languages
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : field.name === "source_languages" ? (
-                                        // Filtered source languages for this repo
-                                        <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto">
-                                            {(filteredOptions as string[]).map((option: string) => {
-                                                const isSelected = (editValues[field.name] || []).includes(option);
-                                                return (
-                                                    <Badge
-                                                        key={option}
-                                                        variant={isSelected ? "default" : "outline"}
-                                                        className="cursor-pointer transition-colors hover:bg-primary/80"
-                                                        onClick={() => toggleEditOption(field.name, option)}
-                                                    >
-                                                        {isSelected && <Check className="h-3 w-3 mr-1" />}
-                                                        {option}
-                                                    </Badge>
-                                                );
-                                            })}
-                                            {(filteredOptions as string[]).length === 0 && (
-                                                <div className="text-xs text-muted-foreground italic">
-                                                    No supported languages detected for this repo
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        // Flat list for other fields
-                                        <div className="flex flex-wrap gap-2 max-h-[200px] overflow-y-auto">
-                                            {(Array.isArray(field.options) ? (field.options as string[]) : []).map((option: string) => {
-                                                const isSelected = (editValues[field.name] || []).includes(option);
-                                                return (
-                                                    <Badge
-                                                        key={option}
-                                                        variant={isSelected ? "default" : "outline"}
-                                                        className="cursor-pointer transition-colors hover:bg-primary/80"
-                                                        onClick={() => toggleEditOption(field.name, option)}
-                                                    >
-                                                        {isSelected && <Check className="h-3 w-3 mr-1" />}
-                                                        {option}
-                                                    </Badge>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
+                            return (
+                                <DynamicConfigField
+                                    key={field.name}
+                                    field={fieldWithFilteredOptions}
+                                    value={editValues[field.name]}
+                                    onChange={(newValue) => {
+                                        setEditValues(prev => ({
+                                            ...prev,
+                                            [field.name]: newValue as string[]
+                                        }));
+                                    }}
+                                />
                             );
                         })}
                     </div>

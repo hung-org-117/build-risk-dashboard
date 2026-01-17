@@ -765,14 +765,16 @@ def process_workflow_run(
     def _work(state: TaskState) -> Dict[str, Any]:
         """Feature extraction work function."""
         if state.phase == "START":
-            # Get template features to report expected count
+            # Get features from config (if available) or fallback to template
             from app.services.dataset_template_service import DatasetTemplateService
 
-            template_service = DatasetTemplateService(self.db)
-            template = template_service.get_template_by_name("Risk Prediction")
+            if getattr(repo_config, "dag_features", None):
+                combined_features = repo_config.dag_features
+            else:
+                template_service = DatasetTemplateService(self.db)
+                template = template_service.get_template_by_name("Risk Prediction")
+                combined_features = template.combined_feature_names
 
-            # Use combined_feature_names which includes template features + defaults
-            combined_features = template.combined_feature_names
             state.meta["feature_names"] = combined_features
 
             # Mark as IN_PROGRESS
@@ -791,13 +793,18 @@ def process_workflow_run(
 
         if state.phase == "EXTRACTING":
             feature_names = state.meta.get("feature_names", [])
-            # Fallback if not in meta
+            # Fallback if not in meta (resume from crash)
             if not feature_names:
-                from app.services.dataset_template_service import DatasetTemplateService
+                if getattr(repo_config, "dag_features", None):
+                    feature_names = repo_config.dag_features
+                else:
+                    from app.services.dataset_template_service import (
+                        DatasetTemplateService,
+                    )
 
-                template_service = DatasetTemplateService(self.db)
-                template = template_service.get_template_by_name("Risk Prediction")
-                feature_names = template.combined_feature_names
+                    template_service = DatasetTemplateService(self.db)
+                    template = template_service.get_template_by_name("Risk Prediction")
+                    feature_names = template.combined_feature_names
 
             # Extract features
             result = extract_features_for_build(

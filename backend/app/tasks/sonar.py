@@ -88,6 +88,25 @@ def start_sonar_scan_for_version_commit(
             error=error_msg,
         )
 
+        # Increment scans_failed counter (context-aware for version or scenario)
+        try:
+            from app.tasks.shared.pipeline_context import PipelineContext
+            from app.tasks.shared.scan_context_helpers import (
+                check_and_mark_scans_completed,
+                increment_scan_failed,
+            )
+
+            pipeline_ctx = PipelineContext.detect(db, scenario_id)
+
+            increment_scan_failed(db, scenario_id)
+            check_and_mark_scans_completed(db, scenario_id)
+
+            # Context-aware notification (works for both DatasetVersion and MLScenario)
+            if pipeline_ctx:
+                pipeline_ctx.check_and_notify_completed()
+        except Exception as e:
+            logger.warning(f"Failed to update scan failure stats: {e}")
+
     def _cleanup(state: TaskState) -> None:
         """Reset scan status for retry."""
         # No cleanup needed - scan record status is reset by create_or_get on retry

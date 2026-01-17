@@ -16,6 +16,10 @@ class RepoImportRequest(BaseModel):
         default_factory=dict,
         description="Feature configuration dict with global and per-repo settings",
     )
+    feature_ids: Optional[List[str]] = Field(
+        default=None,
+        description="List of explicitly enabled feature IDs (from template or selection)",
+    )
 
     ci_provider: CIProvider = Field(
         default=CIProvider.GITHUB_ACTIONS,

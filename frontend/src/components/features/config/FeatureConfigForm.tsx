@@ -1,32 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { Settings, Globe, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import { featuresApi, reposApi } from "@/lib/api";
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { featuresApi } from "@/lib/api";
+import { ConfigFieldSpec } from "@/types";
+import { AlertCircle, Globe, Settings } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { DynamicConfigField } from "./DynamicConfigField";
 import { RepoConfigSection } from "./RepoConfigSection";
-
-/** Config field spec from API */
-interface ConfigFieldSpec {
-    name: string;
-    type: string;
-    scope: string;
-    required: boolean;
-    description: string;
-    default: unknown;
-    options: string[] | null;
-}
 
 interface RepoInfo {
     id: string; // github_repo_id
@@ -183,75 +171,14 @@ export function FeatureConfigForm({
 
     // Render input for global fields
     const renderGlobalConfigInput = (field: ConfigFieldSpec) => {
-        const currentValue = globalConfigs[field.name] ?? field.default ?? "";
+        const currentValue = globalConfigs[field.name];
 
-        // Number input
-        if (field.type === "int" || field.type === "integer" || field.type === "number") {
-            return (
-                <Input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={currentValue as number}
-                    onChange={(e) =>
-                        handleGlobalConfigChange(
-                            field.name,
-                            parseInt(e.target.value) || field.default || 0
-                        )
-                    }
-                    disabled={disabled}
-                    className="w-24"
-                />
-            );
-        }
-
-        // Boolean/Select
-        if (field.options && field.options.length > 0 && field.type !== "list") {
-            return (
-                <Select
-                    value={String(currentValue || "")}
-                    onValueChange={(value) => handleGlobalConfigChange(field.name, value)}
-                    disabled={disabled}
-                >
-                    <SelectTrigger className="w-40">
-                        <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {field.options.map((option) => (
-                            <SelectItem key={option} value={option}>
-                                {option}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-            );
-        }
-
-        // List input (comma-separated)
-        if (field.type === "list") {
-            const arrayValue = (currentValue as string[]) || [];
-            return (
-                <Input
-                    type="text"
-                    placeholder="Enter values separated by commas"
-                    value={arrayValue.join(", ")}
-                    onChange={(e) =>
-                        handleGlobalConfigChange(field.name, parseArrayValue(e.target.value))
-                    }
-                    disabled={disabled}
-                    className="flex-1"
-                />
-            );
-        }
-
-        // Default: text input
         return (
-            <Input
-                type="text"
-                value={String(currentValue)}
-                onChange={(e) => handleGlobalConfigChange(field.name, e.target.value)}
+            <DynamicConfigField
+                field={field}
+                value={currentValue}
+                onChange={(newValue: unknown) => handleGlobalConfigChange(field.name, newValue)}
                 disabled={disabled}
-                className="flex-1"
             />
         );
     };
@@ -305,7 +232,7 @@ export function FeatureConfigForm({
                 <>
                     {/* Global Settings Section */}
                     {hasGlobalFields && (
-                        <div className="space-y-3">
+                        <div className="space-y-4">
                             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                                 <Globe className="h-4 w-4" />
                                 Global Settings
@@ -330,6 +257,29 @@ export function FeatureConfigForm({
                                         <span className="text-xs text-muted-foreground">
                                             {field.description}
                                         </span>
+                                        {/* Feature badges showing which features need this config */}
+                                        {field.required_by && field.required_by.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                <span className="text-xs text-muted-foreground">Used by:</span>
+                                                <TooltipProvider delayDuration={100}>
+                                                    {field.required_by.map((featureName) => (
+                                                        <Tooltip key={featureName}>
+                                                            <TooltipTrigger asChild>
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className="text-[10px] px-1.5 py-0 cursor-help"
+                                                                >
+                                                                    {featureName}
+                                                                </Badge>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent side="top" className="max-w-xs">
+                                                                <p className="font-medium">{featureName}</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    ))}
+                                                </TooltipProvider>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             ))}

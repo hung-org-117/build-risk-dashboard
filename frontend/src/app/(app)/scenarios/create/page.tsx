@@ -11,6 +11,7 @@ import {
     Save,
     ChevronLeft,
     Shield,
+    LayoutDashboard,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -28,20 +29,32 @@ import { useToast } from "@/components/ui/use-toast";
 
 import { WizardProvider, useWizard } from "./_components/WizardContext";
 import { StepDataSource } from "./_components/StepDataSource";
-import { StepFeatures } from "./_components/StepFeatures";
+import { StepFeatureSelection } from "./_components/StepFeatureSelection";
+import { StepFeatureConfiguration } from "./_components/StepFeatureConfiguration";
 import { trainingScenariosApi } from "@/lib/api/training-scenarios";
 import { getApiErrorMessage } from "@/lib/api/client";
+import { useState } from "react";
 
 // Step Review Component
 function StepReview() {
     const { state, setName, setDescription } = useWizard();
+    const [showAllFeatures, setShowAllFeatures] = useState(false);
+    const [showAllMetrics, setShowAllMetrics] = useState(false);
 
     // Stats for review
-    const totalFeatures = state.features.dag_features.length;
-    const scansEnabled = [
-        state.features.scan_metrics.sonarqube?.length ? "SonarQube" : null,
-        state.features.scan_metrics.trivy?.length ? "Trivy" : null
-    ].filter(Boolean);
+    const features = state.features.dag_features.slice().sort();
+    const totalFeatures = features.length;
+
+    // Scan stats
+    const sonarMetrics = state.features.scan_metrics.sonarqube || [];
+    const trivyMetrics = state.features.scan_metrics.trivy || [];
+    const allMetrics = [
+        ...sonarMetrics.map(m => ({ tool: 'SonarQube', name: m })),
+        ...trivyMetrics.map(m => ({ tool: 'Trivy', name: m }))
+    ];
+
+    const displayFeatures = showAllFeatures ? features : features.slice(0, 20);
+    const hasMoreFeatures = features.length > 20;
 
     return (
         <div className="space-y-6">
@@ -50,7 +63,6 @@ function StepReview() {
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
-                            <FileCheck className="h-4 w-4 text-primary" />
                             Scenario Details
                         </CardTitle>
                     </CardHeader>
@@ -83,7 +95,6 @@ function StepReview() {
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
-                            <Database className="h-4 w-4 text-blue-500" />
                             Data Source
                         </CardTitle>
                     </CardHeader>
@@ -169,38 +180,54 @@ function StepReview() {
             <Card className="border-indigo-100 dark:border-indigo-900 overflow-hidden">
                 <CardHeader className="pb-3 bg-slate-50/50 dark:bg-slate-900/50 border-b">
                     <CardTitle className="text-base flex items-center gap-2">
-                        <Settings2 className="h-4 w-4 text-indigo-500" />
-                        Feature Engineering
+                        Features & Metrics
                     </CardTitle>
                     <CardDescription>
                         Configuration for feature extraction and analysis
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="pt-6 grid md:grid-cols-2 gap-8 relative z-10">
-                    <div className="space-y-3">
+                <CardContent className="pt-6 grid md:grid-cols-2 gap-6">
+                    {/* DAG Features */}
+                    <div className="space-y-3 flex flex-col">
                         <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Extraction Features</span>
-                            <Badge className="bg-indigo-600 hover:bg-indigo-700">{totalFeatures}</Badge>
+                            <span className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Extraction Features ({totalFeatures})</span>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                            Features will be extracted from build logs, source code, and collaboration history based on the selected graph.
-                        </p>
+
+                        <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-3 border flex-1 min-h-[100px]">
+                            <div className="flex flex-wrap gap-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+                                {features.map(feature => (
+                                    <Badge key={feature} variant="secondary" className="font-mono text-xs font-normal">
+                                        {feature}
+                                    </Badge>
+                                ))}
+                                {features.length === 0 && (
+                                    <span className="text-sm text-muted-foreground italic">No features selected</span>
+                                )}
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="space-y-3">
-                        <span className="text-sm font-medium text-muted-foreground">Active Scanners</span>
-                        {scansEnabled.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                                {scansEnabled.map(scan => (
-                                    <div key={scan} className="flex items-center gap-2 bg-white dark:bg-slate-800 border rounded-md px-3 py-2 shadow-sm">
-                                        <div className={`h-2 w-2 rounded-full ${scan === 'SonarQube' ? 'bg-blue-500' : 'bg-cyan-500'}`}></div>
-                                        <span className="font-medium text-sm">{scan}</span>
-                                    </div>
-                                ))}
+                    {/* Scan Metrics */}
+                    <div className="space-y-3 flex flex-col">
+                        <span className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Scan Metrics ({allMetrics.length})</span>
+                        {allMetrics.length > 0 ? (
+                            <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-3 border flex-1 min-h-[100px]">
+                                <div className="flex flex-wrap gap-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+                                    {allMetrics.map((metric, idx) => (
+                                        <Badge
+                                            key={`${metric.tool}-${metric.name}-${idx}`}
+                                            variant="outline"
+                                            className={metric.tool === 'SonarQube' ? "border-blue-200 bg-blue-50 text-blue-700" : "border-cyan-200 bg-cyan-50 text-cyan-700"}
+                                        >
+                                            <span className="font-semibold mr-1">{metric.tool}:</span>
+                                            {metric.name}
+                                        </Badge>
+                                    ))}
+                                </div>
                             </div>
                         ) : (
-                            <div className="text-sm text-muted-foreground italic flex items-center gap-2">
-                                <Shield className="h-3 w-3" /> No security scans enabled
+                            <div className="text-sm text-muted-foreground italic flex items-center gap-2 pl-1 h-full items-start pt-3">
+                                <Shield className="h-3 w-3" /> No security scan metrics enabled
                             </div>
                         )}
                     </div>
@@ -217,8 +244,9 @@ function StepIndicator() {
 
     const steps = [
         { num: 1, label: "Data Source", icon: Database },
-        { num: 2, label: "Features", icon: Settings2 },
-        { num: 3, label: "Review", icon: FileCheck },
+        { num: 2, label: "Selection", icon: LayoutDashboard }, // Changed Icon to LayoutDashboard if available
+        { num: 3, label: "Configuration", icon: Settings2 },
+        { num: 4, label: "Review", icon: FileCheck },
     ];
 
     return (
@@ -287,7 +315,6 @@ function WizardContent() {
                         repos: state.featureConfigs.repos || {},
                     },
                 },
-                // No splitting_config - will be configured at export time
             };
 
             const scenario = await trainingScenariosApi.create(payload);
@@ -318,11 +345,17 @@ function WizardContent() {
             return state.previewStats && state.previewStats.total_builds > 0 && !state.isPreviewLoading;
         }
         if (state.step === 2) {
+            // Selection Step
             const hasFeatures = state.features.dag_features.length > 0;
             const hasScans = state.features.scan_metrics.sonarqube.length > 0 || state.features.scan_metrics.trivy.length > 0;
             return hasFeatures || hasScans;
         }
         if (state.step === 3) {
+            // Configuration Step - always valid to proceed
+            return true;
+        }
+        if (state.step === 4) {
+            // Review Step
             return !!state.name && state.name.trim().length > 0;
         }
         return false;
@@ -330,7 +363,7 @@ function WizardContent() {
 
     const handleNextAction = () => {
         if (!canGoNext()) return;
-        if (state.step < 3) {
+        if (state.step < 4) {
             setStep(state.step + 1);
         } else {
             handleCreate();
@@ -378,20 +411,20 @@ function WizardContent() {
                         <Button
                             onClick={handleNextAction}
                             disabled={!canGoNext() || state.isSubmitting}
-                            className={state.step === 3 ? "bg-green-600 hover:bg-green-700" : ""}
+                            className="bg-green-600 hover:bg-green-700 text-white"
                         >
                             {state.isSubmitting ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                     Processing...
                                 </>
-                            ) : state.step === 3 ? (
+                            ) : state.step === 4 ? (
                                 <>
                                     Start
                                 </>
                             ) : (
                                 <>
-                                    Next: {["", "Features", "Review"][state.step]}
+                                    Next: {["", "Selection", "Configuration", "Review"][state.step]}
                                     <ArrowRight className="ml-2 h-4 w-4" />
                                 </>
                             )}
@@ -409,8 +442,9 @@ function WizardContent() {
             <div className="flex-1 overflow-hidden relative bg-slate-50/30 dark:bg-slate-950/30 p-4 md:p-6">
                 <div className="h-full w-full max-w-[1600px] mx-auto">
                     {state.step === 1 && <StepDataSource />}
-                    {state.step === 2 && <StepFeatures />}
-                    {state.step === 3 && <StepReview />}
+                    {state.step === 2 && <StepFeatureSelection />}
+                    {state.step === 3 && <StepFeatureConfiguration />}
+                    {state.step === 4 && <StepReview />}
                 </div>
             </div>
         </div>

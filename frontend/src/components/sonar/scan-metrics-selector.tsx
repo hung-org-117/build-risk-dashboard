@@ -23,23 +23,20 @@ import {
 } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-// =============================================================================
-// Types
-// =============================================================================
-
-interface MetricDefinition {
+//Types
+export interface MetricDefinition {
     key: string;
     display_name: string;
     description: string;
     data_type: string;
 }
 
-interface ToolMetrics {
+export interface ToolMetrics {
     metrics: Record<string, MetricDefinition[]>;
     all_keys: string[];
 }
 
-interface AvailableMetrics {
+export interface AvailableMetrics {
     sonarqube: ToolMetrics;
     trivy: ToolMetrics;
 }
@@ -51,11 +48,9 @@ interface ScanMetricsSelectorProps {
     onTrivyChange: (metrics: string[]) => void;
     className?: string;
     showOnlyTool?: "sonarqube" | "trivy";
+    availableMetrics?: AvailableMetrics | null;
+    isLoading?: boolean;
 }
-
-// =============================================================================
-// Constants
-// =============================================================================
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
     reliability: <BarChart3 className="h-4 w-4" />,
@@ -87,10 +82,6 @@ const CATEGORY_COLORS: Record<string, string> = {
     secret: "bg-pink-500/10 text-pink-600 border-pink-200",
 };
 
-// =============================================================================
-// Component
-// =============================================================================
-
 export function ScanMetricsSelector({
     selectedSonarMetrics,
     selectedTrivyMetrics,
@@ -98,29 +89,36 @@ export function ScanMetricsSelector({
     onTrivyChange,
     className,
     showOnlyTool,
+    availableMetrics: propMetrics,
+    isLoading: propLoading,
 }: ScanMetricsSelectorProps) {
-    const [availableMetrics, setAvailableMetrics] = useState<AvailableMetrics | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [internalMetrics, setInternalMetrics] = useState<AvailableMetrics | null>(null);
+    const [internalLoading, setInternalLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [activeTab, setActiveTab] = useState<string>(showOnlyTool || "sonarqube");
 
-    // Fetch available metrics on mount
+    const availableMetrics = propMetrics !== undefined ? propMetrics : internalMetrics;
+    const loading = propLoading !== undefined ? propLoading : internalLoading;
+
+    // Fetch available metrics on mount if not provided via props
     useEffect(() => {
+        if (propMetrics !== undefined) return;
+
         const fetchMetrics = async () => {
             try {
-                setLoading(true);
+                setInternalLoading(true);
                 const data = await settingsApi.getAvailableMetrics();
-                setAvailableMetrics(data);
+                setInternalMetrics(data);
             } catch (err) {
                 console.error("Failed to fetch available metrics:", err);
                 setError("Failed to load available metrics");
             } finally {
-                setLoading(false);
+                setInternalLoading(false);
             }
         };
         fetchMetrics();
-    }, []);
+    }, [propMetrics]);
 
     // Toggle metric selection
     const handleToggleSonar = useCallback(

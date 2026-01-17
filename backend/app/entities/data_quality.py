@@ -97,7 +97,7 @@ class DataQualityMetric(BaseModel):
     empty_string_count: int = 0
 
     # Validity check (based on valid_range from metadata)
-    expected_range: Optional[Tuple[float, float]] = None
+    expected_range: Optional[Tuple[Optional[float], Optional[float]]] = None
     expected_values: Optional[List[str]] = None
     out_of_range_count: int = 0
     invalid_value_count: int = 0

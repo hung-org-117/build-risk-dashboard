@@ -25,7 +25,7 @@ from app.tasks.pipeline.feature_dag._inputs import (
     RawBuildRunsCollection,
     RepoInput,
 )
-from app.tasks.pipeline.feature_dag._metadata import requires_config
+from app.tasks.pipeline.feature_dag._metadata import ConfigSpec, requires_config
 from app.tasks.pipeline.feature_dag.analyzers import (
     _count_test_cases,
     _is_doc_file,
@@ -308,13 +308,13 @@ MAX_COMMITS_FOR_HEAVY_OPS = 50  # Skip heavy features for large builds
 
 @tag(group="git")
 @requires_config(
-    lookback_days={
-        "type": "integer",
-        "scope": "global",
-        "required": False,
-        "description": "Number of days to look back for commit history analysis",
-        "default": 90,
-    }
+    lookback_days=ConfigSpec(
+        type="integer",
+        scope="global",
+        required=False,
+        description="Number of days to look back for commit history analysis",
+        default=90,
+    )
 )
 def git_file_commit_density(
     git_history: GitHistoryInput,

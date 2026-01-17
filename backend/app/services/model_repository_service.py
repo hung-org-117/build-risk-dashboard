@@ -165,6 +165,7 @@ class RepositoryService:
                     max_builds_to_ingest=payload.max_builds,
                     since_days=payload.since_days,
                     feature_configs=payload.feature_configs or {},
+                    dag_features=payload.feature_ids or [],
                 )
             )
 
@@ -777,6 +778,59 @@ class RepositoryService:
             logger.warning("Failed to detect languages for %s: %s", full_name, e)
 
         return {"languages": languages}
+
+    def detect_languages_batch(
+        self, full_names: List[str], current_user: dict
+    ) -> dict[str, List[str]]:
+        """
+        Detect repository languages for multiple repos via GitHub API.
+        Reuses the GitHub client session for efficiency.
+
+        Returns:
+            Dict mapping repo full_name to list of languages.
+            Example: {"owner/repo": ["python", "html"]}
+        """
+        from app.services.github.github_client import (
+            get_app_github_client,
+            get_user_github_client,
+        )
+
+        user_id = str(current_user["_id"])
+
+        # Use GitHub App if configured, else fallback to user token
+        if settings.GITHUB_INSTALLATION_ID:
+            client_ctx = get_app_github_client()
+        else:
+            client_ctx = get_user_github_client(self.db, user_id)
+
+        results = {}
+
+        try:
+            with client_ctx as gh:
+                for full_name in full_names:
+                    try:
+                        stats = gh.list_languages(full_name) or {}
+                        # Top 5 languages
+                        top_langs = [
+                            lang.lower()
+                            for lang, _ in sorted(
+                                stats.items(), key=lambda kv: kv[1], reverse=True
+                            )[:5]
+                        ]
+                        results[full_name] = top_langs
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to detect languages for %s: %s", full_name, e
+                        )
+                        results[full_name] = []
+        except Exception as e:
+            logger.error(f"Batch language detection failed: {e}")
+            # Return empty results for all requested repos instead of failing completely
+            for name in full_names:
+                if name not in results:
+                    results[name] = []
+
+        return results
 
     def list_test_frameworks(self) -> dict:
         """

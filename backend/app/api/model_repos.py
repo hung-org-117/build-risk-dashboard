@@ -12,6 +12,7 @@ from app.dtos import (
     RepoSearchResponse,
     RepoSuggestionListResponse,
 )
+from app.dtos.batch_language_request import BatchLanguageRequest
 from app.dtos.build import (
     BuildDetail,
     BuildListResponse,
@@ -57,6 +58,19 @@ def detect_repository_languages(
     """
     service = RepositoryService(db)
     return service.detect_languages(full_name, current_user)
+
+
+@router.post("/languages/batch")
+def detect_repository_languages_batch(
+    payload: BatchLanguageRequest,
+    db: Database = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Detect languages for multiple repositories (batch).
+    """
+    service = RepositoryService(db)
+    return service.detect_languages_batch(payload.full_names, current_user)
 
 
 @router.get("/", response_model=RepoListResponse, response_model_by_alias=False)

@@ -165,6 +165,23 @@ def start_trivy_scan_for_version_commit(
                     f"{corr_prefix} Trivy scan failed for {commit_sha[:8]}: {error_msg}"
                 )
                 trivy_scan_repo.mark_failed(scan_record.id, error_msg)
+
+                # Increment scans_failed counter (context-aware for version or scenario)
+                try:
+                    from app.tasks.shared.scan_context_helpers import (
+                        check_and_mark_scans_completed,
+                        increment_scan_failed,
+                    )
+
+                    increment_scan_failed(db, scenario_id)
+                    check_and_mark_scans_completed(db, scenario_id)
+
+                    # Context-aware notification (works for both DatasetVersion and MLScenario)
+                    if pipeline_ctx:
+                        pipeline_ctx.check_and_notify_completed()
+                except Exception as e:
+                    logger.warning(f"Failed to update scan failure stats: {e}")
+
                 return {"status": "error", "error": error_msg}
 
             # Process metrics
