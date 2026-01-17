@@ -1,6 +1,6 @@
-# Model Training Pipeline - Mô Tả Chi Tiết Toàn Bộ Luồng
+# Build Risk Evaluation Pipeline - Technical Documentation
 
-## 📋 Mục Lục
+## Table of Contents
 1. [Tổng Quan Kiến Trúc](#tổng-quan-kiến-trúc)
 2. [Dashboard Statistics](#dashboard-statistics)
 3. [Phase 1: Import & Fetch](#phase-1-import--fetch)
@@ -21,7 +21,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        MODEL TRAINING PIPELINE                          │
+│                        BUILD RISK EVALUATION PIPELINE                        │
 └─────────────────────────────────────────────────────────────────────────┘
 
 User Imports GitHub Repository
@@ -29,39 +29,39 @@ User Imports GitHub Repository
        ▼
 ┌──────────────────────────────────────────┐
 │  PHASE 1: IMPORT & FETCH                 │
-│  ✓ Verify repo exists on GitHub          │
-│  ✓ Create ModelRepoConfig                │
-│  ✓ Fetch builds from CI API              │
-│  ✓ Create RawBuildRun records            │
-│  ✓ Create ModelImportBuild records       │
+│  - Verify repo exists on GitHub          │
+│  - Create ModelRepoConfig                │
+│  - Fetch builds from CI API              │
+│  - Create RawBuildRun records            │
+│  - Create ModelImportBuild records       │
 └──────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────┐
 │  PHASE 2: INGESTION                      │
-│  ✓ Clone/update git repositories         │
-│  ✓ Create git worktrees cho commits      │
-│  ✓ Download build logs từ CI             │
-│  ✓ Per-resource status tracking          │
-│  ✓ Mark builds as INGESTED/FAILED        │
+│  - Clone/update git repositories         │
+│  - Create git worktrees cho commits      │
+│  - Download build logs từ CI             │
+│  - Per-resource status tracking          │
+│  - Mark builds as INGESTED/FAILED        │
 └──────────────────────────────────────────┘
        │
        ▼ (User triggers manually)
 ┌──────────────────────────────────────────┐
 │  PHASE 3: PROCESSING                     │
-│  ✓ Create ModelTrainingBuild records     │
-│  ✓ Extract features (Hamilton DAG)       │
-│  ✓ Store features in FeatureVector       │
-│  ✓ Sequential processing (temporal deps) │
+│  - Create ModelTrainingBuild records     │
+│  - Extract features (Hamilton DAG)       │
+│  - Store features in FeatureVector       │
+│  - Sequential processing (temporal deps) │
 └──────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────┐
 │  PHASE 4: PREDICTION                     │
-│  ✓ Batch prediction (parallel)           │
-│  ✓ Risk level classification             │
-│  ✓ Uncertainty estimation                │
-│  ✓ Store prediction results              │
+│  - Batch prediction (parallel)           │
+│  - Risk level classification             │
+│  - Uncertainty estimation                │
+│  - Store prediction results              │
 └──────────────────────────────────────────┘
        │
        ▼

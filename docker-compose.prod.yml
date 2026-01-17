@@ -153,175 +153,174 @@ services:
     networks:
       - app-network
 
-  # # =========================================
-  # # Backend API Server
-  # # =========================================
-  # backend:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile
-  #   container_name: prod-backend
-  #   command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     # Database
-  #     MONGODB_URI: mongodb://mongo:27017
-  #     MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
-  #     # Message Broker
-  #     CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
-  #     CELERY_RESULT_BACKEND: redis://redis:6379/0
-  #     REDIS_URL: redis://redis:6379/0
-  #     # Security
-  #     SECRET_KEY: ${SECRET_KEY}
-  #     DEBUG: "False"
-  #     ENV: "prod"
-  #     FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
-  #     # SonarQube
-  #     SONAR_HOST_URL: http://sonarqube:9000
-  #     SONAR_TOKEN: ${SONAR_TOKEN:-}
-  #     SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
-  #     SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
-  #     # Trivy
-  #     TRIVY_ENABLED: "true"
-  #     TRIVY_SERVER_URL: http://trivy:4954
-  #     # GitHub
-  #     GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-  #     GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
-  #     GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
-  #     GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
-  #     GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
-  #     GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-  #     GITHUB_TOKENS: ${GITHUB_TOKENS:-}
-  #     GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
-  #     GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/api/auth/github/callback}
-  #     # Email (Gmail API)
-  #     GMAIL_ENABLED: ${GMAIL_ENABLED:-false}
-  #     GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
-  #     GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
-  #     GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
-  #     GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
-  #   volumes:
-  #     - repo_data:/app/repo-data
-  #     - shared_data:/app/data
-  #     - ./builddefection.2025-11-17.private-key.pem:/app/builddefection.2025-11-17.private-key.pem:ro
-  #   depends_on:
-  #     mongo:
-  #       condition: service_healthy
-  #     rabbitmq:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   networks:
-  #     - app-network
+  # Backend API Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prod-backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
+      # Message Broker
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "False"
+      ENV: "prod"
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+      # SonarQube
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
+      SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
+      # Trivy
+      TRIVY_ENABLED: "true"
+      TRIVY_SERVER_URL: http://trivy:4954
+      # GitHub
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_TOKENS: ${GITHUB_TOKENS:-}
+      GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/api/auth/github/callback}
+      # Email (Gmail API)
+      GMAIL_ENABLED: ${GMAIL_ENABLED:-false}
+      GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
+    volumes:
+      - repo_data:/app/repo-data
+      - shared_data:/app/data
+      - ./builddefection.2025-11-17.private-key.pem:/app/builddefection.2025-11-17.private-key.pem:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
 
-  # # =========================================
-  # # Celery Worker
-  # # =========================================
-  # celery-worker:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile
-  #   container_name: prod-celery-worker
-  #   command: >
-  #     uv run celery -A app.celery_app worker 
-  #     --loglevel=info 
-  #     --concurrency=${CELERY_CONCURRENCY:-4}
-  #     -Q pipeline.default,model_ingestion,model_processing,model_prediction,dataset_ingestion,dataset_processing,dataset_validation,sonar_scan,trivy_scan
-  #   environment:
-  #     MONGODB_URI: mongodb://mongo:27017
-  #     MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
-  #     CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
-  #     CELERY_RESULT_BACKEND: redis://redis:6379/0
-  #     REDIS_URL: redis://redis:6379/0
-  #     SECRET_KEY: ${SECRET_KEY}
-  #     HOME: /tmp
-  #     ENV: "prod"
-  #     # SonarQube
-  #     SONAR_HOST_URL: http://sonarqube:9000
-  #     SONAR_TOKEN: ${SONAR_TOKEN:-}
-  #     SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
-  #     SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
-  #     # Trivy
-  #     TRIVY_ENABLED: "true"
-  #     TRIVY_SERVER_URL: http://trivy:4954
-  #     # GitHub
-  #     GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-  #     GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
-  #     GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
-  #     GITHUB_TOKENS: ${GITHUB_TOKENS:-}
-  #     GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
-  #   volumes:
-  #     - repo_data:/app/repo-data
-  #     - shared_data:/app/data
-  #     - ./builddefection.2025-11-17.private-key.pem:/app/builddefection.2025-11-17.private-key.pem:ro
-  #   depends_on:
-  #     mongo:
-  #       condition: service_healthy
-  #     rabbitmq:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   networks:
-  #     - app-network
+  # =========================================
+  # Celery Worker
+  # =========================================
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prod-celery-worker
+    command: >
+      uv run celery -A app.celery_app worker 
+      --loglevel=info 
+      --concurrency=${CELERY_CONCURRENCY:-4}
+      -Q pipeline.default,model_ingestion,model_processing,model_prediction,dataset_ingestion,dataset_processing,dataset_validation,sonar_scan,trivy_scan
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      HOME: /tmp
+      ENV: "prod"
+      # SonarQube
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
+      SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
+      # Trivy
+      TRIVY_ENABLED: "true"
+      TRIVY_SERVER_URL: http://trivy:4954
+      # GitHub
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+      GITHUB_TOKENS: ${GITHUB_TOKENS:-}
+      GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
+    volumes:
+      - repo_data:/app/repo-data
+      - shared_data:/app/data
+      - ./builddefection.2025-11-17.private-key.pem:/app/builddefection.2025-11-17.private-key.pem:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
 
-  # # =========================================
-  # # Celery Beat Scheduler
-  # # =========================================
-  # celery-beat:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile
-  #   container_name: prod-celery-beat
-  #   command: uv run celery -A app.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
-  #   environment:
-  #     MONGODB_URI: mongodb://mongo:27017
-  #     MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
-  #     CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
-  #     REDIS_URL: redis://redis:6379/0
-  #     SECRET_KEY: ${SECRET_KEY}
-  #     HOME: /tmp
-  #     ENV: "prod"
-  #     # GitHub (required for Settings validation)
-  #     GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-  #     GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
-  #     GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
-  #     GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
-  #   volumes:
-  #     - shared_data:/app/data
-  #   depends_on:
-  #     mongo:
-  #       condition: service_healthy
-  #     rabbitmq:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   networks:
-  #     - app-network
+  # =========================================
+  # Celery Beat Scheduler
+  # =========================================
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: prod-celery-beat
+    command: uv run celery -A app.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-myuser}:${RABBITMQ_PASS:-mypass}@rabbitmq:5672//
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      HOME: /tmp
+      ENV: "prod"
+      # GitHub (required for Settings validation)
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+      GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
+    volumes:
+      - shared_data:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
 
-  # # =========================================
-  # # Frontend (Next.js Production)
-  # # =========================================
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile.prod
-  #     args:
-  #       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-  #       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
-  # 
-  #   container_name: prod-frontend
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     NODE_ENV: production
-  #     NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-  #     NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
-  # 
-  #   restart: unless-stopped
-  #   networks:
-  #     - app-network
+  # =========================================
+  # Frontend (Next.js Production)
+  # =========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+
+    container_name: prod-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+
+    restart: unless-stopped
+    networks:
+      - app-network
+
 
 networks:
   app-network:

@@ -1,6 +1,6 @@
-# Training Scenario Pipeline - Mô Tả Chi Tiết Toàn Bộ Luồng
+# Dataset Enrichment Pipeline - Technical Documentation
 
-## 📋 Mục Lục
+## Table of Contents
 1. [Tổng Quan Kiến Trúc](#tổng-quan-kiến-trúc)
 2. [Dashboard Statistics](#dashboard-statistics)
 3. [Phase 0: Build Source Upload](#phase-0-build-source-upload)
@@ -23,7 +23,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      TRAINING SCENARIO PIPELINE                          │
+│                         DATASET ENRICHMENT PIPELINE                         │
 └─────────────────────────────────────────────────────────────────────────┘
 
 Phase 0: Admin uploads CSV (Build Source)
@@ -31,10 +31,10 @@ Phase 0: Admin uploads CSV (Build Source)
        ▼
 ┌──────────────────────────────────────────┐
 │  BUILD SOURCE VALIDATION                  │
-│  ✓ Parse CSV with build IDs               │
-│  ✓ Validate repos on GitHub API           │
-│  ✓ Validate builds on CI API              │
-│  ✓ Cache to RawRepository & RawBuildRun   │
+│  - Parse CSV with build IDs               │
+│  - Validate repos on GitHub API           │
+│  - Validate builds on CI API              │
+│  - Cache to RawRepository & RawBuildRun   │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -46,11 +46,11 @@ User creates Training Scenario with filters
        ▼
 ┌──────────────────────────────────────────┐
 │  PHASE 1: FILTERING & INGESTION          │
-│  ✓ Query builds from warehouse (filters) │
-│  ✓ Create TrainingIngestionBuild records │
-│  ✓ Clone/update git repositories         │
-│  ✓ Create git worktrees cho commits      │
-│  ✓ Download build logs từ CI             │
+│  - Query builds from warehouse (filters) │
+│  - Create TrainingIngestionBuild records │
+│  - Clone/update git repositories         │
+│  - Create git worktrees cho commits      │
+│  - Download build logs từ CI             │
 └──────────────────────────────────────────┘
        │
        ▼ (User triggers manually)
@@ -59,19 +59,19 @@ User creates Training Scenario with filters
 │                                                                          │
 │  ┌─────────────────────────────────┐   ┌─────────────────────────────────┐
 │  │ 2.A: FEATURE EXTRACTION         │   │ 2.B: SCAN METRICS (Optional)   │
-│  │  ✓ Create EnrichmentBuild       │   │  ✓ Dispatch scans (fire&forget)│
-│  │  ✓ Hamilton DAG extraction      │   │  ✓ Trivy/SonarQube parallel    │
-│  │  ✓ Sequential (temporal deps)   │   │  ✓ Backfill to FeatureVector   │
+│  │  - Create EnrichmentBuild       │   │  - Dispatch scans (fire&forget)│
+│  │  - Hamilton DAG extraction      │   │  - Trivy/SonarQube parallel    │
+│  │  - Sequential (temporal deps)   │   │  - Backfill to FeatureVector   │
 │  │                                 │   │                                 │
-│  │  ⏱️ When done:                   │   │  ⏱️ Runs independently:         │
+│  │  When done:                   │   │  Runs independently:         │
 │  │  → status = PROCESSED           │   │  → scan_extraction_completed   │
 │  │  → feature_extraction_completed │   │  → Metrics available gradually │
 │  └─────────────────────────────────┘   └─────────────────────────────────┘
 │               │                                    │                     │
 │               ▼                                    │                     │
 │     PROCESSED (features done)                      │                     │
-│     ✅ Analysis tab available                      │ (may still running) │
-│     ✅ Export tab available                        │                     │
+│     Analysis tab available                      │ (may still running) │
+│     Export tab available                        │                     │
 │               │◄───────────────────────────────────┘                     │
 │               │  (scans backfill to FeatureVector.scan_metrics)          │
 └───────────────│──────────────────────────────────────────────────────────┘
@@ -85,10 +85,10 @@ TrainingScenario (PROCESSED) - Ready for Analysis & Export
        ▼ (User creates TrainingDatasetExport)
 ┌──────────────────────────────────────────┐
 │  EXPORT: DATASET GENERATION              │
-│  ✓ Create TrainingDatasetExport entity   │
-│  ✓ Apply splitting strategy (per-export) │
-│  ✓ Generate train/val/test files         │
-│  ✓ Export to parquet/csv                 │
+│  - Create TrainingDatasetExport entity   │
+│  - Apply splitting strategy (per-export) │
+│  - Generate train/val/test files         │
+│  - Export to parquet/csv                 │
 └──────────────────────────────────────────┘
        │
        ▼
@@ -140,10 +140,10 @@ TrainingScenario Status Flow:
           ┌────────────────────────────────────────────┐
           │ PROCESSED = feature_extraction_completed   │
           │                                            │
-          │ ✅ Analysis tab: Available immediately     │
-          │ ✅ Export tab: Available immediately       │
+          │ Analysis tab: Available immediately     │
+          │ Export tab: Available immediately       │
           │                                            │
-          │ 🔄 If scans still running:                 │
+          │ If scans still running:                 │
           │    - Show progress indicator               │
           │    - Export uses available scan_metrics    │
           │    - Refresh to get updated metrics        │
@@ -151,8 +151,8 @@ TrainingScenario Status Flow:
 
 Completion Flags (independent of status):
 
-    feature_extraction_completed: bool  # ✅ Required for PROCESSED
-    scan_extraction_completed: bool     # ℹ️ Optional enrichment
+    feature_extraction_completed: bool  # Required for PROCESSED
+    scan_extraction_completed: bool     # Optional enrichment
 
 TrainingDatasetExport Status Flow:
 
@@ -354,9 +354,9 @@ start_scenario_processing
               ▼                                           │
     ┌─────────────────────────────────────────────────────┤
     │  PROCESSED                                          │
-    │  ✅ Analysis tab: Shows features + partial scans    │
-    │  ✅ Export tab: Can export with available data      │
-    │  🔄 Scans continue backfilling in background        │
+    │  Analysis tab: Shows features + partial scans    │
+    │  Export tab: Can export with available data      │
+    │  Scans continue backfilling in background        │
     └─────────────────────────────────────────────────────┘
 ```
 
@@ -373,7 +373,7 @@ chain(
     process_single_enrichment(build_2),  # 2024-01-02 (references build_1)
     process_single_enrichment(build_3),  # 2024-01-03 (references build_2)
     ...,
-    finalize_scenario_processing
+    finalize_feature_extraction
 )
 ```
 

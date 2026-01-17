@@ -6,9 +6,9 @@ A comprehensive CI/CD risk assessment platform with SonarQube code quality integ
 
 - **Docker & Docker Compose**: For running infrastructure services (MongoDB, RabbitMQ, Redis)
 - **Python 3.11+**: For the backend. Requires `uv` for package management
-- **Node.js 18+**: For the frontend
+- **Node.js 20+**: For the frontend
 - **GitHub App**: Required for authentication and webhooks
-- **SonarQube Server** (Optional): For code quality scanning. Can use local instance or cloud service
+- **SonarQube Server** (Optional): For code quality scanning
 
 ## Project Structure
 
@@ -27,7 +27,7 @@ A comprehensive CI/CD risk assessment platform with SonarQube code quality integ
 │   ├── pyproject.toml
 │   └── Dockerfile
 ├── frontend/               # Next.js web application
-├── docker-compose.prod.yml # Full-stack deployment (Nginx + app + workers + monitoring)
+├── docker-compose.prod.yml # Full-stack deployment (app + workers + monitoring)
 ├── docker-compose.server.yml # Remote server services (MongoDB, RabbitMQ, Redis, SonarQube, Trivy)
 ├── .env.prod.example       # Production compose env template
 ├── .env.server.example     # Server compose env template
@@ -92,7 +92,7 @@ This will start:
    - API: http://localhost:8000
    - API Docs: http://localhost:8000/api/docs
 
-6. Run Celery worker (in a separate terminal):x
+6. Run Celery worker (in a separate terminal):
    ```bash
    cd backend
    uv run celery -A app.celery_app worker --loglevel=info
@@ -185,9 +185,8 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d
 
 This starts:
 - MongoDB, RabbitMQ, Redis (infrastructure)
-- Nginx reverse proxy (port 80)
-- Backend API (port 8000, behind Nginx)
-- Frontend (served by Nginx)
+- Backend API (port 8000)
+- Frontend (port 3000)
 - Celery Worker and Beat
 - SonarQube (port 9000) and Trivy (port 4954)
 - Grafana (port 3001)
@@ -407,19 +406,19 @@ curl -u myuser:mypass http://localhost:15672/api/queues
 
 ## Features
 
-- ✅ GitHub OAuth authentication
-- ✅ Repository management and webhook integration
-- ✅ Build log collection and analysis
-- ✅ Git diff feature extraction
-- ✅ Repository snapshot metrics
-- ✅ Hamilton DAG-based feature pipeline
-- ✅ Dataset import and enrichment workflow
-- ✅ SonarQube code quality scanning
-- ✅ Trivy security vulnerability scanning
-- ✅ Configurable scan settings per repository
-- ✅ Scan job tracking and retry mechanism
-- ✅ Real-time WebSocket updates
-- ✅ Pipeline execution monitoring
+- GitHub OAuth authentication
+- Repository management and webhook integration
+- Build log collection and analysis
+- Git diff feature extraction
+- Repository snapshot metrics
+- Hamilton DAG-based feature pipeline
+- Dataset import and enrichment workflow
+- SonarQube code quality scanning
+- Trivy security vulnerability scanning
+- Configurable scan settings per repository
+- Scan job tracking and retry mechanism
+- Real-time WebSocket updates
+- Pipeline execution monitoring
 
 ## Contributing
 

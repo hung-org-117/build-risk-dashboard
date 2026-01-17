@@ -184,6 +184,141 @@ docker exec prod-rabbitmq rabbitmqctl list_queues
 docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
 ```
 
+## 🌐 4. Exposing Web Application on GCP
+
+### 4.1 GCP Firewall Configuration
+
+Mở các ports cần thiết để truy cập từ bên ngoài:
+
+```bash
+# Via gcloud CLI
+gcloud compute firewall-rules create allow-build-risk-dashboard \
+  --allow tcp:3000,tcp:8000,tcp:3001,tcp:9000 \
+  --source-ranges 0.0.0.0/0 \
+  --description "Allow Build Risk Dashboard ports"
+```
+
+Hoặc qua **GCP Console**:
+1. VPC Network → Firewall → Create Firewall Rule
+2. **Name**: `allow-build-risk-dashboard`
+3. **Targets**: All instances (hoặc chọn specific tag)
+4. **Source IP ranges**: `0.0.0.0/0`
+5. **Protocols and ports**: `tcp:3000,8000,3001,9000`
+
+### 4.2 Access URLs
+
+Sau khi mở firewall, truy cập ứng dụng qua:
+
+| Service | URL |
+|---------|-----|
+| Frontend | `http://YOUR_GCP_EXTERNAL_IP:3000` |
+| Backend API | `http://YOUR_GCP_EXTERNAL_IP:8000/api/docs` |
+| Grafana | `http://YOUR_GCP_EXTERNAL_IP:3001` |
+| SonarQube | `http://YOUR_GCP_EXTERNAL_IP:9000` |
+
+### 4.3 Update Environment Variables
+
+Cập nhật `.env` với external IP của GCP server:
+
+```env
+DOMAIN_NAME=YOUR_GCP_EXTERNAL_IP
+NEXT_PUBLIC_API_URL=http://YOUR_GCP_EXTERNAL_IP:8000/api
+NEXT_PUBLIC_WS_URL=ws://YOUR_GCP_EXTERNAL_IP:8000/api/ws/events
+FRONTEND_BASE_URL=http://YOUR_GCP_EXTERNAL_IP:3000
+```
+
+Sau đó rebuild frontend (vì NEXT_PUBLIC_* là build-time variables):
+
+```bash
+docker compose -f docker-compose.prod.yml build frontend
+docker compose -f docker-compose.prod.yml up -d frontend
+```
+
+---
+
+## 🔗 5. GitHub Webhook Configuration
+
+### 5.1 Configure GitHub App Webhook
+
+1. Truy cập **GitHub** → Settings → Developer Settings → GitHub Apps → [Your App]
+2. Trong phần **Webhook**:
+   - **Webhook URL**: `http://YOUR_GCP_EXTERNAL_IP:8000/api/webhook/github`
+   - **Webhook secret**: Cùng giá trị với `GITHUB_WEBHOOK_SECRET` trong `.env`
+   - **Content type**: `application/json`
+3. Subscribe events: `Workflow run`, `Push`, `Pull request`
+
+### 5.2 Verify Webhook Connectivity
+
+Sau khi cấu hình:
+
+1. Trigger một workflow trên GitHub repository đã track
+2. Kiểm tra logs backend:
+   ```bash
+   docker compose -f docker-compose.prod.yml logs -f backend | grep webhook
+   ```
+3. Hoặc kiểm tra trên GitHub App → Advanced → Recent Deliveries
+
+### 5.3 Webhook Flow
+
+```
+GitHub (workflow_run.completed)
+       │
+       ▼
+http://GCP_IP:8000/api/webhook/github
+       │
+       ├─ Verify HMAC signature (GITHUB_WEBHOOK_SECRET)
+       ├─ Create/Update RawBuildRun
+       └─ Dispatch ingestion task (auto-sync)
+```
+
+---
+
+## 🔒 6. Security Recommendations (Production)
+
+### 6.1 Use HTTPS with Domain
+
+Đối với production, khuyến nghị sử dụng domain + SSL:
+
+1. **Register domain** và trỏ DNS A record về GCP external IP
+2. **Setup Cloudflare** (hoặc SSL certificate):
+   - Proxy traffic qua Cloudflare
+   - Enable SSL/TLS (Full mode)
+3. **Update URLs** trong `.env`:
+   ```env
+   NEXT_PUBLIC_API_URL=https://yourdomain.com/api
+   NEXT_PUBLIC_WS_URL=wss://yourdomain.com/api/ws/events
+   ```
+
+### 6.2 Restrict Source IPs (Optional)
+
+Giới hạn truy cập chỉ từ GitHub webhooks:
+
+```bash
+# GitHub webhook IP ranges (check docs.github.com for current ranges)
+gcloud compute firewall-rules create allow-github-webhooks \
+  --allow tcp:8000 \
+  --source-ranges 192.30.252.0/22,185.199.108.0/22,140.82.112.0/20 \
+  --description "Allow GitHub webhook IPs only"
+```
+
+---
+
+## 🔧 Common Commands
+
+```bash
+# Stop all
+docker-compose -f docker-compose.prod.yml down
+
+# Xem logs backend & worker
+docker-compose -f docker-compose.prod.yml logs -f backend celery-worker
+
+# Kiểm tra hàng đợi RabbitMQ
+docker exec prod-rabbitmq rabbitmqctl list_queues
+
+# Backup MongoDB
+docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
+```
+
 ## ⚠️ Troubleshooting
 
 **GitHub App lỗi (401/403):**
@@ -197,3 +332,10 @@ docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
 **Celery Worker không chạy task:**
 - Kiểm tra logs: `docker-compose -f docker-compose.prod.yml logs -f celery-worker`
 - Đảm bảo `GITHUB_ORGANIZATION` đã set trong `.env`.
+
+**GitHub Webhook không nhận được (timeout/connection refused):**
+- Kiểm tra firewall GCP đã mở port 8000
+- Kiểm tra backend đang chạy: `docker compose -f docker-compose.prod.yml ps`
+- Test connectivity: `curl http://YOUR_GCP_IP:8000/api/health`
+- Kiểm tra webhook secret khớp giữa GitHub App và `.env`
+
