@@ -13,6 +13,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import { RefreshCw, Pause, Play, Search, X } from "lucide-react";
 
 interface LogEntry {
@@ -87,7 +88,10 @@ export function LogsViewer({
                 <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">Application Logs</CardTitle>
                     <div className="flex items-center gap-2">
-                        <Badge variant={isPaused ? "secondary" : "default"}>
+                        <Badge
+                            variant={isPaused ? "secondary" : "default"}
+                            className={cn(!isPaused && "bg-green-600 hover:bg-green-700")}
+                        >
                             {isPaused ? "Paused" : "Live"}
                         </Badge>
                         <Button
