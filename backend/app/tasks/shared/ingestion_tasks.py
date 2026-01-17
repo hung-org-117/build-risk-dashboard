@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
     queue="ingestion",
     soft_time_limit=600,
     time_limit=660,
-    max_retries=5,
+    max_retries=0,  # Fail fast on timeout
 )
 def clone_repo(
     self: SafeTask,
@@ -301,7 +301,7 @@ def _execute_git_clone_or_fetch(repo_path: Path, full_name: str, log_ctx: str) -
     queue="ingestion",
     soft_time_limit=600,  # 10 min per chunk (fork replay needs more time)
     time_limit=660,
-    max_retries=3,
+    max_retries=0,  # Fail fast on timeout
 )
 def create_worktree_chunk(
     self: SafeTask,

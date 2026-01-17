@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
     queue="sonar_scan",
     soft_time_limit=1800,
     time_limit=2100,
-    max_retries=3,
+    max_retries=0,
 )
 def start_sonar_scan_for_version_commit(
     self: ScanTask,
@@ -131,6 +131,39 @@ def start_sonar_scan_for_version_commit(
                 raise ValueError(error_msg)
 
             state.meta["worktree_path"] = str(worktree_path)
+
+            # Check if component already exists on SonarQube
+            project_key = component_key.rsplit("_", 1)[0]
+            sonar_tool = SonarQubeTool(
+                project_key=project_key, github_repo_id=github_repo_id
+            )
+
+            if sonar_tool._project_exists(component_key):
+                # Component exists - skip scan, directly queue export task
+                logger.info(
+                    f"{corr_prefix} Component {component_key} already exists on SonarQube, "
+                    "skipping scan and fetching metrics directly"
+                )
+                scan_repo.mark_scanning(scan_record.id)
+                publish_scenario_scan_updated(
+                    scenario_id=scenario_id,
+                    scan_id=str(scan_record.id),
+                    commit_sha=commit_sha,
+                    tool_type="sonarqube",
+                    status="scanning",
+                )
+
+                # Directly call export task (synchronous - faster than waiting for webhook)
+                export_metrics_from_webhook.delay(
+                    component_key=component_key,
+                    analysis_status="SUCCESS",
+                )
+
+                return {
+                    "status": "existing_component",
+                    "component_key": component_key,
+                    "message": "Metrics export queued (component already exists)",
+                }
 
             # Mark as scanning
             scan_repo.mark_scanning(scan_record.id)
@@ -289,8 +322,29 @@ def export_metrics_from_webhook(
         )
 
         if not metrics:
-            logger.warning(f"No metrics available for {component_key}")
-            scan_repo.mark_failed(scan_record.id, "No metrics available")
+            error_msg = "No metrics available from SonarQube"
+            logger.warning(f"{error_msg} for {component_key}")
+            scan_repo.mark_failed(scan_record.id, error_msg)
+
+            # Publish failed status
+            publish_scenario_scan_updated(
+                scenario_id=scenario_id_str,
+                scan_id=str(scan_record.id),
+                commit_sha=scan_record.commit_sha,
+                tool_type="sonarqube",
+                status="failed",
+                error=error_msg,
+            )
+
+            # Increment failed counter
+            from app.tasks.shared.scan_context_helpers import (
+                check_and_mark_scans_completed,
+                increment_scan_failed,
+            )
+
+            increment_scan_failed(db, scenario_id_str)
+            check_and_mark_scans_completed(db, scenario_id_str)
+
             return {"status": "no_metrics", "component_key": component_key}
 
         # Context-aware backfill (works for both DatasetVersion and MLScenario)

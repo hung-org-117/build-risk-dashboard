@@ -11,6 +11,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectContent,
@@ -318,19 +319,23 @@ export function RepoConfigSection({
                                             {field.required_by && field.required_by.length > 0 && (
                                                 <div className="flex flex-wrap gap-0.5">
                                                     <TooltipProvider delayDuration={100}>
-                                                        {field.required_by.slice(0, 2).map((featureName) => (
-                                                            <Tooltip key={featureName}>
+                                                        {field.required_by.slice(0, 2).map((req) => (
+                                                            <Tooltip key={req.name}>
                                                                 <TooltipTrigger asChild>
                                                                     <Badge
                                                                         variant="outline"
                                                                         className="text-[9px] px-1 py-0 cursor-help font-normal"
                                                                     >
-                                                                        {featureName}
+                                                                        {req.name}
                                                                     </Badge>
                                                                 </TooltipTrigger>
                                                                 <TooltipContent side="top" className="max-w-xs">
-                                                                    <p className="font-medium">{featureName}</p>
-                                                                    <p className="text-xs text-muted-foreground">Feature requires this configuration</p>
+                                                                    <p className="font-medium">{req.name}</p>
+                                                                    {req.description ? (
+                                                                        <p className="text-xs text-muted-foreground mt-1">{req.description}</p>
+                                                                    ) : (
+                                                                        <p className="text-xs text-muted-foreground">Feature requires this configuration</p>
+                                                                    )}
                                                                 </TooltipContent>
                                                             </Tooltip>
                                                         ))}
@@ -343,8 +348,10 @@ export function RepoConfigSection({
                                                                 </TooltipTrigger>
                                                                 <TooltipContent side="top" className="max-w-xs">
                                                                     <div className="space-y-1">
-                                                                        {field.required_by.slice(2).map(f => (
-                                                                            <p key={f} className="text-xs">{f}</p>
+                                                                        {field.required_by.slice(2).map(req => (
+                                                                            <div key={req.name}>
+                                                                                <p className="text-xs font-medium">{req.name}</p>
+                                                                            </div>
                                                                         ))}
                                                                     </div>
                                                                 </TooltipContent>
@@ -475,17 +482,25 @@ export function RepoConfigSection({
                             };
 
                             return (
-                                <DynamicConfigField
-                                    key={field.name}
-                                    field={fieldWithFilteredOptions}
-                                    value={editValues[field.name]}
-                                    onChange={(newValue) => {
-                                        setEditValues(prev => ({
-                                            ...prev,
-                                            [field.name]: newValue as string[]
-                                        }));
-                                    }}
-                                />
+                                <div key={field.name} className="space-y-2">
+                                    <Label className="text-sm font-medium">
+                                        {formatFieldName(field.name)}
+                                        {field.required && <span className="text-destructive ml-1">*</span>}
+                                    </Label>
+                                    <DynamicConfigField
+                                        field={fieldWithFilteredOptions}
+                                        value={editValues[field.name]}
+                                        onChange={(newValue) => {
+                                            setEditValues(prev => ({
+                                                ...prev,
+                                                [field.name]: newValue as string[]
+                                            }));
+                                        }}
+                                    />
+                                    {field.description && (
+                                        <p className="text-xs text-muted-foreground">{field.description}</p>
+                                    )}
+                                </div>
                             );
                         })}
                     </div>

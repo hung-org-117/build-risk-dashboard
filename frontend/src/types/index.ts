@@ -956,6 +956,11 @@ export interface DatasetTemplateListResponse {
   total: number;
 }
 
+export interface FeatureRequirement {
+  name: string;
+  description?: string;
+}
+
 export interface ConfigFieldSpec {
   name: string;
   type: string;
@@ -964,5 +969,5 @@ export interface ConfigFieldSpec {
   description: string;
   default: unknown;
   options: any; // Flexible options
-  required_by?: string[]; // Feature names that require this config
+  required_by?: FeatureRequirement[]; // Feature names that require this config
 }

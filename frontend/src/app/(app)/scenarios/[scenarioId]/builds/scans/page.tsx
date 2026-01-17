@@ -397,13 +397,14 @@ export default function ScansPage() {
                     <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
                         <thead className="bg-slate-50 dark:bg-slate-900/40">
                             <tr>
-                                <th className="px-4 py-3 w-[50px]"></th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[100px]">Commit</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[140px]">Status</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[80px]">Builds</th>
-                                <th className="px-4 py-3 text-left font-medium text-slate-500 w-[100px]">Duration</th>
-                                <th className="px-4 py-3 text-right font-medium text-slate-500 w-[140px]">Completed At</th>
-                                <th className="px-4 py-3 w-16"></th>
+                                <th className="px-3 py-3 w-[40px]"></th>
+                                <th className="px-3 py-3 text-left font-medium text-slate-500 w-[80px]">Commit</th>
+                                <th className="px-3 py-3 text-left font-medium text-slate-500 w-[200px]">Repository</th>
+                                <th className="px-3 py-3 text-left font-medium text-slate-500 w-[100px]">Status</th>
+                                <th className="px-3 py-3 text-left font-medium text-slate-500 w-[60px]">Builds</th>
+                                <th className="px-3 py-3 text-left font-medium text-slate-500 w-[80px]">Duration</th>
+                                <th className="px-3 py-3 text-right font-medium text-slate-500 w-[130px]">Completed At</th>
+                                <th className="px-3 py-3 w-12"></th>
                             </tr>
                         </thead>
                         {items.map((scan) => {
@@ -427,7 +428,7 @@ export default function ScansPage() {
                                                 router.push(`/commit-scans/${scenarioId}/${toolType}/${scan.id}`);
                                             }}
                                         >
-                                            <td className="px-4 py-3">
+                                            <td className="px-3 py-3">
                                                 {hasDetails && (
                                                     <CollapsibleTrigger asChild>
                                                         <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
@@ -440,18 +441,21 @@ export default function ScansPage() {
                                                     </CollapsibleTrigger>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 font-mono text-xs">
+                                            <td className="px-3 py-3 font-mono text-xs">
                                                 {scan.commit_sha.substring(0, 7)}
                                             </td>
-                                            <td className="px-4 py-3">{renderStatus(scan.status)}</td>
-                                            <td className="px-4 py-3">{scan.builds_affected}</td>
-                                            <td className="px-4 py-3 text-xs">
+                                            <td className="px-3 py-3 text-xs text-muted-foreground truncate max-w-[200px]" title={scan.repo_full_name}>
+                                                {scan.repo_full_name}
+                                            </td>
+                                            <td className="px-3 py-3">{renderStatus(scan.status)}</td>
+                                            <td className="px-3 py-3 text-center">{scan.builds_affected}</td>
+                                            <td className="px-3 py-3 text-xs">
                                                 {formatDuration(scan.started_at, scan.completed_at)}
                                             </td>
-                                            <td className="px-4 py-3 text-xs text-right text-muted-foreground">
+                                            <td className="px-3 py-3 text-xs text-right text-muted-foreground">
                                                 {formatDateTime(scan.completed_at)}
                                             </td>
-                                            <td className="px-4 py-3">
+                                            <td className="px-3 py-3">
                                                 {scan.status === "failed" && (
                                                     <Button
                                                         variant="ghost"
@@ -474,7 +478,7 @@ export default function ScansPage() {
                                         </tr>
                                         <CollapsibleContent asChild>
                                             <tr>
-                                                <td colSpan={7} className="p-0 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+                                                <td colSpan={8} className="p-0 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
                                                     <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
                                                         {/* Metrics Panel */}
                                                         {scan.metrics && (

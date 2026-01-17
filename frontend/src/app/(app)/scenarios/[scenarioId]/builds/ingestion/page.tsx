@@ -326,7 +326,7 @@ export default function IngestionBuildsPage() {
                 <CardHeader className="space-y-4">
                     <div className="flex flex-row items-center justify-between">
                         <div>
-                            <CardTitle>Ingestion Builds</CardTitle>
+                            <CardTitle>Build Resources</CardTitle>
                             <CardDescription>
                                 {data?.total ?? 0} builds found
                             </CardDescription>

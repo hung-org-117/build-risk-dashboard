@@ -90,6 +90,13 @@ class DAGResponse(BaseModel):
 
 
 # Config Requirements DTOs
+class FeatureRequirement(BaseModel):
+    """Details about a feature requiring configuration."""
+
+    name: str
+    description: Optional[str] = None
+
+
 class ConfigFieldSpec(BaseModel):
     """Specification for a single config field required by features."""
 
@@ -102,7 +109,9 @@ class ConfigFieldSpec(BaseModel):
     options: Optional[Any] = (
         None  # Flexible: list, dict (grouped), or any structure for UI
     )
-    required_by: Optional[List[str]] = None  # Feature names that require this config
+    required_by: Optional[List[FeatureRequirement]] = (
+        None  # Features that require this config
+    )
 
 
 class ConfigRequirementsRequest(BaseModel):

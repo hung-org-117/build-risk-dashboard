@@ -691,7 +691,7 @@ def finalize_prediction(
     queue="model_processing",
     soft_time_limit=600,
     time_limit=900,
-    max_retries=3,
+    max_retries=0,  # Fail fast on timeout
 )
 def process_workflow_run(
     self: ModelProcessingTask,
@@ -1191,7 +1191,7 @@ def handle_processing_chain_error(
     queue="model_prediction",
     soft_time_limit=300,
     time_limit=360,
-    max_retries=3,
+    max_retries=0,  # Fail fast on timeout
 )
 def predict_builds_batch(
     self: ModelPredictionTask,

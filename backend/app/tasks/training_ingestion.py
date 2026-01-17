@@ -68,6 +68,7 @@ def _create_scenario_failure_handler(scenario_id: str, db):
     queue="scenario_ingestion",
     soft_time_limit=120,
     time_limit=180,
+    max_retries=0,
 )
 def start_scenario_ingestion(
     self: SafeTask,
@@ -359,7 +360,9 @@ def _resolve_filter_config(scenario: TrainingScenario) -> Dict[str, Any]:
         config_dict = data_config
     else:
         config_dict = (
-            data_config.model_dump() if hasattr(data_config, "model_dump") else data_config.__dict__
+            data_config.model_dump()
+            if hasattr(data_config, "model_dump")
+            else data_config.__dict__
         )
 
     # Direct extraction from flat DTO/Dict
@@ -381,7 +384,9 @@ def _resolve_filter_config(scenario: TrainingScenario) -> Dict[str, Any]:
     }
 
 
-def _find_matching_repos(db, languages: List[str], build_source_ids: List[str] = None) -> List[Any]:
+def _find_matching_repos(
+    db, languages: List[str], build_source_ids: List[str] = None
+) -> List[Any]:
     """Find repositories matching language and source criteria."""
     raw_repo_repo = RawRepositoryRepository(db)
     repo_query: Dict[str, Any] = {"is_private": False}
@@ -403,7 +408,9 @@ def _find_matching_repos(db, languages: List[str], build_source_ids: List[str] =
         import re
 
         # Support case-insensitive matching using Regex
-        regex_list = [re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages]
+        regex_list = [
+            re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages
+        ]
         repo_query["main_lang"] = {"$in": regex_list}
 
     return list(raw_repo_repo.find_many(repo_query))
@@ -487,7 +494,9 @@ def _filter_builds_for_scenario(
     filters = _resolve_filter_config(scenario)
 
     # 2. Find matching repositories
-    repos = _find_matching_repos(db, filters["languages"], filters.get("build_source_ids"))
+    repos = _find_matching_repos(
+        db, filters["languages"], filters.get("build_source_ids")
+    )
 
     if not repos:
         logger.warning(f"{corr_prefix} [filter] No repos match filter criteria")
@@ -496,7 +505,9 @@ def _filter_builds_for_scenario(
     logger.info(f"{corr_prefix} [filter] Found {len(repos)} matching repos")
 
     # 3. Process builds
-    total_inserted = _process_ingestion_builds(db, scenario_id, repos, filters, corr_prefix)
+    total_inserted = _process_ingestion_builds(
+        db, scenario_id, repos, filters, corr_prefix
+    )
 
     if total_inserted == 0:
         logger.warning(f"{corr_prefix} [filter] No builds match filter criteria")
@@ -539,7 +550,9 @@ def aggregate_scenario_ingestion(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(f"{corr_prefix} [aggregate_ingestion] Processing results for {scenario_id}")
+        logger.info(
+            f"{corr_prefix} [aggregate_ingestion] Processing results for {scenario_id}"
+        )
 
         scenario_repo = TrainingScenarioRepository(self.db)
         ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
@@ -710,7 +723,9 @@ def handle_scenario_chord_error(
     except Exception as e:
         logger.warning(f"Could not retrieve exception for task {task_id}: {e}")
 
-    logger.error(f"{corr_prefix} Ingestion chord failed for scenario {scenario_id}: {error_msg}")
+    logger.error(
+        f"{corr_prefix} Ingestion chord failed for scenario {scenario_id}: {error_msg}"
+    )
 
     ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
     scenario_repo = TrainingScenarioRepository(self.db)
@@ -786,6 +801,7 @@ def handle_scenario_chord_error(
     queue="scenario_ingestion",
     soft_time_limit=300,
     time_limit=360,
+    max_retries=0,  # Disable retries - fail fast on timeout
 )
 def reingest_failed_builds(
     self: SafeTask,
@@ -844,7 +860,9 @@ def reingest_failed_builds(
         if failed_count == 0:
             msg = "No failed builds to retry"
             if missing_count > 0:
-                msg += f" ({missing_count} builds have missing resources - not retryable)"
+                msg += (
+                    f" ({missing_count} builds have missing resources - not retryable)"
+                )
             return {
                 "status": "no_failed_builds",
                 "failed_count": 0,
@@ -871,7 +889,9 @@ def reingest_failed_builds(
         if reset_result.modified_count == 0:
             return {"status": "error", "message": "Failed to reset any builds"}
 
-        logger.info(f"{corr_prefix} Reset {reset_result.modified_count} failed builds to PENDING")
+        logger.info(
+            f"{corr_prefix} Reset {reset_result.modified_count} failed builds to PENDING"
+        )
 
         # Update scenario status to INGESTING
         scenario_repo.update_one(
@@ -922,7 +942,9 @@ def reingest_failed_builds(
                 continue
 
             build_ids = [b["ci_run_id"] for b in repo_builds if b.get("ci_run_id")]
-            commit_shas = list({b["commit_sha"] for b in repo_builds if b.get("commit_sha")})
+            commit_shas = list(
+                {b["commit_sha"] for b in repo_builds if b.get("commit_sha")}
+            )
 
             if not build_ids:
                 continue

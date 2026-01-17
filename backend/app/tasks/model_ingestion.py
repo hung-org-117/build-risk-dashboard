@@ -323,7 +323,7 @@ def ingest_model_builds(
     queue="model_ingestion",
     soft_time_limit=600,
     time_limit=900,
-    max_retries=3,
+    max_retries=0,  # Fail fast on timeout
 )
 def fetch_builds_until_existing(
     self: SafeTask,
@@ -564,7 +564,7 @@ def fetch_builds_until_existing(
     queue="model_ingestion",
     soft_time_limit=300,
     time_limit=360,
-    max_retries=3,
+    max_retries=0,  # Fail fast on timeout
 )
 def fetch_builds_batch(
     self: SafeTask,
@@ -1481,7 +1481,7 @@ def reingest_failed_builds(
     queue="model_ingestion",
     soft_time_limit=300,
     time_limit=360,
-    max_retries=3,
+    max_retries=0,  # Fail fast on timeout
 )
 def ingest_webhook_build(
     self: SafeTask,

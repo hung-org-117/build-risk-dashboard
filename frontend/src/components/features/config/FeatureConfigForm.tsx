@@ -262,18 +262,21 @@ export function FeatureConfigForm({
                                             <div className="flex flex-wrap gap-1 mt-1">
                                                 <span className="text-xs text-muted-foreground">Used by:</span>
                                                 <TooltipProvider delayDuration={100}>
-                                                    {field.required_by.map((featureName) => (
-                                                        <Tooltip key={featureName}>
+                                                    {field.required_by.map((req) => (
+                                                        <Tooltip key={req.name}>
                                                             <TooltipTrigger asChild>
                                                                 <Badge
                                                                     variant="outline"
                                                                     className="text-[10px] px-1.5 py-0 cursor-help"
                                                                 >
-                                                                    {featureName}
+                                                                    {req.name}
                                                                 </Badge>
                                                             </TooltipTrigger>
                                                             <TooltipContent side="top" className="max-w-xs">
-                                                                <p className="font-medium">{featureName}</p>
+                                                                <p className="font-medium">{req.name}</p>
+                                                                {req.description && (
+                                                                    <p className="text-xs text-muted-foreground mt-1">{req.description}</p>
+                                                                )}
                                                             </TooltipContent>
                                                         </Tooltip>
                                                     ))}

@@ -96,20 +96,16 @@ TRIVY_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.INTEGER,
         example_value="15",
     ),
-    # -------------------------------------------------------------------------
-    # Secrets Metrics
-    # -------------------------------------------------------------------------
-    MetricDefinition(
-        key="secrets_count",
-        display_name="Secrets Found",
-        description="Number of exposed secrets detected (API keys, passwords, tokens)",
-        category=MetricCategory.SECURITY,
-        data_type=MetricDataType.INTEGER,
-        example_value="0",
-    ),
-    # -------------------------------------------------------------------------
+    # Secrets Metrics (disabled - secret scanner is slow)
+    # MetricDefinition(
+    #     key="secrets_count",
+    #     display_name="Secrets Found",
+    #     description="Number of exposed secrets detected (API keys, passwords, tokens)",
+    #     category=MetricCategory.SECURITY,
+    #     data_type=MetricDataType.INTEGER,
+    #     example_value="0",
+    # ),
     # Scan Metadata
-    # -------------------------------------------------------------------------
     MetricDefinition(
         key="scan_duration_ms",
         display_name="Scan Duration",

@@ -69,10 +69,12 @@ class TrivyTool(IntegrationTool):
         except Exception as e:
             logger.warning(f"Could not load Trivy settings from DB: {e}")
 
-        # Fallback to env vars
+        # Fallback to env vars and default config
+        from app.entities.settings import DEFAULT_TRIVY_CONFIG
+
         return {
             "server_url": getattr(settings, "TRIVY_SERVER_URL", None),
-            "default_config": "",
+            "default_config": DEFAULT_TRIVY_CONFIG,
         }
 
     @property
@@ -362,6 +364,9 @@ class TrivyTool(IntegrationTool):
             self._server_url,
             "--scanners",
             ",".join(scan_types),  # Use passed scan types
+            # Performance: Skip downloading checks/DB updates (use server's cached data)
+            "--skip-check-update",
+            "--skip-db-update",
         ]
 
         # Target path inside container

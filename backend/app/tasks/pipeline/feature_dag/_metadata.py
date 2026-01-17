@@ -372,6 +372,12 @@ def collect_config_requirements(
                 if not feature_display_names:
                     feature_display_names = [name]
 
+                # Get feature description from docstring
+                description = (obj.__doc__ or "").strip()
+                # If first line exists, use it as short description
+                if description:
+                    description = description.split("\n")[0].strip()
+
                 for req in obj._config_requirements:
                     field_name = req["field"]
                     if field_name in all_fields:
@@ -379,13 +385,26 @@ def collect_config_requirements(
                         all_fields[field_name]["required"] = (
                             all_fields[field_name]["required"] or req["required"]
                         )
-                        # Add to required_by list
-                        for fn in feature_display_names:
-                            if fn not in all_fields[field_name]["required_by"]:
-                                all_fields[field_name]["required_by"].append(fn)
+                        # Add to required_by list if not already present
+                        current_required_by = all_fields[field_name]["required_by"]
+                        # Avoid duplicates by name (if required_by is list of dicts)
+                        # Note: If it's still list of strings from old cache, this might break, but we assume fresh run
+                        existing_names = {
+                            r["name"] if isinstance(r, dict) else r
+                            for r in current_required_by
+                        }
+                        for f_name in feature_display_names:
+                            if f_name not in existing_names:
+                                current_required_by.append(
+                                    {"name": f_name, "description": description}
+                                )
+                                existing_names.add(f_name)
                     else:
                         field_data = req.copy()
-                        field_data["required_by"] = list(feature_display_names)
+                        field_data["required_by"] = [
+                            {"name": f_name, "description": description}
+                            for f_name in feature_display_names
+                        ]
                         all_fields[field_name] = field_data
 
     return all_fields

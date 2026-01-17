@@ -176,10 +176,9 @@ def dispatch_scan_for_scenario_commit(
             sonar_tool_config = scan_tool_config.get("sonarqube", {})
             sonar_config = _get_repo_config(sonar_tool_config, github_repo_id)
 
-            # Generate component key with scenario_id prefix for uniqueness
+            # Generate component key (repo + commit only)
             repo_name_safe = repo_full_name.replace("/", "_")
-            scenario_prefix = scenario_id[:8]
-            component_key = f"{scenario_prefix}_{repo_name_safe}_{commit_sha[:12]}"
+            component_key = f"{repo_name_safe}_{commit_sha[:12]}"
 
             config_content = _build_sonar_config_content(sonar_config)
 

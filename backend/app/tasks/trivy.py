@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
     queue="trivy_scan",
     soft_time_limit=600,
     time_limit=900,
-    max_retries=3,
+    max_retries=0,
 )
 def start_trivy_scan_for_version_commit(
     self: ScanTask,
@@ -286,7 +286,8 @@ def start_trivy_scan_for_version_commit(
 
 def _parse_scan_types(trivy_config: dict) -> List[str]:
     """Parse scan types from config, default to all types for comprehensive scanning."""
-    default_types = ["vuln", "misconfig", "secret"]
+    # Modified: Excluded 'secret' by default as it's too slow
+    default_types = ["vuln", "misconfig"]
 
     if not trivy_config.get("scanners"):
         return default_types

@@ -12,7 +12,8 @@ sonar.sourceEncoding=UTF-8
 sonar.scm.disabled=true
 sonar.java.binaries=.
 
-sonar.exclusions=**/.git/**,**/.hg/**,**/.svn/**,**/node_modules/**,**/vendor/**,**/dist/**,**/build/**,**/target/**,**/out/**,**/.next/**,**/.nuxt/**,**/.cache/**,**/__pycache__/**,**/*.min.js,**/*.min.css
+# Exclude non-source directories and files
+sonar.exclusions=**/.git/**,**/.hg/**,**/.svn/**,**/node_modules/**,**/vendor/**,**/dist/**,**/build/**,**/target/**,**/out/**,**/.next/**,**/.nuxt/**,**/.cache/**,**/__pycache__/**,**/*.min.js,**/*.min.css,**/.m2/**,**/.gradle/**,**/.npm/**,**/.yarn/**,**/.pnpm/**,**/coverage/**,**/.nyc_output/**,**/.pytest_cache/**,**/.tox/**,**/.venv/**,**/venv/**,**/env/**,**/.env/**,**/virtualenv/**,**/.idea/**,**/.vscode/**,**/.eclipse/**,**/logs/**,**/log/**,**/tmp/**,**/temp/**,**/.DS_Store,**/Thumbs.db,**/*.lock,**/package-lock.json,**/yarn.lock,**/pnpm-lock.yaml,**/poetry.lock,**/Pipfile.lock,**/go.sum,**/Cargo.lock,**/composer.lock,**/Gemfile.lock
 
 sonar.inclusions=**/*
 """
@@ -30,7 +31,8 @@ severity:
 scanners:
   - vuln
   - misconfig
-  - secret
+  # Note: 'secret' scanner disabled for performance - it's very slow
+  # - secret
   - license
 
 list-all-pkgs: true
@@ -40,19 +42,70 @@ ignore-unfixed: false
 format: json
 output: trivy-result.json
 
+# Performance optimizations
+# Skip Java DB update to avoid Maven dependency resolution timeouts
+skip-java-db-update: true
+
+# Offline mode - skip downloading vulnerability DB during scan
+# (assumes Trivy server has the DB)
+offline-scan: true
+
 scan:
   skip-dirs:
+    # Package managers / dependencies
     - node_modules
     - vendor
+    - .npm
+    - .yarn
+    - .pnpm
+    - .m2
+    - .gradle
+    - .ivy2
+    - .sbt
+    - .cargo
+    - .rustup
+    # Version control
     - .git
+    - .hg
+    - .svn
+    # Build outputs
     - dist
     - build
     - target
     - out
+    - bin
+    - obj
     - .next
     - .nuxt
+    - .output
+    # Cache / temp
     - .cache
     - __pycache__
+    - .pytest_cache
+    - .tox
+    - .mypy_cache
+    - .ruff_cache
+    - coverage
+    - .nyc_output
+    - tmp
+    - temp
+    - logs
+    - log
+    # Virtual environments
+    - .venv
+    - venv
+    - env
+    - .env
+    - virtualenv
+    # IDE / Editor
+    - .idea
+    - .vscode
+    - .eclipse
+    # Test data / fixtures
+    - testdata
+    - test-fixtures
+    - fixtures
+    - mocks
 
   skip-files:
     - "**/*.min.js"
@@ -62,14 +115,47 @@ scan:
     - "**/*.jpg"
     - "**/*.jpeg"
     - "**/*.gif"
+    - "**/*.ico"
+    - "**/*.svg"
+    - "**/*.webp"
     - "**/*.pdf"
     - "**/*.zip"
     - "**/*.tar"
     - "**/*.tar.gz"
     - "**/*.tgz"
+    - "**/*.gz"
+    - "**/*.bz2"
+    - "**/*.xz"
+    - "**/*.rar"
+    - "**/*.7z"
     - "**/*.jar"
+    - "**/*.war"
+    - "**/*.ear"
     - "**/*.exe"
     - "**/*.dll"
+    - "**/*.so"
+    - "**/*.dylib"
+    - "**/*.woff"
+    - "**/*.woff2"
+    - "**/*.ttf"
+    - "**/*.eot"
+    - "**/*.otf"
+    - "**/*.mp3"
+    - "**/*.mp4"
+    - "**/*.avi"
+    - "**/*.mov"
+    - "**/*.wmv"
+    - "**/*.flv"
+    - "**/*.webm"
+    - "**/package-lock.json"
+    - "**/yarn.lock"
+    - "**/pnpm-lock.yaml"
+    - "**/poetry.lock"
+    - "**/Pipfile.lock"
+    - "**/go.sum"
+    - "**/Cargo.lock"
+    - "**/composer.lock"
+    - "**/Gemfile.lock"
 """
 
 

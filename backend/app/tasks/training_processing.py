@@ -12,6 +12,7 @@ This module handles the processing phase of training scenario (user-triggered):
 Note: Dataset generation tasks moved to app.tasks.training_export module.
 """
 
+from app.entities import TrainingIngestionBuild
 import logging
 from datetime import datetime
 from typing import Any, Dict, List
@@ -303,10 +304,10 @@ def dispatch_enrichment_batches(
         }
 
         # Sort by build creation time (oldest first) for temporal features
-        def get_build_timestamp(b):
+        def get_build_timestamp(b: TrainingIngestionBuild):
             raw_run = raw_build_runs.get(str(b.raw_build_run_id))
-            if raw_run and raw_run.created_at:
-                return raw_run.created_at
+            if raw_run and raw_run.run_created_at:
+                return raw_run.run_created_at
             if b.created_at:
                 return b.created_at
             return datetime.utcnow()
@@ -523,7 +524,7 @@ def handle_processing_chain_error(
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=600,
-    max_retries=2,
+    max_retries=0,
 )
 def process_single_enrichment(
     self: ScenarioProcessingTask,
@@ -789,6 +790,7 @@ def finalize_feature_extraction(
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=360,
+    max_retries=0,  # Disable retries - fail fast on timeout
 )
 def reprocess_failed_feature_extraction(
     self: ScenarioProcessingTask,
@@ -1384,20 +1386,23 @@ def process_retry_scan_batch(
                 skipped_missing += 1
                 continue
 
-            # Generate component key
+            # Generate component key (repo + commit only)
             repo_name_safe = scan_info["repo_full_name"].replace("/", "_")
-            component_key = (
-                f"{scenario_id[:8]}_{repo_name_safe}_{scan_info['commit_sha'][:12]}"
-            )
+            component_key = f"{repo_name_safe}_{scan_info['commit_sha'][:12]}"
 
             # Check if project already exists on SonarQube server
             if sonar_tool._project_exists(component_key):
                 logger.info(
-                    f"{corr_prefix} Skipping {scan_info['commit_sha'][:8]} - "
-                    f"project {component_key} already exists on SonarQube server"
+                    f"{corr_prefix} Component {component_key} exists on SonarQube, "
+                    "triggering metrics export directly"
                 )
-                # Mark as completed since data exists on server
-                # Optionally trigger metrics export instead of full scan
+                # Trigger metrics export instead of full scan
+                from app.tasks.sonar import export_metrics_from_webhook
+
+                export_metrics_from_webhook.delay(
+                    component_key=component_key,
+                    analysis_status="SUCCESS",
+                )
                 skipped_exists_on_server += 1
                 continue
 
