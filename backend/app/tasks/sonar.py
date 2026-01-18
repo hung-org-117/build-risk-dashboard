@@ -89,20 +89,13 @@ def start_sonar_scan_for_version_commit(
 
         # Increment scans_failed counter (context-aware for version or scenario)
         try:
-            from app.tasks.shared.pipeline_context import PipelineContext
             from app.tasks.shared.scan_context_helpers import (
                 check_and_mark_scans_completed,
                 increment_scan_failed,
             )
 
-            pipeline_ctx = PipelineContext.detect(db, scenario_id)
-
             increment_scan_failed(db, scenario_id)
             check_and_mark_scans_completed(db, scenario_id)
-
-            # Context-aware notification (works for both DatasetVersion and MLScenario)
-            if pipeline_ctx:
-                pipeline_ctx.check_and_notify_completed()
         except Exception as e:
             logger.warning(f"Failed to update scan failure stats: {e}")
 
@@ -291,13 +284,6 @@ def export_metrics_from_webhook(
             increment_scan_failed(db, scenario_id_str)
             check_and_mark_scans_completed(db, scenario_id_str)
 
-            # Context-aware notification (works for both DatasetVersion and MLScenario)
-            try:
-                if pipeline_ctx:
-                    pipeline_ctx.check_and_notify_completed()
-            except Exception as e:
-                logger.warning(f"Failed to check completion notification: {e}")
-
             return {"status": "failed", "component_key": component_key}
 
         # Get scenario to determine which metrics to fetch
@@ -397,13 +383,6 @@ def export_metrics_from_webhook(
 
         increment_scan_completed(db, scenario_id_str)
         check_and_mark_scans_completed(db, scenario_id_str)
-
-        # Context-aware notification (works for both DatasetVersion and MLScenario)
-        try:
-            if pipeline_ctx:
-                pipeline_ctx.check_and_notify_completed()
-        except Exception as e:
-            logger.warning(f"Failed to check completion notification: {e}")
 
         return {
             "status": "success",

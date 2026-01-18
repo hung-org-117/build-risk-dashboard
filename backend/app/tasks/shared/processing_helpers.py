@@ -241,15 +241,19 @@ def extract_features_for_build(
                 TEMPORAL_FEATURES,
             )
 
-            required_features = set(TEMPORAL_FEATURES + STATIC_FEATURES)
-            extracted_features = set(formatted_features.keys())
-            missing_model_features = required_features - extracted_features
+            if category == AuditLogCategory.MODEL_TRAINING:
+                required_features = set(TEMPORAL_FEATURES + STATIC_FEATURES)
+                extracted_features = set(formatted_features.keys())
+                missing_model_features = required_features - extracted_features
 
-            if missing_model_features:
-                logger.warning(
-                    f"Build {raw_build_run.ci_run_id} missing {len(missing_model_features)} "
-                    f"model features: {sorted(missing_model_features)}"
-                )
+                if missing_model_features:
+                    logger.warning(
+                        f"Build {raw_build_run.ci_run_id} missing {len(missing_model_features)} "
+                        f"model features: {sorted(missing_model_features)}"
+                    )
+            else:
+                missing_model_features = set()
+
         except ImportError:
             # Model not available, skip validation
             missing_model_features = set()

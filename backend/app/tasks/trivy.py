@@ -98,10 +98,6 @@ def start_trivy_scan_for_version_commit(
 
             increment_scan_failed(db, scenario_id)
             check_and_mark_scans_completed(db, scenario_id)
-
-            # Context-aware notification (works for both DatasetVersion and MLScenario)
-            if pipeline_ctx:
-                pipeline_ctx.check_and_notify_completed()
         except Exception as e:
             logger.warning(f"Failed to update scan failure stats: {e}")
 
@@ -175,9 +171,6 @@ def start_trivy_scan_for_version_commit(
                     increment_scan_failed(db, scenario_id)
                     check_and_mark_scans_completed(db, scenario_id)
 
-                    # Context-aware notification (works for both DatasetVersion and MLScenario)
-                    if pipeline_ctx:
-                        pipeline_ctx.check_and_notify_completed()
                 except Exception as e:
                     logger.warning(f"Failed to update scan failure stats: {e}")
 
@@ -259,15 +252,6 @@ def start_trivy_scan_for_version_commit(
                 "vuln_total": filtered_metrics.get("vuln_total", 0),
                 "scan_duration_ms": scan_duration_ms,
             }
-
-            # Context-aware notification (works for both DatasetVersion and MLScenario)
-            try:
-                if pipeline_ctx:
-                    pipeline_ctx.check_and_notify_completed()
-            except Exception as e:
-                logger.warning(
-                    f"{corr_prefix} Failed to check completion notification: {e}"
-                )
 
             state.phase = "DONE"
 

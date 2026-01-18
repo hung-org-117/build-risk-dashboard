@@ -66,6 +66,8 @@ export default function ScenarioAnalysisPage() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
+    const [distributionsLoading, setDistributionsLoading] = useState(false);
+
     // Feature Distribution UI State
     const [distributionSearch, setDistributionSearch] = useState("");
     const [distributionPage, setDistributionPage] = useState(1);
@@ -80,7 +82,7 @@ export default function ScenarioAnalysisPage() {
     const [scanDistributionPage, setScanDistributionPage] = useState(1);
     const [scanDistributionSearch, setScanDistributionSearch] = useState("");
 
-    // 1. Fetch Scenario Details (Controlled by scenarioId)
+    // 1. Fetch Scenario Details
     const fetchScenario = useCallback(async () => {
         try {
             const data = await trainingScenariosApi.get(scenarioId);
@@ -97,42 +99,76 @@ export default function ScenarioAnalysisPage() {
         }
     }, [fetchScenario, scenarioId]);
 
-    // 2. Fetch Features Tab Data (Quality Report, Metrics, Distributions)
-    const fetchFeatureData = useCallback(async () => {
+    // 2. Fetch Initial Quality Report (Once or on Refresh)
+    const fetchQualityReport = useCallback(async () => {
         if (!scenarioId) return;
-        setLoading(true);
+        // Only set global loading if we don't have report yet (initial load)
+        if (!qualityReport) setLoading(true);
         try {
-            const [qualityData, metricData, distributionData] = await Promise.all([
-                trainingScenariosApi.getAnalysis(scenarioId),
-                statisticsApi.getFeatureMetrics(scenarioId, {
-                    page: metricsPage,
-                    limit: 10,
-                    search: metricsSearch
-                }),
-                statisticsApi.getDistributions(scenarioId, {
-                    page: distributionPage,
-                    limit: 6,
-                    search: distributionSearch,
-                    category: "All"
-                })
-            ]);
+            const qualityData = await trainingScenariosApi.getAnalysis(scenarioId);
             setQualityReport(qualityData);
-            setMetricsData(metricData);
-            setDistributions(distributionData);
         } catch (err) {
-            console.error("Failed to fetch features tab data:", err);
+            console.error("Failed to fetch quality report:", err);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [scenarioId, metricsPage, metricsSearch, distributionPage, distributionSearch]);
+    }, [scenarioId, qualityReport]);
 
-    // Features Effect
     useEffect(() => {
         if (scenarioId && activeTab === "features") {
-            fetchFeatureData();
+            fetchQualityReport();
         }
-    }, [fetchFeatureData, scenarioId, activeTab]);
+    }, [fetchQualityReport, scenarioId, activeTab]);
+
+    // 3. Fetch Metrics (Paginated)
+    const fetchMetrics = useCallback(async () => {
+        if (!scenarioId) return;
+        setMetricsLoading(true);
+        try {
+            const metricData = await statisticsApi.getFeatureMetrics(scenarioId, {
+                page: metricsPage,
+                limit: 10,
+                search: metricsSearch
+            });
+            setMetricsData(metricData);
+        } catch (err) {
+            console.error("Failed to fetch metrics:", err);
+        } finally {
+            setMetricsLoading(false);
+        }
+    }, [scenarioId, metricsPage, metricsSearch]);
+
+    useEffect(() => {
+        if (scenarioId && activeTab === "features") {
+            fetchMetrics();
+        }
+    }, [fetchMetrics, scenarioId, activeTab]);
+
+    // 4. Fetch Distributions (Paginated)
+    const fetchDistributions = useCallback(async () => {
+        if (!scenarioId) return;
+        setDistributionsLoading(true);
+        try {
+            const distributionData = await statisticsApi.getDistributions(scenarioId, {
+                page: distributionPage,
+                limit: 6,
+                search: distributionSearch,
+                category: "All"
+            });
+            setDistributions(distributionData);
+        } catch (err) {
+            console.error("Failed to fetch distributions:", err);
+        } finally {
+            setDistributionsLoading(false);
+        }
+    }, [scenarioId, distributionPage, distributionSearch]);
+
+    useEffect(() => {
+        if (scenarioId && activeTab === "features") {
+            fetchDistributions();
+        }
+    }, [fetchDistributions, scenarioId, activeTab]);
 
     // 3. Fetch Integration Tab Data (Scan Stats)
     // Note: Depends on qualityReport existence but NOT its value to avoid loops set by setQualityReport
@@ -175,12 +211,16 @@ export default function ScenarioAnalysisPage() {
         const unsubscribe = subscribe("SCENARIO.UPDATED", (data: { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
                 fetchScenario(); // Always update scenario status
-                if (activeTab === "features") fetchFeatureData();
+                if (activeTab === "features") {
+                    fetchQualityReport();
+                    fetchMetrics();
+                    fetchDistributions();
+                }
                 if (activeTab === "integration") fetchIntegrationData();
             }
         });
         return () => unsubscribe();
-    }, [subscribe, scenarioId, activeTab, fetchScenario, fetchFeatureData, fetchIntegrationData]);
+    }, [subscribe, scenarioId, activeTab, fetchScenario, fetchQualityReport, fetchMetrics, fetchDistributions, fetchIntegrationData]);
 
     const handleRefresh = () => {
         setRefreshing(true);
@@ -188,7 +228,11 @@ export default function ScenarioAnalysisPage() {
         setTrivyStats(null);
         setSonarStats(null);
         // Trigger re-fetch based on active tab
-        if (activeTab === "features") fetchFeatureData();
+        if (activeTab === "features") {
+            fetchQualityReport();
+            fetchMetrics();
+            fetchDistributions();
+        }
         if (activeTab === "integration") fetchIntegrationData();
     };
 
@@ -563,7 +607,11 @@ export default function ScenarioAnalysisPage() {
                                                 </div>
                                             </CardHeader>
                                             <CardContent>
-                                                {distributions.total_items === 0 ? (
+                                                {distributionsLoading ? (
+                                                    <div className="py-12 flex justify-center">
+                                                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                                    </div>
+                                                ) : distributions.total_items === 0 ? (
                                                     <div className="text-center py-12 text-muted-foreground">No features found matching your criteria.</div>
                                                 ) : (
                                                     <div className="space-y-4">
