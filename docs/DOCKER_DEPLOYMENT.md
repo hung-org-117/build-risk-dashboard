@@ -156,7 +156,7 @@ docker compose -f docker-compose.prod.yml logs -f
 |---------|-----------|---------------|---------------|
 | **Frontend** | 3000 | 3000 | `http://IP:3000` |
 | **Backend** | 8000 | 8000 | `http://IP:8000` |
-| **Grafana** | 3001 | 3000 | `http://IP:3001` |
+| **Grafana** | 3001 | 3000 | `http://IP:3001` (Optional) |
 | **SonarQube**| 9000 | 9000 | `http://IP:9000` |
 | **RabbitMQ** | 15672 | 15672 | `http://IP:15672` |
 

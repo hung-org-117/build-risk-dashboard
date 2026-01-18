@@ -345,6 +345,8 @@ npm run build
 | `SECRET_KEY` | Yes | JWT signing secret |
 | `SONAR_TOKEN` | No | SonarQube API token |
 | `TRIVY_ENABLED` | No | Enable Trivy scanning (default: false) |
+| `TRIVY_SKIP_DB_UPDATE` | No | Skip Trivy vuln DB update (default: false) |
+| `TRIVY_SKIP_JAVA_DB_UPDATE` | No | Skip Trivy Java DB update (default: false) |
 
 ## Troubleshooting
 
