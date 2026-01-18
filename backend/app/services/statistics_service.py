@@ -601,11 +601,13 @@ class StatisticsService:
         sonar_summary.alert_status_error_count = alert_status_error
         sonar_summary.total_scans = scan_summary.builds_with_sonar
 
+        # Return response with tool-specific summaries
+        # If tool is specified, only include that summary; otherwise include both
         return ScanMetricsStatisticsResponse(
             scenario_id=scenario_id,
             scan_summary=scan_summary,
-            trivy_summary=trivy_summary,
-            sonar_summary=sonar_summary,
+            trivy_summary=trivy_summary if should_process_trivy else None,
+            sonar_summary=sonar_summary if should_process_sonar else None,
         )
 
     def get_scan_distributions(

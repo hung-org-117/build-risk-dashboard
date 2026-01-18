@@ -184,8 +184,9 @@ export interface ScanSummary {
 export interface ScanMetricsStatisticsResponse {
     scenario_id: string;
     scan_summary: ScanSummary;
-    trivy_summary: TrivySummary;
-    sonar_summary: SonarSummary;
+    // Optional: only included when tool is not specified or matches
+    trivy_summary?: TrivySummary;
+    sonar_summary?: SonarSummary;
 }
 
 export const statisticsApi = {

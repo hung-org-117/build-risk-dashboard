@@ -1,7 +1,8 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { FeatureDistributionChart } from "@/components/analysis/feature-distribution-chart";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
     Card,
     CardContent,
@@ -9,22 +10,19 @@ import {
     CardHeader,
     CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Loader2, Shield, BarChart3, AlertCircle, RefreshCw, Clock, Bug, Code, AlertTriangle } from "lucide-react";
-import {
-    trainingScenariosApi,
-    TrainingScenarioRecord,
-    DataQualityReport,
-} from "@/lib/api/training-scenarios";
-import { statisticsApi, ScanMetricsStatisticsResponse, FeatureDistributionResponse, NumericDistribution, FeatureMetricsResponse } from "@/lib/api/statistics";
-import { FeatureDistributionChart } from "@/components/analysis/feature-distribution-chart";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSSE } from "@/contexts/sse-context";
-import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { FeatureDistributionResponse, FeatureMetricsResponse, NumericDistribution, ScanMetricsStatisticsResponse, statisticsApi } from "@/lib/api/statistics";
+import {
+    DataQualityReport,
+    TrainingScenarioRecord,
+    trainingScenariosApi,
+} from "@/lib/api/training-scenarios";
+import { AlertCircle, BarChart3, ChevronLeft, ChevronRight, Clock, Loader2, RefreshCw, Search, Shield } from "lucide-react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
 
 const ITEMS_PER_PAGE = 6;
@@ -42,15 +40,31 @@ export default function ScenarioAnalysisPage() {
     const params = useParams<{ scenarioId: string }>();
     const scenarioId = params.scenarioId;
     const { subscribe } = useSSE();
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const pathname = usePathname();
+
+    // Get tab from URL or default to "features"
+    const activeTab = searchParams.get("tab") || "features";
+
+    // Sync URL when tab changes
+    const handleTabChange = useCallback((value: string) => {
+        const newParams = new URLSearchParams(searchParams.toString());
+        newParams.set("tab", value);
+        router.push(`${pathname}?${newParams.toString()}`);
+    }, [pathname, router, searchParams]);
 
     const [scenario, setScenario] = useState<TrainingScenarioRecord | null>(null);
     const [qualityReport, setQualityReport] = useState<DataQualityReport | null>(null);
+    // Integration stats
     const [trivyStats, setTrivyStats] = useState<ScanMetricsStatisticsResponse | null>(null);
     const [sonarStats, setSonarStats] = useState<ScanMetricsStatisticsResponse | null>(null);
+    const [scanDistributions, setScanDistributions] = useState<FeatureDistributionResponse | null>(null); // Placeholder for scan distributions if we separate API
+
+    // Feature distributions
     const [distributions, setDistributions] = useState<FeatureDistributionResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [activeTab, setActiveTab] = useState("features");
 
     // Feature Distribution UI State
     const [distributionSearch, setDistributionSearch] = useState("");
@@ -66,132 +80,117 @@ export default function ScenarioAnalysisPage() {
     const [scanDistributionPage, setScanDistributionPage] = useState(1);
     const [scanDistributionSearch, setScanDistributionSearch] = useState("");
 
-    const fetchDistributions = useCallback(async () => {
-        if (!scenarioId) return;
+    // 1. Fetch Scenario Details (Controlled by scenarioId)
+    const fetchScenario = useCallback(async () => {
         try {
-            const data = await statisticsApi.getDistributions(scenarioId, {
-                page: distributionPage,
-                limit: 6, // Hardcoded limit as per previous const
-                search: distributionSearch,
-                category: "All" // Defaulting to All since UI filter is removed
-            });
-            setDistributions(data);
+            const data = await trainingScenariosApi.get(scenarioId);
+            setScenario(data);
         } catch (err) {
-            console.error("Failed to fetch distributions:", err);
+            console.error("Failed to fetch scenario:", err);
         }
-    }, [scenarioId, distributionPage, distributionSearch]);
+    }, [scenarioId]);
 
-    const fetchMetrics = useCallback(async () => {
+    // Scenario Effect
+    useEffect(() => {
+        if (scenarioId) {
+            fetchScenario();
+        }
+    }, [fetchScenario, scenarioId]);
+
+    // 2. Fetch Features Tab Data (Quality Report, Metrics, Distributions)
+    const fetchFeatureData = useCallback(async () => {
         if (!scenarioId) return;
-        setMetricsLoading(true);
+        setLoading(true);
         try {
-            const data = await statisticsApi.getFeatureMetrics(scenarioId, {
-                page: metricsPage,
-                limit: 10,
-                search: metricsSearch
-            });
-            setMetricsData(data);
-        } catch (err) {
-            console.error("Failed to fetch metrics:", err);
-        } finally {
-            setMetricsLoading(false);
-        }
-    }, [scenarioId, metricsPage, metricsSearch]);
-
-    // Initial Data Fetch - ONLY fetches Scenario & Quality Report
-    const fetchData = useCallback(async () => {
-        try {
-            const [scenarioData, qualityData] = await Promise.all([
-                trainingScenariosApi.get(scenarioId),
+            const [qualityData, metricData, distributionData] = await Promise.all([
                 trainingScenariosApi.getAnalysis(scenarioId),
+                statisticsApi.getFeatureMetrics(scenarioId, {
+                    page: metricsPage,
+                    limit: 10,
+                    search: metricsSearch
+                }),
+                statisticsApi.getDistributions(scenarioId, {
+                    page: distributionPage,
+                    limit: 6,
+                    search: distributionSearch,
+                    category: "All"
+                })
             ]);
-            setScenario(scenarioData);
             setQualityReport(qualityData);
-
-            // Note: We deliberately DO NOT fetch metrics/distributions here.
-            // They are handled by their own useEffects which trigger when:
-            // 1. loading becomes false (initial load)
-            // 2. scenario reference changes (SSE updates)
-            // 3. local state changes (pagination/search)
-
+            setMetricsData(metricData);
+            setDistributions(distributionData);
         } catch (err) {
-            console.error("Failed to fetch analysis data:", err);
+            console.error("Failed to fetch features tab data:", err);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [scenarioId]); // Removed dependencies on fetchDistributions/fetchMetrics
+    }, [scenarioId, metricsPage, metricsSearch, distributionPage, distributionSearch]);
 
-    // Effect for Distribution updates (when filters change)
+    // Features Effect
     useEffect(() => {
-        if (!loading && (scenario?.feature_extraction_completed || scenario?.status === "processed")) {
-            const timer = setTimeout(() => {
-                fetchDistributions();
-            }, 300); // Debounce search
-            return () => clearTimeout(timer);
+        if (scenarioId && activeTab === "features") {
+            fetchFeatureData();
         }
-    }, [fetchDistributions, loading, scenario]);
+    }, [fetchFeatureData, scenarioId, activeTab]);
 
-    // Effect for Metrics updates
-    useEffect(() => {
-        if (!loading && (scenario?.feature_extraction_completed || scenario?.status === "processed")) {
-            const timer = setTimeout(() => {
-                fetchMetrics();
-            }, 300); // Debounce search
-            return () => clearTimeout(timer);
-        }
-    }, [fetchMetrics, loading, scenario]);
+    // 3. Fetch Integration Tab Data (Scan Stats)
+    // Note: Depends on qualityReport existence but NOT its value to avoid loops set by setQualityReport
+    const fetchIntegrationData = useCallback(async () => {
+        if (!scenarioId) return;
+        setLoading(true);
+        try {
+            // Parallel fetch for Trivy and Sonar
+            const [trivyData, sonarData] = await Promise.all([
+                statisticsApi.getScanMetrics(scenarioId, "trivy"),
+                statisticsApi.getScanMetrics(scenarioId, "sonarqube"),
+            ]);
+            setTrivyStats(trivyData);
+            setSonarStats(sonarData);
 
-    // Fetch tab-specific data when active tab changes
-    useEffect(() => {
-        if (!scenarioId || loading) return;
-
-        const fetchTabStats = async () => {
-            if (activeTab === "integration") {
-                // Fetch both if they haven't been loaded yet
-                if (!trivyStats) {
-                    try {
-                        const data = await statisticsApi.getScanMetrics(scenarioId, "trivy");
-                        setTrivyStats(data);
-                    } catch (err) {
-                        console.error("Failed to fetch trivy stats:", err);
-                    }
-                }
-                if (!sonarStats) {
-                    try {
-                        const data = await statisticsApi.getScanMetrics(scenarioId, "sonarqube");
-                        setSonarStats(data);
-                    } catch (err) {
-                        console.error("Failed to fetch sonarqube stats:", err);
-                    }
-                }
+            // Fetch quality report if missing (needed for distributions), independent of main flow
+            if (!qualityReport) {
+                const qualityData = await trainingScenariosApi.getAnalysis(scenarioId);
+                setQualityReport(qualityData);
             }
-        };
 
-        fetchTabStats();
-    }, [activeTab, scenarioId, loading, trivyStats, sonarStats]);
+        } catch (err) {
+            console.error("Failed to fetch integration tab data:", err);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, [scenarioId, qualityReport]); // Depends on qualityReport to know if it's missing, but logic prevents loop? 
+    // Wait, if qualityReport is null -> fetch -> setQualityReport -> fetchIntegrationData changes -> Effect runs -> qualityReport is NOT null -> no fetch -> no set. Loop broken. Correct.
 
-    const handleRefresh = async () => {
-        setRefreshing(true);
-        // Clear cached stats to force refetch
-        setTrivyStats(null);
-        setSonarStats(null);
-        await fetchData();
-    };
-
+    // Integration Effect
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        if (scenarioId && activeTab === "integration") {
+            fetchIntegrationData();
+        }
+    }, [fetchIntegrationData, scenarioId, activeTab]);
 
-    // Subscribe to SSE for real-time updates when scans complete
+    // Subscribe to SSE for updates - trigger specific refreshes
     useEffect(() => {
         const unsubscribe = subscribe("SCENARIO.UPDATED", (data: { scenario_id?: string }) => {
             if (data.scenario_id === scenarioId) {
-                fetchData();
+                fetchScenario(); // Always update scenario status
+                if (activeTab === "features") fetchFeatureData();
+                if (activeTab === "integration") fetchIntegrationData();
             }
         });
         return () => unsubscribe();
-    }, [subscribe, scenarioId, fetchData]);
+    }, [subscribe, scenarioId, activeTab, fetchScenario, fetchFeatureData, fetchIntegrationData]);
+
+    const handleRefresh = () => {
+        setRefreshing(true);
+        // Reset local caches?
+        setTrivyStats(null);
+        setSonarStats(null);
+        // Trigger re-fetch based on active tab
+        if (activeTab === "features") fetchFeatureData();
+        if (activeTab === "integration") fetchIntegrationData();
+    };
 
     // =============================================================================
     // Derived State for Progressive Availability
@@ -325,7 +324,7 @@ export default function ScenarioAnalysisPage() {
                 </Button>
             </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
                 <TabsList className="w-full grid grid-cols-2">
                     <TabsTrigger value="features">Features</TabsTrigger>
                     <TabsTrigger value="integration">Integration Tools</TabsTrigger>
@@ -630,8 +629,12 @@ export default function ScenarioAnalysisPage() {
                             <h3 className="text-lg font-semibold tracking-tight">Trivy Security Scanning</h3>
                         </div>
 
-                        {/* Empty State */}
-                        {qualityReport?.scan_metrics_summary?.trivy_builds_scanned === 0 ? (
+                        {/* Empty State - Check trivyStats directly, not qualityReport.scan_metrics_summary */}
+                        {!trivyStats ? (
+                            <div className="flex min-h-[150px] items-center justify-center border rounded-md">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : trivyStats.scan_summary.builds_with_trivy === 0 ? (
                             <Card>
                                 <CardContent className="py-8">
                                     <div className="flex flex-col items-center gap-4 text-center">
@@ -641,10 +644,6 @@ export default function ScenarioAnalysisPage() {
                                     </div>
                                 </CardContent>
                             </Card>
-                        ) : !trivyStats ? (
-                            <div className="flex min-h-[150px] items-center justify-center border rounded-md">
-                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                            </div>
                         ) : (
                             <>
                                 {/* Trivy Overview Cards */}
@@ -667,7 +666,7 @@ export default function ScenarioAnalysisPage() {
                                                 </div>
                                                 <div className="text-right">
                                                     <p className="text-muted-foreground">Secrets Found</p>
-                                                    <p className="font-semibold">{trivyStats.trivy_summary.secrets_count.count}</p>
+                                                    <p className="font-semibold">{trivyStats.trivy_summary?.secrets_count.count ?? 0}</p>
                                                 </div>
                                             </div>
                                         </CardContent>
@@ -678,26 +677,26 @@ export default function ScenarioAnalysisPage() {
                                         <CardHeader className="pb-3">
                                             <CardTitle className="text-base">Vulnerabilities</CardTitle>
                                             <CardDescription>
-                                                Avg/Total across {trivyStats.trivy_summary.total_scans} scans
+                                                Avg/Total across {trivyStats.trivy_summary?.total_scans ?? 0} scans
                                             </CardDescription>
                                         </CardHeader>
                                         <CardContent>
                                             <div className="grid grid-cols-4 gap-2 text-center">
                                                 <div className="p-2 rounded bg-red-50 dark:bg-red-900/10">
                                                     <p className="text-xs font-semibold text-red-600">Crit</p>
-                                                    <p className="font-mono font-bold text-red-700">{trivyStats.trivy_summary.vuln_critical.sum}</p>
+                                                    <p className="font-mono font-bold text-red-700">{trivyStats.trivy_summary?.vuln_critical.sum ?? 0}</p>
                                                 </div>
                                                 <div className="p-2 rounded bg-orange-50 dark:bg-orange-900/10">
                                                     <p className="text-xs font-semibold text-orange-600">High</p>
-                                                    <p className="font-mono font-bold text-orange-700">{trivyStats.trivy_summary.vuln_high.sum}</p>
+                                                    <p className="font-mono font-bold text-orange-700">{trivyStats.trivy_summary?.vuln_high.sum ?? 0}</p>
                                                 </div>
                                                 <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/10">
                                                     <p className="text-xs font-semibold text-amber-600">Med</p>
-                                                    <p className="font-mono font-bold text-amber-700">{trivyStats.trivy_summary.vuln_medium.sum}</p>
+                                                    <p className="font-mono font-bold text-amber-700">{trivyStats.trivy_summary?.vuln_medium.sum ?? 0}</p>
                                                 </div>
                                                 <div className="p-2 rounded bg-blue-50 dark:bg-blue-900/10">
                                                     <p className="text-xs font-semibold text-blue-600">Low</p>
-                                                    <p className="font-mono font-bold text-blue-700">{trivyStats.trivy_summary.vuln_low.sum}</p>
+                                                    <p className="font-mono font-bold text-blue-700">{trivyStats.trivy_summary?.vuln_low.sum ?? 0}</p>
                                                 </div>
                                             </div>
                                         </CardContent>
@@ -715,8 +714,12 @@ export default function ScenarioAnalysisPage() {
                             <h3 className="text-lg font-semibold tracking-tight">SonarQube Quality Gate</h3>
                         </div>
 
-                        {/* Empty State */}
-                        {qualityReport?.scan_metrics_summary?.sonarqube_builds_scanned === 0 ? (
+                        {/* Empty State - Check sonarStats directly, not qualityReport.scan_metrics_summary */}
+                        {!sonarStats ? (
+                            <div className="flex min-h-[150px] items-center justify-center border rounded-md">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : sonarStats.scan_summary.builds_with_sonar === 0 ? (
                             <Card>
                                 <CardContent className="py-8">
                                     <div className="flex flex-col items-center gap-4 text-center">
@@ -726,10 +729,6 @@ export default function ScenarioAnalysisPage() {
                                     </div>
                                 </CardContent>
                             </Card>
-                        ) : !sonarStats ? (
-                            <div className="flex min-h-[150px] items-center justify-center border rounded-md">
-                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                            </div>
                         ) : (
                             <>
                                 {/* SonarQube Overview Cards */}
@@ -752,7 +751,7 @@ export default function ScenarioAnalysisPage() {
                                                 </div>
                                                 <div className="text-right">
                                                     <p className="text-muted-foreground">Total Issues</p>
-                                                    <p className="font-semibold">{sonarStats.sonar_summary.bugs.sum + sonarStats.sonar_summary.code_smells.sum + sonarStats.sonar_summary.vulnerabilities.sum}</p>
+                                                    <p className="font-semibold">{(sonarStats.sonar_summary?.bugs.sum ?? 0) + (sonarStats.sonar_summary?.code_smells.sum ?? 0) + (sonarStats.sonar_summary?.vulnerabilities.sum ?? 0)}</p>
                                                 </div>
                                             </div>
                                         </CardContent>
@@ -762,40 +761,40 @@ export default function ScenarioAnalysisPage() {
                                         <CardHeader className="pb-3">
                                             <CardTitle className="text-base">Quality Metrics</CardTitle>
                                             <CardDescription>
-                                                Aggregated from {sonarStats.sonar_summary.total_scans} scans
+                                                Aggregated from {sonarStats.sonar_summary?.total_scans ?? 0} scans
                                             </CardDescription>
                                         </CardHeader>
                                         <CardContent>
                                             <div className="grid grid-cols-4 gap-2 text-center">
                                                 <div className="p-2 rounded bg-red-50 dark:bg-red-900/10">
                                                     <p className="text-xs font-semibold text-red-600">Bugs</p>
-                                                    <p className="font-mono font-bold text-red-700">{sonarStats.sonar_summary.bugs.sum}</p>
+                                                    <p className="font-mono font-bold text-red-700">{sonarStats.sonar_summary?.bugs.sum ?? 0}</p>
                                                 </div>
                                                 <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/10">
                                                     <p className="text-xs font-semibold text-amber-600">Smells</p>
-                                                    <p className="font-mono font-bold text-amber-700">{sonarStats.sonar_summary.code_smells.sum}</p>
+                                                    <p className="font-mono font-bold text-amber-700">{sonarStats.sonar_summary?.code_smells.sum ?? 0}</p>
                                                 </div>
                                                 <div className="p-2 rounded bg-purple-50 dark:bg-purple-900/10">
                                                     <p className="text-xs font-semibold text-purple-600">Vulns</p>
-                                                    <p className="font-mono font-bold text-purple-700">{sonarStats.sonar_summary.vulnerabilities.sum}</p>
+                                                    <p className="font-mono font-bold text-purple-700">{sonarStats.sonar_summary?.vulnerabilities.sum ?? 0}</p>
                                                 </div>
                                                 <div className="p-2 rounded bg-orange-50 dark:bg-orange-900/10">
                                                     <p className="text-xs font-semibold text-orange-600">Hotspots</p>
-                                                    <p className="font-mono font-bold text-orange-700">{sonarStats.sonar_summary.security_hotspots.sum}</p>
+                                                    <p className="font-mono font-bold text-orange-700">{sonarStats.sonar_summary?.security_hotspots.sum ?? 0}</p>
                                                 </div>
                                             </div>
                                             <div className="mt-3 flex justify-between text-xs text-muted-foreground">
                                                 <div className="flex gap-1">
                                                     <span>Rel:</span>
-                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary.reliability_rating_avg?.toFixed(1) ?? "N/A"}</span>
+                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary?.reliability_rating_avg?.toFixed(1) ?? "N/A"}</span>
                                                 </div>
                                                 <div className="flex gap-1">
                                                     <span>Sec:</span>
-                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary.security_rating_avg?.toFixed(1) ?? "N/A"}</span>
+                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary?.security_rating_avg?.toFixed(1) ?? "N/A"}</span>
                                                 </div>
                                                 <div className="flex gap-1">
                                                     <span>Maint:</span>
-                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary.maintainability_rating_avg?.toFixed(1) ?? "N/A"}</span>
+                                                    <span className="font-medium text-foreground">{sonarStats.sonar_summary?.maintainability_rating_avg?.toFixed(1) ?? "N/A"}</span>
                                                 </div>
                                             </div>
                                         </CardContent>

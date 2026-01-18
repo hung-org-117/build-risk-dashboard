@@ -86,8 +86,9 @@ class ScanMetricsStatisticsResponse(BaseModel):
 
     scenario_id: str
     scan_summary: ScanSummary = Field(default_factory=ScanSummary)
-    trivy_summary: TrivySummary = Field(default_factory=TrivySummary)
-    sonar_summary: SonarSummary = Field(default_factory=SonarSummary)
+    # Make summaries Optional so we can exclude them when filtering by tool
+    trivy_summary: Optional[TrivySummary] = None
+    sonar_summary: Optional[SonarSummary] = None
 
 
 class ScanMetricDistribution(BaseModel):
