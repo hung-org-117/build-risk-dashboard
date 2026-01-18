@@ -226,69 +226,6 @@ class MonitoringService:
             "has_more": skip + limit < total,
         }
 
-    def get_logs_for_export(
-        self,
-        level: Optional[str] = None,
-        source: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-    ) -> list[Dict[str, Any]]:
-        """
-        Get logs for export with optional date filtering.
-        """
-        logs = self._system_log_repo.find_for_export(
-            level=level,
-            source=source,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        return [
-            {
-                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                "level": log.level,
-                "source": log.source,
-                "message": log.message,
-                "details": log.details,
-            }
-            for log in logs
-        ]
-
-    def stream_logs_export(
-        self,
-        format: str = "csv",
-        level: Optional[str] = None,
-        source: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
-    ):
-        """
-        Stream logs export as CSV or JSON.
-
-        Args:
-            format: "csv" or "json"
-            level: Filter by log level
-            source: Filter by source/component
-            start_date: Filter by timestamp >= start_date
-            end_date: Filter by timestamp <= end_date
-
-        Returns:
-            Generator yielding CSV/JSON chunks
-        """
-        from app.utils.export_utils import format_log_row, stream_csv, stream_json
-
-        cursor = self._system_log_repo.get_cursor_for_export(
-            level=level,
-            source=source,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        if format == "csv":
-            return stream_csv(cursor, format_log_row)
-        else:
-            return stream_json(cursor, format_log_row)
-
     def get_log_metrics(
         self,
         hours: int = 24,

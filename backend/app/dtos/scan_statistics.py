@@ -89,11 +89,3 @@ class ScanMetricsStatisticsResponse(BaseModel):
     # Make summaries Optional so we can exclude them when filtering by tool
     trivy_summary: Optional[TrivySummary] = None
     sonar_summary: Optional[SonarSummary] = None
-
-
-class ScanMetricDistribution(BaseModel):
-    """Distribution data for a scan metric (for charts)."""
-
-    metric_name: str
-    values: List[float] = Field(default_factory=list)
-    labels: List[str] = Field(default_factory=list)  # e.g., severity levels

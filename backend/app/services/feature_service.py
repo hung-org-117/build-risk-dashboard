@@ -124,13 +124,26 @@ class FeatureService:
 
                 # Get metadata from FEATURE_REGISTRY (single source of truth)
                 defn = get_feature_definition(var_name)
+
+                # Derive required_resources
+                required_resources = []
+                if defn and defn.required_resources:
+                    required_resources = [r.value for r in defn.required_resources]
+                elif extractor:
+                    logger.warning(
+                        f"Feature '{var_name}' has no required resources. "
+                        f"Ensure it's defined in one of HAMILTON_MODULES or is an extracted field."
+                    )
+
                 if defn:
                     feature_info[var_name] = {
                         "name": var_name,
                         "display_name": defn.display_name,
                         "description": defn.description,
+                        "category": defn.category.value if defn.category else "unknown",
+                        "required_resources": required_resources,
                         "depends_on": depends_on,
-                        "extractor_node": extractor,
+                        "extractor_node": defn.extractor_node or extractor,
                         "data_type": defn.data_type.value,
                         "nullable": defn.nullable,
                         "unit": defn.unit,
@@ -142,6 +155,8 @@ class FeatureService:
                         "name": var_name,
                         "display_name": var_name.replace("_", " ").title(),
                         "description": var_name,
+                        "category": "unknown",
+                        "required_resources": required_resources,
                         "depends_on": depends_on,
                         "extractor_node": extractor,
                         "data_type": "unknown",
@@ -152,6 +167,8 @@ class FeatureService:
                     "name": var_name,
                     "display_name": var_name.replace("_", " ").title(),
                     "description": var_name,
+                    "category": "unknown",
+                    "required_resources": [],
                     "depends_on": [],
                     "extractor_node": extractor,
                     "data_type": "unknown",
@@ -185,7 +202,7 @@ class FeatureService:
             if feat_name not in feature_info:
                 continue
             info = feature_info[feat_name]
-            node_name = info["extractor_node"]
+            node_name = info.get("extractor_node", "unknown")
             feature_to_node[feat_name] = node_name
             node_features[node_name].append(feat_name)
 
@@ -367,7 +384,7 @@ class FeatureService:
         by_node: Dict[str, List[Dict]] = defaultdict(list)
 
         for feat_name, info in features:
-            node = info["extractor_node"]
+            node = info.get("extractor_node", "unknown")
             by_node[node].append(
                 {
                     "name": feat_name,
@@ -422,10 +439,8 @@ class FeatureService:
         resources = set()
 
         for _feat_name, info in feature_info.items():
-            if info["extractor_node"] == node_name:
-                for dep in info["depends_on"]:
-                    if dep not in feature_info:
-                        resources.add(dep)
+            if info.get("extractor_node") == node_name:
+                resources.update(info.get("required_resources", []))
 
         return sorted(resources)
 
@@ -447,7 +462,9 @@ class FeatureService:
             ]
 
         if extractor_node:
-            features = [f for f in features if f["extractor_node"] == extractor_node]
+            features = [
+                f for f in features if f.get("extractor_node") == extractor_node
+            ]
 
         return features
 
@@ -459,51 +476,3 @@ class FeatureService:
                 status_code=404, detail=f"Feature '{feature_name}' not found"
             )
         return feature_info[feature_name]
-
-    def get_feature_summary(self) -> Dict:
-        """Get summary statistics about available features."""
-        feature_info = self._extract_feature_info()
-        features = [
-            info for name, info in feature_info.items() if name not in DEFAULT_FEATURES
-        ]
-
-        by_category: dict = {}
-        by_source: dict = {}
-        by_node: dict = {}
-
-        for f in features:
-            cat = f["category"]
-            src = f["source"]
-            node = f["extractor_node"]
-
-            by_category[cat] = by_category.get(cat, 0) + 1
-            by_source[src] = by_source.get(src, 0) + 1
-            by_node[node] = by_node.get(node, 0) + 1
-
-        return {
-            "total_features": len(features),
-            "active_features": sum(1 for f in features if f["is_active"]),
-            "by_category": by_category,
-            "by_source": by_source,
-            "by_node": by_node,
-        }
-
-    def validate_features(self, features: List[str]) -> Dict:
-        """Validate if features exist and are available."""
-        feature_info = self._extract_feature_info()
-        valid = []
-        invalid = []
-        warnings = []
-
-        for feat_name in features:
-            if feat_name in feature_info:
-                valid.append(feat_name)
-            elif feat_name not in DEFAULT_FEATURES:
-                invalid.append(feat_name)
-
-        return {
-            "valid": len(invalid) == 0,
-            "valid_features": valid,
-            "invalid_features": invalid,
-            "warnings": warnings,
-        }

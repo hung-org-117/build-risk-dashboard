@@ -1,7 +1,3 @@
-"""
-Feature metadata decorators for Hamilton DAG.
-"""
-
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, TypedDict, TypeVar
 
@@ -33,10 +29,10 @@ class FeatureCategory(str, Enum):
     TEAM = "team"
     METADATA = "metadata"
     WORKFLOW = "workflow"
-    DEVOPS = "devops"  # DevOps file detection and analysis
-    BUILD_HISTORY = "build_history"  # Link to previous build features
-    COMMITTER = "committer"  # Committer experience features
-    COOPERATION = "cooperation"  # Cooperation features (distinct authors, revisions)
+    DEVOPS = "devops"
+    BUILD_HISTORY = "build_history"
+    COMMITTER = "committer"
+    COOPERATION = "cooperation"
 
 
 class FeatureDataType(str, Enum):
@@ -61,11 +57,7 @@ class OutputFormat(str, Enum):
     PIPE_SEPARATED = "pipe"  # "a|b|c"
 
 
-# =============================================================================
 # HELPER FUNCTIONS
-# =============================================================================
-
-
 def build_metadata_registry(modules: list) -> Dict[str, Dict[str, Any]]:
     """
     Build a registry of all feature metadata.

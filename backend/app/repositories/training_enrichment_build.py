@@ -161,33 +161,6 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
 
         return self.update_one(enrichment_build_id, updates)
 
-    def get_completed_with_features(
-        self,
-        scenario_id: str,
-    ) -> List[TrainingEnrichmentBuild]:
-        """Get all completed enrichment builds that have feature vectors."""
-        return self.find_many(
-            {
-                "scenario_id": self._to_object_id(scenario_id),
-                "extraction_status": ExtractionStatus.COMPLETED.value,
-                "feature_vector_id": {"$ne": None},
-            },
-            sort=[("created_at", 1)],
-        )
-
-    def find_completed_by_scenario(
-        self,
-        scenario_id: str,
-    ) -> List[TrainingEnrichmentBuild]:
-        """Get all completed enrichment builds for a scenario (for group preview)."""
-        return self.find_many(
-            {
-                "scenario_id": self._to_object_id(scenario_id),
-                "extraction_status": ExtractionStatus.COMPLETED.value,
-            },
-            sort=[("created_at", 1)],
-        )
-
     def find_by_scenario_with_features(
         self,
         scenario_id: str,
@@ -196,7 +169,8 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         Get all enrichment builds joined with their FeatureVector data.
 
         Returns:
-            List of dictionaries containing build data + 'features' + 'scan_metrics' from FeatureVector.
+            List of dictionaries containing build data + 'features'
+            + 'scan_metrics' from FeatureVector.
         """
         pipeline = [
             {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
@@ -495,7 +469,7 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
 
         Args:
             scenario_id: Scenario ID
-            metric_name: Full metric name (e.g., "trivy_vulnerability_critical", "sonar_code_smells")
+            metric_name: Full metric name (e.g., "trivy_vulnerability_critical")
             bins: Number of histogram bins
 
         Returns:

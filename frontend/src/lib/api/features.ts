@@ -6,10 +6,7 @@ import { api } from "./client";
 
 export const featuresApi = {
     list: async (params?: {
-        category?: string;
-        source?: string;
         extractor_node?: string;
-        is_active?: boolean;
     }) => {
         const response = await api.get<FeatureListResponse>("/features", { params });
         return response.data;

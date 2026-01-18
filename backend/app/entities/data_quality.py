@@ -128,7 +128,7 @@ class DataQualityReport(BaseEntity):
     # References
     scenario_id: PyObjectId = Field(..., description="Reference to training_scenarios")
 
-    # Sub-scores (0-100) - kept for individual score tracking
+    # Sub-scores (0-100)
     completeness_score: float = 0.0  # % features non-null
     validity_score: float = 0.0  # % values within valid range
     consistency_score: float = 0.0  # % builds with all selected features
@@ -146,7 +146,7 @@ class DataQualityReport(BaseEntity):
     # Summary statistics
     total_builds: int = 0
     enriched_builds: int = 0
-    partial_builds: int = 0  # Builds with some features extracted
+    partial_builds: int = 0
     failed_builds: int = 0
     total_features: int = 0
     features_with_issues: int = 0

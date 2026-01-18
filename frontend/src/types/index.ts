@@ -598,13 +598,12 @@ export interface FeatureDefinitionSummary {
   display_name: string;
   description: string;
   category: string;
-  source: string;
+  required_resources: string[];
   extractor_node: string;
   depends_on_features: string[];
   depends_on_resources: string[];
   data_type: string;
   nullable: boolean;
-  is_active: boolean;
   is_deprecated: boolean;
   example_value?: string | null;
   unit?: string | null;

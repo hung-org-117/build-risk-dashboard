@@ -13,6 +13,7 @@ class FeatureDefinitionResponse(BaseModel):
     display_name: str
     description: str
     extractor_node: str
+    required_resources: List[str] = []
     depends_on_features: List[str]
     data_type: str
     nullable: bool = False
@@ -28,24 +29,6 @@ class FeatureListResponse(BaseModel):
 
     total: int
     items: List[FeatureDefinitionResponse]
-
-
-class FeatureSummaryResponse(BaseModel):
-    """Summary statistics about features."""
-
-    total_features: int
-    active_features: int
-    by_category: dict
-    by_source: dict
-    by_node: dict
-
-
-class ValidationResponse(BaseModel):
-    """Response for validation endpoint."""
-
-    valid: bool
-    errors: List[str]
-    warnings: List[str]
 
 
 # DAG Visualization Response Models

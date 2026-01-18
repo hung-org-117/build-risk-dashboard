@@ -8,7 +8,6 @@ Provides comprehensive statistics including:
 - Correlation matrices between numeric features
 """
 
-from app.dtos.statistics import ScanDistributionResponse
 import logging
 import statistics
 from collections import Counter
@@ -26,8 +25,6 @@ from app.dtos.scan_statistics import (
 )
 from app.dtos.statistics import (
     BuildStatusBreakdown,
-    CategoricalDistribution,
-    CategoricalValue,
     CorrelationMatrixResponse,
     CorrelationPair,
     FeatureCompleteness,
@@ -37,10 +34,10 @@ from app.dtos.statistics import (
     HistogramBin,
     NumericDistribution,
     NumericStats,
+    ScanDistributionResponse,
     VersionStatistics,
     VersionStatisticsResponse,
 )
-from app.entities.training_enrichment_build import TrainingEnrichmentBuild
 from app.repositories.data_quality_repository import DataQualityRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
@@ -885,295 +882,6 @@ class StatisticsService:
 
         return completeness_list
 
-    def _calculate_numeric_distribution(
-        self, feature_name: str, values: List[Any], bins: int = 20
-    ) -> NumericDistribution:
-        """Calculate histogram distribution for numeric feature."""
-        # Filter to valid numeric values
-        numeric_values: List[float] = []
-        null_count = 0
-
-        for v in values:
-            if v is None:
-                null_count += 1
-            else:
-                try:
-                    numeric_values.append(float(v))
-                except (ValueError, TypeError):
-                    null_count += 1
-
-        if not numeric_values:
-            return NumericDistribution(
-                feature_name=feature_name,
-                total_count=len(values),
-                null_count=null_count,
-                bins=[],
-                stats=None,
-            )
-
-        # Calculate stats
-        sorted_values = sorted(numeric_values)
-        n = len(sorted_values)
-
-        stats = NumericStats(
-            min=min(numeric_values),
-            max=max(numeric_values),
-            mean=statistics.mean(numeric_values),
-            median=statistics.median(numeric_values),
-            std=statistics.stdev(numeric_values) if n > 1 else 0,
-            q1=sorted_values[n // 4] if n >= 4 else sorted_values[0],
-            q3=sorted_values[3 * n // 4] if n >= 4 else sorted_values[-1],
-            iqr=0,  # Will calculate below
-        )
-        stats.iqr = stats.q3 - stats.q1
-
-        # Create histogram bins
-        min_val, max_val = stats.min, stats.max
-        bin_width = (max_val - min_val) / bins if max_val > min_val else 1
-
-        histogram_bins: List[HistogramBin] = []
-        for i in range(bins):
-            bin_min = min_val + i * bin_width
-            bin_max = min_val + (i + 1) * bin_width
-
-            # Count values in this bin
-            if i == bins - 1:
-                count = sum(1 for v in numeric_values if bin_min <= v <= bin_max)
-            else:
-                count = sum(1 for v in numeric_values if bin_min <= v < bin_max)
-
-            histogram_bins.append(
-                HistogramBin(
-                    min_value=round(bin_min, 4),
-                    max_value=round(bin_max, 4),
-                    count=count,
-                    percentage=round(count / n * 100, 1) if n > 0 else 0,
-                )
-            )
-
-        return NumericDistribution(
-            feature_name=feature_name,
-            total_count=len(values),
-            null_count=null_count,
-            bins=histogram_bins,
-            stats=stats,
-        )
-
-    def _calculate_categorical_distribution(
-        self, feature_name: str, values: List[Any], top_n: int = 20
-    ) -> CategoricalDistribution:
-        """Calculate value counts for categorical feature."""
-        null_count = 0
-        string_values: List[str] = []
-
-        for v in values:
-            if v is None or v == "":
-                null_count += 1
-            else:
-                string_values.append(str(v))
-
-        if not string_values:
-            return CategoricalDistribution(
-                feature_name=feature_name,
-                total_count=len(values),
-                null_count=null_count,
-                unique_count=0,
-                values=[],
-            )
-
-        # Count values
-        counts = Counter(string_values)
-        unique_count = len(counts)
-
-        # Get top N values
-        top_values = counts.most_common(top_n)
-
-        categorical_values = [
-            CategoricalValue(
-                value=val,
-                count=count,
-                percentage=round(count / len(string_values) * 100, 1),
-            )
-            for val, count in top_values
-        ]
-
-        # Add "Other" category if needed
-        if unique_count > top_n:
-            shown_count = sum(v.count for v in categorical_values)
-            other_count = len(string_values) - shown_count
-            categorical_values.append(
-                CategoricalValue(
-                    value="Other",
-                    count=other_count,
-                    percentage=round(other_count / len(string_values) * 100, 1),
-                )
-            )
-
-        return CategoricalDistribution(
-            feature_name=feature_name,
-            total_count=len(values),
-            null_count=null_count,
-            unique_count=unique_count,
-            values=categorical_values,
-        )
-
-    def _calculate_numeric_distribution_from_stats(
-        self,
-        feature_name: str,
-        stats: Dict[str, Any],
-        samples: List[float],
-        bins: int = 20,
-    ) -> NumericDistribution:
-        """
-        Calculate histogram from pre-aggregated stats and sampled values.
-
-        Uses stats from MongoDB aggregation and samples to build histogram bins.
-        Much more memory efficient than loading all values.
-        """
-        if not stats or stats.get("count", 0) == 0:
-            return NumericDistribution(
-                feature_name=feature_name,
-                total_count=0,
-                null_count=0,
-                bins=[],
-                stats=None,
-            )
-
-        min_val = stats.get("min", 0)
-        max_val = stats.get("max", 0)
-        avg_val = stats.get("avg", 0)
-        std_val = stats.get("stdDev", 0) or 0
-        total_count = stats.get("count", 0)
-
-        # Calculate stats object
-        sorted_samples = sorted(samples) if samples else []
-        n = len(sorted_samples)
-
-        numeric_stats = NumericStats(
-            min=min_val,
-            max=max_val,
-            mean=avg_val,
-            median=sorted_samples[n // 2] if n > 0 else avg_val,
-            std=std_val,
-            q1=sorted_samples[n // 4] if n >= 4 else min_val,
-            q3=sorted_samples[3 * n // 4] if n >= 4 else max_val,
-            iqr=0,
-        )
-        numeric_stats.iqr = numeric_stats.q3 - numeric_stats.q1
-
-        # Create histogram bins from samples
-        bin_width = (max_val - min_val) / bins if max_val > min_val else 1
-
-        histogram_bins: List[HistogramBin] = []
-        for i in range(bins):
-            bin_min = min_val + i * bin_width
-            bin_max = min_val + (i + 1) * bin_width
-
-            # Count from samples (representative)
-            if i == bins - 1:
-                count = sum(1 for v in samples if bin_min <= v <= bin_max)
-            else:
-                count = sum(1 for v in samples if bin_min <= v < bin_max)
-
-            # Scale count to estimated total
-            estimated_count = int(count * total_count / n) if n > 0 else 0
-
-            histogram_bins.append(
-                HistogramBin(
-                    min_value=round(bin_min, 4),
-                    max_value=round(bin_max, 4),
-                    count=estimated_count,
-                    percentage=(
-                        round(estimated_count / total_count * 100, 1)
-                        if total_count > 0
-                        else 0
-                    ),
-                )
-            )
-
-        return NumericDistribution(
-            feature_name=feature_name,
-            total_count=total_count,
-            null_count=0,  # MongoDB already filtered nulls
-            bins=histogram_bins,
-            stats=numeric_stats,
-        )
-
-    def _calculate_categorical_distribution_aggregated(
-        self,
-        scenario_id: str,
-        feature_name: str,
-        top_n: int = 20,
-    ) -> Optional[CategoricalDistribution]:
-        """
-        Calculate categorical distribution using MongoDB aggregation.
-
-        Groups and counts values directly in the database.
-        """
-        pipeline = [
-            {"$match": {"scenario_id": self.build_repo._to_object_id(scenario_id)}},
-            {
-                "$lookup": {
-                    "from": "feature_vectors",
-                    "localField": "feature_vector_id",
-                    "foreignField": "_id",
-                    "as": "fv",
-                }
-            },
-            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": False}},
-            {"$project": {"value": {"$toString": f"$fv.features.{feature_name}"}}},
-            {"$match": {"value": {"$ne": None, "$ne": ""}}},
-            {"$group": {"_id": "$value", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": top_n + 1},  # +1 to check for "Other"
-        ]
-
-        results = list(self.build_repo.collection.aggregate(pipeline))
-        if not results:
-            return None
-
-        total_count = sum(r["count"] for r in results)
-        unique_count = len(results)
-
-        # Build categorical values
-        categorical_values = []
-        for r in results[:top_n]:
-            categorical_values.append(
-                CategoricalValue(
-                    value=str(r["_id"]) if r["_id"] is not None else "Unknown",
-                    count=r["count"],
-                    percentage=(
-                        round(r["count"] / total_count * 100, 1)
-                        if total_count > 0
-                        else 0
-                    ),
-                )
-            )
-
-        # Add "Other" if there are more values
-        if len(results) > top_n:
-            shown_count = sum(v.count for v in categorical_values)
-            other_count = total_count - shown_count
-            categorical_values.append(
-                CategoricalValue(
-                    value="Other",
-                    count=other_count,
-                    percentage=(
-                        round(other_count / total_count * 100, 1)
-                        if total_count > 0
-                        else 0
-                    ),
-                )
-            )
-
-        return CategoricalDistribution(
-            feature_name=feature_name,
-            total_count=total_count,
-            null_count=0,
-            unique_count=unique_count,
-            values=categorical_values,
-        )
-
     def _calculate_correlation(
         self, values_1: List[Optional[float]], values_2: List[Optional[float]]
     ) -> Optional[float]:
@@ -1183,7 +891,7 @@ class StatisticsService:
 
         # Filter to pairs where both are not None
         v1_clean, v2_clean = [], []
-        for x, y in zip(values_1, values_2):
+        for x, y in zip(values_1, values_2, strict=False):
             if x is not None and y is not None:
                 v1_clean.append(x)
                 v2_clean.append(y)

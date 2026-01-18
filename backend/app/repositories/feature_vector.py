@@ -151,6 +151,21 @@ class FeatureVectorRepository(BaseRepository[FeatureVector]):
         cursor = self.collection.find({"raw_build_run_id": {"$in": raw_build_run_ids}})
         return {str(doc["raw_build_run_id"]): FeatureVector(**doc) for doc in cursor}
 
+    def find_many_by_ids(
+        self,
+        feature_vector_ids: List[ObjectId],
+    ) -> Dict[str, FeatureVector]:
+        """
+        Batch query: Find feature vectors by their primary _id.
+
+        Returns dict mapping str(_id) -> FeatureVector for O(1) lookup.
+        """
+        if not feature_vector_ids:
+            return {}
+
+        cursor = self.collection.find({"_id": {"$in": feature_vector_ids}})
+        return {str(doc["_id"]): FeatureVector(**doc) for doc in cursor}
+
     def walk_temporal_chain(
         self,
         raw_repo_id: ObjectId,

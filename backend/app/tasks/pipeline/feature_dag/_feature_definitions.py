@@ -1,16 +1,5 @@
-"""
-Centralized Feature Definitions Registry.
-
-Usage:
-    from app.tasks.pipeline.feature_dag._feature_definitions import (
-        get_feature_definition,
-        FEATURE_REGISTRY,
-    )
-"""
-
 from typing import Dict, List, Optional
 
-# Import types from _types.py (the source of truth for FeatureDefinition)
 from app.tasks.pipeline.feature_dag._types import (
     FeatureCategory,
     FeatureDataType,
@@ -18,11 +7,8 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureResource,
     OutputFormat,
 )
-
-# Import FEATURE_REGISTRY from registry package
 from app.tasks.pipeline.feature_dag.registry import FEATURE_REGISTRY
 
-# Re-export everything for backwards compatibility
 __all__ = [
     "FeatureCategory",
     "FeatureDataType",

@@ -1,10 +1,5 @@
 """
 Monitoring API - Endpoints for system monitoring and observability.
-
-Endpoints:
-- GET /monitoring/system - System stats (Celery, Redis, MongoDB)
-- GET /monitoring/audit-logs - Feature extraction audit logs
-- GET /monitoring/queues - Celery queue details
 """
 
 import logging
@@ -39,24 +34,6 @@ def get_system_stats(
     return service.get_system_stats()
 
 
-@router.get("/queues")
-def get_queue_stats(
-    db: Database = Depends(get_db),
-    _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
-):
-    """
-    Get detailed Celery queue statistics.
-
-    Shows message counts for each queue.
-    """
-    service = MonitoringService(db)
-    stats = service.get_system_stats()
-    return {
-        "queues": stats.get("celery", {}).get("queues", {}),
-        "workers": stats.get("celery", {}).get("workers", []),
-    }
-
-
 @router.get("/logs")
 def get_system_logs(
     limit: int = Query(100, ge=1, le=500),
@@ -75,35 +52,6 @@ def get_system_logs(
     """
     service = MonitoringService(db)
     return service.get_system_logs(limit=limit, skip=skip, level=level, source=source)
-
-
-@router.get("/logs/export")
-def export_system_logs(
-    level: Optional[str] = Query(None),
-    source: Optional[str] = Query(None),
-    format: str = Query("json", description="Export format: json or csv"),
-    db: Database = Depends(get_db),
-    _admin: dict = Depends(RequirePermission(Permission.ADMIN_FULL)),
-):
-    """
-    Export system logs as JSON or CSV (streaming).
-
-    Admin only. Returns up to 10,000 logs for download.
-    """
-    from fastapi.responses import StreamingResponse
-
-    service = MonitoringService(db)
-
-    content = service.stream_logs_export(format=format, level=level, source=source)
-
-    media_type = "text/csv" if format == "csv" else "application/json"
-    filename = f"system_logs.{format}"
-
-    return StreamingResponse(
-        content,
-        media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
 
 
 @router.get("/metrics")

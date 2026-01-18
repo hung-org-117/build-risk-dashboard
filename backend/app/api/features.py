@@ -12,8 +12,6 @@ from app.dtos.feature import (
     ExecutionLevelResponse,
     FeatureDefinitionResponse,
     FeatureListResponse,
-    FeatureSummaryResponse,
-    ValidationResponse,
 )
 from app.services.feature_service import FeatureService
 
@@ -59,6 +57,7 @@ def list_features(
                 display_name=f["display_name"],
                 description=f["description"],
                 extractor_node=f["extractor_node"],
+                required_resources=f.get("required_resources", []),
                 depends_on_features=f.get("depends_on", []),
                 data_type=f["data_type"],
                 nullable=f.get("nullable", False),
@@ -107,24 +106,13 @@ def get_feature(feature_name: str):
         display_name=metadata["display_name"],
         description=metadata["description"],
         extractor_node=metadata["extractor_node"],
+        required_resources=metadata.get("required_resources", []),
         depends_on_features=metadata.get("depends_on", []),
         data_type=metadata["data_type"],
         nullable=metadata.get("nullable", False),
         example_value=metadata.get("example_value"),
         unit=metadata.get("unit"),
     )
-
-
-@router.get("/summary/stats", response_model=FeatureSummaryResponse)
-def get_feature_summary():
-    result = service.get_feature_summary()
-    return FeatureSummaryResponse(**result)
-
-
-@router.get("/validate/all", response_model=ValidationResponse)
-def validate_features():
-    result = service.validate_features()
-    return ValidationResponse(**result)
 
 
 @router.post("/config-requirements", response_model=ConfigRequirementsResponse)

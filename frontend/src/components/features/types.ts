@@ -41,6 +41,7 @@ export interface FeatureDefinition {
     display_name: string;
     description: string;
     data_type: string;
+    required_resources: string[];
     depends_on_features: string[];
     extractor_node: string;
     nullable?: boolean;

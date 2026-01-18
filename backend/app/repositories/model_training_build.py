@@ -87,7 +87,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                         if hasattr(extraction_status, "value")
                         else extraction_status
                     ),
-                    "created_at": now,
+                    "created_at": datetime.utcnow(),  # Inlined now
                 },
             },
             upsert=True,
@@ -97,7 +97,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         # Check if it was newly created by comparing created_at
         was_created = (
             doc.get("created_at") is not None
-            and (datetime.utcnow() - doc.get("created_at", datetime.utcnow())).total_seconds() < 2
+            and (datetime.utcnow() - doc["created_at"]).total_seconds() < 2
         )
         return build, was_created
 
@@ -112,20 +112,6 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                 "extraction_status": ExtractionStatus.FAILED.value,
             }
         )
-
-    def find_by_status(
-        self,
-        repo_id: str,
-        status: ExtractionStatus,
-        limit: int = 1000,
-    ) -> List[ModelTrainingBuild]:
-        """Find builds by extraction status for a repo."""
-        query = {
-            "model_repo_config_id": self.ensure_object_id(repo_id),
-            "extraction_status": status.value if hasattr(status, "value") else status,
-        }
-        cursor = self.collection.find(query).limit(limit)
-        return [ModelTrainingBuild(**doc) for doc in cursor]
 
     def find_builds_for_prediction(
         self,
@@ -161,7 +147,9 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """Count builds for a config, optionally filtered by status."""
         query: Dict[str, Any] = {"model_repo_config_id": model_repo_config_id}
         if status:
-            query["extraction_status"] = status.value if hasattr(status, "value") else status
+            query["extraction_status"] = (
+                status.value if hasattr(status, "value") else status
+            )
         return self.collection.count_documents(query)
 
     def find_existing_by_raw_build_run_ids(
@@ -358,7 +346,11 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                 }
             },
             # Extract feature keys from feature_vector.features
-            {"$project": {"feature_keys": {"$objectToArray": "$feature_vector.features"}}},
+            {
+                "$project": {
+                    "feature_keys": {"$objectToArray": "$feature_vector.features"}
+                }
+            },
             {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
         ]
@@ -467,8 +459,12 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             {
                 "$group": {
                     "_id": None,
-                    "predicted": {"$sum": {"$cond": [{"$ne": ["$predicted_label", None]}, 1, 0]}},
-                    "failed": {"$sum": {"$cond": [{"$ne": ["$prediction_error", None]}, 1, 0]}},
+                    "predicted": {
+                        "$sum": {"$cond": [{"$ne": ["$predicted_label", None]}, 1, 0]}
+                    },
+                    "failed": {
+                        "$sum": {"$cond": [{"$ne": ["$prediction_error", None]}, 1, 0]}
+                    },
                     "pending": {
                         "$sum": {
                             "$cond": [
