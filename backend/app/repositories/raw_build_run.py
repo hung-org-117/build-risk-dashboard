@@ -259,7 +259,10 @@ class RawBuildRunRepository(BaseRepository[RawBuildRun]):
         )
         pipeline.append({"$unwind": "$repo"})
 
-        # 3. Filter by Language
+        # 3. Filter out Private Repos (Security requirement)
+        pipeline.append({"$match": {"repo.is_private": {"$ne": True}}})
+
+        # 4. Filter by Language
         if languages and "all" not in languages:
             regex_list = [
                 re.compile(f"^{re.escape(lang)}$", re.IGNORECASE) for lang in languages

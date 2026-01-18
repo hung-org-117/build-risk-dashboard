@@ -480,3 +480,93 @@ class TrainingEnrichmentBuildRepository(BaseRepository[TrainingEnrichmentBuild])
         # Post-process buckets to ensure continuity/ordering
         # $bucketAuto returns buckets sorted by min value
         return {"stats": stats, "bins": buckets}
+
+    def aggregate_scan_metrics_stats_and_distribution(
+        self,
+        scenario_id: str,
+        metric_name: str,
+        bins: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Aggregate numeric stats AND histogram distribution for scan metrics.
+
+        Similar to aggregate_numeric_stats_and_distribution but reads from
+        FeatureVector.scan_metrics instead of FeatureVector.features.
+
+        Args:
+            scenario_id: Scenario ID
+            metric_name: Full metric name (e.g., "trivy_vulnerability_critical", "sonar_code_smells")
+            bins: Number of histogram bins
+
+        Returns:
+            Dict containing:
+                - stats: {min, max, avg, stdDev, count}
+                - bins: List of {min, max, count}
+        """
+        pipeline = [
+            {"$match": {"scenario_id": self._to_object_id(scenario_id)}},
+            {
+                "$lookup": {
+                    "from": "feature_vectors",
+                    "localField": "feature_vector_id",
+                    "foreignField": "_id",
+                    "as": "fv",
+                }
+            },
+            {"$unwind": {"path": "$fv", "preserveNullAndEmptyArrays": False}},
+            # Project the scan metric value, converting to double
+            {
+                "$project": {
+                    "value": {
+                        "$convert": {
+                            "input": f"$fv.scan_metrics.{metric_name}",
+                            "to": "double",
+                            "onError": None,
+                            "onNull": None,
+                        }
+                    }
+                }
+            },
+            # Filter out nulls
+            {"$match": {"value": {"$ne": None}}},
+            # Calculate stats and distribution in parallel
+            {
+                "$facet": {
+                    "stats": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "min": {"$min": "$value"},
+                                "max": {"$max": "$value"},
+                                "avg": {"$avg": "$value"},
+                                "stdDev": {"$stdDevPop": "$value"},
+                                "count": {"$sum": 1},
+                            }
+                        }
+                    ],
+                    "buckets": [
+                        {
+                            "$bucketAuto": {
+                                "groupBy": "$value",
+                                "buckets": bins,
+                                "output": {
+                                    "count": {"$sum": 1},
+                                    "min": {"$min": "$value"},
+                                    "max": {"$max": "$value"},
+                                },
+                            }
+                        }
+                    ],
+                }
+            },
+        ]
+
+        results = list(self.collection.aggregate(pipeline))
+        if not results:
+            return {"stats": None, "bins": []}
+
+        result = results[0]
+        stats = result.get("stats", [{}])[0] if result.get("stats") else None
+        buckets = result.get("buckets", [])
+
+        return {"stats": stats, "bins": buckets}

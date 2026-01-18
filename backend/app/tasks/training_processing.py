@@ -475,13 +475,6 @@ def handle_processing_chain_error(
 
         if updated_scenario:
             publish_scenario_updated(updated_scenario)
-
-        # Check and notify enrichment completion (if scans also done)
-        from app.services.notification_service import (
-            check_and_notify_enrichment_completed,
-        )
-
-        check_and_notify_enrichment_completed(self.db, scenario_id)
     else:
         # No builds completed - mark as FAILED and notify
         updated_scenario = scenario_repo.find_one_and_update(
@@ -524,7 +517,6 @@ def handle_processing_chain_error(
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=600,
-    max_retries=0,
 )
 def process_single_enrichment(
     self: ScenarioProcessingTask,
@@ -750,22 +742,17 @@ def finalize_feature_extraction(
                 f"{corr_prefix} Completed: {completed + partial}/{total}, failed: {failed}. "
             )
 
-            # Trigger quality evaluation immediately after feature extraction
+            # Trigger feature quality evaluation after feature extraction
             try:
                 from app.services.data_quality_service import DataQualityService
 
                 quality_service = DataQualityService(self.db)
-                quality_service.finalize_quality_report(scenario_id)
-                logger.info(f"{corr_prefix} Quality report finalized for {scenario_id}")
+                quality_service.finalize_feature_quality_report(scenario_id)
+                logger.info(
+                    f"{corr_prefix} Feature quality report finalized for {scenario_id}"
+                )
             except Exception as e:
                 logger.warning(f"{corr_prefix} Quality evaluation failed: {e}")
-
-            # Check if enrichment is fully complete (features + scans) and send notification
-            from app.services.notification_service import (
-                check_and_notify_enrichment_completed,
-            )
-
-            check_and_notify_enrichment_completed(self.db, scenario_id)
 
             return {
                 "status": "completed",
@@ -790,7 +777,6 @@ def finalize_feature_extraction(
     queue="scenario_processing",
     soft_time_limit=300,
     time_limit=360,
-    max_retries=0,  # Disable retries - fail fast on timeout
 )
 def reprocess_failed_feature_extraction(
     self: ScenarioProcessingTask,
@@ -1386,9 +1372,11 @@ def process_retry_scan_batch(
                 skipped_missing += 1
                 continue
 
-            # Generate component key (repo + commit only)
+            # Generate component key (repo + scenario + commit for uniqueness)
             repo_name_safe = scan_info["repo_full_name"].replace("/", "_")
-            component_key = f"{repo_name_safe}_{scan_info['commit_sha'][:12]}"
+            component_key = (
+                f"{repo_name_safe}_{scenario_id[:8]}_{scan_info['commit_sha'][:12]}"
+            )
 
             # Check if project already exists on SonarQube server
             if sonar_tool._project_exists(component_key):

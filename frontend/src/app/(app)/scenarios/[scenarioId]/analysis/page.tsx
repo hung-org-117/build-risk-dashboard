@@ -62,6 +62,10 @@ export default function ScenarioAnalysisPage() {
     const [metricsSearch, setMetricsSearch] = useState("");
     const [metricsLoading, setMetricsLoading] = useState(false);
 
+    // Scan Metrics Distribution UI State
+    const [scanDistributionPage, setScanDistributionPage] = useState(1);
+    const [scanDistributionSearch, setScanDistributionSearch] = useState("");
+
     const fetchDistributions = useCallback(async () => {
         if (!scenarioId) return;
         try {
@@ -700,44 +704,6 @@ export default function ScenarioAnalysisPage() {
                                     </Card>
                                 </div>
 
-                                {/* Trivy Metrics Detail Table */}
-                                {(qualityReport.feature_metrics ?? []).filter(m => m.source === "trivy").length > 0 && (
-                                    <Card>
-                                        <CardHeader className="py-4">
-                                            <CardTitle className="text-sm">Detailed Metrics</CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="py-0 pb-4">
-                                            <div className="overflow-x-auto">
-                                                <table className="min-w-full text-sm">
-                                                    <thead>
-                                                        <tr className="border-b text-muted-foreground">
-                                                            <th className="px-4 py-2 text-left font-medium">Metric</th>
-                                                            <th className="px-4 py-2 text-right font-medium">Completeness</th>
-                                                            <th className="px-4 py-2 text-right font-medium">Mean</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y">
-                                                        {(qualityReport.feature_metrics ?? [])
-                                                            .filter(m => m.source === "trivy")
-                                                            .map((metric) => (
-                                                                <tr key={metric.feature_name}>
-                                                                    <td className="px-4 py-2 font-medium">{metric.feature_name}</td>
-                                                                    <td className="px-4 py-2 text-right">
-                                                                        <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
-                                                                            {metric.completeness_pct.toFixed(1)}%
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-4 py-2 text-right text-muted-foreground">
-                                                                        {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                )}
                             </>
                         )}
                     </div>
@@ -836,48 +802,119 @@ export default function ScenarioAnalysisPage() {
                                     </Card>
                                 </div>
 
-                                {/* Sonar Metrics Detail Table */}
-                                {(qualityReport.feature_metrics ?? []).filter(m => m.source === "sonarqube").length > 0 && (
-                                    <Card>
-                                        <CardHeader className="py-4">
-                                            <CardTitle className="text-sm">Detailed Metrics</CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="py-0 pb-4">
-                                            <div className="overflow-x-auto">
-                                                <table className="min-w-full text-sm">
-                                                    <thead>
-                                                        <tr className="border-b text-muted-foreground">
-                                                            <th className="px-4 py-2 text-left font-medium">Metric</th>
-                                                            <th className="px-4 py-2 text-right font-medium">Completeness</th>
-                                                            <th className="px-4 py-2 text-right font-medium">Mean</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y">
-                                                        {(qualityReport.feature_metrics ?? [])
-                                                            .filter(m => m.source === "sonarqube")
-                                                            .map((metric) => (
-                                                                <tr key={metric.feature_name}>
-                                                                    <td className="px-4 py-2 font-medium">{metric.feature_name}</td>
-                                                                    <td className="px-4 py-2 text-muted-foreground">{metric.data_type}</td>
-                                                                    <td className="px-4 py-2 text-right">
-                                                                        <span className={metric.completeness_pct < 90 ? "text-amber-600" : "text-green-600"}>
-                                                                            {metric.completeness_pct.toFixed(1)}%
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-4 py-2 text-right text-muted-foreground">
-                                                                        {metric.mean_value != null ? metric.mean_value.toFixed(2) : "—"}
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                )}
                             </>
                         )}
                     </div>
+
+
+
+                    {/* COMBINED SCAN METRICS DISTRIBUTIONS */}
+                    {qualityReport?.scan_metric_distributions && qualityReport.scan_metric_distributions.length > 0 && (() => {
+                        // Filter and paginate scan metrics
+                        const filteredScanMetrics = qualityReport.scan_metric_distributions.filter(m =>
+                            m.feature_name.toLowerCase().includes(scanDistributionSearch.toLowerCase())
+                        );
+                        const scanTotalPages = Math.ceil(filteredScanMetrics.length / ITEMS_PER_PAGE);
+                        const scanStartIndex = (scanDistributionPage - 1) * ITEMS_PER_PAGE;
+                        const paginatedScanMetrics = filteredScanMetrics.slice(scanStartIndex, scanStartIndex + ITEMS_PER_PAGE);
+
+                        return (
+                            <Card>
+                                <CardHeader className="py-4">
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <BarChart3 className="h-5 w-5 text-indigo-500" />
+                                            <div>
+                                                <CardTitle className="text-base">Scan Metrics Distributions</CardTitle>
+                                                <CardDescription>
+                                                    Histogram distributions for Trivy and SonarQube scan metrics across builds
+                                                </CardDescription>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="relative">
+                                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                                <Input
+                                                    placeholder="Search metrics..."
+                                                    value={scanDistributionSearch}
+                                                    onChange={(e) => {
+                                                        setScanDistributionSearch(e.target.value);
+                                                        setScanDistributionPage(1);
+                                                    }}
+                                                    className="pl-8 w-[200px]"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </CardHeader>
+                                <CardContent>
+                                    {filteredScanMetrics.length === 0 ? (
+                                        <div className="text-center py-12 text-muted-foreground">No scan metrics found matching your search.</div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                                {paginatedScanMetrics.map((metric) => (
+                                                    <FeatureDistributionChart
+                                                        key={metric.feature_name}
+                                                        featureName={metric.feature_name}
+                                                        distribution={{
+                                                            feature_name: metric.feature_name,
+                                                            data_type: metric.data_type,
+                                                            total_count: metric.total_values,
+                                                            null_count: metric.null_count,
+                                                            bins: metric.distribution_bins?.map(b => ({
+                                                                min_value: b.min_value,
+                                                                max_value: b.max_value,
+                                                                count: b.count,
+                                                                percentage: b.percentage,
+                                                            })) ?? [],
+                                                            stats: {
+                                                                min: metric.min_value ?? 0,
+                                                                max: metric.max_value ?? 0,
+                                                                mean: metric.mean_value ?? 0,
+                                                                median: 0,
+                                                                std: metric.std_dev ?? 0,
+                                                                q1: 0,
+                                                                q3: 0,
+                                                                iqr: 0,
+                                                            },
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
+
+                                            {scanTotalPages > 1 && (
+                                                <div className="flex items-center justify-between pt-4 border-t">
+                                                    <div className="text-sm text-muted-foreground">
+                                                        Showing {scanStartIndex + 1} to {Math.min(scanStartIndex + ITEMS_PER_PAGE, filteredScanMetrics.length)} of {filteredScanMetrics.length} entries
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setScanDistributionPage(p => Math.max(1, p - 1))}
+                                                            disabled={scanDistributionPage === 1}
+                                                        >
+                                                            <ChevronLeft className="h-4 w-4" />
+                                                        </Button>
+                                                        <span className="text-sm font-medium">Page {scanDistributionPage} of {scanTotalPages}</span>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setScanDistributionPage(p => Math.min(scanTotalPages, p + 1))}
+                                                            disabled={scanDistributionPage === scanTotalPages}
+                                                        >
+                                                            <ChevronRight className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        );
+                    })()}
                 </TabsContent>
             </Tabs >
         </div >

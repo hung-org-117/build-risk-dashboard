@@ -156,26 +156,3 @@ class PipelineContext:
         from app.tasks.shared.scan_context_helpers import check_and_mark_scans_completed
 
         return check_and_mark_scans_completed(self.db, self.context_id)
-
-    def check_and_notify_completed(self) -> bool:
-        """
-        Check if processing is fully complete and send notification if needed.
-
-        For TrainingScenario: checks features + scans complete, sends notification.
-        For Model Pipeline: checks processing complete, logs completion.
-
-        Returns:
-            True if notification was sent/logged, False if still pending.
-        """
-        if self.pipeline_type == PipelineType.TRAINING_SCENARIO:
-            from app.services.notification_service import (
-                check_and_notify_enrichment_completed,
-            )
-
-            return check_and_notify_enrichment_completed(
-                db=self.db, scenario_id=self.context_id
-            )
-        else:
-            # Model pipeline has its own notification flow
-            logger.info(f"Model pipeline {self.context_id} completion check skipped")
-            return False

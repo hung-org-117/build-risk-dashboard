@@ -8,6 +8,7 @@ Provides comprehensive statistics including:
 - Correlation matrices between numeric features
 """
 
+from app.dtos.statistics import ScanDistributionResponse
 import logging
 import statistics
 from collections import Counter
@@ -605,6 +606,77 @@ class StatisticsService:
             scan_summary=scan_summary,
             trivy_summary=trivy_summary,
             sonar_summary=sonar_summary,
+        )
+
+    def get_scan_distributions(
+        self,
+        scenario_id: str,
+        page: int = 1,
+        limit: int = 6,
+        search: Optional[str] = None,
+    ) -> ScanDistributionResponse:
+        """
+        Get paginated scan metrics distributions for a scenario.
+
+        Reads from DataQualityReport.scan_metric_distributions which contains
+        pre-calculated histogram distributions for Trivy and SonarQube metrics.
+        """
+        from app.dtos.statistics import ScanDistributionItem, ScanDistributionResponse
+
+        # Fetch quality report
+        report = self.quality_repo.find_by_scenario(scenario_id)
+        if not report or not report.scan_metric_distributions:
+            return ScanDistributionResponse(scenario_id=scenario_id)
+
+        # Get all scan distributions
+        all_distributions = report.scan_metric_distributions
+
+        # Filter by search
+        if search:
+            search_lower = search.lower()
+            all_distributions = [
+                m for m in all_distributions if search_lower in m.feature_name.lower()
+            ]
+
+        total_items = len(all_distributions)
+        total_pages = (total_items + limit - 1) // limit if limit > 0 else 0
+
+        # Paginate
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated = all_distributions[start_idx:end_idx]
+
+        # Map to DTO
+        items = [
+            ScanDistributionItem(
+                feature_name=m.feature_name,
+                data_type=m.data_type,
+                total_count=m.total_values,
+                null_count=m.null_count,
+                min_value=m.min_value,
+                max_value=m.max_value,
+                mean_value=m.mean_value,
+                std_dev=m.std_dev,
+                bins=[
+                    HistogramBin(
+                        min_value=b.min_value,
+                        max_value=b.max_value,
+                        count=b.count,
+                        percentage=b.percentage,
+                    )
+                    for b in (m.distribution_bins or [])
+                ],
+            )
+            for m in paginated
+        ]
+
+        return ScanDistributionResponse(
+            scenario_id=scenario_id,
+            items=items,
+            total_items=total_items,
+            total_pages=total_pages,
+            current_page=page,
+            items_per_page=limit,
         )
 
     def _calculate_metric_summary(self, values: List[float]) -> MetricSummary:

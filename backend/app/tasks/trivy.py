@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
     queue="trivy_scan",
     soft_time_limit=600,
     time_limit=900,
-    max_retries=0,
 )
 def start_trivy_scan_for_version_commit(
     self: ScanTask,

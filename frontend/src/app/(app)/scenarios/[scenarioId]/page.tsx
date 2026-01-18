@@ -321,25 +321,82 @@ export default function ScenarioOverviewPage() {
                                         <h4 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Features & Tools</h4>
                                     </div>
                                     <div className="space-y-4 text-sm bg-transparent p-0 border-0 rounded-none dark:border-0 dark:bg-transparent">
-                                        <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800 pb-3">
-                                            <span className="text-muted-foreground text-sm font-medium">DAG Features</span>
-                                            <Badge variant="default" className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-3">
-                                                {(scenario as any).feature_config.dag_features?.length || 0}
-                                            </Badge>
-                                        </div>
-                                        <div className="space-y-3 pt-1">
-                                            <span className="text-muted-foreground block text-xs font-medium uppercase tracking-tight">Active Scan Tools</span>
-                                            <div className="flex gap-2">
-                                                {(scenario as any).feature_config.scan_metrics?.sonarqube ? (
-                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">SonarQube</Badge>
-                                                ) : null}
-                                                {(scenario as any).feature_config.scan_metrics?.trivy ? (
-                                                    <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 px-3 py-1">Trivy</Badge>
-                                                ) : null}
-                                                {!(scenario as any).feature_config.scan_metrics?.sonarqube && !(scenario as any).feature_config.scan_metrics?.trivy && (
-                                                    <span className="text-muted-foreground text-xs italic">No scan tools enabled</span>
-                                                )}
+                                        <div className="space-y-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-muted-foreground text-sm font-medium">DAG Features</span>
+                                                <Badge variant="default" className="bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 px-3">
+                                                    {(scenario as any).feature_config.dag_features?.length || 0}
+                                                </Badge>
                                             </div>
+                                            {/* Scrollable list of DAG Features */}
+                                            {(scenario as any).feature_config.dag_features?.length > 0 && (
+                                                <div className="max-h-40 overflow-y-auto border rounded-md p-2 bg-muted/20">
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {(scenario as any).feature_config.dag_features.map((feature: string) => (
+                                                            <Badge key={feature} variant="outline" className="px-2 py-0.5 text-xs font-normal">
+                                                                {feature}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-4 pt-1">
+                                            <span className="text-muted-foreground block text-xs font-medium uppercase tracking-tight">Active Scan Tools & Metrics</span>
+
+                                            {/* SonarQube Metrics */}
+                                            {(scenario as any).feature_config.scan_metrics?.sonarqube && (scenario as any).feature_config.scan_metrics.sonarqube.length > 0 && (
+                                                <div className="space-y-1.5 border rounded-md p-3 bg-muted/10">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-2 py-0.5 text-xs">SonarQube</Badge>
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            {(scenario as any).feature_config.scan_metrics.sonarqube.length} metrics
+                                                        </span>
+                                                    </div>
+                                                    <div className="max-h-32 overflow-y-auto pr-1">
+                                                        <div className="flex flex-wrap gap-1.5 pl-1">
+                                                            {(scenario as any).feature_config.scan_metrics.sonarqube.map((metric: string) => (
+                                                                <Badge key={`sonar-${metric}`} variant="secondary" className="px-1.5 py-0 text-[10px] text-muted-foreground bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700">
+                                                                    {metric}
+                                                                </Badge>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Trivy Metrics */}
+                                            {(scenario as any).feature_config.scan_metrics?.trivy && (scenario as any).feature_config.scan_metrics.trivy.length > 0 && (
+                                                <div className="space-y-1.5 border rounded-md p-3 bg-muted/10">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 px-2 py-0.5 text-xs">Trivy</Badge>
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground">
+                                                            {(scenario as any).feature_config.scan_metrics.trivy.length} metrics
+                                                        </span>
+                                                    </div>
+                                                    <div className="max-h-32 overflow-y-auto pr-1">
+                                                        <div className="flex flex-wrap gap-1.5 pl-1">
+                                                            {(scenario as any).feature_config.scan_metrics.trivy.map((metric: string) => (
+                                                                <Badge key={`trivy-${metric}`} variant="secondary" className="px-1.5 py-0 text-[10px] text-muted-foreground bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700">
+                                                                    {metric}
+                                                                </Badge>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Empty State */}
+                                            {!(scenario as any).feature_config.scan_metrics?.sonarqube?.length && !(scenario as any).feature_config.scan_metrics?.trivy?.length && (
+                                                <div className="p-4 border border-dashed rounded-md text-center">
+                                                    <span className="text-muted-foreground text-xs italic">No scan tools or metrics enabled</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

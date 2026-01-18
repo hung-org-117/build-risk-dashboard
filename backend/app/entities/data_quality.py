@@ -134,8 +134,11 @@ class DataQualityReport(BaseEntity):
     consistency_score: float = 0.0  # % builds with all selected features
     coverage_score: float = 0.0  # % successfully enriched builds
 
-    # Detailed metrics per feature
+    # Detailed metrics per feature (DAG features only)
     feature_metrics: List[DataQualityMetric] = Field(default_factory=list)
+
+    # Scan metrics distributions (Trivy + SonarQube)
+    scan_metric_distributions: List[DataQualityMetric] = Field(default_factory=list)
 
     # Scan metrics summary (Trivy + SonarQube)
     scan_metrics_summary: ScanMetricsSummary = Field(default_factory=ScanMetricsSummary)

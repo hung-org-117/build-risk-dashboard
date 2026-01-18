@@ -30,7 +30,6 @@ import {
     XCircle,
     Clock,
     RefreshCw,
-    RotateCcw,
     Shield,
     BarChart3,
     FileJson,
@@ -67,7 +66,31 @@ export default function ScansPage() {
     const [trivyData, setTrivyData] = useState<PaginatedResponse<CommitScanRecord> | null>(null);
     const [sonarData, setSonarData] = useState<PaginatedResponse<CommitScanRecord> | null>(null);
     const [loading, setLoading] = useState(true);
-    const [retrying, setRetrying] = useState<string | null>(null);
+    // Listen for SCAN_ERROR events - merge error into local state
+    useEffect(() => {
+        const handleScanError = (event: CustomEvent<{
+            scenario_id?: string;
+            scan_id: string;
+            commit_sha: string;
+            tool_type: string;
+            error: string;
+            retry_count: number;
+        }>) => {
+            if (event.detail.scenario_id === scenarioId) {
+                mergeScanUpdate({
+                    ...event.detail,
+                    status: "failed",
+                });
+            }
+        };
+
+        window.addEventListener("SCAN_ERROR", handleScanError as EventListener);
+        return () => {
+            window.removeEventListener("SCAN_ERROR", handleScanError as EventListener);
+        };
+    }, [scenarioId]);
+
+    // Calculate failed counts
     const [sonarPage, setSonarPage] = useState(1);
     const [trivyPage, setTrivyPage] = useState(1);
     // Scan progress tracking
@@ -294,17 +317,7 @@ export default function ScansPage() {
         };
     }, [scenarioId]);
 
-    const handleRetry = async (commitSha: string, toolType: "trivy" | "sonarqube") => {
-        setRetrying(`${toolType}-${commitSha}`);
-        try {
-            await trainingScenariosApi.retryCommitScan(scenarioId, commitSha, toolType);
-            await fetchScans(true);
-        } catch (err) {
-            console.error("Retry failed:", err);
-        } finally {
-            setRetrying(null);
-        }
-    };
+
 
     // Calculate failed counts
     const trivyFailedCount = trivyData?.items?.filter(s => s.status === "failed").length || 0;
@@ -456,24 +469,7 @@ export default function ScansPage() {
                                                 {formatDateTime(scan.completed_at)}
                                             </td>
                                             <td className="px-3 py-3">
-                                                {scan.status === "failed" && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        disabled={retrying === `${toolType}-${scan.commit_sha}`}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleRetry(scan.commit_sha, toolType);
-                                                        }}
-                                                        className="h-8 w-8 p-0"
-                                                    >
-                                                        {retrying === `${toolType}-${scan.commit_sha}` ? (
-                                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                                        ) : (
-                                                            <RotateCcw className="h-3 w-3" />
-                                                        )}
-                                                    </Button>
-                                                )}
+                                                {/* Action column - currently empty as single retry is disabled */}
                                             </td>
                                         </tr>
                                         <CollapsibleContent asChild>
@@ -561,10 +557,13 @@ export default function ScansPage() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleRetryTool(activeTab as "trivy" | "sonarqube")}
-                                disabled={retryingTool !== null || (scanProgress?.scans_failed || 0) === 0}
+                                disabled={
+                                    retryingTool !== null ||
+                                    (activeTab === "trivy" ? trivyFailedCount === 0 : sonarFailedCount === 0)
+                                }
                                 className={cn(
                                     "transition-colors",
-                                    (scanProgress?.scans_failed || 0) > 0
+                                    (activeTab === "trivy" ? trivyFailedCount > 0 : sonarFailedCount > 0)
                                         ? "text-amber-600 border-amber-300 hover:bg-amber-50"
                                         : "text-muted-foreground border-slate-200"
                                 )}

@@ -30,6 +30,9 @@ HAMILTON_CACHE_DIR = DATA_DIR / "hamilton_cache"
 # Scan configuration files (SonarQube/Trivy per-version per-repo)
 SCAN_CONFIG_DIR = DATA_DIR / "scan-config"
 
+# Trivy cache directory (for Java DB and other artifacts)
+TRIVY_CACHE_DIR = DATA_DIR / "cache" / "trivy"
+
 # Export job output files (CSV, JSON exports)
 EXPORTS_DIR = DATA_DIR / "exports"
 
@@ -46,6 +49,7 @@ def ensure_data_dirs() -> None:
         LOGS_DIR,
         HAMILTON_CACHE_DIR,
         SCAN_CONFIG_DIR,
+        TRIVY_CACHE_DIR,
         EXPORTS_DIR,
         TRAINING_DATASETS_DIR,
     ]:

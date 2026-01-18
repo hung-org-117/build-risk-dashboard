@@ -190,3 +190,28 @@ class CorrelationMatrixResponse(BaseModel):
         default_factory=list,
         description="Pairs with |correlation| > 0.7",
     )
+
+
+class ScanDistributionItem(BaseModel):
+    """Distribution data for a single scan metric."""
+
+    feature_name: str
+    data_type: str = "numeric"
+    total_count: int
+    null_count: int
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    mean_value: Optional[float] = None
+    std_dev: Optional[float] = None
+    bins: List[HistogramBin] = Field(default_factory=list)
+
+
+class ScanDistributionResponse(BaseModel):
+    """Paginated response for scan metrics distributions."""
+
+    scenario_id: str
+    items: List[ScanDistributionItem] = Field(default_factory=list)
+    total_items: int = 0
+    total_pages: int = 0
+    current_page: int = 1
+    items_per_page: int = 0

@@ -750,131 +750,325 @@ class DataQualityService:
 
             metric.distribution_bins = distribution_bins
 
-    def finalize_quality_report(self, scenario_id: str) -> DataQualityReport:
+    # =========================================================================
+    # SEPARATE FINALIZATION METHODS
+    # =========================================================================
+
+    def finalize_feature_quality_report(self, scenario_id: str) -> DataQualityReport:
         """
-        Finalize quality report after enrichment is complete.
-        Calculates final scores and marks report as COMPLETED.
+        Finalize feature extraction portion of quality report.
+        Called after feature extraction completes.
 
-        Called from check_and_notify_enrichment_completed.
+        Updates: feature_metrics, completeness_score, validity_score, coverage_score
         """
-        report = self.quality_repo.find_by_scenario(scenario_id)
-        if not report:
-            # If no report exists, run full evaluation
-            return self.evaluate_version(scenario_id)
-
-        # If feature_metrics is empty, run full evaluation to calculate proper scores
-        # This handles the case where incremental updates were not used
-        if not report.feature_metrics:
-            logger.info(
-                f"No feature_metrics found for scenario {scenario_id}, "
-                "running full evaluation"
-            )
-            # Delete the existing empty report first
-            self.quality_repo.delete_by_scenario(scenario_id)
-            return self.evaluate_version(scenario_id)
-
-        # Get scenario for build counts
+        report = self.get_or_create_report(scenario_id)
         scenario = self.scenario_repo.find_by_id(scenario_id)
-        if scenario:
-            report.total_builds = scenario.builds_total or 0
-            report.enriched_builds = scenario.builds_features_extracted or 0
-            report.failed_builds = scenario.builds_features_extracted_failed or 0
-            report.total_features = len(scenario.feature_config.dag_features or [])
 
-            # Calculate coverage score
-            if report.total_builds > 0:
-                report.coverage_score = (
-                    report.enriched_builds / report.total_builds * 100
-                )
+        if not scenario:
+            logger.warning(f"Scenario {scenario_id} not found for feature finalization")
+            return report
 
-            # Populate scan metrics summary from scenario stats
-            scans_total = scenario.scans_total or 0
-            scans_completed = scenario.scans_completed or 0
+        # Update build counts from scenario
+        report.total_builds = scenario.builds_total or 0
+        report.enriched_builds = scenario.builds_features_extracted or 0
+        report.failed_builds = scenario.builds_features_extracted_failed or 0
+        report.total_features = len(scenario.feature_config.dag_features or [])
 
-            # Get scan tool config to determine which tools are configured
-            scan_config = scenario.feature_config.scan_tool_config or {}
-            trivy_configured = "trivy" in scan_config
-            sonarqube_configured = "sonarqube" in scan_config
+        # Calculate coverage score
+        if report.total_builds > 0:
+            report.coverage_score = report.enriched_builds / report.total_builds * 100
 
-            scan_summary = ScanMetricsSummary()
-
-            # Estimate per-tool based on configured tools
-            # Each commit can have Trivy and/or SonarQube scans
-            if trivy_configured and sonarqube_configured:
-                # Both configured - split counts evenly (approximation)
-                half_total = scans_total // 2
-                half_completed = scans_completed // 2
-                scan_summary.trivy_builds_scanned = half_total
-                scan_summary.trivy_builds_with_metrics = half_completed
-                scan_summary.sonarqube_builds_scanned = scans_total - half_total
-                scan_summary.sonarqube_builds_with_metrics = (
-                    scans_completed - half_completed
-                )
-            elif trivy_configured:
-                scan_summary.trivy_builds_scanned = scans_total
-                scan_summary.trivy_builds_with_metrics = scans_completed
-            elif sonarqube_configured:
-                scan_summary.sonarqube_builds_scanned = scans_total
-                scan_summary.sonarqube_builds_with_metrics = scans_completed
-
-            # Calculate coverage percentages
-            if scan_summary.trivy_builds_scanned > 0:
-                scan_summary.trivy_coverage_pct = (
-                    scan_summary.trivy_builds_with_metrics
-                    / scan_summary.trivy_builds_scanned
-                    * 100
-                )
-            if scan_summary.sonarqube_builds_scanned > 0:
-                scan_summary.sonarqube_coverage_pct = (
-                    scan_summary.sonarqube_builds_with_metrics
-                    / scan_summary.sonarqube_builds_scanned
-                    * 100
-                )
-
-            report.scan_metrics_summary = scan_summary
+        # If no feature_metrics from incremental updates, run full evaluation
+        if not report.feature_metrics:
+            logger.info("No feature_metrics found, running full feature evaluation")
+            # Run full evaluation but only for features
+            return self._run_full_feature_evaluation(scenario_id, report)
 
         # Calculate distributions for numeric features
-        if report.feature_metrics:
-            self._calculate_feature_distributions(scenario_id, report.feature_metrics)
+        self._calculate_feature_distributions(scenario_id, report.feature_metrics)
 
-        report.mark_completed()
-
-        # Calculate completeness score from feature metrics
+        # Calculate scores from feature metrics
         report.completeness_score = self._calculate_completeness_score(
             report.feature_metrics
         )
-
-        # Calculate validity score
         report.validity_score = self._calculate_validity_score(report.feature_metrics)
 
-        report.mark_completed()
-
-        # Update in DB (including feature_metrics with distributions)
+        # Update in DB
         self.quality_repo.update_one(
             str(report.id),
             {
-                "status": (
-                    report.status.value
-                    if hasattr(report.status, "value")
-                    else report.status
-                ),
                 "completeness_score": report.completeness_score,
                 "validity_score": report.validity_score,
-                "consistency_score": report.consistency_score,
                 "coverage_score": report.coverage_score,
                 "total_builds": report.total_builds,
                 "enriched_builds": report.enriched_builds,
                 "failed_builds": report.failed_builds,
                 "total_features": report.total_features,
-                "scan_metrics_summary": report.scan_metrics_summary.dict(),
                 "feature_metrics": [m.dict() for m in report.feature_metrics],
-                "completed_at": report.completed_at,
             },
         )
 
         logger.info(
-            f"Quality report finalized for scenario {scenario_id}: "
+            f"Feature quality report finalized for scenario {scenario_id}: "
             f"completeness={report.completeness_score:.1f}"
         )
+
+        return report
+
+    def finalize_all_scan_reports(self, scenario_id: str) -> DataQualityReport:
+        """
+        Finalize all scan reports (Trivy + SonarQube) in one call.
+        Called when all scans complete (scans_completed + scans_failed >= scans_total).
+
+        Combines finalize_trivy_scan_report and finalize_sonarqube_scan_report.
+        """
+        from app.entities.sonar_commit_scan import SonarScanStatus
+        from app.entities.trivy_commit_scan import TrivyScanStatus
+        from app.repositories.sonar_commit_scan import SonarCommitScanRepository
+        from app.repositories.trivy_commit_scan import TrivyCommitScanRepository
+
+        report = self.get_or_create_report(scenario_id)
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+
+        if not scenario:
+            logger.warning(f"Scenario {scenario_id} not found for scan finalization")
+            return report
+
+        summary = report.scan_metrics_summary or ScanMetricsSummary()
+        scan_config = getattr(scenario.feature_config, "scan_metrics", {}) or {}
+
+        # === Trivy ===
+        trivy_repo = TrivyCommitScanRepository(self.db)
+        trivy_total = trivy_repo.count_by_scenario(ObjectId(scenario_id))
+        trivy_completed = trivy_repo.count_by_scenario_and_status(
+            ObjectId(scenario_id), TrivyScanStatus.COMPLETED
+        )
+
+        summary.trivy_builds_scanned = trivy_total
+        summary.trivy_builds_with_metrics = trivy_completed
+        summary.trivy_coverage_pct = (
+            (trivy_completed / trivy_total * 100) if trivy_total > 0 else 0.0
+        )
+
+        scan_distributions = []
+
+        trivy_metrics = scan_config.get("trivy", [])
+        if trivy_metrics:
+            trivy_metric_items = self._calculate_scan_metric_distributions(
+                scenario_id, trivy_metrics, prefix="trivy_"
+            )
+            scan_distributions.extend(trivy_metric_items)
+
+        # === SonarQube ===
+        sonar_repo = SonarCommitScanRepository(self.db)
+        sonar_total = sonar_repo.count_by_scenario(ObjectId(scenario_id))
+        sonar_completed = sonar_repo.count_by_scenario_and_status(
+            ObjectId(scenario_id), SonarScanStatus.COMPLETED
+        )
+
+        summary.sonarqube_builds_scanned = sonar_total
+        summary.sonarqube_builds_with_metrics = sonar_completed
+        summary.sonarqube_coverage_pct = (
+            (sonar_completed / sonar_total * 100) if sonar_total > 0 else 0.0
+        )
+
+        sonar_metrics = scan_config.get("sonarqube", [])
+        if sonar_metrics:
+            sonar_metric_items = self._calculate_scan_metric_distributions(
+                scenario_id, sonar_metrics, prefix="sonar_"
+            )
+            scan_distributions.extend(sonar_metric_items)
+
+        report.scan_metrics_summary = summary
+        report.scan_metric_distributions = scan_distributions
+
+        # Update in DB
+        self.quality_repo.update_one(
+            str(report.id),
+            {
+                "scan_metrics_summary": summary.dict(),
+                "scan_metric_distributions": [m.dict() for m in scan_distributions],
+            },
+        )
+
+        logger.info(
+            f"All scan reports finalized for scenario {scenario_id}: "
+            f"Trivy {trivy_completed}/{trivy_total}, "
+            f"SonarQube {sonar_completed}/{sonar_total}"
+        )
+
+        return report
+
+    def _calculate_scan_metric_distributions(
+        self,
+        scenario_id: str,
+        metric_names: List[str],
+        prefix: str,
+        bins: int = 20,
+    ) -> List[DataQualityMetric]:
+        """
+        Calculate statistics and histogram distributions for scan metrics.
+
+        Args:
+            scenario_id: Scenario ID
+            metric_names: List of metric names (without prefix)
+            prefix: Metric prefix ("trivy_" or "sonar_")
+            bins: Number of histogram bins
+
+        Returns:
+            List of DataQualityMetric objects with distributions
+        """
+        from app.repositories.training_enrichment_build import (
+            TrainingEnrichmentBuildRepository,
+        )
+
+        build_repo = TrainingEnrichmentBuildRepository(self.db)
+        metrics = []
+
+        for metric_name in metric_names:
+            # Full metric name with prefix (e.g., "trivy_vulnerability_critical")
+            full_metric_name = f"{prefix}{metric_name}"
+
+            # Use the new aggregation method
+            agg_result = build_repo.aggregate_scan_metrics_stats_and_distribution(
+                scenario_id, full_metric_name, bins=bins
+            )
+
+            stats = agg_result.get("stats")
+            buckets = agg_result.get("bins", [])
+
+            if not stats or stats.get("count", 0) == 0:
+                continue
+
+            # Create DataQualityMetric for this scan metric
+            source = (
+                MetricSource.TRIVY if prefix == "trivy_" else MetricSource.SONARQUBE
+            )
+
+            metric = DataQualityMetric(
+                feature_name=full_metric_name,
+                source=source,
+                data_type="numeric",
+                total_values=stats.get("count", 0),
+                null_count=0,  # Non-null values only from aggregation
+                completeness_pct=100.0,  # All values present if they reached here
+                min_value=stats.get("min"),
+                max_value=stats.get("max"),
+                mean_value=stats.get("avg"),
+                std_dev=stats.get("stdDev"),
+            )
+
+            # Add histogram bins
+            total_count = stats.get("count", 0)
+            distribution_bins = []
+
+            for b in buckets:
+                id_bounds = b.get("_id", {})
+                b_min = id_bounds.get("min") or b.get("min")
+                b_max = id_bounds.get("max") or b.get("max")
+
+                if b_min is None:
+                    continue
+                if b_max is None:
+                    b_max = b_min
+
+                count = b.get("count", 0)
+
+                distribution_bins.append(
+                    HistogramBinCache(
+                        min_value=round(float(b_min), 4),
+                        max_value=round(float(b_max), 4),
+                        count=count,
+                        percentage=(
+                            round(count / total_count * 100, 1)
+                            if total_count > 0
+                            else 0
+                        ),
+                    )
+                )
+
+            distribution_bins.sort(key=lambda x: x.min_value)
+            metric.distribution_bins = distribution_bins
+            metrics.append(metric)
+
+        return metrics
+
+    def _run_full_feature_evaluation(
+        self, scenario_id: str, report: DataQualityReport
+    ) -> DataQualityReport:
+        """Run full feature evaluation when incremental metrics are not available."""
+        scenario = self.scenario_repo.find_by_id(scenario_id)
+        if not scenario:
+            return report
+
+        try:
+            builds, _ = self.build_repo.find_by_scenario(scenario_id)
+            if not builds:
+                return report
+
+            selected_features = scenario.feature_config.dag_features or []
+            if not selected_features:
+                return report
+
+            feature_metadata = self._get_feature_metadata(selected_features)
+
+            # Load feature vectors
+            raw_build_run_ids = [
+                b.raw_build_run_id for b in builds if b.raw_build_run_id
+            ]
+            feature_vectors_map = (
+                self.feature_vector_repo.find_many_by_raw_build_run_ids(
+                    raw_build_run_ids
+                )
+            )
+
+            class BuildWithFeatures:
+                def __init__(self, build, features):
+                    self.build = build
+                    self.features = features or {}
+
+            builds_with_features = []
+            for build in builds:
+                fv = feature_vectors_map.get(str(build.raw_build_run_id))
+                features = fv.features if fv else {}
+                builds_with_features.append(BuildWithFeatures(build, features))
+
+            enriched_builds = [
+                b for b in builds_with_features if b.features and len(b.features) > 0
+            ]
+
+            report.feature_metrics = self._calculate_feature_metrics(
+                builds=enriched_builds,
+                selected_features=selected_features,
+                feature_metadata=feature_metadata,
+            )
+
+            self._calculate_feature_distributions(scenario_id, report.feature_metrics)
+
+            report.completeness_score = self._calculate_completeness_score(
+                report.feature_metrics
+            )
+            report.validity_score = self._calculate_validity_score(
+                report.feature_metrics
+            )
+            report.consistency_score = self._calculate_consistency_score(
+                builds=enriched_builds,
+                selected_features=selected_features,
+            )
+
+            # Update in DB
+            self.quality_repo.update_one(
+                str(report.id),
+                {
+                    "completeness_score": report.completeness_score,
+                    "validity_score": report.validity_score,
+                    "consistency_score": report.consistency_score,
+                    "coverage_score": report.coverage_score,
+                    "feature_metrics": [m.dict() for m in report.feature_metrics],
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"Full feature evaluation failed: {e}")
 
         return report

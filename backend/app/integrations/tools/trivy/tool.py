@@ -14,6 +14,7 @@ from app.integrations.base import (
     ToolType,
 )
 from app.integrations.tools.trivy.metrics import TRIVY_METRICS
+from app.paths import TRIVY_CACHE_DIR
 from app.utils.git import ensure_worktree
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class TrivyTool(IntegrationTool):
                 "Trivy server URL is not configured. Trivy scanning will be unavailable."
             )
         self._default_config = trivy_settings.get("default_config", "")
-        self._timeout = 600  # Default timeout 10 minutes
+        self._timeout = 1200  # Default timeout 20 minutes
 
     def _get_db_settings(self) -> Dict[str, Any]:
         """Load Trivy settings from database."""
@@ -219,11 +220,14 @@ class TrivyTool(IntegrationTool):
             )
             # logger.debug(f"Command: {' '.join(cmd)}")
 
+            # Use extensive timeout for subprocess to allow Trivy to handle its own timeout
+            process_timeout = self._timeout + 300  # 5 minutes buffer
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self._timeout + 30,  # Extra buffer
+                timeout=process_timeout,
             )
 
             scan_duration_ms = int((time.time() - start_time) * 1000)
@@ -364,9 +368,11 @@ class TrivyTool(IntegrationTool):
             self._server_url,
             "--scanners",
             ",".join(scan_types),  # Use passed scan types
+            "--no-progress",  # Prevent buffer issues
             # Performance: Skip downloading checks/DB updates (use server's cached data)
             "--skip-check-update",
             "--skip-db-update",
+            "--skip-java-db-update",  # Prevent Java DB download hangs
         ]
 
         # Target path inside container
@@ -377,8 +383,11 @@ class TrivyTool(IntegrationTool):
             "docker",
             "run",
             "--rm",
+            "--init",  # Use tini as init to handle signals properly and prevent zombie processes
             "-v",
             f"{target_path_abs}:/work:ro",  # Mount source as read-only
+            "-v",
+            f"{str(TRIVY_CACHE_DIR)}:/root/.cache/trivy:rw",  # Persist cache between runs
             "--network",
             "host",  # Access Trivy server
         ]

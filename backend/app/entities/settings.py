@@ -19,7 +19,7 @@ sonar.inclusions=**/*
 """
 
 DEFAULT_TRIVY_CONFIG = """
-timeout: 10m
+timeout: 20m
 
 severity:
   - CRITICAL
@@ -64,6 +64,9 @@ scan:
     - .sbt
     - .cargo
     - .rustup
+    - .ruby
+    - .bundle
+    - .gem
     # Version control
     - .git
     - .hg
@@ -78,6 +81,8 @@ scan:
     - .next
     - .nuxt
     - .output
+    - .serverless
+    - .terraform
     # Cache / temp
     - .cache
     - __pycache__
@@ -97,6 +102,7 @@ scan:
     - env
     - .env
     - virtualenv
+    - .conda
     # IDE / Editor
     - .idea
     - .vscode
@@ -106,6 +112,7 @@ scan:
     - test-fixtures
     - fixtures
     - mocks
+
 
   skip-files:
     - "**/*.min.js"

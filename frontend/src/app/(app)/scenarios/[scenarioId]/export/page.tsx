@@ -191,8 +191,6 @@ export default function ScenarioExportPage() {
             onViewExport={handleViewExport}
             onDeleteExport={handleDeleteExport}
             onRefresh={fetchExports}
-            scansRunning={scansRunning}
-            scansProgress={scansProgress}
         />
     );
 }

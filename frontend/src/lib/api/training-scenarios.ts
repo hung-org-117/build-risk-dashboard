@@ -372,6 +372,12 @@ export interface DataQualityMetric {
     invalid_value_count: number;
     validity_pct: number;
     issues: string[];
+    distribution_bins?: {
+        min_value: number;
+        max_value: number;
+        count: number;
+        percentage: number;
+    }[];
 }
 
 export interface QualityIssue {
@@ -396,6 +402,7 @@ export interface DataQualityReport {
     consistency_score?: number;
     coverage_score?: number;
     feature_metrics?: DataQualityMetric[];
+    scan_metric_distributions?: DataQualityMetric[];
     scan_metrics_summary?: ScanMetricsSummary;
     total_builds?: number;
     enriched_builds?: number;

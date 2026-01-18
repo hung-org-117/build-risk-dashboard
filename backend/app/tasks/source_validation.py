@@ -329,7 +329,6 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
     queue="source_validation",
     soft_time_limit=600,
     time_limit=660,
-    max_retries=0,  # Fail fast on timeout
 )
 def validate_source_repo_chunk(
     self,
@@ -468,7 +467,6 @@ def validate_source_repo_chunk(
     queue="source_validation",
     soft_time_limit=300,
     time_limit=360,
-    max_retries=0,  # Fail fast on timeout
 )
 def validate_source_builds_chunk(
     self,

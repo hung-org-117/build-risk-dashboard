@@ -46,8 +46,6 @@ interface ExportsListSectionProps {
     onViewExport?: (exportId: string) => void;
     onDeleteExport: (exportId: string) => void;
     onRefresh?: () => void;
-    scansRunning: boolean;
-    scansProgress: number;
 }
 
 export function ExportsListSection({
@@ -57,8 +55,6 @@ export function ExportsListSection({
     onViewExport,
     onDeleteExport,
     onRefresh,
-    scansRunning,
-    scansProgress,
 }: ExportsListSectionProps) {
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
     const [page, setPage] = useState(1);
@@ -138,20 +134,10 @@ export function ExportsListSection({
                     )}
                     <Button
                         onClick={onCreateNew}
-                        disabled={scansRunning}
                         className="bg-green-600 hover:bg-green-700 text-white"
                     >
-                        {scansRunning ? (
-                            <>
-                                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                                Scans Running ({scansProgress}%)
-                            </>
-                        ) : (
-                            <>
-                                <FileText className="mr-2 h-4 w-4" />
-                                Create New Export
-                            </>
-                        )}
+                        <FileText className="mr-2 h-4 w-4" />
+                        Create New Export
                     </Button>
                 </div>
             </CardHeader>

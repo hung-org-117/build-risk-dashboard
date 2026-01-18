@@ -286,7 +286,7 @@ class SafeTask(PipelineTask):
     # This prevents conflict where Celery auto-retries before run_safe() can checkpoint
     autoretry_for = ()
 
-    max_retries = 5
+    max_retries = 3
     soft_retry_delay = 15
     transient_retry_base = 5
     transient_retry_cap = 300
@@ -446,7 +446,25 @@ class SafeTask(PipelineTask):
             return result
 
         except SoftTimeLimitExceeded as e:
-            # Timeout - checkpoint, cleanup, retry
+            # Timeout - check if retries available
+            if (
+                self.max_retries == 0
+                or getattr(self.request, "retries", 0) >= self.max_retries
+            ):
+                logger.error(f"{log_prefix} Soft time limit exceeded, no retries left")
+                if mark_failed_fn:
+                    try:
+                        mark_failed_fn(e)
+                    except Exception as mark_exc:
+                        logger.warning(
+                            f"{log_prefix} Failed to mark failed: {mark_exc}"
+                        )
+                if cleanup_fn:
+                    self._safe_cleanup(cleanup_fn, state, log_prefix)
+                # Return failed result instead of raising to allow cleanup to complete
+                return {"status": "failed", "error": "Soft time limit exceeded"}
+
+            # Retry available - checkpoint, cleanup, retry
             logger.warning(
                 f"{log_prefix} Soft time limit exceeded, phase={state.phase}"
             )
@@ -457,8 +475,22 @@ class SafeTask(PipelineTask):
             raise self.retry(countdown=self.soft_retry_delay, exc=e)
 
         except TransientError as e:
-            # Transient - checkpoint, cleanup, retry with backoff
+            # Transient - check if retries available
             attempt = getattr(self.request, "retries", 0)
+            if self.max_retries == 0 or attempt >= self.max_retries:
+                logger.error(f"{log_prefix} TransientError, no retries left: {e}")
+                if mark_failed_fn:
+                    try:
+                        mark_failed_fn(e)
+                    except Exception as mark_exc:
+                        logger.warning(
+                            f"{log_prefix} Failed to mark failed: {mark_exc}"
+                        )
+                if cleanup_fn:
+                    self._safe_cleanup(cleanup_fn, state, log_prefix)
+                raise
+
+            # Retry available - checkpoint, cleanup, retry with backoff
             delay = compute_backoff(
                 attempt, base=self.transient_retry_base, cap=self.transient_retry_cap
             )
@@ -608,11 +640,6 @@ class ScanTask(SafeTask):
         def update_scan_failed(status: str, error_message: str) -> None:
             try:
                 from app.database.mongo import get_database
-                from app.tasks.shared.events import publish_scenario_scan_updated
-                from app.tasks.shared.scan_context_helpers import (
-                    check_and_mark_scans_completed,
-                    increment_scan_failed,
-                )
 
                 db = get_database()
 
@@ -645,19 +672,6 @@ class ScanTask(SafeTask):
                         logger.info(
                             f"Marked SonarQube scan {scan.id} as FAILED: {error_message[:100]}"
                         )
-
-                # Publish event and update counters
-                publish_scenario_scan_updated(
-                    scenario_id=scenario_id,
-                    scan_id="",  # May not have scan_id at this point
-                    commit_sha=commit_sha,
-                    tool_type=tool_type,
-                    status="failed",
-                    error=error_message,
-                )
-
-                increment_scan_failed(db, scenario_id)
-                check_and_mark_scans_completed(db, scenario_id)
 
             except Exception as e:
                 logger.warning(

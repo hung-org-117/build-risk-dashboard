@@ -112,6 +112,15 @@ def check_and_mark_scans_completed(db: Database, context_id: str) -> bool:
                 scenario_repo.mark_scan_extraction_completed(context_id)
                 logger.info(f"TrainingScenario {context_id} scan extraction completed")
 
+                # Finalize scan quality reports (Trivy + SonarQube combined)
+                try:
+                    from app.services.data_quality_service import DataQualityService
+
+                    quality_service = DataQualityService(db)
+                    quality_service.finalize_all_scan_reports(context_id)
+                except Exception as e:
+                    logger.warning(f"Scan quality report finalization failed: {e}")
+
                 # Refresh and publish SSE update with latest data
                 from app.tasks.shared.events import publish_scenario_updated
 

@@ -273,4 +273,47 @@ export const statisticsApi = {
         );
         return response.data;
     },
+
+    getScanDistributions: async (
+        scenarioId: string,
+        options?: {
+            page?: number;
+            limit?: number;
+            search?: string;
+        }
+    ): Promise<ScanDistributionResponse> => {
+        const response = await api.get<ScanDistributionResponse>(
+            `/scenarios/${scenarioId}/statistics/scan-distributions`,
+            {
+                params: {
+                    page: options?.page,
+                    limit: options?.limit,
+                    search: options?.search,
+                },
+            }
+        );
+        return response.data;
+    },
 };
+
+// Scan Distribution Types
+export interface ScanDistributionItem {
+    feature_name: string;
+    data_type: string;
+    total_count: number;
+    null_count: number;
+    min_value?: number;
+    max_value?: number;
+    mean_value?: number;
+    std_dev?: number;
+    bins: HistogramBin[];
+}
+
+export interface ScanDistributionResponse {
+    scenario_id: string;
+    items: ScanDistributionItem[];
+    total_items: number;
+    total_pages: number;
+    current_page: number;
+    items_per_page: number;
+}

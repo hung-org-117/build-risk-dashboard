@@ -68,7 +68,6 @@ def _create_scenario_failure_handler(scenario_id: str, db):
     queue="scenario_ingestion",
     soft_time_limit=120,
     time_limit=180,
-    max_retries=0,
 )
 def start_scenario_ingestion(
     self: SafeTask,
@@ -389,7 +388,7 @@ def _find_matching_repos(
 ) -> List[Any]:
     """Find repositories matching language and source criteria."""
     raw_repo_repo = RawRepositoryRepository(db)
-    repo_query: Dict[str, Any] = {"is_private": False}
+    repo_query: Dict[str, Any] = {"is_private": {"$ne": True}}
 
     # If build sources are specified, restrict to repos in those sources
     if build_source_ids:
@@ -801,7 +800,6 @@ def handle_scenario_chord_error(
     queue="scenario_ingestion",
     soft_time_limit=300,
     time_limit=360,
-    max_retries=0,  # Disable retries - fail fast on timeout
 )
 def reingest_failed_builds(
     self: SafeTask,

@@ -13,6 +13,7 @@ from app.dtos.statistics import (
     CorrelationMatrixResponse,
     FeatureDistributionResponse,
     FeatureMetricsResponse,
+    ScanDistributionResponse,
     VersionStatisticsResponse,
 )
 from app.middleware.rbac import Permission, RequirePermission
@@ -161,4 +162,28 @@ async def get_scan_metrics_statistics(
     return service.get_scan_metrics_statistics(
         scenario_id=scenario_id,
         tool=tool,
+    )
+
+
+@router.get("/scan-distributions", response_model=ScanDistributionResponse)
+async def get_scan_distributions(
+    scenario_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(6, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search term for metric name"),
+    db=Depends(get_db),
+    current_user: dict = Depends(RequirePermission(Permission.VIEW_DATASETS)),
+):
+    """
+    Get paginated scan metrics distributions for a scenario.
+
+    Returns histogram distributions for Trivy and SonarQube metrics
+    with pagination and search support.
+    """
+    service = StatisticsService(db)
+    return service.get_scan_distributions(
+        scenario_id=scenario_id,
+        page=page,
+        limit=limit,
+        search=search,
     )

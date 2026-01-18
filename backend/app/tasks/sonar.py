@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
     queue="sonar_scan",
     soft_time_limit=1800,
     time_limit=2100,
-    max_retries=0,
 )
 def start_sonar_scan_for_version_commit(
     self: ScanTask,
@@ -133,7 +132,8 @@ def start_sonar_scan_for_version_commit(
             state.meta["worktree_path"] = str(worktree_path)
 
             # Check if component already exists on SonarQube
-            project_key = component_key.rsplit("_", 1)[0]
+            # Extract project_key from component_key: {repo}_{scenario}_{commit}
+            project_key = component_key.rsplit("_", 2)[0]
             sonar_tool = SonarQubeTool(
                 project_key=project_key, github_repo_id=github_repo_id
             )
@@ -181,7 +181,8 @@ def start_sonar_scan_for_version_commit(
         if state.phase == "SCANNING":
             worktree_path_str = state.meta["worktree_path"]
 
-            project_key = component_key.rsplit("_", 1)[0]
+            # Extract project_key from component_key: {repo}_{scenario}_{commit}
+            project_key = component_key.rsplit("_", 2)[0]
             sonar_tool = SonarQubeTool(
                 project_key=project_key, github_repo_id=github_repo_id
             )

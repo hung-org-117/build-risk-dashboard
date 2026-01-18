@@ -412,7 +412,7 @@ export function UnifiedBuildsTable({
       <CardHeader className="space-y-4">
         <div className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Pipeline Builds</CardTitle>
+            <CardTitle>Evaluation Builds</CardTitle>
             <CardDescription>
               All builds with ingestion, extraction, and prediction status
             </CardDescription>
@@ -565,8 +565,9 @@ export function UnifiedBuildsTable({
                             <span className="font-medium font-mono text-xs">
                               {build.ci_run_id || "—"}
                             </span>
-                            {/* Show Pending badge for builds ingested but not processed */}
-                            {build.ingestion_status === "ingested" &&
+                            {/* Show Pending badge for builds ingested or missing_resource but not processed */}
+                            {(build.ingestion_status === "ingested" ||
+                              build.ingestion_status === "missing_resource") &&
                               !build.training_build_id && (
                                 <Badge
                                   variant="outline"
