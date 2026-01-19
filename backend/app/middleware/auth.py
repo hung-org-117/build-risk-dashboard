@@ -63,8 +63,12 @@ async def get_current_user(
     try:
         user = db.users.find_one({"_id": ObjectId(user_id)})
         if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        # Check if user is banned
+        if user.get("is_banned", False):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account has been banned and you cannot access the application.",
             )
         return user
     except Exception as e:

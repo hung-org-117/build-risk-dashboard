@@ -65,6 +65,10 @@ export const adminUsersApi = {
     delete: async (userId: string): Promise<void> => {
         await api.delete(`/admin/users/${userId}`);
     },
+    unban: async (userId: string): Promise<UserAccount> => {
+        const response = await api.patch<UserAccount>(`/admin/users/${userId}/unban`);
+        return response.data;
+    },
 };
 
 // Admin Repos API

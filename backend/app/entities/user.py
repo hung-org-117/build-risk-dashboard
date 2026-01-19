@@ -33,6 +33,14 @@ class User(BaseEntity):
     github_accessible_repos: List[str] = Field(default_factory=list)
     github_repos_synced_at: Optional[datetime] = None
 
+    # Access control
+    is_banned: bool = Field(
+        default=False, description="Whether the user is banned (cannot log in)"
+    )
+    banned_at: Optional[datetime] = Field(
+        default=None, description="Timestamp when the user was banned"
+    )
+
     # Notification preferences
     browser_notifications: bool = Field(
         default=True, description="Enable browser notifications"

@@ -32,26 +32,18 @@ class AuthService:
     def __init__(self, db: Database):
         self.db = db
 
-    def initiate_github_login(
-        self, payload: GithubOAuthInitRequest
-    ) -> GithubAuthorizeResponse:
+    def initiate_github_login(self, payload: GithubOAuthInitRequest) -> GithubAuthorizeResponse:
         """Initiate GitHub OAuth flow by creating a state token."""
         oauth_state = create_oauth_state(self.db, redirect_url=payload.redirect_path)
         authorize_url = build_authorize_url(oauth_state["state"])
-        return GithubAuthorizeResponse(
-            authorize_url=authorize_url, state=oauth_state["state"]
-        )
+        return GithubAuthorizeResponse(authorize_url=authorize_url, state=oauth_state["state"])
 
-    async def handle_github_callback(
-        self, code: str, state: str
-    ) -> Tuple[str, str, str]:
+    async def handle_github_callback(self, code: str, state: str) -> Tuple[str, str, str]:
         """
         Handle GitHub OAuth callback, exchange code for token.
         Returns (access_token, refresh_token, redirect_path).
         """
-        identity_doc, redirect_path = await exchange_code_for_token(
-            self.db, code=code, state=state
-        )
+        identity_doc, redirect_path = await exchange_code_for_token(self.db, code=code, state=state)
         user_id = identity_doc.user_id
 
         # Create JWT access token with expiration matching configuration
@@ -102,6 +94,13 @@ class AuthService:
                     detail="User not found",
                 )
 
+            # Check if user is banned
+            if user.get("is_banned", False):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been banned and you cannot access the application.",
+                )
+
             new_access_token = create_access_token(subject=user_id)
 
             return TokenResponse(
@@ -120,9 +119,7 @@ class AuthService:
         user_id = user["_id"]
 
         # Get GitHub identity if exists
-        identity = self.db.oauth_identities.find_one(
-            {"user_id": user_id, "provider": "github"}
-        )
+        identity = self.db.oauth_identities.find_one({"user_id": user_id, "provider": "github"})
 
         github_info = GitHubInfo(connected=False)
 
@@ -143,9 +140,7 @@ class AuthService:
             email=user.get("email"),
             name=user.get("name"),
             role=user.get("role", "user"),
-            created_at=(
-                user.get("created_at").isoformat() if user.get("created_at") else None
-            ),
+            created_at=(user.get("created_at").isoformat() if user.get("created_at") else None),
             github=github_info,
         )
 
@@ -212,9 +207,7 @@ class AuthService:
         )
 
 
-def create_access_token(
-    subject: str | int, expires_delta: Optional[timedelta] = None
-) -> str:
+def create_access_token(subject: str | int, expires_delta: Optional[timedelta] = None) -> str:
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
@@ -229,9 +222,7 @@ def create_access_token(
     return token
 
 
-def create_refresh_token(
-    subject: str | int, expires_delta: Optional[timedelta] = None
-) -> str:
+def create_refresh_token(subject: str | int, expires_delta: Optional[timedelta] = None) -> str:
     if expires_delta is None:
         expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
@@ -248,9 +239,7 @@ def create_refresh_token(
 
 def decode_access_token(token: str) -> dict[str, Any]:
     try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
         # Validate token type
         if payload.get("type") != "access":
@@ -276,9 +265,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 def decode_refresh_token(token: str) -> dict[str, Any]:
     try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
         # Validate token type
         if payload.get("type") != "refresh":

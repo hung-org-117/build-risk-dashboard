@@ -31,6 +31,8 @@ class AdminUserService:
             name=user.name,
             role=user.role,
             created_at=user.created_at,
+            is_banned=getattr(user, "is_banned", False),
+            banned_at=getattr(user, "banned_at", None),
         )
 
     def list_users(
@@ -58,9 +60,7 @@ class AdminUserService:
             )
         return self._to_response(user)
 
-    def update_user(
-        self, user_id: str, payload: AdminUserUpdateRequest
-    ) -> AdminUserResponse:
+    def update_user(self, user_id: str, payload: AdminUserUpdateRequest) -> AdminUserResponse:
         """Update user profile."""
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
@@ -78,7 +78,7 @@ class AdminUserService:
         return self._to_response(user)
 
     def delete_user(self, user_id: str, current_admin_id: str) -> None:
-        """Delete user account (UC4: Delete User Account)."""
+        """Ban user account instead of hard delete (UC4: Delete User Account)."""
         # Prevent admin from deleting themselves
         if user_id == current_admin_id:
             raise HTTPException(
@@ -86,22 +86,48 @@ class AdminUserService:
                 detail="Cannot delete your own account",
             )
 
-        # Check if this would leave no admins
+        # Only allow banning regular users, not admins
         user = self.user_repo.find_by_id(ObjectId(user_id))
-        if user and user.role == "admin":
-            admin_count = self.user_repo.count_admins()
-            if admin_count <= 1:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot delete the last admin",
-                )
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
 
-        success = self.user_repo.delete_user(user_id)
+        if user.role == "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot ban admin users. Admins can only be deleted by other admins with proper permission.",
+            )
+
+        success = self.user_repo.ban_user(user_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found",
             )
 
-        # Also clean up OAuth identities for this user
+        # Optionally clean up OAuth identities to revoke access tokens
         self.oauth_identity_repo.delete_by_user_id(ObjectId(user_id))
+
+    def unban_user(self, user_id: str) -> AdminUserResponse:
+        """Unban a user to restore their login access."""
+        user = self.user_repo.find_by_id(ObjectId(user_id))
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
+        # Update to unban
+        updates = {
+            "is_banned": False,
+            "banned_at": None,
+        }
+        updated_user = self.user_repo.update_user(user_id, updates)
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to unban user",
+            )
+        return self._to_response(updated_user)

@@ -37,6 +37,8 @@ User Imports GitHub Repository
 └──────────────────────────────────────────┘
        │
        ▼
+       │
+       ▼
 ┌──────────────────────────────────────────┐
 │  PHASE 2: INGESTION                      │
 │  - Clone/update git repositories         │

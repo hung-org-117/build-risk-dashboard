@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Users, Trash2, Shield, User, RefreshCw, Mail, Search } from 'lucide-react'
+import { Users, Trash2, Shield, User, RefreshCw, Mail, Search, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -31,9 +31,13 @@ export default function AdminUsersPage() {
     const [page, setPage] = useState(1)
     const pageSize = 20
 
-    // Delete dialog state
-    const [deleteUserId, setDeleteUserId] = useState<string | null>(null)
-    const [isDeleting, setIsDeleting] = useState(false)
+    // Ban dialog state
+    const [banUserId, setBanUserId] = useState<string | null>(null)
+    const [banUserData, setBanUserData] = useState<UserAccount | null>(null)
+    const [isBanning, setIsBanning] = useState(false)
+    
+    // Admin ban warning state
+    const [showAdminWarning, setShowAdminWarning] = useState(false)
 
     const fetchCurrentUser = useCallback(async () => {
         try {
@@ -74,24 +78,49 @@ export default function AdminUsersPage() {
         fetchUsers()
     }, [fetchUsers])
 
-    const handleDeleteUser = async () => {
-        if (!deleteUserId) return
+    const handleBanUser = async () => {
+        if (!banUserId || !banUserData) return
 
-        setIsDeleting(true)
+        // Check if trying to ban an admin
+        if (banUserData.role === 'admin') {
+            setShowAdminWarning(true)
+            return
+        }
+
+        setIsBanning(true)
         try {
-            await adminUsersApi.delete(deleteUserId)
-            setDeleteUserId(null)
+            await adminUsersApi.delete(banUserId)
+            setBanUserId(null)
+            setBanUserData(null)
             fetchUsers()
-            toast({ title: 'Success', description: 'User deleted successfully' })
-        } catch (err) {
-            console.error('Failed to delete user:', err)
+            toast({ title: 'Success', description: 'User banned successfully' })
+        } catch (err: any) {
+            console.error('Failed to ban user:', err)
+            const errorMessage = err?.response?.status === 403 
+                ? 'Cannot ban admin users' 
+                : 'Failed to ban user'
             toast({
                 title: 'Error',
-                description: 'Failed to delete user',
+                description: errorMessage,
                 variant: 'destructive',
             })
         } finally {
-            setIsDeleting(false)
+            setIsBanning(false)
+        }
+    }
+
+    const handleUnbanUser = async (userId: string) => {
+        try {
+            await adminUsersApi.unban(userId)
+            fetchUsers()
+            toast({ title: 'Success', description: 'User unbanned successfully' })
+        } catch (err) {
+            console.error('Failed to unban user:', err)
+            toast({
+                title: 'Error',
+                description: 'Failed to unban user',
+                variant: 'destructive',
+            })
         }
     }
 
@@ -141,6 +170,23 @@ export default function AdminUsersPage() {
                     )}
                     {user.role}
                 </Badge>
+            ),
+        },
+        {
+            key: 'status',
+            header: 'Status',
+            render: (user) => (
+                <div className="flex items-center gap-2">
+                    {user.is_banned ? (
+                        <Badge variant="destructive" className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                            Banned
+                        </Badge>
+                    ) : (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                            Active
+                        </Badge>
+                    )}
+                </div>
             ),
         },
         {
@@ -208,15 +254,34 @@ export default function AdminUsersPage() {
                         itemName="users"
                         actions={(user) => (
                             user.id !== currentUserId ? (
-                                <div className="flex justify-end">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-destructive hover:text-destructive"
-                                        onClick={() => setDeleteUserId(user.id)}
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                <div className="flex justify-end gap-1">
+                                    {user.is_banned ? (
+                                        // Unban button for banned users
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                            onClick={() => handleUnbanUser(user.id)}
+                                            title="Restore user access"
+                                        >
+                                            <RefreshCw className="h-4 w-4" />
+                                        </Button>
+                                    ) : (
+                                        // Ban button for active users
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-900/20"
+                                            onClick={() => {
+                                                setBanUserData(user)
+                                                setBanUserId(user.id)
+                                                setShowAdminWarning(false)
+                                            }}
+                                            title="Ban user account"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    )}
                                 </div>
                             ) : null
                         )}
@@ -224,25 +289,52 @@ export default function AdminUsersPage() {
                 </CardContent>
             </Card>
 
-            {/* Delete User Confirmation Dialog */}
-            <Dialog open={!!deleteUserId} onOpenChange={() => setDeleteUserId(null)}>
+            {/* Ban User Confirmation Dialog */}
+            <Dialog open={!!banUserId && !showAdminWarning} onOpenChange={() => { setBanUserId(null); setBanUserData(null) }}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Delete User</DialogTitle>
+                        <DialogTitle>Ban User</DialogTitle>
                         <DialogDescription>
-                            Are you sure you want to delete this user? This action cannot be undone.
+                            This user will be banned and unable to log in. Their account and data will be preserved for audit purposes. You can unban them later if needed.
                         </DialogDescription>
                     </DialogHeader>
+                    {banUserData && (
+                        <div className="bg-muted/50 p-3 rounded-md text-sm">
+                            <p><strong>User:</strong> {banUserData.name || banUserData.email}</p>
+                            <p><strong>Email:</strong> {banUserData.email}</p>
+                            <p><strong>Role:</strong> {banUserData.role}</p>
+                        </div>
+                    )}
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setDeleteUserId(null)}>
+                        <Button variant="outline" onClick={() => { setBanUserId(null); setBanUserData(null) }}>
                             Cancel
                         </Button>
                         <Button
                             variant="destructive"
-                            onClick={handleDeleteUser}
-                            disabled={isDeleting}
+                            onClick={handleBanUser}
+                            disabled={isBanning}
                         >
-                            {isDeleting ? 'Deleting...' : 'Delete User'}
+                            {isBanning ? 'Banning...' : 'Ban User'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Admin Ban Warning Dialog */}
+            <Dialog open={showAdminWarning} onOpenChange={setShowAdminWarning}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <AlertCircle className="h-5 w-5 text-yellow-600" />
+                            Cannot Ban Admin User
+                        </DialogTitle>
+                        <DialogDescription>
+                            Only regular users can be banned. Admin users must be demoted to a regular user role first before banning.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => { setShowAdminWarning(false); setBanUserId(null); setBanUserData(null) }}>
+                            OK
                         </Button>
                     </DialogFooter>
                 </DialogContent>

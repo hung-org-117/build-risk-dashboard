@@ -51,6 +51,8 @@ class UserRepository(BaseRepository[User]):
             "name": name,
             "role": role,
             "created_at": now,
+            "is_banned": False,
+            "banned_at": None,
         }
         return self.insert_one(user_doc)
 
@@ -66,16 +68,25 @@ class UserRepository(BaseRepository[User]):
         )
         return User(**result) if result else None
 
-    def delete_user(self, user_id: str) -> bool:
-        """Delete a user by ID"""
+    def ban_user(self, user_id: str) -> bool:
+        """Soft-ban a user (disable login) instead of deleting."""
         from bson import ObjectId
 
-        result = self.collection.delete_one({"_id": ObjectId(user_id)})
-        return result.deleted_count > 0
+        result = self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {
+                "$set": {
+                    "is_banned": True,
+                    "banned_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        return result.modified_count > 0
 
     def count_admins(self) -> int:
-        """Count total admin users"""
-        return self.collection.count_documents({"role": "admin"})
+        """Count total admin users (excluding banned admins)"""
+        return self.collection.count_documents({"role": "admin", "is_banned": {"$ne": True}})
 
     def find_by_role(self, role: str) -> List[User]:
         """Find all users with a specific role."""
@@ -90,9 +101,7 @@ class UserRepository(BaseRepository[User]):
         """
         from bson import ObjectId
 
-        repo_oid = (
-            ObjectId(raw_repo_id) if isinstance(raw_repo_id, str) else raw_repo_id
-        )
+        repo_oid = ObjectId(raw_repo_id) if isinstance(raw_repo_id, str) else raw_repo_id
         return self.find_many({"github_accessible_repos": repo_oid})
 
     def update_settings(

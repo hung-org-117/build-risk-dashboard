@@ -76,7 +76,22 @@ def delete_user(
     db: Database = Depends(get_db),
     admin: dict = Depends(RequirePermission(Permission.MANAGE_USERS)),
 ):
-    """Delete user account (Admin only). UC4: Delete User Account"""
+    """Ban user account (soft delete - disable login). UC4: Delete User Account"""
     service = AdminUserService(db)
     current_admin_id = str(admin["_id"])
     service.delete_user(user_id, current_admin_id)
+
+
+@router.patch(
+    "/{user_id}/unban",
+    response_model=AdminUserResponse,
+    response_model_by_alias=False,
+)
+def unban_user(
+    user_id: str = Path(..., description="User ID"),
+    db: Database = Depends(get_db),
+    _admin: dict = Depends(RequirePermission(Permission.MANAGE_USERS)),
+):
+    """Unban a user to restore their login access."""
+    service = AdminUserService(db)
+    return service.unban_user(user_id)

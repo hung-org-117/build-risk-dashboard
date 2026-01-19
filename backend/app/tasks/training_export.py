@@ -31,6 +31,7 @@ from app.repositories.training_dataset_export import TrainingDatasetExportReposi
 from app.repositories.training_dataset_split import TrainingDatasetSplitRepository
 from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRepository
 from app.repositories.training_scenario import TrainingScenarioRepository
+from app.services.preprocessing_service import PreprocessingService
 from app.services.splitting_strategy_service import SplittingStrategyService
 from app.tasks.base import ExportTask, TaskState
 from app.tasks.shared.events import publish_export_updated
@@ -143,9 +144,7 @@ def generate_export_dataset(
         # STEP 2: Lazy Materialization
         # ======================================================================
         try:
-            df = _ensure_dataset_materialized(
-                scenario_id, self.db, correlation_id=correlation_id
-            )
+            df = _ensure_dataset_materialized(scenario_id, self.db, correlation_id=correlation_id)
         except Exception as e:
             logger.error(f"{corr_prefix} Failed to materialize dataset: {e}")
             export_repo.mark_failed(export_id, f"Materialization failed: {str(e)}")
@@ -176,6 +175,10 @@ def generate_export_dataset(
         splitting_service = SplittingStrategyService()
         splitting_config = export.splitting_config
 
+        # Initialize Preprocessing Service
+        preprocessing_config = export.preprocessing_config
+        preprocessor = PreprocessingService(config=preprocessing_config)
+
         # Delete old splits for this export (if regenerating)
         split_repo.delete_by_export(export_id)
 
@@ -205,6 +208,7 @@ def generate_export_dataset(
             logger.info(f"{corr_prefix} Using CV strategy, generating multiple folds")
 
             for fold in splitting_service.apply_cv(df, splitting_config, label_column):
+                # CV: Each fold fits independently on its Train set
                 fold_count += 1
                 fold_id = fold.fold_id
 
@@ -222,6 +226,11 @@ def generate_export_dataset(
                         continue
 
                     split_df = df.loc[indices]
+
+                    # Anti-Leakage: Fit on Train, Transform on Test/Val
+                    if split_type == "train":
+                        preprocessor.fit(split_df)
+                    split_df = preprocessor.transform(split_df)
 
                     # Track totals (for last fold stats)
                     if split_type == "train":
@@ -246,9 +255,7 @@ def generate_export_dataset(
                         # Filter metadata to only include integer values for group_distribution
                         # (entity requires Dict[str, int])
                         group_dist = {
-                            k: v
-                            for k, v in (fold.metadata or {}).items()
-                            if isinstance(v, int)
+                            k: v for k, v in (fold.metadata or {}).items() if isinstance(v, int)
                         }
 
                         split_repo.create_split(
@@ -258,9 +265,7 @@ def generate_export_dataset(
                             fold_id=fold_id,
                             record_count=len(split_df),
                             feature_count=len(split_df.columns),
-                            class_distribution={
-                                str(k): v for k, v in class_dist.items()
-                            },
+                            class_distribution={str(k): v for k, v in class_dist.items()},
                             group_distribution=group_dist,
                             file_path=str(file_path.relative_to(paths.DATA_DIR)),
                             file_size_bytes=file_size,
@@ -284,6 +289,11 @@ def generate_export_dataset(
                     continue
 
                 split_df = df.loc[indices]
+
+                # Anti-Leakage: Fit on Train, Transform on Test/Val
+                if split_type == "train":
+                    preprocessor.fit(split_df)
+                split_df = preprocessor.transform(split_df)
 
                 if split_type == "train":
                     total_train = len(split_df)
@@ -373,9 +383,7 @@ def generate_export_dataset(
 # ============================================================================
 
 
-def _ensure_dataset_materialized(
-    scenario_id: str, db, correlation_id: str = ""
-) -> pd.DataFrame:
+def _ensure_dataset_materialized(scenario_id: str, db, correlation_id: str = "") -> pd.DataFrame:
     """
     Ensure 'master_dataset.parquet' exists for the scenario.
     If not, materialize it by streaming data from MongoDB.
@@ -489,11 +497,7 @@ def _process_and_write_batch(
         return
 
     # Bulk fetch FeatureVectors
-    fv_ids = [
-        doc.get("feature_vector_id")
-        for doc in batch_docs
-        if doc.get("feature_vector_id")
-    ]
+    fv_ids = [doc.get("feature_vector_id") for doc in batch_docs if doc.get("feature_vector_id")]
     fvs = fv_repo.find_by_ids(list(map(str, fv_ids)))
     fv_map = {str(fv.id): fv for fv in fvs}
 

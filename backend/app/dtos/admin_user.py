@@ -16,6 +16,8 @@ class AdminUserResponse(BaseModel):
     name: Optional[str] = None
     role: Literal["admin", "user"]
     created_at: datetime
+    is_banned: bool = Field(default=False)
+    banned_at: Optional[datetime] = None
 
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 

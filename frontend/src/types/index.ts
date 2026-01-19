@@ -710,6 +710,8 @@ export interface UserAccount {
   email_notifications_enabled: boolean;
   subscriptions: Record<string, NotificationSubscription>;
   created_at: string;
+  is_banned?: boolean;
+  banned_at?: string | null;
   github?: {
     connected: boolean;
     login?: string;

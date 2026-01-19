@@ -23,6 +23,8 @@ class UserResponse(BaseModel):
     email_notifications_enabled: bool = False
     subscriptions: Dict[str, NotificationSubscriptionDto] = Field(default_factory=dict)
     created_at: datetime
+    is_banned: bool = Field(default=False, description="Whether the user is banned")
+    banned_at: Optional[datetime] = None
 
     model_config = ConfigDict(populate_by_name=True)
 
