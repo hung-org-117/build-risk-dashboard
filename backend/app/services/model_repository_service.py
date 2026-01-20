@@ -138,6 +138,22 @@ class RepositoryService:
                 github_metadata=repo_data,
             )
 
+            # Validate language support
+            from app.tasks.pipeline.feature_dag.languages.registry import LanguageRegistry
+
+            main_lang = repo_data.get("language")
+            supported_langs = LanguageRegistry.get_supported_languages()
+
+            # Case-insensitive check
+            if not main_lang or main_lang.lower() not in supported_langs:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Repository '{payload.full_name}' language '{main_lang}' is not supported. "
+                        f"Supported languages: {', '.join(supported_langs)}"
+                    ),
+                )
+
             from app.entities.model_repo_config import ModelRepoConfig
 
             # Check if repo already exists (with hard delete, this is simple)
@@ -215,6 +231,7 @@ class RepositoryService:
                             "owner": repo.get("owner", {}).get("login"),
                             "html_url": repo.get("html_url"),
                             "github_repo_id": repo.get("id"),
+                            "language": repo.get("language"),
                         }
                     )
         except Exception as e:
@@ -293,6 +310,7 @@ class RepositoryService:
                                 "owner": owner,
                                 "html_url": repo.get("html_url"),
                                 "github_repo_id": repo.get("id"),
+                                "language": repo.get("language"),
                             }
                         )
 
@@ -315,6 +333,7 @@ class RepositoryService:
                             "owner": owner,
                             "html_url": repo.get("html_url"),
                             "github_repo_id": repo.get("id"),
+                            "language": repo.get("language"),
                         }
                     )
         except Exception as e:
@@ -325,9 +344,7 @@ class RepositoryService:
             public_matches=public_matches,  # "Public GitHub Repositories"
         )
 
-    def get_repository_detail(
-        self, repo_id: str, current_user: dict
-    ) -> RepoDetailResponse:
+    def get_repository_detail(self, repo_id: str, current_user: dict) -> RepoDetailResponse:
         repo_doc = self.repo_config.find_by_id(ObjectId(repo_id))
         if not repo_doc:
             raise HTTPException(
@@ -400,9 +417,7 @@ class RepositoryService:
             )
 
         # Update status to queued/ingesting
-        self.repo_config.update_repository(
-            repo_id, {"status": ModelImportStatus.QUEUED.value}
-        )
+        self.repo_config.update_repository(repo_id, {"status": ModelImportStatus.QUEUED.value})
 
         # Trigger INGESTION only (not processing) with sync_until_existing mode
         ingest_model_builds.delay(
@@ -500,9 +515,7 @@ class RepositoryService:
             )
         )
         feature_vector_ids = [
-            b["feature_vector_id"]
-            for b in training_builds
-            if b.get("feature_vector_id")
+            b["feature_vector_id"] for b in training_builds if b.get("feature_vector_id")
         ]
 
         # Use transaction for atomic cascade deletion
@@ -511,34 +524,20 @@ class RepositoryService:
             audit_deleted = audit_log_repo.delete_by_raw_repo_id(
                 raw_repo_oid, AuditLogCategory.MODEL_TRAINING, session=session
             )
-            logger.info(
-                f"Deleted {audit_deleted} FeatureAuditLog for raw_repo {raw_repo_oid}"
-            )
+            logger.info(f"Deleted {audit_deleted} FeatureAuditLog for raw_repo {raw_repo_oid}")
 
             # 2. Delete FeatureVector documents (by feature_vector_ids)
             if feature_vector_ids:
-                fv_deleted = feature_vector_repo.delete_by_ids(
-                    feature_vector_ids, session=session
-                )
-                logger.info(
-                    f"Deleted {fv_deleted} FeatureVector for repo config {repo_id}"
-                )
+                fv_deleted = feature_vector_repo.delete_by_ids(feature_vector_ids, session=session)
+                logger.info(f"Deleted {fv_deleted} FeatureVector for repo config {repo_id}")
 
             # 3. Delete ModelImportBuild documents
-            import_deleted = import_build_repo.delete_by_repo_config(
-                repo_oid, session=session
-            )
-            logger.info(
-                f"Deleted {import_deleted} ModelImportBuild for repo config {repo_id}"
-            )
+            import_deleted = import_build_repo.delete_by_repo_config(repo_oid, session=session)
+            logger.info(f"Deleted {import_deleted} ModelImportBuild for repo config {repo_id}")
 
             # 4. Delete ModelTrainingBuild documents
-            training_deleted = training_build_repo.delete_by_repo_config(
-                repo_oid, session=session
-            )
-            logger.info(
-                f"Deleted {training_deleted} ModelTrainingBuild for repo config {repo_id}"
-            )
+            training_deleted = training_build_repo.delete_by_repo_config(repo_oid, session=session)
+            logger.info(f"Deleted {training_deleted} ModelTrainingBuild for repo config {repo_id}")
 
             # 5. Hard delete the config itself
             self.repo_config.hard_delete(repo_oid, session=session)
@@ -573,12 +572,8 @@ class RepositoryService:
             {"$match": {"model_repo_config_id": ObjectId(repo_id)}},
             {"$group": {"_id": "$extraction_status", "count": {"$sum": 1}}},
         ]
-        extraction_results = list(
-            training_build_repo.collection.aggregate(extraction_pipeline)
-        )
-        extraction_counts = {
-            r["_id"]: r["count"] for r in extraction_results if r["_id"]
-        }
+        extraction_results = list(training_build_repo.collection.aggregate(extraction_pipeline))
+        extraction_counts = {r["_id"]: r["count"] for r in extraction_results if r["_id"]}
 
         # Get prediction stats from training builds
         prediction_pipeline = [
@@ -609,17 +604,13 @@ class RepositoryService:
                 }
             },
         ]
-        prediction_results = list(
-            training_build_repo.collection.aggregate(prediction_pipeline)
-        )
+        prediction_results = list(training_build_repo.collection.aggregate(prediction_pipeline))
         prediction_stats = prediction_results[0] if prediction_results else {}
 
         with_prediction = prediction_stats.get("with_prediction", 0)
         prediction_failed = prediction_stats.get("prediction_failed", 0)
         total_processed = prediction_stats.get("total_processed", 0)
-        pending_prediction = max(
-            0, total_processed - with_prediction - prediction_failed
-        )
+        pending_prediction = max(0, total_processed - with_prediction - prediction_failed)
 
         # Get per-resource status summary (git_history, git_worktree, build_logs)
         resource_status_summary = import_build_repo.get_resource_status_summary(repo_id)
@@ -652,9 +643,7 @@ class RepositoryService:
             {"$limit": 1},
             {"$project": {"build_number": 1, "ci_run_id": "$raw_build.ci_run_id"}},
         ]
-        newest_processed = list(
-            training_build_repo.collection.aggregate(newest_processed_pipeline)
-        )
+        newest_processed = list(training_build_repo.collection.aggregate(newest_processed_pipeline))
         if newest_processed:
             last_processed_build_number = newest_processed[0].get("build_number")
             last_processed_ci_run_id = newest_processed[0].get("ci_run_id")
@@ -665,18 +654,14 @@ class RepositoryService:
         )
 
         # Count missing resource builds that can be retried (after checkpoint)
-        missing_resource_retryable = (
-            import_build_repo.count_missing_resource_after_checkpoint(
-                repo_id, last_checkpoint_id
-            )
+        missing_resource_retryable = import_build_repo.count_missing_resource_after_checkpoint(
+            repo_id, last_checkpoint_id
         )
 
         return {
             "repo_id": repo_id,
             "status": (
-                repo_doc.status.value
-                if hasattr(repo_doc.status, "value")
-                else repo_doc.status
+                repo_doc.status.value if hasattr(repo_doc.status, "value") else repo_doc.status
             ),
             # === CHECKPOINT INFO (simplified) ===
             "checkpoint": {
@@ -736,8 +721,8 @@ class RepositoryService:
             raise HTTPException(status_code=404, detail="Repository not found")
 
         import_build_repo = ModelImportBuildRepository(self.db)
-        missing_resource_builds = (
-            import_build_repo.get_missing_resource_builds_with_errors(repo_id, limit)
+        missing_resource_builds = import_build_repo.get_missing_resource_builds_with_errors(
+            repo_id, limit
         )
 
         return {
@@ -770,9 +755,7 @@ class RepositoryService:
                 stats = gh.list_languages(full_name) or {}
                 languages = [
                     lang.lower()
-                    for lang, _ in sorted(
-                        stats.items(), key=lambda kv: kv[1], reverse=True
-                    )[:5]
+                    for lang, _ in sorted(stats.items(), key=lambda kv: kv[1], reverse=True)[:5]
                 ]
         except Exception as e:
             logger.warning("Failed to detect languages for %s: %s", full_name, e)
@@ -819,9 +802,7 @@ class RepositoryService:
                         ]
                         results[full_name] = top_langs
                     except Exception as e:
-                        logger.warning(
-                            "Failed to detect languages for %s: %s", full_name, e
-                        )
+                        logger.warning("Failed to detect languages for %s: %s", full_name, e)
                         results[full_name] = []
         except Exception as e:
             logger.error(f"Batch language detection failed: {e}")
@@ -897,9 +878,7 @@ class RepositoryService:
         build_repo = ModelTrainingBuildRepository(self.db)
 
         # Get cursor for streaming
-        cursor = build_repo.get_for_export(
-            ObjectId(repo_id), start_date, end_date, build_status
-        )
+        cursor = build_repo.get_for_export(ObjectId(repo_id), start_date, end_date, build_status)
 
         # Get all feature keys for consistent CSV columns
         all_feature_keys = None
@@ -1001,9 +980,7 @@ class RepositoryService:
                 )
 
         build_repo = ModelTrainingBuildRepository(self.db)
-        total = build_repo.count_for_export(
-            ObjectId(repo_id), start_date, end_date, build_status
-        )
+        total = build_repo.count_for_export(ObjectId(repo_id), start_date, end_date, build_status)
 
         if total == 0:
             raise HTTPException(
@@ -1065,9 +1042,7 @@ class RepositoryService:
             "format": job.format,
             "total_rows": job.total_rows,
             "processed_rows": job.processed_rows,
-            "progress": (
-                job.processed_rows / job.total_rows * 100 if job.total_rows else 0
-            ),
+            "progress": (job.processed_rows / job.total_rows * 100 if job.total_rows else 0),
             "file_path": job.file_path,
             "file_size": job.file_size,
             "error_message": job.error_message,

@@ -552,6 +552,7 @@ export interface RepoSuggestion {
   owner?: string;
   html_url?: string;
   github_repo_id?: number;
+  language?: string;
 }
 
 export interface RepoSuggestionResponse {

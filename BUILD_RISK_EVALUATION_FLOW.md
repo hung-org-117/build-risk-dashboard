@@ -143,6 +143,26 @@ Minimal metrics shown on the admin widget:
 | `aggregate_fetch_results` | model_ingestion | 120s | Aggregate fetch results (chord callback) |
 | `handle_fetch_chord_error` | model_ingestion | 120s | Error handler cho fetch chord failures |
 
+### 1.1.1 Supported Languages
+
+Feature extraction chỉ hỗ trợ các ngôn ngữ sau:
+
+| Language | Strategy Class |
+|----------|---------------|
+| `python` | PythonStrategy |
+| `java` | JavaStrategy |
+| `ruby` | RubyStrategy |
+| `javascript` | JavascriptStrategy |
+| `typescript` | JavascriptStrategy |
+| `go` | GoStrategy |
+| `cpp` | CppStrategy |
+
+> [!IMPORTANT]
+> Khi import repository, hệ thống kiểm tra `main_lang` của repository từ GitHub API.
+> Nếu main language không nằm trong danh sách supported languages → trả về lỗi **ngay lập tức**, không tiến hành import.
+
+**File**: [backend/app/tasks/pipeline/feature_dag/languages/registry.py](backend/app/tasks/pipeline/feature_dag/languages/registry.py)
+
 ### 1.2 Import Flow Diagram
 
 ```
@@ -152,6 +172,10 @@ User clicks "Import Repository"
 bulk_import_repositories (API)
 │
 ├─ Verify repo on GitHub API
+├─ Get main_lang from GitHub metadata
+├─ ❌ CHECK: main_lang in SUPPORTED_LANGUAGES?
+│   └─ NO → Return error: "Language '{main_lang}' is not supported"
+│   └─ YES → Continue
 ├─ Create/Update RawRepository
 ├─ Create ModelRepoConfig (status=QUEUED)
 └─ Dispatch start_model_processing

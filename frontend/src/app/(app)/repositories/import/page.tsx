@@ -34,6 +34,9 @@ import {
     RepoSuggestion
 } from "@/types";
 
+import { useToast } from "@/components/ui/use-toast";
+import { featuresApi } from "@/lib/api/features";
+
 import { useRepoLanguages } from "@/hooks/use-repo-languages";
 
 import { useFeatureSelector } from "@/components/features";
@@ -66,6 +69,16 @@ export default function ImportRepositoriesPage() {
     >({});
     const [importing, setImporting] = useState(false);
     const [activeRepo, setActiveRepo] = useState<string | null>(null);
+
+    // Supported Languages Validation
+    const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
+    const { toast } = useToast();
+
+    useEffect(() => {
+        featuresApi.getConfig().then(data => {
+            setSupportedLanguages(data.languages.map(l => l.toLowerCase()));
+        }).catch(err => console.error("Failed to fetch supported languages", err));
+    }, []);
 
 
     // Feature Selector Hook
@@ -173,13 +186,38 @@ export default function ImportRepositoriesPage() {
         setImporting(true);
 
         try {
+            // Filter out unsupported repositories
+            const validRepos = selectedList.filter(repo => {
+                if (!repo.language) return false; // Strict: requires language
+                const lang = repo.language.toLowerCase();
+                return supportedLanguages.includes(lang);
+            });
+
+            if (validRepos.length === 0) {
+                toast({
+                    title: "No valid repositories",
+                    description: "None of the selected repositories use a supported language.",
+                    variant: "destructive",
+                });
+                setImporting(false);
+                return;
+            }
+
+            if (validRepos.length < selectedList.length) {
+                toast({
+                    title: "Some repositories skipped",
+                    description: `${selectedList.length - validRepos.length} repositories were skipped because their language is not supported.`,
+                    variant: "default", // or warning if available, default is neutral 
+                });
+            }
+
             // Prepare global configs including all selected features
             const finalGlobalConfig: Record<string, any> = { ...featureConfigs.global };
 
             // Get selected features for backend
             const featureIds = Array.from(featureSelector.selectedFeatures);
 
-            const payloads: RepoImportPayload[] = selectedList.map((repo) => {
+            const payloads: RepoImportPayload[] = validRepos.map((repo) => {
                 const repoId = String(repo.github_repo_id);
                 const baseConfig = baseConfigs[repoId];
                 const dynamicRepoConfig = featureConfigs.repos[repoId] || {};
@@ -204,6 +242,11 @@ export default function ImportRepositoriesPage() {
             router.push("/repositories?imported=true");
         } catch (err: unknown) {
             console.error(err);
+            toast({
+                title: "Import failed",
+                description: "An error occurred while importing repositories.",
+                variant: "destructive",
+            });
         } finally {
             setImporting(false);
         }
@@ -284,6 +327,7 @@ export default function ImportRepositoriesPage() {
                         />
                     ) : (
                         <ConfigurationStep
+                            supportedLanguages={supportedLanguages}
                             selectedList={selectedList}
                             activeRepo={activeRepo}
                             setActiveRepo={setActiveRepo}
@@ -459,7 +503,9 @@ interface Step2Props {
 }
 
 // Step 3 Content (was Step 2)
-interface ConfigurationStepProps extends Step2Props { }
+interface ConfigurationStepProps extends Step2Props {
+    supportedLanguages: string[];
+}
 
 function ConfigurationStep({
     selectedList,
@@ -472,7 +518,13 @@ function ConfigurationStep({
     setFeatureConfigs,
     repoLanguages,
     templateApplied,
+    supportedLanguages,
 }: ConfigurationStepProps) {
+    // Validate active repo
+    const currentRepo = selectedList.find(r => String(r.github_repo_id) === activeRepo);
+    const currentLang = currentRepo?.language?.toLowerCase();
+    const isSupported = currentLang ? supportedLanguages.includes(currentLang) : false;
+
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
             <div className="flex items-center gap-2 text-sm text-muted-foreground pb-2">
@@ -481,24 +533,38 @@ function ConfigurationStep({
             </div>
             {/* Repo Tabs */}
             <div className="flex gap-2 overflow-x-auto pb-2">
-                {selectedList.map((repo) => (
-                    <button
-                        key={repo.github_repo_id}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeRepo === String(repo.github_repo_id)
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted hover:bg-muted/80"
-                            }`}
-                        onClick={() => setActiveRepo(String(repo.github_repo_id))}
-                    >
-                        {repo.full_name.split("/")[1]}
-                    </button>
-                ))}
+                {selectedList.map((repo) => {
+                    const langCalls = repo.language?.toLowerCase();
+                    const supported = langCalls ? supportedLanguages.includes(langCalls) : false;
+
+                    return (
+                        <button
+                            key={repo.github_repo_id}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${activeRepo === String(repo.github_repo_id)
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted hover:bg-muted/80"
+                                } ${!supported ? "opacity-70" : ""}`}
+                            onClick={() => setActiveRepo(String(repo.github_repo_id))}
+                        >
+                            {repo.full_name.split("/")[1]}
+                            {!supported && (
+                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-destructive/10 text-destructive text-[10px] font-bold">!</span>
+                            )}
+                        </button>
+                    );
+                })}
             </div>
 
-            {activeRepo && (
+            {activeRepo && currentRepo && (
                 <div className="space-y-6">
-                    {/* Base Config */}
-                    <Card>
+                    {!isSupported && (
+                        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive font-medium">
+                            Language &apos;{currentRepo.language || "unknown"}&apos; is not supported. This repository will be skipped during import.
+                        </div>
+                    )}
+
+                    {/* Base Config - Disable if not supported */}
+                    <Card className={!isSupported ? "opacity-50 pointer-events-none" : ""}>
                         <CardHeader className="pb-4">
                             <CardTitle className="text-base">Import Settings</CardTitle>
                         </CardHeader>
@@ -507,6 +573,7 @@ function ConfigurationStep({
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">CI Provider</label>
                                     <Select
+                                        disabled={!isSupported}
                                         value={baseConfigs[activeRepo]?.ci_provider || CIProvider.GITHUB_ACTIONS}
                                         onValueChange={(val) => setBaseConfigs(prev => ({
                                             ...prev,
@@ -526,6 +593,7 @@ function ConfigurationStep({
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">Max Builds</label>
                                     <Input
+                                        disabled={!isSupported}
                                         type="number"
                                         placeholder="Unlimited"
                                         min={1}
@@ -539,6 +607,7 @@ function ConfigurationStep({
                                 <div className="space-y-2">
                                     <label className="text-sm font-medium">Since Days</label>
                                     <Input
+                                        disabled={!isSupported}
                                         type="number"
                                         placeholder="Unlimited"
                                         min={1}
@@ -554,7 +623,7 @@ function ConfigurationStep({
                     </Card>
 
                     {/* Feature Config - only render after template is applied */}
-                    {templateApplied && (
+                    {templateApplied && isSupported && (
                         <FeatureConfigForm
                             selectedFeatures={featureFormFeatures}
                             repos={featureFormRepos}
