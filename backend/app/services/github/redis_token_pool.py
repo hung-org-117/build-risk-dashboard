@@ -253,6 +253,9 @@ class RedisTokenPool:
                 f"{KEY_STATS}:{token_hash}", "status", TOKEN_STATUS_RATE_LIMITED
             )
         else:
+            # Clear cooldown if it exists - this ensures tokens can be acquired
+            # after rate limit resets or when manually synced
+            self._redis.delete(f"{KEY_COOLDOWN}:{token_hash}")
             self._redis.hset(f"{KEY_STATS}:{token_hash}", "status", TOKEN_STATUS_ACTIVE)
 
     def update_rate_limit_from_headers(

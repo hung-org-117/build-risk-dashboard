@@ -41,10 +41,7 @@ from pymongo.database import Database
 from app.config import settings
 from app.core.tracing import TracingContext
 from app.database.mongo import get_database
-from app.services.github.exceptions import (
-    GithubAllRateLimitError,
-    GithubRetryableError,
-)
+from app.services.github.exceptions import GithubAllRateLimitError, GithubRetryableError
 
 logger = logging.getLogger(__name__)
 
@@ -475,33 +472,21 @@ class SafeTask(PipelineTask):
             raise self.retry(countdown=self.soft_retry_delay, exc=e)
 
         except TransientError as e:
-            # Transient - check if retries available
-            attempt = getattr(self.request, "retries", 0)
-            if self.max_retries == 0 or attempt >= self.max_retries:
-                logger.error(f"{log_prefix} TransientError, no retries left: {e}")
-                if mark_failed_fn:
-                    try:
-                        mark_failed_fn(e)
-                    except Exception as mark_exc:
-                        logger.warning(
-                            f"{log_prefix} Failed to mark failed: {mark_exc}"
-                        )
-                if cleanup_fn:
-                    self._safe_cleanup(cleanup_fn, state, log_prefix)
-                raise
-
-            # Retry available - checkpoint, cleanup, retry with backoff
-            delay = compute_backoff(
-                attempt, base=self.transient_retry_base, cap=self.transient_retry_cap
+            # Transient - use unified retryable error handler
+            self._handle_retryable_error(
+                exc=e,
+                state=state,
+                log_prefix=log_prefix,
+                error_type=f"TransientError, phase={state.phase}",
+                save_state_fn=save_state_fn,
+                mark_failed_fn=mark_failed_fn,
+                cleanup_fn=cleanup_fn,
+                delay_fn=lambda attempt: compute_backoff(
+                    attempt,
+                    base=self.transient_retry_base,
+                    cap=self.transient_retry_cap,
+                ),
             )
-            logger.info(
-                f"{log_prefix} TransientError, phase={state.phase}, retry in {delay}s: {e}"
-            )
-            if save_state_fn:
-                save_state_fn(state)
-            if cleanup_fn:
-                self._safe_cleanup(cleanup_fn, state, log_prefix)
-            raise self.retry(countdown=delay, exc=e)
 
         except Retry:
             # Celery internal - re-raise
@@ -533,34 +518,55 @@ class SafeTask(PipelineTask):
                 self._safe_cleanup(cleanup_fn, state, log_prefix)
             raise
 
+        except GithubAllRateLimitError as e:
+            # All tokens exhausted - checkpoint and re-raise
+            # PipelineTask handles retry with proper countdown
+            logger.warning(
+                f"{log_prefix} All GitHub tokens rate limited, will retry: {e}"
+            )
+            self._checkpoint_and_cleanup(save_state_fn, cleanup_fn, state, log_prefix)
+            raise
+
+        except GithubRetryableError as e:
+            # GitHub API transient error - use unified retryable error handler
+            self._handle_retryable_error(
+                exc=e,
+                state=state,
+                log_prefix=log_prefix,
+                error_type="GithubRetryableError",
+                save_state_fn=save_state_fn,
+                mark_failed_fn=mark_failed_fn,
+                cleanup_fn=cleanup_fn,
+                delay_fn=lambda attempt: compute_backoff(
+                    attempt,
+                    base=self.transient_retry_base,
+                    cap=self.transient_retry_cap,
+                ),
+            )
+
         except Exception as e:
             # Unknown exception
             logger.exception(f"{log_prefix} Unexpected error, phase={state.phase}")
             if fail_on_unknown:
                 # Treat as permanent
-                if mark_failed_fn:
-                    try:
-                        mark_failed_fn(e)
-                    except Exception as mark_exc:
-                        logger.warning(
-                            f"{log_prefix} Failed to mark failed: {mark_exc}"
-                        )
-                if cleanup_fn:
-                    self._safe_cleanup(cleanup_fn, state, log_prefix)
+                self._mark_and_cleanup(mark_failed_fn, cleanup_fn, state, log_prefix, e)
                 raise
             else:
-                # Treat as transient - retry
-                attempt = getattr(self.request, "retries", 0)
-                delay = compute_backoff(
-                    attempt,
-                    base=self.transient_retry_base,
-                    cap=self.transient_retry_cap,
+                # Treat as transient - use unified retryable error handler
+                self._handle_retryable_error(
+                    exc=e,
+                    state=state,
+                    log_prefix=log_prefix,
+                    error_type="UnknownError (treating as transient)",
+                    save_state_fn=save_state_fn,
+                    mark_failed_fn=mark_failed_fn,
+                    cleanup_fn=cleanup_fn,
+                    delay_fn=lambda attempt: compute_backoff(
+                        attempt,
+                        base=self.transient_retry_base,
+                        cap=self.transient_retry_cap,
+                    ),
                 )
-                if save_state_fn:
-                    save_state_fn(state)
-                if cleanup_fn:
-                    self._safe_cleanup(cleanup_fn, state, log_prefix)
-                raise self.retry(countdown=delay, exc=e)
 
     def _safe_cleanup(
         self, cleanup_fn: Callable[[TaskState], None], state: TaskState, log_prefix: str
@@ -570,6 +576,72 @@ class SafeTask(PipelineTask):
             cleanup_fn(state)
         except Exception as cleanup_exc:
             logger.warning(f"{log_prefix} Cleanup failed: {cleanup_exc}")
+
+    def _mark_and_cleanup(
+        self,
+        mark_fn: Callable[[Exception], None] | None,
+        cleanup_fn: Callable[[TaskState], None] | None,
+        state: TaskState,
+        log_prefix: str,
+        exc: Exception,
+    ) -> None:
+        """Call mark_failed_fn and cleanup_fn safely."""
+        if mark_fn:
+            try:
+                mark_fn(exc)
+            except Exception as mark_exc:
+                logger.warning(f"{log_prefix} Failed to mark failed: {mark_exc}")
+        if cleanup_fn:
+            self._safe_cleanup(cleanup_fn, state, log_prefix)
+
+    def _checkpoint_and_cleanup(
+        self,
+        save_state_fn: Callable[[TaskState], None] | None,
+        cleanup_fn: Callable[[TaskState], None] | None,
+        state: TaskState,
+        log_prefix: str,
+    ) -> None:
+        """Checkpoint state and cleanup before retry."""
+        if save_state_fn:
+            save_state_fn(state)
+        if cleanup_fn:
+            self._safe_cleanup(cleanup_fn, state, log_prefix)
+
+    def _handle_retryable_error(
+        self,
+        exc: Exception,
+        state: TaskState,
+        log_prefix: str,
+        error_type: str,
+        save_state_fn: Callable[[TaskState], None] | None,
+        mark_failed_fn: Callable[[Exception], None] | None,
+        cleanup_fn: Callable[[TaskState], None] | None,
+        delay_fn: Callable[[int], int],
+    ) -> None:
+        """
+        Unified handler for retryable errors.
+
+        Args:
+            exc: The exception that was raised
+            state: Current task state
+            log_prefix: Logging prefix
+            error_type: Human-readable error type for logging
+            save_state_fn: Function to checkpoint state
+            mark_failed_fn: Function to mark job as failed
+            cleanup_fn: Function to cleanup partial work
+            delay_fn: Function(attempt) -> delay_seconds
+        """
+        attempt = getattr(self.request, "retries", 0)
+
+        if self.max_retries == 0 or attempt >= self.max_retries:
+            logger.error(f"{log_prefix} {error_type}, no retries left: {exc}")
+            self._mark_and_cleanup(mark_failed_fn, cleanup_fn, state, log_prefix, exc)
+            raise exc
+
+        delay = delay_fn(attempt)
+        logger.info(f"{log_prefix} {error_type}, retry in {delay}s: {exc}")
+        self._checkpoint_and_cleanup(save_state_fn, cleanup_fn, state, log_prefix)
+        raise self.retry(countdown=delay, exc=exc)
 
 
 # =============================================================================
