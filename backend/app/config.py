@@ -66,15 +66,9 @@ class Settings(BaseSettings):
     INGESTION_BUILDS_PER_PAGE: int = 40  # Builds fetched per API page
     INGESTION_WORKTREES_PER_CHUNK: int = 20  # Worktrees created per task
     INGESTION_LOGS_PER_CHUNK: int = 20  # Logs downloaded per task
-    INGESTION_IMPORT_BUILDS_PER_CHUNK: int = (
-        1000  # Import builds created per bulk insert
-    )
-    INGESTION_BUILDS_QUERY_LIMIT: int = (
-        5000  # Max builds loaded per DB query (pagination)
-    )
-    INGESTION_REPOS_PER_BATCH: int = (
-        10  # Repos dispatched per batch (for large datasets)
-    )
+    INGESTION_IMPORT_BUILDS_PER_CHUNK: int = 1000  # Import builds created per bulk insert
+    INGESTION_BUILDS_QUERY_LIMIT: int = 5000  # Max builds loaded per DB query (pagination)
+    INGESTION_REPOS_PER_BATCH: int = 10  # Repos dispatched per batch (for large datasets)
 
     # --- Processing Phase (feature extraction) ---
     PROCESSING_BUILDS_PER_BATCH: int = 20  # Builds processed per enrichment batch
@@ -94,6 +88,10 @@ class Settings(BaseSettings):
     # --- Scanning Phase (Trivy, SonarQube) ---
     SCAN_BUILDS_PER_QUERY: int = 200  # Builds fetched per paginated query
     SCAN_COMMITS_PER_BATCH: int = 5  # Commits dispatched per batch task
+    SCAN_DISPATCH_DELAY_SECONDS: float = 0.5  # Delay between scan dispatches (rate limiting)
+
+    # --- Export Settings ---
+    MIN_EXPORT_DISK_SPACE_BYTES: int = 1 * 1024 * 1024 * 1024  # 1GB minimum free space
 
     # --- Rate Limiting (GitHub API) ---
     GITHUB_API_RATE_PER_SECOND: float = 100.0  # Sustained request rate

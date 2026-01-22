@@ -15,6 +15,7 @@ The key difference from the old flow:
 """
 
 import logging
+import shutil
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -24,6 +25,7 @@ import pyarrow.parquet as pq
 
 from app import paths
 from app.celery_app import celery_app
+from app.config import settings
 from app.entities.enums import ExtractionStatus
 from app.entities.training_dataset_export import ExportStatus
 from app.repositories.feature_vector import FeatureVectorRepository
@@ -33,10 +35,40 @@ from app.repositories.training_enrichment_build import TrainingEnrichmentBuildRe
 from app.repositories.training_scenario import TrainingScenarioRepository
 from app.services.preprocessing_service import PreprocessingService
 from app.services.splitting_strategy_service import SplittingStrategyService
-from app.tasks.base import ExportTask, TaskState
+from app.tasks.base import DistributedLock, ExportTask, TaskState
 from app.tasks.shared.events import publish_export_updated
 
 logger = logging.getLogger(__name__)
+
+
+def _check_disk_space(target_path: str, min_bytes: int | None = None) -> bool:
+    """
+    Check if target path has sufficient disk space.
+
+    Args:
+        target_path: Directory path to check
+        min_bytes: Minimum required free bytes (default: from settings)
+
+    Returns:
+        True if sufficient space, False otherwise
+
+    Raises:
+        OSError: If path does not exist or cannot be accessed
+    """
+    try:
+        if min_bytes is None:
+            min_bytes = settings.MIN_EXPORT_DISK_SPACE_BYTES
+        usage = shutil.disk_usage(target_path)
+        return usage.free >= min_bytes
+    except OSError:
+        # Path doesn't exist yet, check parent
+        from pathlib import Path
+
+        parent = Path(target_path).parent
+        if parent.exists():
+            usage = shutil.disk_usage(str(parent))
+            return usage.free >= min_bytes
+        return True  # Assume sufficient if we can't check
 
 
 def _create_export_failure_handler(export_id: str, scenario_id: str, db):
@@ -129,247 +161,276 @@ def generate_export_dataset(
         if not scenario:
             return {"status": "error", "error": "Scenario not found"}
 
-        # Update export status to GENERATING
-        export_repo.update_status(export_id, ExportStatus.GENERATING)
+        # PRE-EXPORT VALIDATIONS (Added for robustness)
 
-        # Publish SSE event for GENERATING status
-        publish_export_updated(
-            scenario_id=scenario_id,
-            export_id=export_id,
-            status="generating",
-            name=export.name,
-        )
+        # Check disk space before proceeding
+        output_dir = paths.get_training_dataset_dir(scenario_id)
+        if not _check_disk_space(str(output_dir)):
+            error_msg = (
+                f"Insufficient disk space. At least "
+                f"{settings.MIN_EXPORT_DISK_SPACE_BYTES / (1024**3):.0f}GB required."
+            )
+            logger.error(f"{corr_prefix} {error_msg}")
+            export_repo.mark_failed(export_id, error_msg)
+            publish_export_updated(
+                scenario_id=scenario_id,
+                export_id=export_id,
+                status="failed",
+                error=error_msg,
+            )
+            return {"status": "error", "error": error_msg}
 
-        # ======================================================================
-        # STEP 2: Lazy Materialization
-        # ======================================================================
+        # Acquire export lock to prevent concurrent exports to same scenario
+        # This prevents conflicts when multiple exports try to create/read
+        # the master_dataset.parquet simultaneously
         try:
-            df = _ensure_dataset_materialized(scenario_id, self.db, correlation_id=correlation_id)
-        except Exception as e:
-            logger.error(f"{corr_prefix} Failed to materialize dataset: {e}")
-            export_repo.mark_failed(export_id, f"Materialization failed: {str(e)}")
-            publish_export_updated(
-                scenario_id=scenario_id,
-                export_id=export_id,
-                status="failed",
-                error=f"Materialization failed: {str(e)}",
-            )
-            raise e
+            with DistributedLock(
+                self.redis,
+                f"export:scenario:{scenario_id}",
+                ttl_seconds=720,  # Match task time_limit
+                retry_times=5,
+                retry_delay=2.0,
+            ):
+                # Update export status to GENERATING (inside lock)
+                export_repo.update_status(export_id, ExportStatus.GENERATING)
 
-        if df.empty:
-            logger.warning(f"{corr_prefix} Master dataset is empty")
-            export_repo.mark_failed(export_id, "Master dataset is empty")
-            publish_export_updated(
-                scenario_id=scenario_id,
-                export_id=export_id,
-                status="failed",
-                error="Master dataset is empty",
-            )
-            return {"status": "error", "error": "Master dataset is empty"}
+                # Publish SSE event for GENERATING status
+                publish_export_updated(
+                    scenario_id=scenario_id,
+                    export_id=export_id,
+                    status="generating",
+                    name=export.name,
+                )
 
-        logger.info(f"{corr_prefix} Loaded master dataset with {len(df)} rows")
+                # STEP 2: Lazy Materialization
+                df = _ensure_dataset_materialized(
+                    scenario_id, self.db, correlation_id=correlation_id
+                )
 
-        # ======================================================================
-        # STEP 3: Apply Splitting (Single-Split or CV)
-        # ======================================================================
-        splitting_service = SplittingStrategyService()
-        splitting_config = export.splitting_config
-
-        # Initialize Preprocessing Service
-        preprocessing_config = export.preprocessing_config
-        preprocessor = PreprocessingService(config=preprocessing_config)
-
-        # Delete old splits for this export (if regenerating)
-        split_repo.delete_by_export(export_id)
-
-        # Create base output directory
-        output_dir = paths.get_training_dataset_dir(scenario_id) / export_id
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Determine export formats from output config
-        output_config = export.output_config
-        # OutputConfig has 'format' (singular), wrap in list for iteration
-        export_formats = [output_config.format] if output_config else ["parquet"]
-
-        start_time = datetime.utcnow()
-        total_train = 0
-        total_val = 0
-        total_test = 0
-        fold_count = 0
-
-        # Check if CV strategy
-        is_cv = splitting_service.is_cv_strategy(splitting_config)
-
-        # Label column: build_status_num (0=passed, 1=failed)
-        label_column = "build_status_num"
-
-        if is_cv:
-            # ====== CV MODE: Generate multiple folds ======
-            logger.info(f"{corr_prefix} Using CV strategy, generating multiple folds")
-
-            for fold in splitting_service.apply_cv(df, splitting_config, label_column):
-                # CV: Each fold fits independently on its Train set
-                fold_count += 1
-                fold_id = fold.fold_id
-
-                # Create fold directory
-                fold_dir = output_dir / fold_id
-                fold_dir.mkdir(parents=True, exist_ok=True)
-
-                # Export train/val/test for this fold
-                for split_type, indices in [
-                    ("train", fold.train_indices),
-                    ("validation", fold.val_indices),
-                    ("test", fold.test_indices),
-                ]:
-                    if not indices:
-                        continue
-
-                    split_df = df.loc[indices]
-
-                    # Anti-Leakage: Fit on Train, Transform on Test/Val
-                    if split_type == "train":
-                        preprocessor.fit(split_df)
-                    split_df = preprocessor.transform(split_df)
-
-                    # Track totals (for last fold stats)
-                    if split_type == "train":
-                        total_train = len(split_df)
-                    elif split_type == "validation":
-                        total_val = len(split_df)
-                    else:
-                        total_test = len(split_df)
-
-                    # Export in each format
-                    for fmt in export_formats:
-                        file_path = fold_dir / f"{split_type}.{fmt}"
-
-                        if fmt == "parquet":
-                            split_df.to_parquet(file_path, index=False)
-                        else:
-                            split_df.to_csv(file_path, index=False)
-
-                        file_size = file_path.stat().st_size
-                        class_dist = split_df[label_column].value_counts().to_dict()
-
-                        # Filter metadata to only include integer values for group_distribution
-                        # (entity requires Dict[str, int])
-                        group_dist = {
-                            k: v for k, v in (fold.metadata or {}).items() if isinstance(v, int)
-                        }
-
-                        split_repo.create_split(
-                            export_id=export_id,
-                            scenario_id=scenario_id,
-                            split_type=split_type,
-                            fold_id=fold_id,
-                            record_count=len(split_df),
-                            feature_count=len(split_df.columns),
-                            class_distribution={str(k): v for k, v in class_dist.items()},
-                            group_distribution=group_dist,
-                            file_path=str(file_path.relative_to(paths.DATA_DIR)),
-                            file_size_bytes=file_size,
-                            file_format=fmt,
-                            feature_names=list(split_df.columns),
-                            generation_duration_seconds=0,
-                        )
-
-                logger.info(f"{corr_prefix} Generated fold {fold_count}: {fold_id}")
-
-        else:
-            # ====== SINGLE-SPLIT MODE ======
-            result = splitting_service.apply_split(df, splitting_config, label_column)
-
-            for split_type, indices in [
-                ("train", result.train_indices),
-                ("validation", result.val_indices),
-                ("test", result.test_indices),
-            ]:
-                if not indices:
-                    continue
-
-                split_df = df.loc[indices]
-
-                # Anti-Leakage: Fit on Train, Transform on Test/Val
-                if split_type == "train":
-                    preprocessor.fit(split_df)
-                split_df = preprocessor.transform(split_df)
-
-                if split_type == "train":
-                    total_train = len(split_df)
-                elif split_type == "validation":
-                    total_val = len(split_df)
-                else:
-                    total_test = len(split_df)
-
-                for fmt in export_formats:
-                    file_path = output_dir / f"{split_type}.{fmt}"
-
-                    if fmt == "parquet":
-                        split_df.to_parquet(file_path, index=False)
-                    else:
-                        split_df.to_csv(file_path, index=False)
-
-                    file_size = file_path.stat().st_size
-                    class_dist = split_df[label_column].value_counts().to_dict()
-
-                    split_repo.create_split(
-                        export_id=export_id,
+                if df.empty:
+                    logger.warning(f"{corr_prefix} Master dataset is empty")
+                    export_repo.mark_failed(export_id, "Master dataset is empty")
+                    publish_export_updated(
                         scenario_id=scenario_id,
-                        split_type=split_type,
-                        fold_id=None,
-                        record_count=len(split_df),
-                        feature_count=len(split_df.columns),
-                        class_distribution={str(k): v for k, v in class_dist.items()},
-                        group_distribution={},
-                        file_path=str(file_path.relative_to(paths.DATA_DIR)),
-                        file_size_bytes=file_size,
-                        file_format=fmt,
-                        feature_names=list(split_df.columns),
-                        generation_duration_seconds=0,
+                        export_id=export_id,
+                        status="failed",
+                        error="Master dataset is empty",
                     )
+                    return {"status": "error", "error": "Master dataset is empty"}
 
-        total_duration = (datetime.utcnow() - start_time).total_seconds()
+                logger.info(f"{corr_prefix} Loaded master dataset with {len(df)} rows")
 
-        # Mark export as completed
-        export_repo.mark_completed(
-            export_id=export_id,
-            train_count=total_train,
-            val_count=total_val,
-            test_count=total_test,
-            feature_count=len(df.columns),
-            generation_duration_seconds=total_duration,
-        )
+                # ==============================================================
+                splitting_service = SplittingStrategyService()
+                splitting_config = export.splitting_config
 
-        # Publish SSE event for COMPLETED status
-        publish_export_updated(
-            scenario_id=scenario_id,
-            export_id=export_id,
-            status="completed",
-            name=export.name,
-            train_count=total_train,
-            val_count=total_val,
-            test_count=total_test,
-            fold_count=fold_count if is_cv else 1,
-            feature_count=len(df.columns),
-            generation_duration_seconds=total_duration,
-        )
+                # Initialize Preprocessing Service
+                preprocessing_config = export.preprocessing_config
+                preprocessor = PreprocessingService(config=preprocessing_config)
 
-        logger.info(
-            f"{corr_prefix} Completed: folds={fold_count if is_cv else 1}, "
-            f"train={total_train}, val={total_val}, test={total_test}"
-        )
+                # Delete old splits for this export (if regenerating)
+                split_repo.delete_by_export(export_id)
 
-        return {
-            "status": "completed",
-            "export_id": export_id,
-            "is_cv": is_cv,
-            "fold_count": fold_count if is_cv else 1,
-            "train_count": total_train,
-            "val_count": total_val,
-            "test_count": total_test,
-            "duration_seconds": total_duration,
-        }
+                # Create base output directory
+                export_output_dir = paths.get_training_dataset_dir(scenario_id) / export_id
+                export_output_dir.mkdir(parents=True, exist_ok=True)
+
+                # Determine export formats from output config
+                output_config = export.output_config
+                export_formats = [output_config.format] if output_config else ["parquet"]
+
+                start_time = datetime.utcnow()
+                total_train = 0
+                total_val = 0
+                total_test = 0
+                fold_count = 0
+
+                # Check if CV strategy
+                is_cv = splitting_service.is_cv_strategy(splitting_config)
+
+                # Label column: build_status_num (0=passed, 1=failed)
+                label_column = "build_status_num"
+
+                if is_cv:
+                    # ====== CV MODE: Generate multiple folds ======
+                    logger.info(f"{corr_prefix} Using CV strategy, generating multiple folds")
+
+                    for fold in splitting_service.apply_cv(df, splitting_config, label_column):
+                        fold_count += 1
+                        fold_id = fold.fold_id
+
+                        # Create fold directory
+                        fold_dir = export_output_dir / fold_id
+                        fold_dir.mkdir(parents=True, exist_ok=True)
+
+                        # Export train/val/test for this fold
+                        for split_type, indices in [
+                            ("train", fold.train_indices),
+                            ("validation", fold.val_indices),
+                            ("test", fold.test_indices),
+                        ]:
+                            if not indices:
+                                continue
+
+                            split_df = df.loc[indices]
+
+                            # Anti-Leakage: Fit on Train, Transform on Test/Val
+                            if split_type == "train":
+                                preprocessor.fit(split_df)
+                            split_df = preprocessor.transform(split_df)
+
+                            # Track totals (for last fold stats)
+                            if split_type == "train":
+                                total_train = len(split_df)
+                            elif split_type == "validation":
+                                total_val = len(split_df)
+                            else:
+                                total_test = len(split_df)
+
+                            # Export in each format
+                            for fmt in export_formats:
+                                file_path = fold_dir / f"{split_type}.{fmt}"
+
+                                if fmt == "parquet":
+                                    split_df.to_parquet(file_path, index=False)
+                                else:
+                                    split_df.to_csv(file_path, index=False)
+
+                                file_size = file_path.stat().st_size
+                                class_dist = split_df[label_column].value_counts().to_dict()
+
+                                # Filter metadata for group_distribution
+                                group_dist = {
+                                    k: v
+                                    for k, v in (fold.metadata or {}).items()
+                                    if isinstance(v, int)
+                                }
+
+                                split_repo.create_split(
+                                    export_id=export_id,
+                                    scenario_id=scenario_id,
+                                    split_type=split_type,
+                                    fold_id=fold_id,
+                                    record_count=len(split_df),
+                                    feature_count=len(split_df.columns),
+                                    class_distribution={str(k): v for k, v in class_dist.items()},
+                                    group_distribution=group_dist,
+                                    file_path=str(file_path.relative_to(paths.DATA_DIR)),
+                                    file_size_bytes=file_size,
+                                    file_format=fmt,
+                                    feature_names=list(split_df.columns),
+                                    generation_duration_seconds=0,
+                                )
+
+                        logger.info(f"{corr_prefix} Generated fold {fold_count}: {fold_id}")
+
+                else:
+                    # ====== SINGLE-SPLIT MODE ======
+                    result = splitting_service.apply_split(df, splitting_config, label_column)
+
+                    for split_type, indices in [
+                        ("train", result.train_indices),
+                        ("validation", result.val_indices),
+                        ("test", result.test_indices),
+                    ]:
+                        if not indices:
+                            continue
+
+                        split_df = df.loc[indices]
+
+                        # Anti-Leakage: Fit on Train, Transform on Test/Val
+                        if split_type == "train":
+                            preprocessor.fit(split_df)
+                        split_df = preprocessor.transform(split_df)
+
+                        if split_type == "train":
+                            total_train = len(split_df)
+                        elif split_type == "validation":
+                            total_val = len(split_df)
+                        else:
+                            total_test = len(split_df)
+
+                        for fmt in export_formats:
+                            file_path = export_output_dir / f"{split_type}.{fmt}"
+
+                            if fmt == "parquet":
+                                split_df.to_parquet(file_path, index=False)
+                            else:
+                                split_df.to_csv(file_path, index=False)
+
+                            file_size = file_path.stat().st_size
+                            class_dist = split_df[label_column].value_counts().to_dict()
+
+                            split_repo.create_split(
+                                export_id=export_id,
+                                scenario_id=scenario_id,
+                                split_type=split_type,
+                                fold_id=None,
+                                record_count=len(split_df),
+                                feature_count=len(split_df.columns),
+                                class_distribution={str(k): v for k, v in class_dist.items()},
+                                group_distribution={},
+                                file_path=str(file_path.relative_to(paths.DATA_DIR)),
+                                file_size_bytes=file_size,
+                                file_format=fmt,
+                                feature_names=list(split_df.columns),
+                                generation_duration_seconds=0,
+                            )
+
+                total_duration = (datetime.utcnow() - start_time).total_seconds()
+
+                # Mark export as completed
+                export_repo.mark_completed(
+                    export_id=export_id,
+                    train_count=total_train,
+                    val_count=total_val,
+                    test_count=total_test,
+                    feature_count=len(df.columns),
+                    generation_duration_seconds=total_duration,
+                )
+
+                # Publish SSE event for COMPLETED status
+                publish_export_updated(
+                    scenario_id=scenario_id,
+                    export_id=export_id,
+                    status="completed",
+                    name=export.name,
+                    train_count=total_train,
+                    val_count=total_val,
+                    test_count=total_test,
+                    fold_count=fold_count if is_cv else 1,
+                    feature_count=len(df.columns),
+                    generation_duration_seconds=total_duration,
+                )
+
+                logger.info(
+                    f"{corr_prefix} Completed: folds={fold_count if is_cv else 1}, "
+                    f"train={total_train}, val={total_val}, test={total_test}"
+                )
+
+                return {
+                    "status": "completed",
+                    "export_id": export_id,
+                    "is_cv": is_cv,
+                    "fold_count": fold_count if is_cv else 1,
+                    "train_count": total_train,
+                    "val_count": total_val,
+                    "test_count": total_test,
+                    "duration_seconds": total_duration,
+                }
+
+        except RuntimeError as lock_err:
+            # Lock acquisition failed
+            error_msg = "Another export is in progress for this scenario"
+            logger.warning(f"{corr_prefix} {error_msg}: {lock_err}")
+            export_repo.mark_failed(export_id, error_msg)
+            publish_export_updated(
+                scenario_id=scenario_id,
+                export_id=export_id,
+                status="failed",
+                error=error_msg,
+            )
+            return {"status": "error", "error": error_msg}
 
     return self.run_safe(
         job_id=export_id,

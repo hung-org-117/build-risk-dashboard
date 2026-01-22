@@ -210,14 +210,10 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
         }
 
         if validated_builds:
-            logger.info(
-                f"Resuming: skipping {len(validated_builds)} already validated builds"
-            )
+            logger.info(f"Resuming: skipping {len(validated_builds)} already validated builds")
             for repo_name in list(all_repo_builds.keys()):
                 remaining = [
-                    b
-                    for b in all_repo_builds[repo_name]
-                    if b["build_id"] not in validated_builds
+                    b for b in all_repo_builds[repo_name] if b["build_id"] not in validated_builds
                 ]
                 if remaining:
                     all_repo_builds[repo_name] = remaining
@@ -246,14 +242,10 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
         init_validation_stats(self.redis, source_id, total_repos, total_builds)
 
         # Chunk repos for parallel processing
-        repo_chunks = list(
-            chunk_dict(all_repo_builds, settings.VALIDATION_REPOS_PER_TASK)
-        )
+        repo_chunks = list(chunk_dict(all_repo_builds, settings.VALIDATION_REPOS_PER_TASK))
 
         # Update total chunks in Redis
-        increment_validation_stat(
-            self.redis, source_id, "total_chunks", len(repo_chunks)
-        )
+        increment_validation_stat(self.redis, source_id, "total_chunks", len(repo_chunks))
 
         repo_tasks = [
             validate_source_repo_chunk.si(
@@ -373,9 +365,7 @@ def validate_source_repo_chunk(
                     # Check if private
                     if repo_data.get("private"):
                         repos_private += 1
-                        increment_validation_stat(
-                            self.redis, source_id, "repos_private"
-                        )
+                        increment_validation_stat(self.redis, source_id, "repos_private")
                         increment_validation_stat(
                             self.redis, source_id, "builds_not_found", len(builds)
                         )
@@ -435,9 +425,7 @@ def validate_source_repo_chunk(
         # Publish progress update
         stats = get_validation_stats(self.redis, source_id)
         progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
-        publish_source_validation_updated(
-            source_id, "validating", progress=progress, stats=stats
-        )
+        publish_source_validation_updated(source_id, "validating", progress=progress, stats=stats)
 
         return {
             "chunk_index": chunk_index,
@@ -540,9 +528,7 @@ def validate_source_builds_chunk(
 
         # Determine CI provider from first build
         ci_provider_str = (
-            builds[0].get("ci_provider", "github_actions")
-            if builds
-            else "github_actions"
+            builds[0].get("ci_provider", "github_actions") if builds else "github_actions"
         )
         ci_provider = CIProvider(ci_provider_str)
 
@@ -592,7 +578,7 @@ def validate_source_builds_chunk(
                 }
             )
 
-        cached_map = {r.build_id: r for r in cached_runs}
+        cached_map = {r.ci_run_id: r for r in cached_runs}
 
         for build_info in builds_to_validate:
             build_id = build_info["build_id"]
@@ -609,6 +595,7 @@ def validate_source_builds_chunk(
                 # Create SourceBuild immediately
                 builds_to_insert.append(
                     SourceBuild(
+                        _id=None,
                         source_id=ObjectId(source_id),
                         build_id_from_source=build_id,
                         repo_name_from_source=repo_name,
@@ -662,17 +649,13 @@ def validate_source_builds_chunk(
                 BuildConclusion.SUCCESS,
                 BuildConclusion.FAILURE,
             ):
-                conclusion_str = (
-                    conclusion.value if hasattr(conclusion, "value") else conclusion
-                )
+                conclusion_str = conclusion.value if hasattr(conclusion, "value") else conclusion
                 return True, f"Conclusion '{conclusion_str}' filtered"
 
             return False, ""
 
         # Process results
-        for build_info, build_data in zip(
-            builds_to_validate, build_results, strict=False
-        ):
+        for build_info, build_data in zip(builds_to_validate, build_results, strict=False):
             build_id = build_info["build_id"]
 
             try:
@@ -715,6 +698,7 @@ def validate_source_builds_chunk(
                         builds_filtered += 1
                         builds_to_insert.append(
                             SourceBuild(
+                                _id=None,
                                 source_id=ObjectId(source_id),
                                 build_id_from_source=build_id,
                                 repo_name_from_source=repo_name,
@@ -729,6 +713,7 @@ def validate_source_builds_chunk(
                         # Build passed filters
                         builds_to_insert.append(
                             SourceBuild(
+                                _id=None,
                                 source_id=ObjectId(source_id),
                                 build_id_from_source=build_id,
                                 repo_name_from_source=repo_name,
@@ -743,13 +728,13 @@ def validate_source_builds_chunk(
                 else:
                     builds_to_insert.append(
                         SourceBuild(
+                            _id=None,
+                            raw_run_id=None,
                             source_id=ObjectId(source_id),
                             build_id_from_source=build_id,
                             repo_name_from_source=repo_name,
                             raw_repo_id=(
-                                ObjectId(effective_repo_id)
-                                if effective_repo_id
-                                else None
+                                ObjectId(effective_repo_id) if effective_repo_id else None
                             ),
                             status=SourceBuildStatus.NOT_FOUND,
                             validation_error="Build not found or incomplete",
@@ -762,12 +747,12 @@ def validate_source_builds_chunk(
                 logger.warning(f"Error validating build {build_id}: {e}")
                 builds_to_insert.append(
                     SourceBuild(
+                        _id=None,
+                        raw_run_id=None,
                         source_id=ObjectId(source_id),
                         build_id_from_source=build_id,
                         repo_name_from_source=repo_name,
-                        raw_repo_id=(
-                            ObjectId(effective_repo_id) if effective_repo_id else None
-                        ),
+                        raw_repo_id=(ObjectId(effective_repo_id) if effective_repo_id else None),
                         status=SourceBuildStatus.ERROR,
                         validation_error=str(e)[:500],
                         validated_at=utc_now(),
@@ -781,12 +766,8 @@ def validate_source_builds_chunk(
 
         # Update Redis counters
         increment_validation_stat(self.redis, source_id, "builds_found", builds_found)
-        increment_validation_stat(
-            self.redis, source_id, "builds_not_found", builds_not_found
-        )
-        increment_validation_stat(
-            self.redis, source_id, "builds_filtered", builds_filtered
-        )
+        increment_validation_stat(self.redis, source_id, "builds_not_found", builds_not_found)
+        increment_validation_stat(self.redis, source_id, "builds_filtered", builds_filtered)
 
         return {
             "repo_name": repo_name,

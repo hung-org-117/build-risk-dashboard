@@ -298,7 +298,7 @@ def ensure_worktree(github_repo_id: int, commit_sha: str, full_name: str) -> Opt
     """
     Ensure worktree exists for a specific commit.
 
-    Uses RedisLock to coordinate with other workers.
+    Uses DistributedLock to coordinate with other workers.
     Creates bare repo if not exists, handles fork commits via replay, then creates worktree.
 
     Args:
@@ -309,7 +309,8 @@ def ensure_worktree(github_repo_id: int, commit_sha: str, full_name: str) -> Opt
     Returns:
         Path to worktree if successful, None otherwise
     """
-    from app.core.redis import RedisLock
+    from app.core.redis import get_redis
+    from app.tasks.base import DistributedLock
 
     if not github_repo_id:
         logger.warning("No github_repo_id provided, cannot create worktree")
@@ -323,9 +324,11 @@ def ensure_worktree(github_repo_id: int, commit_sha: str, full_name: str) -> Opt
         logger.debug(f"Using existing worktree: {worktree_path}")
         return worktree_path
 
-    with RedisLock(
+    with DistributedLock(
+        get_redis(),
         f"worktree:{github_repo_id}:{commit_sha[:12]}",
-        timeout=180,  # Increased for potential replay
+        ttl_seconds=180,  # Increased for potential replay
+        blocking=True,
         blocking_timeout=60,
     ):
         # Double-check after acquiring lock
@@ -377,7 +380,7 @@ def clone_bare_repo(github_repo_id: int, full_name: str) -> bool:
     """
     Clone repository as bare repo.
 
-    Uses RedisLock to prevent concurrent clones.
+    Uses DistributedLock to prevent concurrent clones.
 
     Args:
         github_repo_id: GitHub's internal repository ID
@@ -386,14 +389,21 @@ def clone_bare_repo(github_repo_id: int, full_name: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    from app.core.redis import RedisLock
+    from app.core.redis import get_redis
+    from app.tasks.base import DistributedLock
 
     if not github_repo_id:
         return False
 
     repo_path = get_repo_path(github_repo_id)
 
-    with RedisLock(f"clone:{github_repo_id}", timeout=700, blocking_timeout=60):
+    with DistributedLock(
+        get_redis(),
+        f"clone:{github_repo_id}",
+        ttl_seconds=700,
+        blocking=True,
+        blocking_timeout=60,
+    ):
         # Already cloned
         if repo_path.exists():
             return True

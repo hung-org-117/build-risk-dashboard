@@ -113,6 +113,26 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             }
         )
 
+    def find_by_status(
+        self,
+        model_repo_config_id: ObjectId | str,
+        status: ExtractionStatus,
+    ) -> List[ModelTrainingBuild]:
+        """Find builds for a repo config filtered by extraction_status."""
+        repo_id = (
+            ObjectId(model_repo_config_id)
+            if isinstance(model_repo_config_id, str)
+            else model_repo_config_id
+        )
+        status_value = status.value if hasattr(status, "value") else status
+
+        return self.find_many(
+            {
+                "model_repo_config_id": repo_id,
+                "extraction_status": status_value,
+            }
+        )
+
     def find_builds_for_prediction(
         self,
         model_repo_config_id: ObjectId,
@@ -147,9 +167,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
         """Count builds for a config, optionally filtered by status."""
         query: Dict[str, Any] = {"model_repo_config_id": model_repo_config_id}
         if status:
-            query["extraction_status"] = (
-                status.value if hasattr(status, "value") else status
-            )
+            query["extraction_status"] = status.value if hasattr(status, "value") else status
         return self.collection.count_documents(query)
 
     def find_existing_by_raw_build_run_ids(
@@ -346,11 +364,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
                 }
             },
             # Extract feature keys from feature_vector.features
-            {
-                "$project": {
-                    "feature_keys": {"$objectToArray": "$feature_vector.features"}
-                }
-            },
+            {"$project": {"feature_keys": {"$objectToArray": "$feature_vector.features"}}},
             {"$unwind": {"path": "$feature_keys", "preserveNullAndEmptyArrays": False}},
             {"$group": {"_id": None, "keys": {"$addToSet": "$feature_keys.k"}}},
         ]
@@ -459,12 +473,8 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
             {
                 "$group": {
                     "_id": None,
-                    "predicted": {
-                        "$sum": {"$cond": [{"$ne": ["$predicted_label", None]}, 1, 0]}
-                    },
-                    "failed": {
-                        "$sum": {"$cond": [{"$ne": ["$prediction_error", None]}, 1, 0]}
-                    },
+                    "predicted": {"$sum": {"$cond": [{"$ne": ["$predicted_label", None]}, 1, 0]}},
+                    "failed": {"$sum": {"$cond": [{"$ne": ["$prediction_error", None]}, 1, 0]}},
                     "pending": {
                         "$sum": {
                             "$cond": [
