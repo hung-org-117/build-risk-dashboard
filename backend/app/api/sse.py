@@ -113,10 +113,14 @@ async def sse_events_generator(
 
     allowed_config_ids = set()
     if accessible_raw_repo_ids:
-        configs = repo_config_repo.find_many({"raw_repo_id": {"$in": accessible_raw_repo_ids}})
+        configs = repo_config_repo.find_many(
+            {"raw_repo_id": {"$in": accessible_raw_repo_ids}}
+        )
         allowed_config_ids = {str(c.id) for c in configs}
 
-    logger.info(f"SSE connected for user {user_id}. Access to {len(allowed_config_ids)} repos.")
+    logger.info(
+        f"SSE connected for user {user_id}. Access to {len(allowed_config_ids)} repos."
+    )
 
     # Send initial connection message
     yield format_sse({"type": "connected", "message": "SSE stream connected"})
@@ -246,8 +250,6 @@ async def sse_enrichment_generator(
                         # Close on completion
                         if event.get("type") in ("complete", "error"):
                             break
-                else:
-                    yield format_sse({"type": "heartbeat"})
 
             except asyncio.TimeoutError:
                 yield format_sse({"type": "heartbeat"})
@@ -302,8 +304,6 @@ async def sse_logs_generator(request: Request) -> AsyncGenerator[str, None]:
                             yield format_sse(log_entry, "log")
                         except json.JSONDecodeError:
                             yield format_sse({"message": data}, "log")
-                else:
-                    yield format_sse({"type": "heartbeat"})
 
             except asyncio.TimeoutError:
                 yield format_sse({"type": "heartbeat"})

@@ -85,13 +85,14 @@ class CIProviderRegistry:
             return provider_type.value
 
         provider_class = cls._providers[provider_type]
-        # Create a minimal instance to get name property
-        config = ProviderConfig(provider=provider_type)
-        try:
-            instance = provider_class(config)
-            return instance.name
-        except Exception:
-            return provider_type.value
+        # Return name from class docstring or use a hardcoded mapping
+        # to avoid creating instance which triggers config validation warnings
+        label_map = {
+            CIProvider.GITHUB_ACTIONS: "GitHub Actions",
+            CIProvider.CIRCLECI: "CircleCI",
+            CIProvider.TRAVIS_CI: "Travis CI",
+        }
+        return label_map.get(provider_type, provider_type.value)
 
     @classmethod
     def get_all_with_labels(cls) -> list[dict[str, str]]:
