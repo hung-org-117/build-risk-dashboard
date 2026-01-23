@@ -228,7 +228,7 @@ services:
       uv run celery -A app.celery_app worker 
       --loglevel=info 
       --concurrency=${CELERY_CONCURRENCY:-4}
-      -Q pipeline.default,model_ingestion,model_processing,model_prediction,dataset_ingestion,dataset_processing,dataset_validation,sonar_scan,trivy_scan
+      -Q pipeline.default,model_ingestion,model_processing,model_prediction,scenario_ingestion,scenario_processing,scenario_scanning,source_validation,ingestion,processing,sonar_scan,trivy_scan
     environment:
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DB_NAME: ${MONGODB_DB_NAME:-buildguard}
@@ -291,6 +291,7 @@ services:
       GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
     volumes:
       - shared_data:/app/data
+      - ./builddefection.2025-11-17.private-key.pem:/app/builddefection.2025-11-17.private-key.pem:ro
     depends_on:
       mongo:
         condition: service_healthy

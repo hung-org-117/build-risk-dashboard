@@ -19,7 +19,6 @@ from app.api import (
     model_repos,
     monitoring,
     notifications,
-    settings,
     sse,
     statistics,
     templates,
@@ -30,6 +29,10 @@ from app.api import (
     users,
     webhook,
 )
+from app.api import (
+    settings as settings_router,
+)
+from app.config import settings
 from app.middleware.exception_handlers import (
     general_exception_handler,
     http_exception_handler,
@@ -71,7 +74,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        settings.FRONTEND_BASE_URL,
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -109,7 +115,7 @@ app.include_router(
 )
 app.include_router(tokens.router, prefix="/api", tags=["GitHub Tokens"])
 app.include_router(templates.router, prefix="/api", tags=["Templates"])
-app.include_router(settings.router, prefix="/api", tags=["Settings"])
+app.include_router(settings_router.router, prefix="/api", tags=["Settings"])
 app.include_router(monitoring.router, prefix="/api", tags=["Monitoring"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(user_settings.router, prefix="/api", tags=["User Settings"])
