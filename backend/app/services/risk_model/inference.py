@@ -171,7 +171,9 @@ class RiskModelService:
             self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
             # Load model checkpoint
-            checkpoint = torch.load(model_path, map_location=self._device, weights_only=False)
+            checkpoint = torch.load(
+                model_path, map_location=self._device, weights_only=False
+            )
 
             # Get hyperparameters from checkpoint or use defaults
             lstm_hidden_dim = checkpoint.get("lstm_hidden_dim", LSTM_HIDDEN_DIM)
@@ -326,7 +328,9 @@ class RiskModelService:
         try:
             # Extract features (with log1p if not prescaled)
             apply_log1p = not use_prescaled
-            temporal_values, static_values = self._extract_features(features, apply_log1p)
+            temporal_values, static_values = self._extract_features(
+                features, apply_log1p
+            )
 
             # Build sequence from history
             if temporal_history:
@@ -375,11 +379,17 @@ class RiskModelService:
 
             # Convert to tensors
             seq_tensor = torch.tensor(seq, dtype=torch.float32).to(self._device)
-            static_tensor = torch.tensor(static_arr, dtype=torch.float32).to(self._device)
-            lengths_tensor = torch.tensor([seq_length], dtype=torch.long).to(self._device)
+            static_tensor = torch.tensor(static_arr, dtype=torch.float32).to(
+                self._device
+            )
+            lengths_tensor = torch.tensor([seq_length], dtype=torch.long).to(
+                self._device
+            )
 
             # Always use uncertainty-weighted fusion
-            return self._predict_with_fusion(seq_tensor, static_tensor, lengths_tensor, n_samples)
+            return self._predict_with_fusion(
+                seq_tensor, static_tensor, lengths_tensor, n_samples
+            )
 
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -399,13 +409,14 @@ class RiskModelService:
         n_samples: int = 30,
     ) -> Dict[str, Any]:
         """
-        Uncertainty-weighted fusion prediction as per Vu et al. paper.
+        Simple averaging fusion prediction.
 
-        Performs MC Dropout separately on each branch, then fuses using
-        inverse variance weighting.
+        Uses 50/50 equal weighting instead of inverse variance weighting,
+        because temporal branch's low uncertainty was causing it to dominate
+        (99%+ weight) and ignore synergy features entirely.
+
+        This change ensures both branches contribute equally to predictions.
         """
-        from app.services.risk_model.model import BayesianRiskModel
-
         self._model.train()  # Enable dropout
 
         probs_temporal_list = []
@@ -425,14 +436,19 @@ class RiskModelService:
         probs_temporal = torch.stack(probs_temporal_list, dim=1)
         probs_synergy = torch.stack(probs_synergy_list, dim=1)
 
-        # Uncertainty-weighted fusion
-        fused_prob, w_temporal, w_synergy = BayesianRiskModel.uncertainty_weighted_fusion(
-            probs_temporal, probs_synergy
-        )
+        # Compute mean probabilities for each branch
+        mean_prob_temporal = probs_temporal.mean(dim=1)
+        mean_prob_synergy = probs_synergy.mean(dim=1)
+
+        # Simple 50/50 averaging (instead of uncertainty-weighted fusion)
+        # This gives synergy features equal importance with temporal features
+        w_temporal = 0.5
+        w_synergy = 0.5
+        fused_prob = w_temporal * mean_prob_temporal + w_synergy * mean_prob_synergy
 
         mean_prob = fused_prob[0].cpu().numpy()
 
-        # Compute overall uncertainty from both branches
+        # Compute uncertainty from both branches
         var_temporal = probs_temporal.var(dim=1).mean().item()
         var_synergy = probs_synergy.var(dim=1).mean().item()
         uncertainty = (var_temporal + var_synergy) / 2
@@ -451,12 +467,8 @@ class RiskModelService:
                 "High": round(float(mean_prob[2]), 4),
             },
             "fusion_weights": {
-                "temporal": round(
-                    float(w_temporal.item() if w_temporal.dim() == 0 else w_temporal[0].item()), 4
-                ),
-                "synergy": round(
-                    float(w_synergy.item() if w_synergy.dim() == 0 else w_synergy[0].item()), 4
-                ),
+                "temporal": w_temporal,
+                "synergy": w_synergy,
             },
             "branch_uncertainty": {
                 "temporal": round(var_temporal, 6),

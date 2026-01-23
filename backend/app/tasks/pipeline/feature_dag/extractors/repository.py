@@ -345,13 +345,13 @@ def _get_previous_build_start_time(
         prev_build = raw_build_runs.find_one(
             {
                 "raw_repo_id": ObjectId(repo_id),
-                "created_at": {"$lt": current_build_time},
+                "run_created_at": {"$lt": current_build_time},
                 "ci_run_id": {"$ne": current_ci_run_id},
             },
-            sort=[("created_at", -1)],
+            sort=[("run_created_at", -1)],
         )
         if prev_build:
-            return prev_build.get("created_at")
+            return prev_build.get("run_created_at")
     except Exception as e:
         logger.warning(f"Failed to get previous build: {e}")
     return None

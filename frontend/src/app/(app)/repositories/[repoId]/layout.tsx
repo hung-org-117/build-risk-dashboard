@@ -179,13 +179,17 @@ export default function RepoLayout({ children }: { children: React.ReactNode }) 
                         if (!prev) return prev;
                         // Avoid double counting if rapid updates come in
                         const current = prev.training_builds;
-                        // Simple heuristic: if we receive a completion event, assume one moved from pending to completed
-                        // Ideally we'd track build IDs, but for a simple counter update this is usually sufficient visual feedback
+                        // If we have pending builds, consume one. If not, this is a new build (increment total).
+                        const hasPending = current.pending > 0;
+
                         return {
                             ...prev,
                             training_builds: {
                                 ...current,
-                                pending: Math.max(0, current.pending - 1),
+                                // Only decrement pending if > 0
+                                pending: hasPending ? current.pending - 1 : 0,
+                                // If we didn't have pending, total must increase to account for this "new" build
+                                total: hasPending ? current.total : current.total + 1,
                                 completed: data.extraction_status === "completed" ? current.completed + 1 : current.completed,
                                 partial: data.extraction_status === "partial" ? current.partial + 1 : current.partial,
                                 failed: data.extraction_status === "failed" ? current.failed + 1 : current.failed,

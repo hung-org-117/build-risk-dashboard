@@ -125,9 +125,9 @@ def build_history_features(
         prev_build = raw_build_runs.find_one(
             {
                 "raw_repo_id": ObjectId(repo.id),
-                "created_at": {"$lt": build_run.created_at},
+                "run_created_at": {"$lt": build_run.created_at},
             },
-            sort=[("created_at", -1)],
+            sort=[("run_created_at", -1)],
         )
 
         if not prev_build:
@@ -150,7 +150,9 @@ def build_history_features(
             result["history_same_committer"] = similarity > AUTHOR_SIMILARITY_THRESHOLD
 
         # history_days_since_prev
-        prev_completed = prev_build.get("completed_at") or prev_build.get("created_at")
+        prev_completed = prev_build.get("run_completed_at") or prev_build.get(
+            "run_created_at"
+        )
         if prev_completed and build_run.created_at:
             delta = build_run.created_at - prev_completed
             result["history_days_since_prev"] = delta.total_seconds() / 86400  # days
@@ -214,11 +216,11 @@ def author_fail_history_features(
             raw_build_runs.find(
                 {
                     "raw_repo_id": ObjectId(repo.id),
-                    "created_at": {"$lte": build_run.created_at},
+                    "run_created_at": {"$lte": build_run.created_at},
                     "ci_run_id": {"$ne": build_run.ci_run_id},
                 }
             )
-            .sort("created_at", -1)
+            .sort("run_created_at", -1)
             .limit(MAX_BUILDS_HISTORY)
         )
 
@@ -280,7 +282,7 @@ def author_experience(
             raw_build_runs.find(
                 {
                     "raw_repo_id": ObjectId(repo.id),
-                    "created_at": {"$lt": build_run.created_at},
+                    "run_created_at": {"$lt": build_run.created_at},
                 }
             ).limit(MAX_BUILDS_HISTORY)
         )
@@ -355,11 +357,11 @@ def project_fail_history_features(
             raw_build_runs.find(
                 {
                     "raw_repo_id": ObjectId(repo.id),
-                    "created_at": {"$lt": build_run.created_at},
+                    "run_created_at": {"$lt": build_run.created_at},
                     "conclusion": {"$in": ["success", "failure"]},
                 }
             )
-            .sort("created_at", -1)
+            .sort("run_created_at", -1)
             .limit(MAX_BUILDS_HISTORY)
         )
 

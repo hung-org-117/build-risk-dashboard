@@ -97,46 +97,54 @@ def git_commit_info(
 
     # Ensure strict temporal ordering (must be older than current build)
     current_created_at = build_run.created_at
+    current_ci_run_id = build_run.ci_run_id
 
-    first = True
     for commit_info in iter_commit_history(repo_path, effective_sha, max_count=1000):
         hexsha = commit_info["hexsha"]
         parents = commit_info["parents"]
 
-        if first:
+        is_head = hexsha == effective_sha
+
+        # For HEAD commit: check for merge, but still check DB for previous builds on same commit
+        if is_head:
             if len(parents) > 1:
                 status = "merge_found"
                 break
-            first = False
-            continue
+            # Don't skip! Check if this commit has a previous build below
 
-        last_commit_sha = hexsha
-
-        # Check if this commit has a build in DB
-        # Use effective_sha since it's always populated (equals commit_sha for non-fork, synthetic_sha for fork)
-        # Must be strictly older than current build to avoid future leaks or self-reference
-        query = {"effective_sha": hexsha, "raw_repo_id": ObjectId(repo.id)}
+        # Check if this commit has a build in DB (excluding current build)
+        query = {
+            "effective_sha": hexsha,
+            "raw_repo_id": ObjectId(repo.id),
+            "ci_run_id": {"$ne": current_ci_run_id},  # Exclude current build
+        }
 
         # Add temporal filter if we have a valid timestamp
         if current_created_at:
-            query["created_at"] = {"$lt": current_created_at}
+            query["run_created_at"] = {"$lte": current_created_at}
 
-        # Sort by created_at DESC to get the most recent valid build
+        # Sort by run_created_at DESC to get the most recent valid build
         existing_build = raw_build_runs.find_one(
             query,
-            sort=[("created_at", -1)],
+            sort=[("run_created_at", -1)],
         )
 
         if existing_build:
             status = "build_found"
             prev_build_id = existing_build.get("ci_run_id")
+            if not is_head:
+                last_commit_sha = hexsha
             break
 
-        commits_hex.append(hexsha)
+        # For HEAD, we've already added it to commits_hex, so don't add again
+        if not is_head:
+            last_commit_sha = hexsha
+            commits_hex.append(hexsha)
 
-        if len(parents) > 1:
-            status = "merge_found"
-            break
+            # Check for merge commit (stop walking)
+            if len(parents) > 1:
+                status = "merge_found"
+                break
 
     return {
         "git_built_commits": commits_hex,
@@ -525,7 +533,7 @@ def _get_pr_mergers(
         cursor = raw_build_runs.find(
             {
                 "raw_repo_id": ObjectId(repo_id),
-                "created_at": {"$gte": start_date, "$lte": end_date},
+                "run_created_at": {"$gte": start_date, "$lte": end_date},
             }
         )
 

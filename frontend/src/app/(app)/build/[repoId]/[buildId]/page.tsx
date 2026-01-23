@@ -491,7 +491,7 @@ export default function BuildDetailPage() {
                                 Extraction in progress...
                             </p>
                         </div>
-                    ) : featureEntries.length > 0 ? (
+                    ) : build.feature_count > 0 ? (
                         <div className="space-y-4">
                             {/* Search */}
                             <div className="relative max-w-sm">
@@ -505,32 +505,38 @@ export default function BuildDetailPage() {
                             </div>
 
                             {/* Features Table */}
-                            <div className="rounded-lg border overflow-hidden max-h-[500px] overflow-y-auto relative">
-                                <table className="w-full text-sm relative">
-                                    <thead className="sticky top-0 z-10">
-                                        <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
-                                            <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-                                                Feature Name
-                                            </th>
-                                            <th className="px-4 py-3 text-left font-semibold text-muted-foreground bg-slate-50 dark:bg-slate-900">
-                                                Value
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {featureEntries.map(([key, value]) => (
-                                            <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
-                                                <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
-                                                    {key}
-                                                </td>
-                                                <td className="px-4 py-3 align-top">
-                                                    <FeatureValue value={value} />
-                                                </td>
+                            {featureEntries.length > 0 ? (
+                                <div className="rounded-lg border overflow-hidden max-h-[500px] overflow-y-auto relative">
+                                    <table className="w-full text-sm relative">
+                                        <thead className="sticky top-0 z-10">
+                                            <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+                                                <th className="w-[280px] min-w-[280px] px-4 py-3 text-left font-semibold text-muted-foreground border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                                                    Feature Name
+                                                </th>
+                                                <th className="px-4 py-3 text-left font-semibold text-muted-foreground bg-slate-50 dark:bg-slate-900">
+                                                    Value
+                                                </th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {featureEntries.map(([key, value]) => (
+                                                <tr key={key} className="hover:bg-slate-50 dark:hover:bg-slate-900/30">
+                                                    <td className="w-[280px] min-w-[280px] px-4 py-3 font-mono text-sm border-r border-slate-100 dark:border-slate-800 align-top">
+                                                        {key}
+                                                    </td>
+                                                    <td className="px-4 py-3 align-top">
+                                                        <FeatureValue value={value} />
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
+                                    <p className="text-muted-foreground">No features match "{featureSearch}"</p>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center dark:border-slate-800 dark:bg-slate-900/50">
