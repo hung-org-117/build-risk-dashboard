@@ -157,6 +157,7 @@ export default function UserReposPage() {
                             <option value="">All Status</option>
                             <option value="queued">Queued</option>
                             <option value="fetching">Fetching</option>
+                            <option value="fetched">Fetched</option>
                             <option value="ingesting">Ingesting</option>
                             <option value="ingested">Ingested</option>
                             <option value="processing">Processing</option>
@@ -209,6 +210,8 @@ export default function UserReposPage() {
                                                     <Badge variant="secondary">Queued</Badge>
                                                 ) : repo.status === "fetching" ? (
                                                     <Badge variant="default" className="bg-cyan-500 hover:bg-cyan-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Fetching</Badge>
+                                                ) : repo.status === "fetched" ? (
+                                                    <Badge variant="default" className="bg-teal-500 hover:bg-teal-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Fetched</Badge>
                                                 ) : repo.status === "ingesting" ? (
                                                     <Badge variant="default" className="bg-blue-500 hover:bg-blue-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Ingesting</Badge>
                                                 ) : ["ingested", "ingestion_complete"].includes(repo.status) ? (

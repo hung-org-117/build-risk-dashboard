@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterator, List, Optional
@@ -239,10 +240,12 @@ class GitHubClient:
                             f"Max retries ({max_retries}) exceeded for HTTP {response.status_code}"
                         )
 
-                    # Exponential backoff: 1s, 2s, 4s, ... capped at RETRY_BACKOFF_MAX
-                    delay = min(
+                    # Exponential backoff with jitter: 1s, 2s, 4s, ... capped at RETRY_BACKOFF_MAX
+                    # Jitter range: 0.7x to 1.3x to prevent thundering herd
+                    base_delay = min(
                         RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX
                     )
+                    delay = base_delay * (0.7 + 0.6 * random.random())
                     logger.warning(
                         f"HTTP {response.status_code} error, retrying in {delay:.1f}s "
                         f"(attempt {retries}/{max_retries})"
@@ -280,9 +283,11 @@ class GitHubClient:
                         f"Max retries ({max_retries}) exceeded for network error: {e}"
                     ) from e
 
-                delay = min(
+                # Exponential backoff with jitter for network errors
+                base_delay = min(
                     RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX
                 )
+                delay = base_delay * (0.7 + 0.6 * random.random())
                 logger.warning(
                     f"Network error: {e}, retrying in {delay:.1f}s "
                     f"(attempt {retries}/{max_retries})"

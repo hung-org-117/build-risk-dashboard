@@ -39,7 +39,7 @@ export function CollectionCard({
     checkpointAt,
     acceptedFailedCount = 0,
 }: CollectionCardProps) {
-    const isCollecting = ["queued", "fetching", "ingesting"].includes(status.toLowerCase());
+    const isCollecting = ["queued", "fetching", "fetched", "ingesting"].includes(status.toLowerCase());
     const hasMissingResources = missingResourceCount > 0;
     const hasActualFailures = failedCount > 0;
 

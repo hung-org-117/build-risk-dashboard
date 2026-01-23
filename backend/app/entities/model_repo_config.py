@@ -19,6 +19,7 @@ class ModelImportStatus(str, Enum):
 
     QUEUED = "queued"
     FETCHING = "fetching"  # Fetching builds from CI API
+    FETCHED = "fetched"  # Fetch complete, ready for ingestion
     INGESTING = "ingesting"  # Clone/worktree/download logs phase
     INGESTED = (
         "ingested"  # Ingestion done (user accepts current state to start processing)

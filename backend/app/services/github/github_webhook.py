@@ -208,9 +208,9 @@ def _handle_workflow_run_event(
         # Dispatch ingestion task for this single build (webhook flow)
         # This only does ingestion (clone, worktree, logs) - no auto-processing
         # User must manually start processing via UI
-        from app.tasks.model_ingestion import ingest_webhook_build
+        from app.tasks.model_ingestion import fetch_webhook_build
 
-        ingest_webhook_build.delay(
+        fetch_webhook_build.delay(
             repo_config_id=repo_config_id,
             raw_repo_id=repo_id,
             raw_build_run_id=str(result.id),

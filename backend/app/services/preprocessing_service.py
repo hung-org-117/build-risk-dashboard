@@ -53,7 +53,9 @@ class PreprocessingConfig:
             return cls()
 
         # Check for nested structure (legacy/YAML raw style)
-        if "missing_features" in config_dict or "normalization" in config_dict:
+        # Handle ambiguity: TrainingDatasetExport uses 'normalization' as str, legacy uses dict
+        is_normalization_dict = isinstance(config_dict.get("normalization"), dict)
+        if "missing_features" in config_dict or is_normalization_dict:
             missing_config = config_dict.get("missing_features", {})
             normalization_config = config_dict.get("normalization", {})
 
@@ -127,8 +129,18 @@ class FillMissingStrategy(MissingValuesStrategy):
     def transform(self, df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
         if columns:
             df = df.copy()
-            # Simple fillna is faster/easier than SimpleImputer for constants
-            df[columns] = df[columns].fillna(self.fill_value)
+            for col in columns:
+                if col not in df.columns:
+                    continue
+
+                # Handle Categorical Columns: Add category if missing
+                if isinstance(df[col].dtype, pd.CategoricalDtype):
+                    if self.fill_value not in df[col].cat.categories:
+                        df[col] = df[col].cat.add_categories([self.fill_value])
+
+                # Simple fillna for the column
+                df[col] = df[col].fillna(self.fill_value).infer_objects(copy=False)
+
             # logger.info(f"Filled {len(columns)} columns with value {self.fill_value}")
         return df
 
@@ -164,7 +176,9 @@ class ImputerStrategy(MissingValuesStrategy):
         if columns:
             # Select numeric columns only
             numeric_cols = [
-                c for c in columns if df[c].dtype in ["float64", "int64", "float32", "int32"]
+                c
+                for c in columns
+                if df[c].dtype in ["float64", "int64", "float32", "int32"]
             ]
             self.fitted_columns = numeric_cols
 
@@ -225,10 +239,12 @@ class SklearnScalerStrategy(NormalizationStrategy):
         self.fitted_columns = []
 
     def fit(self, df: pd.DataFrame, columns: List[str]) -> "SklearnScalerStrategy":
-        if columns:
+        if columns and len(df) > 0:
             self.fitted_columns = columns
             self.scaler = self.scaler_cls()
             self.scaler.fit(df[columns])
+        elif len(df) == 0:
+            logger.warning("Cannot fit scaler: DataFrame is empty (0 samples)")
 
         self.is_fitted = True
         return self
@@ -272,7 +288,9 @@ class MissingValuesStrategyFactory:
     }
 
     @classmethod
-    def create(cls, strategy_name: str, fill_value: float = 0.0) -> MissingValuesStrategy:
+    def create(
+        cls, strategy_name: str, fill_value: float = 0.0
+    ) -> MissingValuesStrategy:
         strategy_class = cls.STRATEGIES.get(strategy_name, FillMissingStrategy)
         if strategy_class == FillMissingStrategy:
             return strategy_class(fill_value)
@@ -305,8 +323,11 @@ class PreprocessingService:
     3. transform(any_df) -> Applies params
     """
 
-    def __init__(self, config: Optional[PreprocessingConfig] = None):
-        self.config = config or PreprocessingConfig()
+    def __init__(self, config: Optional[Any] = None):
+        self.config = PreprocessingConfig.from_dict(config)
+        logger.info(
+            f"Initialized PreprocessingService with config: {self.config}"
+        )  # Debug version check
 
         self.missing_strategy = MissingValuesStrategyFactory.create(
             self.config.missing_strategy, self.config.fill_value
@@ -328,7 +349,9 @@ class PreprocessingService:
         """Identify feature and numeric columns."""
         self.feature_cols = [c for c in df.columns if c not in METADATA_COLUMNS]
         self.numeric_cols = [
-            c for c in self.feature_cols if df[c].dtype in ["float64", "int64", "float32", "int32"]
+            c
+            for c in self.feature_cols
+            if df[c].dtype in ["float64", "int64", "float32", "int32"]
         ]
 
     def fit(self, df: pd.DataFrame) -> "PreprocessingService":
@@ -351,6 +374,12 @@ class PreprocessingService:
         # Create a temp copy for fitting scaler to avoid fitting on NaNs if imputer fills them
         df_imputed = self.missing_strategy.transform(df, self.feature_cols)
 
+        if len(df_imputed) == 0:
+            logger.warning(
+                "DataFrame is empty after missing values handling. "
+                "Check if drop_row strategy removed all rows."
+            )
+
         self.normalization_strategy.fit(df_imputed, self.numeric_cols)
 
         self.is_fitted = True
@@ -361,7 +390,9 @@ class PreprocessingService:
         Apply learned preprocessing to the dataframe.
         """
         if not self.is_fitted:
-            logger.warning("PreprocessingService transforming without fit! Params will be empty.")
+            logger.warning(
+                "PreprocessingService transforming without fit! Params will be empty."
+            )
             # Depending on strategy implementation, might do nothing or fail.
 
         # 1. Handle missing values
@@ -379,7 +410,9 @@ class PreprocessingService:
             self.numeric_cols
             if self.numeric_cols
             else [
-                c for c in feature_cols if df[c].dtype in ["float64", "int64", "float32", "int32"]
+                c
+                for c in feature_cols
+                if df[c].dtype in ["float64", "int64", "float32", "int32"]
             ]
         )
 

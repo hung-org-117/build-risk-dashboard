@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, RotateCcw, CheckCircle2 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+import { featuresApi } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
@@ -35,6 +37,14 @@ export default function UploadBuildDataPage() {
         error,
         validationStatus,
     } = wizard;
+
+    // Fetch supported languages from API
+    const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
+    useEffect(() => {
+        featuresApi.getConfig().then(data => {
+            setSupportedLanguages(data.languages);
+        }).catch(err => console.error("Failed to fetch supported languages", err));
+    }, []);
 
     // Show error toast when error changes
     useEffect(() => {
@@ -94,6 +104,7 @@ export default function UploadBuildDataPage() {
                             onCiProviderModeChange={step1.setCiProviderMode}
                             onCiProviderColumnChange={step1.setCiProviderColumn}
                             onMappingChange={step1.handleMappingChange}
+                            supportedLanguages={supportedLanguages}
                         />
                     ) : (
                         <div className="space-y-6">

@@ -37,22 +37,24 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_processing.finalize_model_processing",
+    name="model.processing.complete",
     queue="model_processing",
-    soft_time_limit=60,
-    time_limit=120,
+    soft_time_limit=30,
+    time_limit=60,
 )
-def finalize_model_processing(
+def handle_pipeline_completion(
     self: SafeTask,
     repo_config_id: str,
     created_count: int,
     correlation_id: str = "",
     last_import_build_id: str = "",
 ) -> Dict[str, Any]:
-    """Finalize model processing after all builds are processed."""
+    """Chain end: Aggregates results after extraction (and prediction)."""
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -60,7 +62,9 @@ def finalize_model_processing(
         logger.info(f"{corr_prefix} Finalizing model processing for {repo_config_id}")
 
         model_build_repo = ModelTrainingBuildRepository(self.db)
-        aggregated_stats = model_build_repo.aggregate_stats_by_repo_config(ObjectId(repo_config_id))
+        aggregated_stats = model_build_repo.aggregate_stats_by_repo_config(
+            ObjectId(repo_config_id)
+        )
 
         success_count = aggregated_stats.get("builds_features_extracted", 0)
         failed_count = aggregated_stats.get("builds_processing_failed", 0)
@@ -73,9 +77,13 @@ def finalize_model_processing(
         )
 
         if failed_count > 0 and success_count == 0:
-            logger.warning(f"{corr_prefix} All builds failed processing ({failed_count})")
+            logger.warning(
+                f"{corr_prefix} All builds failed processing ({failed_count})"
+            )
 
-        builds_ready = model_build_repo.find_builds_for_prediction(ObjectId(repo_config_id))
+        builds_ready = model_build_repo.find_builds_for_prediction(
+            ObjectId(repo_config_id)
+        )
         builds_for_prediction = [str(b.id) for b in builds_ready]
 
         repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -85,7 +93,9 @@ def finalize_model_processing(
         }
 
         if last_import_build_id:
-            update_data["last_processed_import_build_id"] = ObjectId(last_import_build_id)
+            update_data["last_processed_import_build_id"] = ObjectId(
+                last_import_build_id
+            )
             logger.info(f"{corr_prefix} Setting checkpoint to {last_import_build_id}")
 
         repo_config_repo.update_repository(repo_config_id, update_data)
@@ -112,13 +122,13 @@ def finalize_model_processing(
             )
 
             prediction_tasks = [
-                predict_batch.si(
+                predict_risk_batch.si(
                     repo_config_id=repo_config_id,
                     model_build_ids=batch,
                 )
                 for batch in batches
             ]
-            callback = finalize_prediction.si(
+            callback = handle_prediction_completion.si(
                 repo_config_id=repo_config_id,
                 total_builds=len(builds_for_prediction),
                 correlation_id=correlation_id,
@@ -150,12 +160,12 @@ def finalize_model_processing(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_processing.finalize_prediction",
+    name="model.processing.prediction.complete",
     queue="model_prediction",
-    soft_time_limit=60,
-    time_limit=120,
+    soft_time_limit=30,
+    time_limit=60,
 )
-def finalize_prediction(
+def handle_prediction_completion(
     self: SafeTask,
     repo_config_id: str,
     total_builds: int,
@@ -164,7 +174,9 @@ def finalize_prediction(
     """Finalize prediction phase after all prediction batches complete."""
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -174,11 +186,15 @@ def finalize_prediction(
         repo_config_repo = ModelRepoConfigRepository(self.db)
         model_build_repo = ModelTrainingBuildRepository(self.db)
 
-        prediction_stats = model_build_repo.aggregate_prediction_stats(ObjectId(repo_config_id))
+        prediction_stats = model_build_repo.aggregate_prediction_stats(
+            ObjectId(repo_config_id)
+        )
         predicted_count = prediction_stats.get("predicted", 0)
         prediction_failed = prediction_stats.get("failed", 0)
 
-        extraction_stats = model_build_repo.aggregate_stats_by_repo_config(ObjectId(repo_config_id))
+        extraction_stats = model_build_repo.aggregate_stats_by_repo_config(
+            ObjectId(repo_config_id)
+        )
         extraction_failed = extraction_stats.get("builds_processing_failed", 0)
         total_failed = extraction_failed + prediction_failed
 
@@ -212,7 +228,9 @@ def finalize_prediction(
 
             repo_config = repo_config_repo.find_by_id(repo_config_id)
             if repo_config and repo_config.raw_repo_id:
-                risk_counts = model_build_repo.aggregate_risk_counts(ObjectId(repo_config_id))
+                risk_counts = model_build_repo.aggregate_risk_counts(
+                    ObjectId(repo_config_id)
+                )
                 high_count = risk_counts.get("HIGH", 0)
                 medium_count = risk_counts.get("MEDIUM", 0)
                 low_count = risk_counts.get("LOW", 0)
@@ -228,7 +246,9 @@ def finalize_prediction(
                     raw_repo_id=repo_config.raw_repo_id,
                     repo_name=repo_config.full_name,
                     repo_id=repo_config_id,
-                    high_risk_builds=[{"build_number": b.build_number} for b in high_risk_builds],
+                    high_risk_builds=[
+                        {"build_number": b.build_number} for b in high_risk_builds
+                    ],
                     prediction_summary={
                         "high": high_count,
                         "medium": medium_count,
@@ -277,7 +297,9 @@ def handle_processing_chain_error(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     error_msg = str(exc) if exc else "Unknown processing error"
 
-    logger.error(f"{corr_prefix} Processing chain failed for {repo_config_id}: {error_msg}")
+    logger.error(
+        f"{corr_prefix} Processing chain failed for {repo_config_id}: {error_msg}"
+    )
 
     model_build_repo = ModelTrainingBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -358,12 +380,12 @@ def handle_processing_chain_error(
 @celery_app.task(
     bind=True,
     base=ModelPredictionTask,
-    name="app.tasks.model_processing.predict_builds_batch",
+    name="model.processing.predict_risk",
     queue="model_prediction",
     soft_time_limit=300,
-    time_limit=360,
+    time_limit=600,
 )
-def predict_batch(
+def predict_risk_batch(
     self: ModelPredictionTask,
     repo_config_id: str,
     model_build_ids: List[str],
@@ -436,7 +458,9 @@ def predict_batch(
                     )
                     continue
 
-                feature_vector = feature_vector_repo.find_by_id(model_build.feature_vector_id)
+                feature_vector = feature_vector_repo.find_by_id(
+                    model_build.feature_vector_id
+                )
                 if not feature_vector or not feature_vector.features:
                     model_build_repo.update_one(
                         build_id,
@@ -457,9 +481,13 @@ def predict_batch(
                             max_depth=9,
                         )
                         if history_vectors:
-                            temporal_history = [v.features for v in reversed(history_vectors)]
+                            temporal_history = [
+                                v.features for v in reversed(history_vectors)
+                            ]
                     except Exception as e:
-                        logger.warning(f"Failed to fetch temporal history for {build_id}: {e}")
+                        logger.warning(
+                            f"Failed to fetch temporal history for {build_id}: {e}"
+                        )
 
                 was_previously_failed = (
                     model_build.prediction_status == ExtractionStatus.FAILED.value
@@ -502,7 +530,9 @@ def predict_batch(
                 )
 
             for build_info in builds_to_predict:
-                normalized = prediction_service.normalize_features(build_info["features"])
+                normalized = prediction_service.normalize_features(
+                    build_info["features"]
+                )
                 build_info["normalized_features"] = normalized
                 feature_vector_repo.update_normalized_features(
                     build_info["feature_vector_id"],
@@ -591,7 +621,9 @@ def predict_batch(
                     ObjectId(repo_config_id), new_failure_count
                 )
             if succeeded > 0:
-                repo_config_repo.increment_builds_completed(ObjectId(repo_config_id), succeeded)
+                repo_config_repo.increment_builds_completed(
+                    ObjectId(repo_config_id), succeeded
+                )
 
             if retried_success_count > 0 or new_failure_count > 0 or succeeded > 0:
                 config = repo_config_repo.find_by_id(repo_config_id)

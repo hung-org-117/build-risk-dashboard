@@ -52,7 +52,7 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
 
         return self.paginate(
             query,
-            sort=[("created_at", 1)],
+            sort=[("created_at", 1), ("_id", 1)],
             skip=skip,
             limit=limit,
         )
@@ -77,9 +77,90 @@ class TrainingIngestionBuildRepository(BaseRepository[TrainingIngestionBuild]):
                 "scenario_id": self._to_object_id(scenario_id),
                 "status": IngestionStatus.PENDING.value,
             },
-            sort=[("created_at", 1)],
+            sort=[("created_at", 1), ("_id", 1)],
             limit=batch_size,
         )
+
+    def find_for_enrichment_with_raw_data(
+        self,
+        scenario_id: str,
+        statuses: List[IngestionStatus],
+    ) -> List[Dict[str, Any]]:
+        """
+        Optimized aggregation for enrichment dispatch.
+
+        Joins with raw_build_runs to get run_created_at and conclusion,
+        sorts by run_created_at + _id in the database (not Python).
+
+        This eliminates:
+        - 2 separate queries for different statuses
+        - N+1 query pattern for raw_build_runs lookup
+        - Python-side sorting
+
+        Args:
+            scenario_id: Scenario ID
+            statuses: List of statuses to include (e.g., [INGESTED, MISSING_RESOURCE])
+
+        Returns:
+            List of dicts with ingestion build data + joined raw_build_run fields:
+            - _id, scenario_id, raw_repo_id, raw_build_run_id, status
+            - ci_run_id, commit_sha, repo_full_name, github_repo_id, created_at
+            - run_created_at (from raw_build_runs)
+            - run_started_at (from raw_build_runs)
+            - conclusion (from raw_build_runs)
+        """
+        status_values = [s.value for s in statuses]
+
+        pipeline = [
+            # Stage 1: Match by scenario and status
+            {
+                "$match": {
+                    "scenario_id": self._to_object_id(scenario_id),
+                    "status": {"$in": status_values},
+                }
+            },
+            # Stage 2: Lookup raw_build_runs to get run_created_at and conclusion
+            {
+                "$lookup": {
+                    "from": "raw_build_runs",
+                    "localField": "raw_build_run_id",
+                    "foreignField": "_id",
+                    "as": "raw_run",
+                }
+            },
+            # Stage 3: Unwind the joined array (1:1 relationship expected)
+            {"$unwind": {"path": "$raw_run", "preserveNullAndEmptyArrays": True}},
+            # Stage 4: Add fields from raw_build_run for sorting and outcome
+            {
+                "$addFields": {
+                    "run_created_at": "$raw_run.run_created_at",
+                    "run_started_at": "$raw_run.run_started_at",
+                    "conclusion": "$raw_run.conclusion",
+                }
+            },
+            # Stage 5: Sort by run_created_at (oldest first) + _id for determinism
+            {"$sort": {"run_created_at": 1, "_id": 1}},
+            # Stage 6: Project only needed fields (drop raw_run subdocument)
+            {
+                "$project": {
+                    "_id": 1,
+                    "scenario_id": 1,
+                    "raw_repo_id": 1,
+                    "raw_build_run_id": 1,
+                    "status": 1,
+                    "ci_run_id": 1,
+                    "commit_sha": 1,
+                    "repo_full_name": 1,
+                    "github_repo_id": 1,
+                    "created_at": 1,
+                    "run_created_at": 1,
+                    "run_started_at": 1,
+                    "conclusion": 1,
+                }
+            },
+        ]
+
+        return list(self.collection.aggregate(pipeline))
 
     def bulk_create_from_raw_builds(
         self,

@@ -94,6 +94,7 @@ class RepoSuggestion(BaseModel):
     owner: Optional[str] = None
     html_url: Optional[str] = None
     github_repo_id: Optional[int] = None
+    language: Optional[str] = None
 
 
 class RepoSuggestionListResponse(BaseModel):

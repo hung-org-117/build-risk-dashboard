@@ -45,7 +45,6 @@ function getStatusBadge(status: TrainingScenarioStatus) {
         { label: string; variant: "default" | "secondary" | "destructive" | "outline"; className?: string }
     > = {
         queued: { label: "Queued", variant: "outline", className: "border-slate-400 text-slate-400" },
-        filtering: { label: "Filtering...", variant: "outline", className: "border-blue-500 text-blue-500" },
         ingesting: { label: "Ingesting...", variant: "outline", className: "border-blue-500 text-blue-500" },
         ingested: { label: "Ingested", variant: "outline", className: "border-emerald-500 text-emerald-500" },
         processing: { label: "Processing...", variant: "outline", className: "border-purple-500 text-purple-500" },

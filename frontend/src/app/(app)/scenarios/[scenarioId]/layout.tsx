@@ -21,7 +21,6 @@ const getStatusConfig = (status: string) => {
     const key = status.toLowerCase();
     const config: Record<string, { icon: typeof CheckCircle2; color: string; bgColor: string }> = {
         queued: { icon: Loader2, color: "text-slate-600", bgColor: "bg-slate-100" },
-        filtering: { icon: Loader2, color: "text-blue-600", bgColor: "bg-blue-100" },
         ingesting: { icon: Loader2, color: "text-blue-600", bgColor: "bg-blue-100" },
         ingested: { icon: CheckCircle2, color: "text-emerald-600", bgColor: "bg-emerald-100" },
         processing: { icon: Loader2, color: "text-purple-600", bgColor: "bg-purple-100" },
@@ -132,7 +131,7 @@ export default function ScenarioLayout({ children }: { children: ReactNode }) {
                         className={`${statusConfig.bgColor} ${statusConfig.color} hover:${statusConfig.bgColor} cursor-default`}
                     >
                         <StatusIcon
-                            className={`mr-1 h-3 w-3 ${["queued", "filtering", "ingesting", "processing", "splitting"].includes(
+                            className={`mr-1 h-3 w-3 ${["queued", "ingesting", "processing", "splitting"].includes(
                                 scenario.status
                             )
                                 ? "animate-spin"

@@ -117,7 +117,6 @@ def start_scenario_ingestion(
             {
                 "$set": {
                     "status": ScenarioStatus.INGESTING.value,
-                    "filtering_started_at": datetime.utcnow(),
                     "ingestion_started_at": datetime.utcnow(),
                     "builds_total": builds_total,
                     "current_task_id": self.request.id,
@@ -400,7 +399,9 @@ def filter_builds_for_scenario(
     filters = resolve_filter_config(scenario)
 
     # 2. Find matching repositories
-    repos = find_matching_repos(db, filters["languages"], filters.get("build_source_ids"))
+    repos = find_matching_repos(
+        db, filters["languages"], filters.get("build_source_ids")
+    )
 
     if not repos:
         logger.warning(f"{corr_prefix} [filter] No repos match filter criteria")
@@ -409,7 +410,9 @@ def filter_builds_for_scenario(
     logger.info(f"{corr_prefix} [filter] Found {len(repos)} matching repos")
 
     # 3. Process builds
-    total_inserted = process_ingestion_builds(db, scenario_id, repos, filters, corr_prefix)
+    total_inserted = process_ingestion_builds(
+        db, scenario_id, repos, filters, corr_prefix
+    )
 
     if total_inserted == 0:
         logger.warning(f"{corr_prefix} [filter] No builds match filter criteria")

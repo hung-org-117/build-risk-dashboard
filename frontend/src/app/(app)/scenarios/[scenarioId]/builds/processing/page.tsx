@@ -251,12 +251,12 @@ export default function ProcessingBuildsPage() {
                                         <td colSpan={6} className="px-4 py-12 text-center">
                                             <div className="flex flex-col items-center gap-2">
                                                 <p className="text-muted-foreground">
-                                                    {scenario && ["queued", "filtering", "ingesting", "ingested"].includes(scenario.status)
+                                                    {scenario && ["queued", "ingesting", "ingested"].includes(scenario.status)
                                                         ? "Feature extraction has not started yet."
                                                         : "No builds have been processed yet."}
                                                 </p>
                                                 <p className="text-xs text-muted-foreground">
-                                                    {scenario && ["queued", "filtering", "ingesting", "ingested"].includes(scenario.status)
+                                                    {scenario && ["queued", "ingesting", "ingested"].includes(scenario.status)
                                                         ? "Complete ingestion and click \"Start Processing\" to begin feature extraction."
                                                         : "Processing is in progress. Builds will appear here as they are processed."}
                                                 </p>

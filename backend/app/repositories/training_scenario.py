@@ -97,20 +97,6 @@ class TrainingScenarioRepository(BaseRepository[TrainingScenario]):
             query["created_by"] = self._to_object_id(user_id)
         return self.find_one(query)
 
-    def get_active_scenarios(self) -> List[TrainingScenario]:
-        """Get scenarios currently being processed (not completed/failed)."""
-        active_statuses = [
-            ScenarioStatus.QUEUED.value,
-            ScenarioStatus.FILTERING.value,
-            ScenarioStatus.INGESTING.value,
-            ScenarioStatus.PROCESSING.value,
-            ScenarioStatus.SPLITTING.value,
-        ]
-        return self.find_many(
-            {"status": {"$in": active_statuses}},
-            sort=[("created_at", 1)],
-        )
-
     def update_status(
         self,
         scenario_id: str,

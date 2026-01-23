@@ -2,7 +2,7 @@
 TrainingScenario Entity - Training pipeline configuration and tracking.
 
 Stores YAML configuration and tracks scenario progress through phases:
-QUEUED → FILTERING → INGESTING → PROCESSING → PROCESSED
+QUEUED → INGESTING → PROCESSING → PROCESSED
 
 This entity replaces both MLScenario and DatasetVersion, providing a unified
 training pipeline configuration.
@@ -21,8 +21,7 @@ class ScenarioStatus(str, Enum):
     """Status of training scenario through the pipeline."""
 
     QUEUED = "queued"  # Initial state after creation
-    FILTERING = "filtering"  # Phase 1: Querying builds from DB
-    INGESTING = "ingesting"  # Phase 1: Clone, worktree, logs
+    INGESTING = "ingesting"  # Phase 1: Filter builds, clone, worktree, logs
     INGESTED = "ingested"  # Phase 1 complete, user can review + trigger processing
     PROCESSING = "processing"  # Phase 2: Feature extraction + scans
     PROCESSED = "processed"  # Phase 2 complete. Ready for creating exports.
@@ -170,8 +169,6 @@ class TrainingScenario(BaseEntity):
     created_by: Optional[PyObjectId] = None
 
     # Phase timestamps
-    filtering_started_at: Optional[datetime] = None
-    filtering_completed_at: Optional[datetime] = None
     ingestion_started_at: Optional[datetime] = None
     ingestion_completed_at: Optional[datetime] = None
     processing_started_at: Optional[datetime] = None

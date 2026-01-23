@@ -12,7 +12,6 @@ import { api } from "./client";
 
 export type TrainingScenarioStatus =
     | "queued"
-    | "filtering"
     | "ingesting"
     | "ingested"
     | "processing"
@@ -53,7 +52,6 @@ export interface TrainingScenarioRecord {
     // Timestamps
     created_at?: string;
     updated_at?: string;
-    filtering_completed_at?: string;
     ingestion_completed_at?: string;
     processing_completed_at?: string;
     splitting_completed_at?: string;

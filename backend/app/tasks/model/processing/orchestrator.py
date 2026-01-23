@@ -33,21 +33,23 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_processing.start_processing_phase",
+    name="model.processing.start_pipeline",
     queue="model_processing",
     soft_time_limit=60,
     time_limit=120,
 )
-def start_processing_phase(
+def start_model_processing_pipeline(
     self: SafeTask,
     repo_config_id: str,
 ) -> Dict[str, Any]:
     """Phase 2: Start processing phase (manually triggered by user)."""
     # Import here to avoid circular imports
-    from app.tasks.model.processing.orchestrator import dispatch_build_processing
+    from app.tasks.model.processing.orchestrator import dispatch_processing_batch
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -77,7 +79,9 @@ def start_processing_phase(
         last_checkpoint_id = repo_config.last_processed_import_build_id
 
         if last_checkpoint_id:
-            logger.info(f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds")
+            logger.info(
+                f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds"
+            )
         else:
             logger.info(f"{log_ctx} No checkpoint, processing all builds")
 
@@ -110,7 +114,7 @@ def start_processing_phase(
             {"status": ModelImportStatus.PROCESSING.value},
         )
 
-        dispatch_build_processing.delay(
+        dispatch_processing_batch.delay(
             repo_config_id=repo_config_id,
             raw_repo_id=str(repo_config.raw_repo_id),
             model_import_build_ids=model_import_build_ids,
@@ -118,7 +122,9 @@ def start_processing_phase(
             last_import_build_id=str(last_build_id),
         )
 
-        logger.info(f"{log_ctx} Dispatched processing for {len(model_import_build_ids)} builds")
+        logger.info(
+            f"{log_ctx} Dispatched processing for {len(model_import_build_ids)} builds"
+        )
 
         publish_status(
             repo_config_id,
@@ -144,12 +150,12 @@ def start_processing_phase(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_processing.dispatch_build_processing",
+    name="model.processing.dispatch",
     queue="model_processing",
     soft_time_limit=300,
     time_limit=360,
 )
-def dispatch_build_processing(
+def dispatch_processing_batch(
     self: SafeTask,
     repo_config_id: str,
     raw_repo_id: str,
@@ -159,14 +165,16 @@ def dispatch_build_processing(
 ) -> Dict[str, Any]:
     """Create ModelTrainingBuild docs and dispatch feature extraction tasks."""
     # Import here to avoid circular imports
-    from app.tasks.model.processing.extraction import process_workflow_run
+    from app.tasks.model.processing.extraction import extract_build_features
     from app.tasks.model.processing.prediction import (
-        finalize_model_processing,
+        handle_pipeline_completion,
         handle_processing_chain_error,
     )
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -178,7 +186,9 @@ def dispatch_build_processing(
         import_build_repo = ModelImportBuildRepository(self.db)
 
         if not model_import_build_ids:
-            logger.info(f"{corr_prefix} No builds to process for repo config {repo_config_id}")
+            logger.info(
+                f"{corr_prefix} No builds to process for repo config {repo_config_id}"
+            )
             repo_config_repo.update_repository(
                 repo_config_id,
                 {"status": ModelImportStatus.PROCESSED.value},
@@ -188,14 +198,16 @@ def dispatch_build_processing(
 
         ingested_builds = import_build_repo.find_many(
             {"_id": {"$in": [ObjectId(bid) for bid in model_import_build_ids]}},
-            sort=[("run_created_at", 1)],
+            sort=[("run_created_at", 1), ("_id", 1)],
         )
 
         raw_build_run_ids = [str(b.raw_build_run_id) for b in ingested_builds]
         raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
         build_run_map = {str(r.id): r for r in raw_build_runs}
 
-        run_oids = [ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)]
+        run_oids = [
+            ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)
+        ]
         existing_builds_map = model_build_repo.find_existing_by_raw_build_run_ids(
             ObjectId(raw_repo_id), run_oids
         )
@@ -209,7 +221,9 @@ def dispatch_build_processing(
 
             raw_build_run = build_run_map.get(run_id_str)
             if not raw_build_run:
-                logger.warning(f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping")
+                logger.warning(
+                    f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping"
+                )
                 continue
 
             existing = existing_builds_map.get(run_id_str)
@@ -268,7 +282,7 @@ def dispatch_build_processing(
             return {"repo_config_id": repo_config_id, "dispatched": 0}
 
         sequential_tasks = [
-            process_workflow_run.si(
+            extract_build_features.si(
                 repo_config_id=repo_config_id,
                 model_build_id=build_id,
                 is_reprocess=False,
@@ -277,11 +291,13 @@ def dispatch_build_processing(
             for build_id in model_build_id_strs
         ]
 
-        logger.info(f"{corr_prefix} Dispatching {total_builds} builds for sequential processing")
+        logger.info(
+            f"{corr_prefix} Dispatching {total_builds} builds for sequential processing"
+        )
 
         workflow = chain(
             *sequential_tasks,
-            finalize_model_processing.si(
+            handle_pipeline_completion.si(
                 repo_config_id=repo_config_id,
                 created_count=created_count,
                 correlation_id=correlation_id,

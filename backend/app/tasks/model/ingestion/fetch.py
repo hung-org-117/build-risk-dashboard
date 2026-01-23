@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.fetch_builds_until_existing",
+    name="model.ingestion.fetch.sequential",
     queue="model_ingestion",
     soft_time_limit=600,
     time_limit=900,
@@ -48,10 +48,12 @@ def fetch_builds_until_existing(
 ) -> Dict[str, Any]:
     """Sequential fetch that stops when hitting existing builds."""
     # Import here to avoid circular imports
-    from app.tasks.model.ingestion.dispatch import dispatch_ingestion
+    from app.tasks.model.ingestion.dispatch import dispatch_ingestion_batch
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -134,7 +136,9 @@ def fetch_builds_until_existing(
                 if not build.build_id:
                     continue
 
-                existing_run = build_run_repo.find_by_repo_and_build_id(raw_repo_id, build.build_id)
+                existing_run = build_run_repo.find_by_repo_and_build_id(
+                    raw_repo_id, build.build_id
+                )
 
                 if existing_run:
                     existing_on_page += 1
@@ -179,14 +183,20 @@ def fetch_builds_until_existing(
                 all_ci_run_ids.append(build.build_id)
 
             total_new_builds += new_on_page
-            logger.info(f"{log_ctx} Page {page}: {new_on_page} new, {existing_on_page} existing")
+            logger.info(
+                f"{log_ctx} Page {page}: {new_on_page} new, {existing_on_page} existing"
+            )
 
             if existing_on_page > 0:
-                logger.info(f"{log_ctx} Found {existing_on_page} existing builds, stopping sync")
+                logger.info(
+                    f"{log_ctx} Found {existing_on_page} existing builds, stopping sync"
+                )
                 break
 
             if len(builds) < batch_size:
-                logger.info(f"{log_ctx} No more pages (got {len(builds)} < {batch_size})")
+                logger.info(
+                    f"{log_ctx} No more pages (got {len(builds)} < {batch_size})"
+                )
                 break
 
             page += 1
@@ -206,7 +216,19 @@ def fetch_builds_until_existing(
             )
             return {"status": "completed", "new_builds": 0, "pages": page}
 
-        dispatch_ingestion.delay(
+        # Mark as FETCHED before starting ingestion
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.FETCHED.value},
+        )
+        publish_status(
+            repo_config_id,
+            "fetched",
+            f"Fetch complete: {total_new_builds} builds ready for ingestion",
+            stats={"builds_fetched": total_new_builds},
+        )
+
+        dispatch_ingestion_batch.delay(
             repo_config_id=repo_config_id,
             raw_repo_id=raw_repo_id,
             github_repo_id=raw_repo.github_repo_id,
@@ -244,12 +266,12 @@ def fetch_builds_until_existing(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.fetch_builds_batch",
+    name="model.ingestion.fetch.page",
     queue="model_ingestion",
-    soft_time_limit=300,
-    time_limit=360,
+    soft_time_limit=120,
+    time_limit=180,
 )
-def fetch_builds_batch(
+def fetch_builds_page(
     self: SafeTask,
     repo_config_id: str,
     ci_provider: str,
@@ -261,7 +283,9 @@ def fetch_builds_batch(
     """Fetch a single page of builds and create ModelImportBuild records."""
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -279,7 +303,11 @@ def fetch_builds_batch(
         raw_repo_id = str(repo_config.raw_repo_id)
         full_name = repo_config.full_name
 
-        since_dt = datetime.now(timezone.utc) - timedelta(days=since_days) if since_days else None
+        since_dt = (
+            datetime.now(timezone.utc) - timedelta(days=since_days)
+            if since_days
+            else None
+        )
 
         ci_provider_enum = CIProvider(ci_provider)
         provider_config = get_provider_config(ci_provider_enum, db=self.db)
@@ -355,7 +383,9 @@ def fetch_builds_batch(
                 is_bot_commit=build.is_bot_commit or False,
             )
 
-            existing = import_build_repo.find_by_business_key(repo_config_id, str(raw_build_run.id))
+            existing = import_build_repo.find_by_business_key(
+                repo_config_id, str(raw_build_run.id)
+            )
             if existing:
                 continue
 
@@ -377,7 +407,9 @@ def fetch_builds_batch(
             import_build_repo.bulk_insert(import_builds_to_insert)
 
         has_more = len(builds) >= batch_size
-        logger.info(f"{log_ctx} Saved {len(import_builds_to_insert)} builds, has_more={has_more}")
+        logger.info(
+            f"{log_ctx} Saved {len(import_builds_to_insert)} builds, has_more={has_more}"
+        )
 
         return {
             "page": page,
@@ -395,22 +427,24 @@ def fetch_builds_batch(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.aggregate_fetch_results",
+    name="model.ingestion.fetch.complete",
     queue="model_ingestion",
     soft_time_limit=60,
     time_limit=120,
 )
-def aggregate_fetch_results(
+def handle_fetch_completion(
     self: SafeTask,
     results: List[Dict[str, Any]],
     repo_config_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
     """Aggregate fetch results and dispatch ingestion."""
-    from app.tasks.model.ingestion.dispatch import dispatch_ingestion
+    from app.tasks.model.ingestion.dispatch import dispatch_ingestion_batch
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -441,7 +475,9 @@ def aggregate_fetch_results(
         total_fetched = len(fetched_builds)
 
         if total_fetched != total_from_results:
-            logger.warning(f"{log_ctx} Discrepancy: chord={total_from_results}, db={total_fetched}")
+            logger.warning(
+                f"{log_ctx} Discrepancy: chord={total_from_results}, db={total_fetched}"
+            )
 
         logger.info(f"{log_ctx} Found {total_fetched} fetched builds in DB")
 
@@ -451,7 +487,17 @@ def aggregate_fetch_results(
 
         repo_config_repo.update_repository(
             repo_config_id,
-            {"builds_fetched": total_fetched},
+            {
+                "builds_fetched": total_fetched,
+                "status": ModelImportStatus.FETCHED.value,
+            },
+        )
+
+        publish_status(
+            repo_config_id,
+            "fetched",
+            f"Fetch complete: {total_fetched} builds ready for ingestion",
+            stats={"builds_fetched": total_fetched},
         )
 
         commit_shas = import_build_repo.get_commit_shas(repo_config_id)
@@ -461,7 +507,7 @@ def aggregate_fetch_results(
         if not raw_repo:
             raise ValueError(f"RawRepository {repo_config.raw_repo_id} not found")
 
-        dispatch_ingestion.delay(
+        dispatch_ingestion_batch.delay(
             repo_config_id=repo_config_id,
             raw_repo_id=str(repo_config.raw_repo_id),
             github_repo_id=raw_repo.github_repo_id,
@@ -538,4 +584,117 @@ def handle_fetch_chord_error(
         "status": "handled",
         "error": error_msg,
         "repo_config_id": repo_config_id,
+    }
+
+
+@celery_app.task(
+    bind=True,
+    base=SafeTask,
+    name="model.ingestion.fetch.webhook",
+    queue="model_ingestion",
+    soft_time_limit=300,
+    time_limit=360,
+)
+def fetch_webhook_build(
+    self: SafeTask,
+    repo_config_id: str,
+    raw_repo_id: str,
+    raw_build_run_id: str,
+    full_name: str,
+    ci_provider: str,
+    commit_sha: str,
+    ci_run_id: str,
+    github_repo_id: int,
+) -> Dict[str, Any]:
+    """
+    Ingest a single build from webhook event.
+
+    This task is triggered by GitHub webhook when a workflow_run completes.
+    It creates a ModelImportBuild (FETCHED) and dispatches ingestion.
+    """
+    import uuid
+    from app.tasks.model.ingestion.dispatch import dispatch_ingestion_batch
+
+    correlation_id = str(uuid.uuid4())[:8]
+    corr_prefix = f"[corr={correlation_id}][webhook]"
+
+    logger.info(
+        f"{corr_prefix} Starting webhook ingestion for build {ci_run_id} "
+        f"in repo {full_name}"
+    )
+
+    import_build_repo = ModelImportBuildRepository(self.db)
+    repo_config_repo = ModelRepoConfigRepository(self.db)
+    raw_repo_repo = RawRepositoryRepository(self.db)
+
+    repo_config = repo_config_repo.find_by_id(repo_config_id)
+    if not repo_config:
+        logger.error(f"{corr_prefix} ModelRepoConfig not found: {repo_config_id}")
+        return {"status": "error", "error": "ModelRepoConfig not found"}
+
+    raw_repo = raw_repo_repo.find_by_id(raw_repo_id)
+    if not raw_repo:
+        logger.error(f"{corr_prefix} RawRepository not found: {raw_repo_id}")
+        return {"status": "error", "error": "RawRepository not found"}
+
+    github_repo_id = github_repo_id or raw_repo.github_repo_id
+
+    existing_import = import_build_repo.find_by_business_key(
+        repo_config_id, raw_build_run_id
+    )
+
+    if existing_import:
+        logger.info(f"{corr_prefix} Build {ci_run_id} already ingested, skipping")
+        return {"status": "already_ingested", "build_id": ci_run_id}
+
+    from app.repositories.raw_build_run import RawBuildRunRepository
+
+    raw_build_run = RawBuildRunRepository(self.db).find_by_id(raw_build_run_id)
+    run_created_at = raw_build_run.run_created_at if raw_build_run else None
+
+    import_build = ModelImportBuild(
+        _id=None,
+        model_repo_config_id=ObjectId(repo_config_id),
+        raw_build_run_id=ObjectId(raw_build_run_id),
+        status=ModelImportBuildStatus.FETCHED,
+        ci_run_id=ci_run_id,
+        commit_sha=commit_sha,
+        run_created_at=run_created_at,
+        ingestion_started_at=None,
+        ingested_at=None,
+        ingestion_error=None,
+    )
+    result = import_build_repo.insert_one(import_build)
+    import_build_id = str(result.id)
+    logger.info(f"{corr_prefix} Created ModelImportBuild {import_build_id}")
+
+    dispatch_ingestion_batch.delay(
+        repo_config_id=repo_config_id,
+        raw_repo_id=raw_repo_id,
+        github_repo_id=github_repo_id,
+        full_name=full_name,
+        ci_provider=ci_provider,
+        commit_shas=[commit_sha],
+        ci_run_ids=[ci_run_id],
+        correlation_id=correlation_id,
+    )
+
+    publish_status(
+        repo_config_id,
+        "ingesting",
+        f"Ingesting new build from webhook: {ci_run_id[:8]}...",
+        stats={
+            "builds_fetched": 1,
+            "builds_features_extracted": 0,
+            "builds_missing_resource": 0,
+        },
+    )
+
+    logger.info(f"{corr_prefix} Dispatched ingestion for webhook build {ci_run_id}")
+
+    return {
+        "status": "dispatched",
+        "build_id": ci_run_id,
+        "import_build_id": import_build_id,
+        "correlation_id": correlation_id,
     }

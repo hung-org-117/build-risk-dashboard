@@ -33,7 +33,7 @@ export function StepUpload({
     ciProviders,
     mappings,
     isMappingValid,
-    isDatasetCreated,
+    isSourceCreated,
     fileInputRef,
     onFileSelect,
     onNameChange,
@@ -94,7 +94,7 @@ export function StepUpload({
                         {preview.totalRows.toLocaleString()} rows • {preview.columns.length} columns
                     </p>
                 </div>
-                {!isDatasetCreated && (
+                {!isSourceCreated && (
                     <Button variant="ghost" size="sm" onClick={onClearFile}>
                         <X className="h-4 w-4" />
                     </Button>

@@ -16,7 +16,6 @@ from bson import ObjectId
 from celery import chain
 
 from app.celery_app import celery_app
-from app.entities import TrainingIngestionBuild
 from app.entities.enums import ExtractionStatus
 from app.entities.training_ingestion_build import IngestionStatus
 from app.entities.training_scenario import ScenarioStatus
@@ -64,7 +63,9 @@ def dispatch_scans_and_processing(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}")
+        logger.info(
+            f"{corr_prefix} [dispatch_scans_and_processing] Starting for {scenario_id}"
+        )
 
         scenario_repo = TrainingScenarioRepository(self.db)
         scenario = scenario_repo.find_by_id(scenario_id)
@@ -152,30 +153,27 @@ def dispatch_enrichment_batches(
 
     def _work(state: TaskState) -> Dict[str, Any]:
         corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
-        logger.info(f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}")
+        logger.info(
+            f"{corr_prefix} [dispatch_enrichment_batches] Starting for {scenario_id}"
+        )
 
         scenario_repo = TrainingScenarioRepository(self.db)
         ingestion_build_repo = TrainingIngestionBuildRepository(self.db)
         enrichment_build_repo = TrainingEnrichmentBuildRepository(self.db)
-        raw_build_run_repo = RawBuildRunRepository(self.db)
 
         scenario = scenario_repo.find_by_id(scenario_id)
         if not scenario:
             return {"status": "error", "error": "Scenario not found"}
 
-        # Get INGESTED + MISSING_RESOURCE builds (both can be processed)
-        ingested_builds, _ = ingestion_build_repo.find_by_scenario(
-            scenario_id, status_filter=IngestionStatus.INGESTED
-        )
-        missing_resource_builds, _ = ingestion_build_repo.find_by_scenario(
-            scenario_id, status_filter=IngestionStatus.MISSING_RESOURCE
+        # Single aggregation query: filters, joins raw_build_runs, sorts by run_created_at
+        # Eliminates: 2 separate queries, N+1 pattern, Python-side sorting
+        builds_with_raw_data = ingestion_build_repo.find_for_enrichment_with_raw_data(
+            scenario_id=scenario_id,
+            statuses=[IngestionStatus.INGESTED, IngestionStatus.MISSING_RESOURCE],
         )
 
-        all_builds = ingested_builds + missing_resource_builds
-
-        if not all_builds:
+        if not builds_with_raw_data:
             logger.warning(f"{corr_prefix} No builds to process")
-            # No builds - mark as PROCESSED
             updated_scenario = scenario_repo.find_one_and_update(
                 {"_id": ObjectId(scenario_id)},
                 {
@@ -191,50 +189,34 @@ def dispatch_enrichment_batches(
                 publish_scenario_updated(updated_scenario)
             return {"status": "completed", "builds_features_extracted": 0}
 
-        # Get raw build run data for outcome determination and temporal ordering
-        raw_build_run_ids = [b.raw_build_run_id for b in all_builds]
-        raw_build_runs = {
-            str(r.id): r
-            for r in [raw_build_run_repo.find_by_id(rid) for rid in raw_build_run_ids]
-            if r is not None
-        }
-
-        # Sort by build creation time (oldest first) for temporal features
-        def get_build_timestamp(b: TrainingIngestionBuild):
-            raw_run = raw_build_runs.get(str(b.raw_build_run_id))
-            if raw_run and raw_run.run_created_at:
-                return raw_run.run_created_at
-            if b.created_at:
-                return b.created_at
-            return datetime.utcnow()
-
-        all_builds.sort(key=get_build_timestamp)
-
-        # Create EnrichmentBuild records
+        # Create EnrichmentBuild records - data already sorted by run_created_at from DB
         enrichment_build_ids = []
-        for build in all_builds:
-            raw_run = raw_build_runs.get(str(build.raw_build_run_id))
-
-            # Determine outcome from conclusion
-            if raw_run and raw_run.conclusion:
-                outcome = 1 if raw_run.conclusion.lower() == "failure" else 0
+        for build_doc in builds_with_raw_data:
+            # Determine outcome from conclusion (already joined from raw_build_runs)
+            conclusion = build_doc.get("conclusion")
+            if conclusion:
+                outcome = 1 if conclusion.lower() == "failure" else 0
             else:
-                outcome = 1 if "failure" in str(build.status).lower() else 0
+                outcome = (
+                    1 if "failure" in str(build_doc.get("status", "")).lower() else 0
+                )
 
             eb = enrichment_build_repo.upsert_for_ingestion_build(
                 scenario_id=scenario_id,
-                ingestion_build_id=str(build.id),
-                raw_repo_id=str(build.raw_repo_id),
-                raw_build_run_id=str(build.raw_build_run_id),
-                ci_run_id=build.ci_run_id,
-                commit_sha=build.commit_sha,
-                repo_full_name=build.repo_full_name,
+                ingestion_build_id=str(build_doc["_id"]),
+                raw_repo_id=str(build_doc["raw_repo_id"]),
+                raw_build_run_id=str(build_doc["raw_build_run_id"]),
+                ci_run_id=build_doc.get("ci_run_id", ""),
+                commit_sha=build_doc.get("commit_sha", ""),
+                repo_full_name=build_doc.get("repo_full_name", ""),
                 outcome=outcome,
-                build_started_at=raw_run.run_started_at if raw_run else None,
+                build_started_at=build_doc.get("run_started_at"),
             )
             enrichment_build_ids.append(str(eb.id))
 
-        logger.info(f"{corr_prefix} Created {len(enrichment_build_ids)} enrichment builds")
+        logger.info(
+            f"{corr_prefix} Created {len(enrichment_build_ids)} enrichment builds"
+        )
 
         # Get selected features from feature_config
         feature_config = scenario.feature_config
@@ -278,7 +260,9 @@ def dispatch_enrichment_batches(
         workflow.on_error(error_callback)
         workflow.apply_async()
 
-        logger.info(f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing")
+        logger.info(
+            f"{corr_prefix} Dispatched {len(processing_tasks)} builds for processing"
+        )
 
         publish_scenario_updated(scenario)
 

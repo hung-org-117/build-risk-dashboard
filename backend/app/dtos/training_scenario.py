@@ -75,7 +75,6 @@ class TrainingScenarioResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     # Phase timestamps
-    filtering_completed_at: Optional[datetime] = None
     ingestion_completed_at: Optional[datetime] = None
     processing_completed_at: Optional[datetime] = None
 

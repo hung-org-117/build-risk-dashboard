@@ -257,7 +257,8 @@ export default function ImportRepositoriesPage() {
     const featureFormRepos = useMemo(() => selectedList.map(r => ({
         id: String(r.github_repo_id),
         full_name: r.full_name,
-        validation_status: "unknown"
+        validation_status: "unknown",
+        primary_language: r.language
     })), [selectedList]);
 
     // Detect languages for selected repos
@@ -324,6 +325,7 @@ export default function ImportRepositoriesPage() {
                             publicMatches={publicMatches}
                             selectedRepos={selectedRepos}
                             toggleSelection={toggleSelection}
+                            supportedLanguages={supportedLanguages}
                         />
                     ) : (
                         <ConfigurationStep
@@ -397,6 +399,7 @@ interface Step1Props {
     publicMatches: RepoSuggestion[];
     selectedRepos: Record<string, RepoSuggestion>;
     toggleSelection: (repo: RepoSuggestion) => void;
+    supportedLanguages: string[];
 }
 
 function Step1Content({
@@ -408,7 +411,13 @@ function Step1Content({
     publicMatches,
     selectedRepos,
     toggleSelection,
+    supportedLanguages,
 }: Step1Props) {
+    const isLanguageSupported = (lang?: string) => {
+        if (!lang) return false;
+        return supportedLanguages.includes(lang.toLowerCase());
+    };
+
     return (
         <div className="space-y-6 max-w-3xl">
             {/* Search */}
@@ -421,6 +430,25 @@ function Step1Content({
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
+            </div>
+
+            {/* Supported Languages Info */}
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                    <span className="font-semibold">Supported Languages:</span>{" "}
+                    {supportedLanguages.length > 0 ? (
+                        supportedLanguages.map((lang, i) => (
+                            <span key={lang}>
+                                <code className="rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium dark:bg-blue-800">
+                                    {lang}
+                                </code>
+                                {i < supportedLanguages.length - 1 && <span className="mx-1">,</span>}
+                            </span>
+                        ))
+                    ) : (
+                        <span className="text-muted-foreground">Loading...</span>
+                    )}
+                </p>
             </div>
 
             {searchError && (
@@ -447,6 +475,7 @@ function Step1Content({
                                 repo={repo}
                                 isSelected={!!selectedRepos[String(repo.github_repo_id)]}
                                 onToggle={() => toggleSelection(repo)}
+                                isSupported={isLanguageSupported(repo.language)}
                             />
                         ))
                     )}
@@ -473,6 +502,7 @@ function Step1Content({
                                 repo={repo}
                                 isSelected={!!selectedRepos[String(repo.github_repo_id)]}
                                 onToggle={() => toggleSelection(repo)}
+                                isSupported={isLanguageSupported(repo.language)}
                             />
                         ))
                     )}
@@ -643,29 +673,47 @@ function RepoItem({
     repo,
     isSelected,
     onToggle,
+    isSupported,
 }: {
     repo: RepoSuggestion;
     isSelected: boolean;
     onToggle: () => void;
+    isSupported: boolean;
 }) {
+    const language = repo.language || "Unknown";
+
     return (
         <label
-            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${isSelected
-                ? "bg-primary/5 border-primary/30 dark:bg-primary/10"
-                : "hover:bg-muted/50"
+            className={`flex items-start gap-3 rounded-lg border p-4 transition-colors ${!isSupported
+                ? "opacity-50 cursor-not-allowed bg-muted/20"
+                : isSelected
+                    ? "bg-primary/5 border-primary/30 dark:bg-primary/10 cursor-pointer"
+                    : "hover:bg-muted/50 cursor-pointer"
                 }`}
         >
             <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:opacity-50"
                 checked={isSelected}
                 onChange={onToggle}
+                disabled={!isSupported}
             />
             <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{repo.full_name}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`font-medium text-sm ${!isSupported ? "text-muted-foreground" : ""}`}>
+                        {repo.full_name}
+                    </span>
                     {repo.private && (
                         <Badge variant="secondary" className="text-[10px] h-5">Private</Badge>
+                    )}
+                    <Badge
+                        variant={isSupported ? "outline" : "destructive"}
+                        className={`text-[10px] h-5 ${isSupported ? "" : "bg-destructive/10"}`}
+                    >
+                        {language}
+                    </Badge>
+                    {!isSupported && (
+                        <span className="text-[10px] text-destructive font-medium">Not supported</span>
                     )}
                 </div>
                 <p className="text-xs text-muted-foreground line-clamp-1 mt-1">

@@ -49,6 +49,7 @@ interface RepoInfo {
     id: string;
     full_name: string;
     validation_status?: string;
+    primary_language?: string;
 }
 
 // Dynamic config: field name -> array of selected values
@@ -473,7 +474,14 @@ export function RepoConfigSection({
                         {listFields.map(field => {
                             // Get filtered options for this specific repo
                             const repoLangs = editingRepo ? (effectiveRepoLanguages[editingRepo] || []) : [];
-                            const filteredOptions = getFilteredOptions(field, repoLangs);
+
+                            // Fallback logic: if detailed languages failed, use primary_language
+                            const editingRepoInfo = repos.find(r => r.id === editingRepo);
+                            const effectiveLangs = (repoLangs.length > 0)
+                                ? repoLangs
+                                : (editingRepoInfo?.primary_language ? [editingRepoInfo.primary_language] : []);
+
+                            const filteredOptions = getFilteredOptions(field, effectiveLangs);
 
                             // Create a field spec with filtered options
                             const fieldWithFilteredOptions: ConfigFieldSpec = {

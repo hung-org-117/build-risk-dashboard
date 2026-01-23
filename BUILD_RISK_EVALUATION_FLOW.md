@@ -89,22 +89,22 @@ ModelRepoConfig (PROCESSED) + Predictions Ready
 ```
 ModelRepoConfig Status Flow:
 
-    QUEUED ──────► FETCHING ──────► INGESTING ──────► INGESTED
-                      │                  │                │
-                      ▼                  ▼                │
-                   FAILED ◄────────── FAILED             │
-                      │                                   │
-                      ▼                                   ▼
-                 (Retry available)          (User triggers processing)
-                                                          │
-                                                          ▼
-                                               ┌─── PROCESSING ───┐
-                                               │                  │
-                                               ▼                  ▼
-                                           PROCESSED           FAILED
-                                               │
-                                               ▼
-                                     (Retry / Re-sync available)
+    QUEUED ──────► FETCHING ──────► FETCHED ──────► INGESTING ──────► INGESTED
+                       │                │              │                 │
+                       ▼                ▼              ▼                 │
+                    FAILED ◄──────── FAILED ◄────── FAILED              │
+                       │                                                 │
+                       ▼                                                 ▼
+                  (Retry available)                         (User triggers processing)
+                                                                         │
+                                                                         ▼
+                                                              ┌─── PROCESSING ───┐
+                                                              │                  │
+                                                              ▼                  ▼
+                                                          PROCESSED           FAILED
+                                                              │
+                                                              ▼
+                                                    (Retry / Re-sync available)
 ```
 
 ---
@@ -117,6 +117,7 @@ Minimal metrics shown on the admin widget:
 |--------|---------|
 | Total | Repositories imported (`model_repo_configs`) |
 | Fetching | Status=FETCHING |
+| Fetched | Status=FETCHED |
 | Ingesting | Status=INGESTING |
 | Processing | Status=PROCESSING |
 | Processed | Status=PROCESSED |

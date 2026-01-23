@@ -15,7 +15,7 @@ class BuildSummary(BaseModel):
     """
 
     # Identity - using RawBuildRun._id as primary key
-    id: str = Field(..., alias="_id")
+    id: str = Field(..., alias="_id", serialization_alias="id")
 
     # Repository info
     repo_name: str = ""  # Full repository name (owner/repo) for display
@@ -249,7 +249,9 @@ class UnifiedBuildSummary(BaseModel):
 
     # Phase 3: Extraction (optional - only if ModelTrainingBuild exists)
     training_build_id: Optional[str] = None
-    extraction_status: Optional[str] = None  # pending, in_progress, completed, partial, failed
+    extraction_status: Optional[str] = (
+        None  # pending, in_progress, completed, partial, failed
+    )
     feature_count: int = 0
     expected_feature_count: Optional[int] = None  # Expected features from template
     extraction_error: Optional[str] = None

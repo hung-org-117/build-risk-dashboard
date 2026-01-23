@@ -1,22 +1,7 @@
 """
 Source Validation Tasks - Distributed validation using MapReduce pattern.
 
-Similar to dataset_validation.py but uses BuildSource entities.
-Creates raw_build_runs from CSV data via CI provider validation.
-
-Tasks:
-1. source_validation_orchestrator - Main entry, reads CSV chunks, dispatches workers
-2. validate_source_repo_chunk - Validates batch of repos via GitHub API
-3. validate_source_builds_chunk - Validates batch of builds via CI API
-4. aggregate_source_validation_results - Collects results and updates source
-
-Architecture:
-    Orchestrator
-        ├── Repo Chunk 1 → Build Chunks 1.1, 1.2, ...
-        ├── Repo Chunk 2 → Build Chunks 2.1, 2.2, ...
-        └── Repo Chunk N → Build Chunks N.1, N.2, ...
-                              ↓
-                        Aggregator (chord callback)
+Orchestrator splits CSV into chunks (Repo -> Build) and aggregates results.
 """
 
 import logging
@@ -43,6 +28,7 @@ from app.repositories.source_build import SourceBuildRepository
 from app.repositories.source_repo_stats import SourceRepoStatsRepository
 from app.services.github.github_client import get_public_github_client
 from app.tasks.base import SafeTask, TaskState
+from app.tasks.pipeline.feature_dag.languages.registry import LanguageRegistry
 from app.tasks.shared.events import publish_source_validation_updated
 from app.tasks.validation_helpers import (
     calculate_progress,
@@ -120,15 +106,7 @@ class SourceValidationTask(SafeTask):
 def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
     """
     Orchestrator task for distributed source validation.
-
     Reads CSV in chunks, groups by repo, and dispatches worker tasks.
-    Uses Celery chord to aggregate results after all workers complete.
-
-    Args:
-        source_id: ID of the BuildSource to validate
-
-    Returns:
-        Dict with dispatch status
     """
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -210,10 +188,14 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
         }
 
         if validated_builds:
-            logger.info(f"Resuming: skipping {len(validated_builds)} already validated builds")
+            logger.info(
+                f"Resuming: skipping {len(validated_builds)} already validated builds"
+            )
             for repo_name in list(all_repo_builds.keys()):
                 remaining = [
-                    b for b in all_repo_builds[repo_name] if b["build_id"] not in validated_builds
+                    b
+                    for b in all_repo_builds[repo_name]
+                    if b["build_id"] not in validated_builds
                 ]
                 if remaining:
                     all_repo_builds[repo_name] = remaining
@@ -242,10 +224,14 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
         init_validation_stats(self.redis, source_id, total_repos, total_builds)
 
         # Chunk repos for parallel processing
-        repo_chunks = list(chunk_dict(all_repo_builds, settings.VALIDATION_REPOS_PER_TASK))
+        repo_chunks = list(
+            chunk_dict(all_repo_builds, settings.VALIDATION_REPOS_PER_TASK)
+        )
 
         # Update total chunks in Redis
-        increment_validation_stat(self.redis, source_id, "total_chunks", len(repo_chunks))
+        increment_validation_stat(
+            self.redis, source_id, "total_chunks", len(repo_chunks)
+        )
 
         repo_tasks = [
             validate_source_repo_chunk.si(
@@ -271,16 +257,13 @@ def validate_build_source_task(self, source_id: str) -> Dict[str, Any]:
                     )
                 )
 
-        # Two-stage workflow:
-        # Stage 1: All repo validation tasks
-        # Stage 2: All build validation tasks
-        # Final: Aggregate results
+        # Two-stage workflow: Repo Tasks -> Build Tasks -> Aggregation
         workflow = chain(
-            group(repo_tasks),  # Stage 1: Validate repos first
-            group(build_tasks),  # Stage 2: Validate builds
+            group(repo_tasks),
+            group(build_tasks),
             aggregate_source_validation_results.si(
                 source_id=source_id, correlation_id=correlation_id
-            ),  # Final: Aggregate results
+            ),
         ).apply_async()
 
         workflow_id = workflow.id if workflow else None
@@ -329,18 +312,7 @@ def validate_source_repo_chunk(
     chunk_index: int,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
-    """
-    Validate a chunk of repositories and dispatch build validation tasks.
-
-    Args:
-        source_id: Source being validated
-        repo_builds_chunk: Dict mapping repo_name to build list
-        chunk_index: Index of this chunk
-        correlation_id: Correlation ID for tracing
-
-    Returns:
-        Dict with validation results for this chunk
-    """
+    """Validate a chunk of repositories and dispatch build validation tasks."""
 
     def mark_failed(e: Exception):
         handler = _create_source_failure_handler(self.redis, source_id)
@@ -354,7 +326,11 @@ def validate_source_repo_chunk(
         repos_valid = 0
         repos_not_found = 0
         repos_private = 0
+        repos_unsupported_lang = 0
         valid_repos_data: List[Dict[str, Any]] = []
+
+        # Get supported languages once for the entire chunk
+        supported_langs = LanguageRegistry.get_supported_languages()
 
         with get_public_github_client() as client:
             for repo_name, builds in repo_builds_chunk.items():
@@ -365,9 +341,27 @@ def validate_source_repo_chunk(
                     # Check if private
                     if repo_data.get("private"):
                         repos_private += 1
-                        increment_validation_stat(self.redis, source_id, "repos_private")
+                        increment_validation_stat(
+                            self.redis, source_id, "repos_private"
+                        )
                         increment_validation_stat(
                             self.redis, source_id, "builds_not_found", len(builds)
+                        )
+                        continue
+
+                    # Check if language is supported (case-insensitive)
+                    main_lang = repo_data.get("language")
+                    if not main_lang or main_lang.lower() not in supported_langs:
+                        repos_unsupported_lang += 1
+                        increment_validation_stat(
+                            self.redis, source_id, "repos_unsupported_lang"
+                        )
+                        increment_validation_stat(
+                            self.redis, source_id, "builds_not_found", len(builds)
+                        )
+                        logger.info(
+                            f"Skipping repo {repo_name}: language '{main_lang}' not supported. "
+                            f"Supported: {', '.join(supported_langs)}"
                         )
                         continue
 
@@ -384,8 +378,6 @@ def validate_source_repo_chunk(
                     repos_valid += 1
                     increment_validation_stat(self.redis, source_id, "repos_valid")
 
-                    # Extract CI provider from first build
-                    # All builds for same repo have same ci_provider
                     ci_provider = builds[0].get("ci_provider") if builds else None
 
                     source_repo_stats_repo.upsert_by_source_and_repo(
@@ -425,13 +417,16 @@ def validate_source_repo_chunk(
         # Publish progress update
         stats = get_validation_stats(self.redis, source_id)
         progress = calculate_progress(stats["chunks_completed"], stats["total_chunks"])
-        publish_source_validation_updated(source_id, "validating", progress=progress, stats=stats)
+        publish_source_validation_updated(
+            source_id, "validating", progress=progress, stats=stats
+        )
 
         return {
             "chunk_index": chunk_index,
             "repos_valid": repos_valid,
             "repos_not_found": repos_not_found,
             "repos_private": repos_private,
+            "repos_unsupported_lang": repos_unsupported_lang,
             "correlation_id": correlation_id,
         }
 
@@ -494,14 +489,7 @@ def validate_source_builds_chunk(
         raw_build_run_repo = RawBuildRunRepository(db)
         raw_repo_repo = RawRepositoryRepository(db)
 
-        # Lookup raw_repo_id if not provided (dispatched from orchestrator)
-        nonlocal raw_repo_id  # Needed because we assign to it? No, we read it. If we assign, we need nonlocal.
-        # But we assign to `raw_repo_id` inside _work, which is a local variable there if not careful.
-        # Wait, raw_repo_id is argument. In _work it shadows it if we assign.
-        # Actually in _work we can just use a local var or access via closure.
-        # Original code:
-        # if raw_repo_id is None: ... raw_repo_id = str(raw_repo.id)
-        # So yes, we need to handle this. Since it's an arg, we can just use a local variable `effective_repo_id`.
+        # Lookup effective_repo_id
         effective_repo_id = raw_repo_id
 
         if effective_repo_id is None:
@@ -528,7 +516,9 @@ def validate_source_builds_chunk(
 
         # Determine CI provider from first build
         ci_provider_str = (
-            builds[0].get("ci_provider", "github_actions") if builds else "github_actions"
+            builds[0].get("ci_provider", "github_actions")
+            if builds
+            else "github_actions"
         )
         ci_provider = CIProvider(ci_provider_str)
 
@@ -568,13 +558,12 @@ def validate_source_builds_chunk(
         build_ids_to_check = [b["build_id"] for b in builds_to_validate]
 
         # Query RawBuildRun for these builds within this repo
-        # Note: We query by raw_repo_id and build_id to ensure uniqueness scope
         cached_runs = []
         if effective_repo_id and build_ids_to_check:
             cached_runs = raw_build_run_repo.find_many(
                 {
                     "raw_repo_id": ObjectId(effective_repo_id),
-                    "build_id": {"$in": build_ids_to_check},
+                    "ci_run_id": {"$in": build_ids_to_check},
                 }
             )
 
@@ -606,8 +595,6 @@ def validate_source_builds_chunk(
                     )
                 )
                 builds_found += 1
-                # We count this as found, but NOT as fetched (implicitly)
-                # If we wanted to track cache hits, we could add a stat
             else:
                 # Not in cache, must fetch
                 builds_to_fetch.append(build_info)
@@ -649,13 +636,17 @@ def validate_source_builds_chunk(
                 BuildConclusion.SUCCESS,
                 BuildConclusion.FAILURE,
             ):
-                conclusion_str = conclusion.value if hasattr(conclusion, "value") else conclusion
+                conclusion_str = (
+                    conclusion.value if hasattr(conclusion, "value") else conclusion
+                )
                 return True, f"Conclusion '{conclusion_str}' filtered"
 
             return False, ""
 
         # Process results
-        for build_info, build_data in zip(builds_to_validate, build_results, strict=False):
+        for build_info, build_data in zip(
+            builds_to_validate, build_results, strict=False
+        ):
             build_id = build_info["build_id"]
 
             try:
@@ -734,7 +725,9 @@ def validate_source_builds_chunk(
                             build_id_from_source=build_id,
                             repo_name_from_source=repo_name,
                             raw_repo_id=(
-                                ObjectId(effective_repo_id) if effective_repo_id else None
+                                ObjectId(effective_repo_id)
+                                if effective_repo_id
+                                else None
                             ),
                             status=SourceBuildStatus.NOT_FOUND,
                             validation_error="Build not found or incomplete",
@@ -752,7 +745,9 @@ def validate_source_builds_chunk(
                         source_id=ObjectId(source_id),
                         build_id_from_source=build_id,
                         repo_name_from_source=repo_name,
-                        raw_repo_id=(ObjectId(effective_repo_id) if effective_repo_id else None),
+                        raw_repo_id=(
+                            ObjectId(effective_repo_id) if effective_repo_id else None
+                        ),
                         status=SourceBuildStatus.ERROR,
                         validation_error=str(e)[:500],
                         validated_at=utc_now(),
@@ -766,8 +761,12 @@ def validate_source_builds_chunk(
 
         # Update Redis counters
         increment_validation_stat(self.redis, source_id, "builds_found", builds_found)
-        increment_validation_stat(self.redis, source_id, "builds_not_found", builds_not_found)
-        increment_validation_stat(self.redis, source_id, "builds_filtered", builds_filtered)
+        increment_validation_stat(
+            self.redis, source_id, "builds_not_found", builds_not_found
+        )
+        increment_validation_stat(
+            self.redis, source_id, "builds_filtered", builds_filtered
+        )
 
         return {
             "repo_name": repo_name,
@@ -803,18 +802,7 @@ def aggregate_source_validation_results(
     source_id: str,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
-    """
-    Aggregate validation results and finalize source.
-
-    Called after all repo and build validation tasks complete.
-
-    Args:
-        source_id: Source being validated
-        correlation_id: Correlation ID for tracing
-
-    Returns:
-        Dict with final validation stats
-    """
+    """Aggregate validation results and finalize source."""
 
     def mark_failed(e: Exception):
         handler = _create_source_failure_handler(self.redis, source_id)

@@ -34,7 +34,7 @@ TEMPORAL_FEATURES = {
 }
 
 # Static features (point-in-time values for current build)
-STATIC_FEATURES = {
+SYNERGY_FEATURES = {
     # Code churn features
     "git_diff_src_churn",
     "git_diff_files_added",
@@ -84,7 +84,7 @@ CHAIN_FEATURES = {
 }
 
 # All features for prediction
-ALL_PREDICTION_FEATURES = TEMPORAL_FEATURES | STATIC_FEATURES | CHAIN_FEATURES
+ALL_PREDICTION_FEATURES = TEMPORAL_FEATURES | SYNERGY_FEATURES | CHAIN_FEATURES
 
 
 def seed_prediction_template():
@@ -123,7 +123,7 @@ def seed_prediction_template():
     # Print feature breakdown
     logger.info("   Feature breakdown:")
     logger.info(f"      temporal: {len(TEMPORAL_FEATURES)} features")
-    logger.info(f"      static: {len(STATIC_FEATURES)} features")
+    logger.info(f"      SYNERGY_FEATURES: {len(SYNERGY_FEATURES)} features")
     logger.info(f"      chain: {len(CHAIN_FEATURES)} features")
 
     # Print the actual features for reference
@@ -131,8 +131,8 @@ def seed_prediction_template():
     for f in sorted(TEMPORAL_FEATURES):
         logger.info(f"      - {f}")
 
-    logger.info("\n   Static features:")
-    for f in sorted(STATIC_FEATURES):
+    logger.info("\n   SYNERGY_FEATURES features:")
+    for f in sorted(SYNERGY_FEATURES):
         logger.info(f"      - {f}")
 
 

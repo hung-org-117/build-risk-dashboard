@@ -43,6 +43,7 @@ interface UploadFormProps {
     onCiProviderModeChange: (mode: CIProviderMode) => void;
     onCiProviderColumnChange: (column: string) => void;
     onMappingChange: (field: MappingKey, value: string) => void;
+    supportedLanguages?: string[];
 }
 
 export function UploadForm({
@@ -65,6 +66,7 @@ export function UploadForm({
     onCiProviderColumnChange,
     onMappingChange,
     columns,
+    supportedLanguages = [],
 }: UploadFormProps) {
 
     if (!previewExists) {
@@ -103,6 +105,15 @@ export function UploadForm({
                         </>
                     )}
                 </div>
+                {/* Supported Languages Note */}
+                {supportedLanguages.length > 0 && (
+                    <div className="mt-4 p-3 rounded-lg border border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-900/20">
+                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                            <span className="font-medium">Supported Languages:</span>{" "}
+                            {supportedLanguages.join(", ")}
+                        </p>
+                    </div>
+                )}
             </div>
         );
     }

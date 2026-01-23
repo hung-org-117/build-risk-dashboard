@@ -18,7 +18,7 @@ export function ScenarioActionProgressBanner({
     const status = scenario.status.toLowerCase();
 
     // Determine what action is in progress
-    const isIngesting = ["queued", "filtering", "ingesting"].includes(status);
+    const isIngesting = ["queued", "ingesting"].includes(status);
     const isProcessing = status === "processing" || processingLoading;
     const isRetryingIngestion = retryIngestionLoading;
     const isRetryingProcessing = retryProcessingLoading;
@@ -63,8 +63,6 @@ export function ScenarioActionProgressBanner({
         let description = "";
         if (status === "queued") {
             description = "Waiting in queue...";
-        } else if (status === "filtering") {
-            description = "Filtering builds from warehouse...";
         } else {
             description = `Ingesting builds: ${buildsIngested}/${buildsTotal}`;
         }

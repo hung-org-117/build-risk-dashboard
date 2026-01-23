@@ -237,12 +237,12 @@ def extract_features_for_build(
         # Validate required model features are present
         try:
             from app.services.risk_model.inference import (
-                STATIC_FEATURES,
+                SYNERGY_FEATURES,
                 TEMPORAL_FEATURES,
             )
 
             if category == AuditLogCategory.MODEL_TRAINING:
-                required_features = set(TEMPORAL_FEATURES + STATIC_FEATURES)
+                required_features = set(TEMPORAL_FEATURES + SYNERGY_FEATURES)
                 extracted_features = set(formatted_features.keys())
                 missing_model_features = required_features - extracted_features
 

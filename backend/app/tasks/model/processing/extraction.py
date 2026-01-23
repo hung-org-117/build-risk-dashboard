@@ -29,19 +29,22 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=ModelProcessingTask,
-    name="app.tasks.model_processing.process_workflow_run",
+    name="model.processing.extract_features",
     queue="model_processing",
-    soft_time_limit=600,
-    time_limit=900,
+    soft_time_limit=300,
+    time_limit=300,
 )
-def process_workflow_run(
+def extract_build_features(
     self: ModelProcessingTask,
     repo_config_id: str,
     model_build_id: str,
     is_reprocess: bool = False,
     correlation_id: str = "",
 ) -> Dict[str, Any]:
-    """Process a single build for feature extraction."""
+    """Feature extraction from repository resources (Worktree + Logs)."""
+    # Import here to avoid circular imports
+    from app.tasks.model.processing.prediction import predict_risk_batch
+
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
 
     model_build_repo = ModelTrainingBuildRepository(self.db)
@@ -57,7 +60,9 @@ def process_workflow_run(
         }
     )
     if not model_build:
-        logger.info(f"{corr_prefix} ModelTrainingBuild {model_build_id} not PENDING, skipping")
+        logger.info(
+            f"{corr_prefix} ModelTrainingBuild {model_build_id} not PENDING, skipping"
+        )
         return {"status": "skipped", "message": "Not pending or not found"}
 
     raw_build_run = raw_build_run_repo.find_by_id(model_build.raw_build_run_id)
@@ -90,7 +95,9 @@ def process_workflow_run(
             },
         )
         if not is_reprocess:
-            repo_config_repo.increment_builds_processing_failed(ObjectId(repo_config_id))
+            repo_config_repo.increment_builds_processing_failed(
+                ObjectId(repo_config_id)
+            )
 
     def _work(state: TaskState) -> Dict[str, Any]:
         if state.phase == "START":
@@ -164,8 +171,13 @@ def process_workflow_run(
 
         model_build_repo.update_one(build_id, updates)
 
-        if not is_reprocess and updates["extraction_status"] == ExtractionStatus.FAILED.value:
-            repo_config_repo.increment_builds_processing_failed(ObjectId(repo_config_id))
+        if (
+            not is_reprocess
+            and updates["extraction_status"] == ExtractionStatus.FAILED.value
+        ):
+            repo_config_repo.increment_builds_processing_failed(
+                ObjectId(repo_config_id)
+            )
 
         publish_model_processing_updated(
             repo_id=repo_config_id,

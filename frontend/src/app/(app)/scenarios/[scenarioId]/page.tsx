@@ -32,7 +32,7 @@ import { useSSE } from "@/contexts/sse-context";
 // Phase stepper component - Only 2 phases (Generate Dataset is separate)
 function ScenarioStepper({ status }: { status: string }) {
     const phases = [
-        { key: "ingestion", label: "Ingestion", statuses: ["queued", "filtering", "ingesting", "ingested"] },
+        { key: "ingestion", label: "Ingestion", statuses: ["queued", "ingesting", "ingested"] },
         { key: "processing", label: "Processing", statuses: ["processing", "processed"] },
     ];
 

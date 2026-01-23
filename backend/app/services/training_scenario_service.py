@@ -97,7 +97,6 @@ class TrainingScenarioService:
             created_by=str(scenario.created_by) if scenario.created_by else None,
             created_at=scenario.created_at,
             updated_at=scenario.updated_at,
-            filtering_completed_at=scenario.filtering_completed_at,
             ingestion_completed_at=scenario.ingestion_completed_at,
             processing_completed_at=scenario.processing_completed_at,
             feature_extraction_completed=scenario.feature_extraction_completed,
@@ -165,7 +164,6 @@ class TrainingScenarioService:
             feature_config = FeatureConfig(**data.feature_config.model_dump())
 
         # Create scenario entity
-        # Note: splitting_config moved to TrainingDatasetExport
         scenario = TrainingScenario(
             name=data.name,
             description=data.description,
@@ -198,7 +196,6 @@ class TrainingScenarioService:
 
         # Cannot update if processing rules apply (e.g. actively running)
         if scenario.status in (
-            ScenarioStatus.FILTERING,
             ScenarioStatus.INGESTING,
             ScenarioStatus.PROCESSING,
         ):

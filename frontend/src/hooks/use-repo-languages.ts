@@ -1,13 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { reposApi } from "@/lib/api/repos";
 
 export function useRepoLanguages(repos: Array<{ id: string; full_name: string }>) {
     const [repoLanguages, setRepoLanguages] = useState<Record<string, string[]>>({});
     const [loading, setLoading] = useState(false);
-    const [fetched, setFetched] = useState(false);
+
+    // Track processed repos key to avoid redundant calls but allow updates
+    const processedReposRef = useRef<string>("");
 
     useEffect(() => {
-        if (repos.length === 0 || fetched) return;
+        if (repos.length === 0) return;
+
+        // Create a key based on repo full names to detect content changes
+        const currentReposKey = JSON.stringify(repos.map(r => r.full_name).sort());
+        if (currentReposKey === processedReposRef.current) return;
 
         const detectLanguagesBatch = async () => {
             setLoading(true);
@@ -29,7 +35,7 @@ export function useRepoLanguages(repos: Array<{ id: string; full_name: string }>
                 });
 
                 setRepoLanguages(languagesByRepoId);
-                setFetched(true);
+                processedReposRef.current = currentReposKey;
             } catch (err) {
                 console.error("Failed to batch detect languages:", err);
                 // On error, set empty languages
@@ -41,7 +47,7 @@ export function useRepoLanguages(repos: Array<{ id: string; full_name: string }>
 
         detectLanguagesBatch();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [repos]); // Only re-run if repos array changes reference
+    }, [repos]); // Dependency on repos ensures we check whenever reference changes
 
     return { repoLanguages, loading };
 }

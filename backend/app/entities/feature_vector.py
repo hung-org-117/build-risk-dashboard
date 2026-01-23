@@ -106,7 +106,7 @@ class FeatureVector(BaseEntity):
     normalized_features: Dict[str, float] = Field(
         default_factory=dict,
         description="Scaled/standardized features for prediction model input. "
-        "Contains TEMPORAL_FEATURES + STATIC_FEATURES transformed by the model's scalers.",
+        "Contains TEMPORAL_FEATURES + SYNERGY_FEATURES transformed by the model's scalers.",
     )
 
     # ** SCAN METRICS - Results from scan tools (backfilled asynchronously) **

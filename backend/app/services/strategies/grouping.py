@@ -76,7 +76,9 @@ def create_equal_width_bins(
     bins[-1] = max_val + 0.001  # Ensure max value is included
 
     labels = [f"{int(bins[i])}-{int(bins[i + 1])}" for i in range(num_bins)]
-    df[bin_column] = pd.cut(df[column], bins=bins, labels=labels, include_lowest=True)
+    df[bin_column] = pd.cut(
+        df[column], bins=bins, labels=labels, include_lowest=True
+    ).astype(str)
 
     return bin_column
 

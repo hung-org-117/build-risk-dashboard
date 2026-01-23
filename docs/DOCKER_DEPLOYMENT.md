@@ -2,13 +2,13 @@
 
 Hướng dẫn triển khai Build Risk Dashboard sử dụng Docker Compose.
 
-## 📋 Yêu Cầu
+## Yêu Cầu
 
 - Debian/Ubuntu server
 - 8GB RAM minimum (SonarQube requires 4GB)
 - 50GB disk space
 
-## 🔧 1. System Prerequisites
+## 1. System Prerequisites
 
 ### 1.1 Update & Install Base Packages
 
@@ -45,7 +45,7 @@ sudo sysctl -w vm.max_map_count=262144
 echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
 ```
 
-## 🚀 2. Quick Start
+## 2. Quick Start
 
 ### 2.1 Clone và chuẩn bị
 
@@ -75,9 +75,8 @@ sed -i "s/SECRET_KEY=.*/SECRET_KEY=$SECRET_KEY/" .env
 Mở file `.env` và cập nhật các giá trị sau:
 
 **1. Domain & URLs**
-- `DOMAIN_NAME`: IP hoặc Domain của server (VD: `10.128.0.9`). Đây là biến helper để tự điền các URL bên dưới.
 - `NEXT_PUBLIC_API_URL`: `http://{DOMAIN}:8000/api`
-
+- `NEXT_PUBLIC_WS_URL`: `ws://{DOMAIN}:8000/ws` (WebSocket cho SSE updates)
 - `FRONTEND_BASE_URL`: `http://{DOMAIN}:3000`
 
 **2. GitHub Configuration (BẮT BUỘC)**
@@ -86,10 +85,12 @@ Mở file `.env` và cập nhật các giá trị sau:
 - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`: OAuth app credentials.
 - `GITHUB_ORGANIZATION`: Tên organization (VD: `hung-org-117`).
 - `GITHUB_APP_PRIVATE_KEY`: Giữ nguyên đường dẫn `/app/builddefection.2025-11-17.private-key.pem` (đã được mount tự động).
+- `GITHUB_TOKENS`: Comma-separated PATs cho GitHub API token pool (VD: `ghp_token1,ghp_token2`).
 
 **3. External Services**
 - `RABBITMQ_PASS`: Set password mạnh.
-- `GRAFANA_PASS`: Set password admin Grafana.
+- `GRAFANA_PASSWORD`: Set password admin Grafana.
+- `CELERY_CONCURRENCY`: Số worker concurrency (mặc định: 4).
 - `GMAIL_*`: Cấu hình nếu muốn gửi email thông báo.
 
 ### 2.4 Build và khởi động
@@ -105,7 +106,7 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml logs -f
 ```
 
-## ⚙️ 3. Post-Deployment Configuration
+## 3. Post-Deployment Configuration
 
 ### 3.1 Configure SonarQube (Required)
 
@@ -131,11 +132,12 @@ docker compose -f docker-compose.prod.yml logs -f
 
     ```bash
     # Create Webhook (để báo kết quả về backend)
-    curl -u "admin:admin" -X POST \
+    # Sử dụng 'backend' làm hostname vì SonarQube và Backend cùng Docker network
+    curl -u "admin:YOUR_NEW_PASSWORD" -X POST \
       "http://localhost:9000/api/webhooks/create" \
       -d "name=Build Risk Webhook" \
-      -d "url=http://10.128.0.3:8000/api/integrations/webhooks/sonarqube/pipeline" \
-      -d "secret=change-me-to-secure-secret"
+      -d "url=http://backend:8000/api/integrations/webhooks/sonarqube/pipeline" \
+      -d "secret=YOUR_SONAR_WEBHOOK_SECRET"
     ```
 
 4.  **Restart Backend**:
@@ -147,28 +149,41 @@ docker compose -f docker-compose.prod.yml logs -f
 ### 3.2 Verify Grafana
 
 - URL: `http://YOUR_SERVER_IP:3001`
-- Login: `admin` / `GRAFANA_PASS` (từ .env)
+- Login: `admin` / `GRAFANA_PASSWORD` (từ .env)
 - Kiểm tra folder **Build Risk Dashboard** để thấy các dashboards.
 
-## 🏗️ Architecture & Ports
+### 3.3 Trivy Vulnerability Scanner
+
+Trivy chạy tự động và không cần cấu hình thêm. Kiểm tra health:
+
+```bash
+curl http://localhost:4954/healthz
+```
+
+## Architecture & Ports
 
 | Service | Host Port | Internal Port | URL (Example) |
 |---------|-----------|---------------|---------------|
 | **Frontend** | 3000 | 3000 | `http://IP:3000` |
 | **Backend** | 8000 | 8000 | `http://IP:8000` |
-| **Grafana** | 3001 | 3000 | `http://IP:3001` (Optional) |
+| **Grafana** | 3001 | 3000 | `http://IP:3001` |
 | **SonarQube**| 9000 | 9000 | `http://IP:9000` |
+| **Trivy** | 4954 | 4954 | Internal only |
 | **RabbitMQ** | 15672 | 15672 | `http://IP:15672` |
+| **Prometheus**| 9090 | 9090 | `http://IP:9090` |
+| **Loki** | 3100 | 3100 | Internal only |
 
 ```
 Browser ──┬──→ Frontend (:3000)
           ├──→ Backend (:8000)
-          └──→ Grafana (:3001)
+          ├──→ Grafana (:3001)
+          └──→ SonarQube (:9000)
 
-Internal: Backend ↔ MongoDB/Redis/RabbitMQ/SonarQube
+Internal: Backend ↔ MongoDB/Redis/RabbitMQ/SonarQube/Trivy
+Monitoring: Prometheus ← Loki ← Alloy → Grafana
 ```
 
-## 🔧 Common Commands
+## Common Commands
 
 ```bash
 # Stop all
@@ -184,7 +199,7 @@ docker exec prod-rabbitmq rabbitmqctl list_queues
 docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
 ```
 
-## 🌐 4. Exposing Web Application on GCP
+## 4. Exposing Web Application on GCP
 
 ### 4.1 GCP Firewall Configuration
 
@@ -233,7 +248,6 @@ Sau khi mở firewall, truy cập ứng dụng qua:
 Cập nhật `.env` với external IP của GCP server:
 
 ```env
-DOMAIN_NAME=YOUR_GCP_EXTERNAL_IP
 NEXT_PUBLIC_API_URL=http://YOUR_GCP_EXTERNAL_IP:8000/api
 
 FRONTEND_BASE_URL=http://YOUR_GCP_EXTERNAL_IP:3000
@@ -248,7 +262,7 @@ docker compose -f docker-compose.prod.yml up -d frontend
 
 ---
 
-## 🔗 5. GitHub Webhook Configuration
+## 5. GitHub Webhook Configuration
 
 ### 5.1 Configure GitHub App Webhook
 
@@ -285,7 +299,7 @@ http://GCP_IP:8000/api/webhook/github
 
 ---
 
-## 🔒 6. Security Recommendations (Production)
+## 6. Security Recommendations (Production)
 
 ### 6.1 Use HTTPS with Domain
 
@@ -315,23 +329,7 @@ gcloud compute firewall-rules create allow-github-webhooks \
 
 ---
 
-## 🔧 Common Commands
-
-```bash
-# Stop all
-docker-compose -f docker-compose.prod.yml down
-
-# Xem logs backend & worker
-docker-compose -f docker-compose.prod.yml logs -f backend celery-worker
-
-# Kiểm tra hàng đợi RabbitMQ
-docker exec prod-rabbitmq rabbitmqctl list_queues
-
-# Backup MongoDB
-docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
-```
-
-## ⚠️ Troubleshooting
+## Troubleshooting
 
 **GitHub App lỗi (401/403):**
 - Kiểm tra `GITHUB_APP_PRIVATE_KEY` trong `.env` phải trỏ đúng đường dẫn `/app/...pem`.
@@ -350,4 +348,9 @@ docker exec prod-mongo mongodump --archive=/data/backup.gz --gzip
 - Kiểm tra backend đang chạy: `docker compose -f docker-compose.prod.yml ps`
 - Test connectivity: `curl http://YOUR_GCP_IP:8000/api/health`
 - Kiểm tra webhook secret khớp giữa GitHub App và `.env`
+
+**GitHub API Rate Limit:**
+- Thêm nhiều PATs vào `GITHUB_TOKENS` (comma-separated)
+- Kiểm tra Redis đang chạy để token pool hoạt động
+- Xem logs: `docker-compose -f docker-compose.prod.yml logs backend | grep "rate limit"`
 

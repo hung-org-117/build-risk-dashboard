@@ -148,7 +148,7 @@ class PredictionService:
 
             from app.services.risk_model.inference import (
                 LOG1P_FEATURES,
-                STATIC_FEATURES,
+                SYNERGY_FEATURES,
                 TEMPORAL_FEATURES,
             )
 
@@ -173,7 +173,7 @@ class PredictionService:
 
             # Extract static features
             static_values = []
-            for f in STATIC_FEATURES:
+            for f in SYNERGY_FEATURES:
                 val = features_copy.get(f)
                 if val is None:
                     val = 0.0
@@ -191,7 +191,7 @@ class PredictionService:
             # Scale static features
             static_arr = np.array([static_values], dtype=np.float32)
             if model_service._scaler_static:
-                static_df = pd.DataFrame(static_arr, columns=STATIC_FEATURES)
+                static_df = pd.DataFrame(static_arr, columns=SYNERGY_FEATURES)
                 static_scaled = model_service._scaler_static.transform(static_df)
                 static_values = static_scaled[0].tolist()
 
@@ -199,7 +199,7 @@ class PredictionService:
             normalized = {}
             for i, f in enumerate(TEMPORAL_FEATURES):
                 normalized[f] = round(float(temporal_values[i]), 6)
-            for i, f in enumerate(STATIC_FEATURES):
+            for i, f in enumerate(SYNERGY_FEATURES):
                 normalized[f] = round(float(static_values[i]), 6)
 
             return normalized
@@ -218,10 +218,13 @@ class PredictionService:
         Fallback when model/scalers are not available.
         """
         try:
-            from app.services.risk_model.inference import STATIC_FEATURES, TEMPORAL_FEATURES
+            from app.services.risk_model.inference import (
+                SYNERGY_FEATURES,
+                TEMPORAL_FEATURES,
+            )
 
             normalized = {}
-            for f in list(TEMPORAL_FEATURES) + list(STATIC_FEATURES):
+            for f in list(TEMPORAL_FEATURES) + list(SYNERGY_FEATURES):
                 val = features.get(f)
                 if val is None:
                     normalized[f] = 0.0

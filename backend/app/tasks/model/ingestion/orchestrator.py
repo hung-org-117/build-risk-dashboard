@@ -27,12 +27,12 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.start_model_processing",
+    name="model.ingestion.start_pipeline",
     queue="model_processing",
     soft_time_limit=120,
     time_limit=180,
 )
-def start_model_processing(
+def start_model_ingestion_pipeline(
     self: SafeTask,
     repo_config_id: str,
     ci_provider: str,
@@ -43,11 +43,13 @@ def start_model_processing(
     """
     Orchestrator: Start ingestion for repo, then dispatch processing.
 
-    Flow: start_model_processing -> ingest_model_builds -> dispatch_build_processing
+    Flow: start_model_ingestion_pipeline -> orchestrate_model_ingestion -> dispatch_processing_batch
     """
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -72,11 +74,11 @@ def start_model_processing(
         # Mark as started
         model_repo_config_repo.update_repository(
             repo_config_id,
-            {"status": ModelImportStatus.INGESTING.value},
+            {"status": ModelImportStatus.FETCHING.value},
         )
-        publish_status(repo_config_id, "ingesting", "Starting import workflow...")
+        publish_status(repo_config_id, "fetching", "Starting import workflow...")
 
-        ingest_model_builds.delay(
+        orchestrate_model_ingestion.delay(
             repo_config_id=repo_config_id,
             ci_provider=ci_provider,
             max_builds=max_builds,
@@ -104,12 +106,12 @@ def start_model_processing(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.ingest_model_builds",
+    name="model.ingestion.orchestrate",
     queue="model_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
-def ingest_model_builds(
+def orchestrate_model_ingestion(
     self: SafeTask,
     repo_config_id: str,
     ci_provider: str,
@@ -132,22 +134,24 @@ def ingest_model_builds(
         correlation_id: Optional correlation ID for tracing (generates new if not provided)
 
     Flow:
-        ingest_model_builds
+        orchestrate_model_ingestion
             └── chord(
-                    group(fetch_builds_batch tasks per page),
-                    aggregate_fetch_results
+                    group(fetch_builds_page tasks per page),
+                    handle_fetch_completion
                 )
     """
     # Import here to avoid circular imports
     from app.tasks.model.ingestion.fetch import (
-        aggregate_fetch_results,
-        fetch_builds_batch,
+        fetch_builds_page,
         fetch_builds_until_existing,
         handle_fetch_chord_error,
+        handle_fetch_completion,
     )
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -172,7 +176,9 @@ def ingest_model_builds(
         if not repo_config:
             raise ValueError(f"ModelRepoConfig {repo_config_id} not found")
 
-        logger.info(f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}")
+        logger.info(
+            f"{corr_prefix}[model_ingestion] Starting for {repo_config.full_name}"
+        )
 
         # Update repo_config status
         repo_config_repo.update_repository(
@@ -208,9 +214,13 @@ def ingest_model_builds(
         fetch_tasks = []
         remaining = max_builds
         for page in range(1, estimated_pages + 1):
-            api_limit = min(effective_batch_size, remaining) if remaining else effective_batch_size
+            api_limit = (
+                min(effective_batch_size, remaining)
+                if remaining
+                else effective_batch_size
+            )
             fetch_tasks.append(
-                fetch_builds_batch.si(
+                fetch_builds_page.si(
                     repo_config_id=repo_config_id,
                     ci_provider=ci_provider,
                     page=page,
@@ -225,7 +235,7 @@ def ingest_model_builds(
                     break
 
         # Dispatch chord: fetch all pages → aggregate results
-        callback = aggregate_fetch_results.s(
+        callback = handle_fetch_completion.s(
             repo_config_id=repo_config_id,
             correlation_id=correlation_id,
         ).on_error(

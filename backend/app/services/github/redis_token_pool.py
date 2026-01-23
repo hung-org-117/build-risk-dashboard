@@ -218,7 +218,7 @@ class RedisTokenPool:
         token_hash: str,
         remaining: int,
         limit: int,
-        reset_at: datetime,
+        reset_at: datetime | None,
     ) -> None:
         """
         Update rate limit info for a token after an API request.
@@ -227,26 +227,39 @@ class RedisTokenPool:
             token_hash: Token hash
             remaining: Remaining API requests
             limit: Total rate limit
-            reset_at: When rate limit resets
+            reset_at: When rate limit resets (can be None if header missing)
         """
         # Update priority in sorted set (remaining quota)
         self._redis.zadd(KEY_POOL, {token_hash: remaining})
 
         # Update stats
-        self._redis.hset(
-            f"{KEY_STATS}:{token_hash}",
-            mapping={
-                "rate_limit_remaining": remaining,
-                "rate_limit_limit": limit,
-                "rate_limit_reset_at": reset_at.isoformat(),
-            },
-        )
+        stats_mapping = {
+            "rate_limit_remaining": remaining,
+            "rate_limit_limit": limit,
+        }
+        if reset_at:
+            stats_mapping["rate_limit_reset_at"] = reset_at.isoformat()
+        self._redis.hset(f"{KEY_STATS}:{token_hash}", mapping=stats_mapping)
 
         # If remaining is 0, set cooldown
         if remaining == 0:
+            if reset_at:
+                # Use reset time from header
+                cooldown_seconds = (
+                    int((reset_at - _now()).total_seconds()) + 5
+                )  # +5 buffer
+            else:
+                # Fallback: 60 minutes cooldown when no reset time available
+                cooldown_seconds = 3600
+                reset_at = _now() + timedelta(minutes=60)
+                logger.warning(
+                    f"Token {token_hash[:8]}... rate limited but no reset time, "
+                    f"using 60min fallback cooldown"
+                )
+
             self._redis.setex(
                 f"{KEY_COOLDOWN}:{token_hash}",
-                int((reset_at - _now()).total_seconds()) + 5,  # +5 buffer
+                max(1, cooldown_seconds),  # Ensure at least 1 second TTL
                 str(reset_at.timestamp()),
             )
             self._redis.hset(
@@ -284,9 +297,10 @@ class RedisTokenPool:
                 datetime.fromtimestamp(int(reset), tz=timezone.utc) if reset else None
             )
 
+            # update_rate_limit now handles None reset_dt gracefully
             self.update_rate_limit(token_hash, remaining_int, limit_int, reset_dt)
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Failed to parse rate limit headers: {e}")
 
     def mark_rate_limited(
         self,

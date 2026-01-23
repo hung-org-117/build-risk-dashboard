@@ -51,13 +51,14 @@ export function ActionProgressBanner({
 
     // Determine what action is in progress
     const isFetching = status === "fetching" || status === "queued";
+    const isFetched = status === "fetched";
     const isIngesting = status === "ingesting" || syncLoading || retryIngestionLoading;
     const isProcessing = status === "processing" || processingLoading || retryProcessingLoading;
     const isFailed = status === "failed";
 
     // Show banner ONLY if active or failed. 
     // "ingested" and "processed" are considered idle/done and hidden.
-    const isActive = isFetching || isIngesting || isProcessing || isFailed;
+    const isActive = isFetching || isFetched || isIngesting || isProcessing || isFailed;
 
     if (!isActive) return null;
 
@@ -157,6 +158,29 @@ export function ActionProgressBanner({
                         style={{ width: `${ingestionPercent}%` }}
                     />
                 </div>
+            </div>
+        );
+
+    } else if (isFetched) {
+        bannerTitle = "Fetch Complete";
+        bannerColor = "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800";
+        MainIcon = CheckCircle2;
+        iconColor = "text-green-500";
+        isSpinning = false;
+
+        Content = (
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">Fetched</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                        {fetchedCount} builds ready for ingestion
+                    </span>
+                </div>
+                <p className="text-xs text-muted-foreground italic">
+                    Starting ingestion phase...
+                </p>
             </div>
         );
 

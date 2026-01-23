@@ -35,12 +35,12 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.dispatch_ingestion",
+    name="model.ingestion.dispatch",
     queue="model_ingestion",
     soft_time_limit=120,
     time_limit=180,
 )
-def dispatch_ingestion(
+def dispatch_ingestion_batch(
     self: SafeTask,
     repo_config_id: str,
     raw_repo_id: str,
@@ -54,7 +54,9 @@ def dispatch_ingestion(
     """Build and dispatch ingestion workflow."""
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -69,6 +71,13 @@ def dispatch_ingestion(
                 "status": ModelImportBuildStatus.INGESTING.value,
                 "ingestion_started_at": datetime.utcnow(),
             },
+        )
+
+        # Update repo status to INGESTING so UI reflects progress
+        repo_config_repo = ModelRepoConfigRepository(self.db)
+        repo_config_repo.update_repository(
+            repo_config_id,
+            {"status": ModelImportStatus.INGESTING.value},
         )
 
         required_resources = ["git_history", "git_worktree", "build_logs"]
@@ -97,7 +106,9 @@ def dispatch_ingestion(
                 pipeline_type="model",
             )
 
-        logger.info(f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}")
+        logger.info(
+            f"{log_ctx} Resources={sorted(required_resources)}, tasks={tasks_by_level}"
+        )
 
         ctx = ModelPipelineContext(
             repo_config_id=repo_config_id,
@@ -118,7 +129,7 @@ def dispatch_ingestion(
             ci_provider=ci_provider,
         )
 
-        callback = aggregate_model_ingestion_results.s(
+        callback = handle_ingestion_completion.s(
             repo_config_id=repo_config_id,
             correlation_id=correlation_id,
         )
@@ -132,7 +143,7 @@ def dispatch_ingestion(
             chord(ingestion_workflow, callback.on_error(error_callback)).apply_async()
         else:
             logger.info(f"{log_ctx} No ingestion needed, marking as complete")
-            aggregate_model_ingestion_results.delay(
+            handle_ingestion_completion.delay(
                 results=[],
                 repo_config_id=repo_config_id,
                 correlation_id=correlation_id,
@@ -150,12 +161,12 @@ def dispatch_ingestion(
 @celery_app.task(
     bind=True,
     base=SafeTask,
-    name="app.tasks.model_ingestion.aggregate_model_ingestion_results",
+    name="model.ingestion.complete",
     queue="model_ingestion",
     soft_time_limit=30,
     time_limit=60,
 )
-def aggregate_model_ingestion_results(
+def handle_ingestion_completion(
     self: SafeTask,
     results: Any,
     repo_config_id: str,
@@ -164,7 +175,9 @@ def aggregate_model_ingestion_results(
     """Chord callback after ingestion workflow completes."""
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
+        handler = create_repo_config_failure_handler(
+            self.redis, repo_config_id, self.db
+        )
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -239,7 +252,9 @@ def aggregate_model_ingestion_results(
 
         status_counts = import_build_repo.count_by_status(repo_config_id)
         ingested = status_counts.get(ModelImportBuildStatus.INGESTED.value, 0)
-        missing_resource = status_counts.get(ModelImportBuildStatus.MISSING_RESOURCE.value, 0)
+        missing_resource = status_counts.get(
+            ModelImportBuildStatus.MISSING_RESOURCE.value, 0
+        )
         failed = status_counts.get(ModelImportBuildStatus.FAILED.value, 0)
 
         final_status = ModelImportStatus.INGESTED
@@ -318,7 +333,9 @@ def handle_ingestion_chord_error(
     corr_prefix = f"[corr={correlation_id[:8]}]" if correlation_id else ""
     error_msg = str(exc) if exc else "Unknown ingestion error"
 
-    logger.error(f"{corr_prefix} Ingestion chord failed for {repo_config_id}: {error_msg}")
+    logger.error(
+        f"{corr_prefix} Ingestion chord failed for {repo_config_id}: {error_msg}"
+    )
 
     import_build_repo = ModelImportBuildRepository(self.db)
     repo_config_repo = ModelRepoConfigRepository(self.db)
@@ -342,7 +359,9 @@ def handle_ingestion_chord_error(
     )
 
     if ingested_builds:
-        logger.info(f"{corr_prefix} {len(ingested_builds)} builds were INGESTED before failure.")
+        logger.info(
+            f"{corr_prefix} {len(ingested_builds)} builds were INGESTED before failure."
+        )
         repo_config_repo.update_repository(
             repo_config_id,
             {

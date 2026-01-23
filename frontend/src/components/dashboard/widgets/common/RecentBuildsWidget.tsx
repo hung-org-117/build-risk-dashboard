@@ -54,9 +54,9 @@ export function RecentBuildsWidget({ recentBuilds, isEditing, className }: BaseW
                 </td>
               </tr>
             ) : (
-              recentBuilds.slice(0, 5).map((build) => (
+              recentBuilds.slice(0, 5).map((build, index) => (
                 <tr
-                  key={build.id}
+                  key={build.id || `build-${index}`}
                   className="transition hover:bg-slate-50 dark:hover:bg-slate-900/50"
                 >
                   <td className="px-3 py-2 font-medium truncate max-w-[80px]">

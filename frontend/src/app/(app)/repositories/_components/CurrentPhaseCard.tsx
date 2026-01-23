@@ -157,6 +157,20 @@ function getPhaseInfo(status: string, progress: ImportProgress | null): PhaseInf
         };
     }
 
+    // Fetched - ready for ingestion
+    if (statusLower === "fetched") {
+        const { total } = progress.import_builds;
+        return {
+            title: "Fetch Complete",
+            description: "Builds fetched from CI. Starting ingestion phase...",
+            current: total,
+            total,
+            failed: 0,
+            isActive: true,
+            canRetry: false,
+        };
+    }
+
     // Ingesting phase
     if (statusLower === "ingesting") {
         const { ingested, ingesting, total, missing_resource } = progress.import_builds;

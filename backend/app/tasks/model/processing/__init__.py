@@ -15,18 +15,18 @@ from app.tasks.model.processing.common import (
     create_repo_config_failure_handler,
     publish_status,
 )
-from app.tasks.model.processing.extraction import process_workflow_run
+from app.tasks.model.processing.extraction import extract_build_features
 from app.tasks.model.processing.orchestrator import (
-    dispatch_build_processing,
-    start_processing_phase,
+    dispatch_processing_batch,
+    start_model_processing_pipeline,
 )
 from app.tasks.model.processing.prediction import (
-    finalize_model_processing,
-    finalize_prediction,
+    handle_pipeline_completion,
+    handle_prediction_completion,
     handle_processing_chain_error,
-    predict_batch,
+    predict_risk_batch,
 )
-from app.tasks.model.processing.retry import retry_failed_builds
+from app.tasks.model.processing.retry import retry_processing_failures
 
 __all__ = [
     # Base Classes
@@ -36,15 +36,15 @@ __all__ = [
     "create_repo_config_failure_handler",
     "publish_status",
     # Orchestrator
-    "start_processing_phase",
-    "dispatch_build_processing",
+    "start_model_processing_pipeline",
+    "dispatch_processing_batch",
     # Extraction
-    "process_workflow_run",
+    "extract_build_features",
     # Prediction
-    "finalize_model_processing",
-    "finalize_prediction",
-    "predict_batch",
+    "handle_pipeline_completion",
+    "handle_prediction_completion",
+    "predict_risk_batch",
     "handle_processing_chain_error",
     # Retry
-    "retry_failed_builds",
+    "retry_processing_failures",
 ]

@@ -99,7 +99,7 @@ class BaseSplittingStrategy(ABC):
 
         # Check if we have enough samples for second stratification
         _, counts_temp = np.unique(temp_labels, return_counts=True)
-        if counts_temp.min() < 2:
+        if len(temp_indices) < 2 or counts_temp.min() < 2:
             n_temp = len(temp_indices)
             val_end = int(n_temp * val_in_temp)
             val_indices = temp_indices[:val_end]

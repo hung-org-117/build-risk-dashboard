@@ -14,15 +14,15 @@ All tasks preserve their original Celery task names via `name=` parameter.
 # Re-export all tasks from submodules
 from app.tasks.model.processing import (
     create_repo_config_failure_handler,
-    dispatch_build_processing,
-    finalize_model_processing,
-    finalize_prediction,
+    dispatch_processing_batch,
+    extract_build_features,
+    handle_pipeline_completion,
+    handle_prediction_completion,
     handle_processing_chain_error,
-    predict_batch,
-    process_workflow_run,
+    predict_risk_batch,
     publish_status,
-    retry_failed_builds,
-    start_processing_phase,
+    retry_processing_failures,
+    start_model_processing_pipeline,
 )
 from app.tasks.model.processing.common import (
     create_batch_model_training_build_failure_handler,
@@ -31,17 +31,17 @@ from app.tasks.model.processing.common import (
 
 __all__ = [
     # Orchestrator
-    "start_processing_phase",
-    "dispatch_build_processing",
+    "start_model_processing_pipeline",
+    "dispatch_processing_batch",
     # Extraction
-    "process_workflow_run",
+    "extract_build_features",
     # Prediction
-    "finalize_model_processing",
-    "finalize_prediction",
-    "predict_batch",
+    "handle_pipeline_completion",
+    "handle_prediction_completion",
+    "predict_risk_batch",
     "handle_processing_chain_error",
     # Retry
-    "retry_failed_builds",
+    "retry_processing_failures",
     # Helper
     "create_repo_config_failure_handler",
     "create_model_training_build_failure_handler",

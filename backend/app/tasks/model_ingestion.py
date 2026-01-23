@@ -12,37 +12,37 @@ All tasks preserve their original Celery task names via `name=` parameter.
 
 # Re-export all tasks from submodules
 from app.tasks.model.ingestion import (
-    aggregate_fetch_results,
-    aggregate_model_ingestion_results,
+    create_model_import_build_failure_handler,
     create_repo_config_failure_handler,
-    dispatch_ingestion,
-    fetch_builds_batch,
+    dispatch_ingestion_batch,
+    fetch_builds_page,
     fetch_builds_until_existing,
+    fetch_webhook_build,
     handle_fetch_chord_error,
+    handle_fetch_completion,
     handle_ingestion_chord_error,
-    ingest_model_builds,
-    ingest_webhook_build,
-    reingest_failed_builds,
-    start_model_processing,
+    handle_ingestion_completion,
+    orchestrate_model_ingestion,
+    reingest_failures,
+    start_model_ingestion_pipeline,
 )
-from app.tasks.model.ingestion.common import create_model_import_build_failure_handler
 
 __all__ = [
     # Orchestrator
-    "start_model_processing",
-    "ingest_model_builds",
+    "start_model_ingestion_pipeline",
+    "orchestrate_model_ingestion",
     # Fetch
-    "fetch_builds_batch",
+    "fetch_builds_page",
     "fetch_builds_until_existing",
-    "aggregate_fetch_results",
+    "handle_fetch_completion",
     "handle_fetch_chord_error",
+    "fetch_webhook_build",
     # Dispatch
-    "dispatch_ingestion",
-    "aggregate_model_ingestion_results",
+    "dispatch_ingestion_batch",
+    "handle_ingestion_completion",
     "handle_ingestion_chord_error",
     # Reingest
-    "reingest_failed_builds",
-    "ingest_webhook_build",
+    "reingest_failures",
     # Helpers
     "create_repo_config_failure_handler",
     "create_model_import_build_failure_handler",

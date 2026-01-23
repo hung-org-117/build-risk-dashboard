@@ -173,7 +173,6 @@ export interface BuildSourceUpdatePayload {
 
 export type ScenarioStatus =
   | "queued"
-  | "filtering"
   | "ingesting"
   | "processing"
   | "splitting"
@@ -255,8 +254,6 @@ export interface TrainingScenarioRecord {
   scan_extraction_completed: boolean;
   // Timestamps
   created_by?: string;
-  filtering_started_at?: string;
-  filtering_completed_at?: string;
   ingestion_started_at?: string;
   ingestion_completed_at?: string;
   processing_started_at?: string;
@@ -433,7 +430,7 @@ export interface RepositoryRecord {
   builds_ingestion_failed: number;    // Ingestion phase: actual errors (retryable)
   builds_processing_failed: number;   // Processing phase: extraction/prediction failures
   // Status
-  status: "queued" | "fetching" | "ingesting" | "ingestion_complete" | "ingestion_partial" | "processing" | "imported" | "partial" | "failed";
+  status: "queued" | "fetching" | "fetched" | "ingesting" | "ingestion_complete" | "ingestion_partial" | "processing" | "imported" | "partial" | "failed";
   error_message?: string;
   last_synced_at?: string;
   notes?: string;

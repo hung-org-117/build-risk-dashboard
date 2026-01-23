@@ -70,6 +70,7 @@ export function ImportProgressDisplay({
 
     // Display logic based on phase
     const isFetching = ["queued", "fetching"].includes(importStatus);
+    const isFetched = ["fetched"].includes(importStatus);
     const isIngesting = ["ingesting", "ingestion_partial"].includes(importStatus);
     const isIngested = ["ingested", "ingestion_complete"].includes(importStatus);
     const isProcessing = ["processing"].includes(importStatus);
@@ -84,6 +85,11 @@ export function ImportProgressDisplay({
         mainText = totalFetched > 0 ? `${totalFetched} fetched` : "Fetching...";
         progressValue = 100; // Indeterminate pulse
         progressColor = "bg-cyan-500 animate-pulse";
+    } else if (isFetched) {
+        mainText = `${totalFetched} fetched`;
+        subText = "Ready to ingest";
+        progressValue = 100;
+        progressColor = "bg-teal-500";
     } else if (isIngesting) {
         mainText = `${totalIngested}/${totalFetched} ingested`;
         progressValue = totalFetched > 0 ? (totalIngested / totalFetched) * 100 : 0;

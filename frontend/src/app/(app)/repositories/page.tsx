@@ -147,6 +147,8 @@ export default function AdminReposPage() {
         return <Badge variant="secondary">Queued</Badge>;
       case "fetching":
         return <Badge variant="default" className="bg-cyan-500 hover:bg-cyan-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Fetching</Badge>;
+      case "fetched":
+        return <Badge variant="default" className="bg-teal-500 hover:bg-teal-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Fetched</Badge>;
       case "ingesting":
         return <Badge variant="default" className="bg-blue-500 hover:bg-blue-600"><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Ingesting</Badge>;
       case "ingested":
@@ -269,6 +271,7 @@ export default function AdminReposPage() {
               <option value="">All Status</option>
               <option value="queued">Queued</option>
               <option value="fetching">Fetching</option>
+              <option value="fetched">Fetched</option>
               <option value="ingesting">Ingesting</option>
               <option value="ingested">Ingested</option>
               <option value="processing">Processing</option>

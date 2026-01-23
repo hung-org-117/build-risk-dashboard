@@ -42,8 +42,11 @@ const STEPS: Step[] = [
         getCurrent: (p) => p?.import_builds.total || 0,
         getTotal: (p) => p?.import_builds.total || 0,
         getState: (status, p) => {
+            const s = status.toLowerCase();
+            // Fetched or later means fetch is complete
+            if (["fetched", "ingesting", "ingested", "processing", "processed"].includes(s)) return "completed";
             if (p && p.import_builds.total > 0) return "completed";
-            if (["queued", "fetching"].includes(status.toLowerCase())) return "active";
+            if (["queued", "fetching"].includes(s)) return "active";
             return "pending";
         },
     },
@@ -65,6 +68,8 @@ const STEPS: Step[] = [
                 return "completed";
             }
             if (s === "ingesting") return "active";
+            // Fetched means ready to start ingesting
+            if (s === "fetched") return "pending";
             return "pending";
         },
     },
