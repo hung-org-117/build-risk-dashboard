@@ -47,9 +47,7 @@ def start_model_processing_pipeline(
     from app.tasks.model.processing.orchestrator import dispatch_processing_batch
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(
-            self.redis, repo_config_id, self.db
-        )
+        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -79,9 +77,7 @@ def start_model_processing_pipeline(
         last_checkpoint_id = repo_config.last_processed_import_build_id
 
         if last_checkpoint_id:
-            logger.info(
-                f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds"
-            )
+            logger.info(f"{log_ctx} Checkpoint exists at {last_checkpoint_id}, finding new builds")
         else:
             logger.info(f"{log_ctx} No checkpoint, processing all builds")
 
@@ -122,9 +118,7 @@ def start_model_processing_pipeline(
             last_import_build_id=str(last_build_id),
         )
 
-        logger.info(
-            f"{log_ctx} Dispatched processing for {len(model_import_build_ids)} builds"
-        )
+        logger.info(f"{log_ctx} Dispatched processing for {len(model_import_build_ids)} builds")
 
         publish_status(
             repo_config_id,
@@ -172,9 +166,7 @@ def dispatch_processing_batch(
     )
 
     def mark_failed(e: Exception):
-        handler = create_repo_config_failure_handler(
-            self.redis, repo_config_id, self.db
-        )
+        handler = create_repo_config_failure_handler(self.redis, repo_config_id, self.db)
         handler("failed", str(e))
 
     def _work(state: TaskState) -> Dict[str, Any]:
@@ -186,9 +178,7 @@ def dispatch_processing_batch(
         import_build_repo = ModelImportBuildRepository(self.db)
 
         if not model_import_build_ids:
-            logger.info(
-                f"{corr_prefix} No builds to process for repo config {repo_config_id}"
-            )
+            logger.info(f"{corr_prefix} No builds to process for repo config {repo_config_id}")
             repo_config_repo.update_repository(
                 repo_config_id,
                 {"status": ModelImportStatus.PROCESSED.value},
@@ -205,11 +195,11 @@ def dispatch_processing_batch(
         raw_build_runs = raw_build_run_repo.find_by_ids(raw_build_run_ids)
         build_run_map = {str(r.id): r for r in raw_build_runs}
 
-        run_oids = [
-            ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)
-        ]
+        run_oids = [ObjectId(rid) for rid in raw_build_run_ids if ObjectId.is_valid(rid)]
         existing_builds_map = model_build_repo.find_existing_by_raw_build_run_ids(
-            ObjectId(raw_repo_id), run_oids
+            model_repo_config_id=ObjectId(repo_config_id),
+            raw_repo_id=ObjectId(raw_repo_id),
+            raw_build_run_ids=run_oids,
         )
 
         created_count = 0
@@ -221,9 +211,7 @@ def dispatch_processing_batch(
 
             raw_build_run = build_run_map.get(run_id_str)
             if not raw_build_run:
-                logger.warning(
-                    f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping"
-                )
+                logger.warning(f"{corr_prefix} RawBuildRun {run_id_str} not found, skipping")
                 continue
 
             existing = existing_builds_map.get(run_id_str)
@@ -291,9 +279,7 @@ def dispatch_processing_batch(
             for build_id in model_build_id_strs
         ]
 
-        logger.info(
-            f"{corr_prefix} Dispatching {total_builds} builds for sequential processing"
-        )
+        logger.info(f"{corr_prefix} Dispatching {total_builds} builds for sequential processing")
 
         workflow = chain(
             *sequential_tasks,

@@ -172,16 +172,18 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
 
     def find_existing_by_raw_build_run_ids(
         self,
+        model_repo_config_id: ObjectId,
         raw_repo_id: ObjectId,
         raw_build_run_ids: List[ObjectId],
     ) -> Dict[str, "ModelTrainingBuild"]:
         """
-        Batch query: Find existing builds by raw_build_run_ids.
+        Batch query: Find existing builds by raw_build_run_ids within a specific config.
 
         Returns a dict mapping raw_build_run_id (str) -> ModelTrainingBuild
         for efficient O(1) lookup.
 
         Args:
+            model_repo_config_id: The ModelRepoConfig ID (scope)
             raw_repo_id: RawRepository ObjectId
             raw_build_run_ids: List of RawBuildRun ObjectIds
 
@@ -193,6 +195,7 @@ class ModelTrainingBuildRepository(BaseRepository[ModelTrainingBuild]):
 
         builds = self.find_many(
             {
+                "model_repo_config_id": model_repo_config_id,
                 "raw_repo_id": raw_repo_id,
                 "raw_build_run_id": {"$in": raw_build_run_ids},
             }
