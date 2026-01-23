@@ -1,13 +1,5 @@
 """
-Bayesian LSTM Risk Model Definitions.
-
-This module defines the PyTorch model architecture for build risk prediction.
-It should match the training script exactly (hunglt/training.py).
-
-Model Architecture:
-- Temporal Branch: LSTM with Attention for sequence features (build history)
-- Static Branch: Bayesian MLP for point-in-time features
-- Classifier: Fused output → 3-class risk prediction (Low/Medium/High)
+Bayesian LSTM Risk Model Definitions
 """
 
 import torch
@@ -80,8 +72,8 @@ class BayesianLSTM(nn.Module):
         return self.temporal_dropout(context)
 
 
-class BayesianMLP(nn.Module):
-    """MLP layer for static features with dropout for uncertainty."""
+class SynergyMLP(nn.Module):
+    """Bayesian MLP for cross-artifact synergy features with MC Dropout."""
 
     def __init__(self, input_dim: int):
         super().__init__()
@@ -103,9 +95,9 @@ class BayesianRiskModel(nn.Module):
     Dual-branch Bayesian model for build risk prediction.
 
     Architecture:
-    - Temporal branch: LSTM with attention for sequence features
-    - Static branch: MLP for point-in-time features
-    - Classifier: Combined features → 3-class output (Low/Medium/High)
+    - Temporal branch: LSTM with attention for sequence features (X_code, X_test evolution)
+    - Synergy branch: Bayesian MLP for cross-artifact interactions (all 4 streams)
+    - Uncertainty-weighted Fusion: Combines branches using inverse variance weighting
     """
 
     def __init__(
@@ -118,6 +110,9 @@ class BayesianRiskModel(nn.Module):
         temporal_dropout: float = TEMPORAL_DROPOUT,
     ):
         super().__init__()
+        self.lstm_hidden_dim = lstm_hidden_dim
+
+        # Temporal Branch (Risk Evolution)
         self.temporal = BayesianLSTM(
             temporal_dim,
             lstm_hidden_dim,
@@ -125,16 +120,108 @@ class BayesianRiskModel(nn.Module):
             dropout=lstm_dropout,
             temporal_dropout=temporal_dropout,
         )
-        self.static = BayesianMLP(static_dim)
-        self.classifier = nn.Sequential(
-            nn.Linear(lstm_hidden_dim + 64, 64),
+
+        # Synergy Branch (Cross-Artifact Interaction)
+        self.synergy = SynergyMLP(static_dim)
+
+        # Branch-specific heads for uncertainty estimation
+        self.temporal_head = nn.Sequential(
+            nn.Linear(lstm_hidden_dim, 32),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(64, 3),
+            nn.Linear(32, 3),
+        )
+        self.synergy_head = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(32, 3),
         )
 
     def forward(self, seq, static, lengths=None):
-        t = self.temporal(seq, lengths)
-        s = self.static(static)
-        x = torch.cat([t, s], dim=1)
-        return self.classifier(x)
+        """
+        Standard forward pass for training.
+
+        Uses equal-weight averaging of branch logits. This method is intended
+        for the training loop where a single output is needed for loss computation.
+        For inference with uncertainty quantification, use forward_branches()
+        combined with uncertainty_weighted_fusion() instead.
+
+        Args:
+            seq: Temporal sequence tensor (batch, seq_len, temporal_dim)
+            static: Synergy features tensor (batch, static_dim)
+            lengths: Actual sequence lengths for packing
+
+        Returns:
+            Averaged logits from both branches (batch, n_classes)
+        """
+        logits_temporal, logits_synergy, _, _ = self.forward_branches(seq, static, lengths)
+        return (logits_temporal + logits_synergy) / 2
+
+    def forward_branches(self, seq, static, lengths=None):
+        """
+        Forward pass with branch-specific outputs for uncertainty-aware inference.
+
+        This method is used during MC Dropout inference to obtain separate
+        predictions from Temporal and Synergy branches, enabling uncertainty
+        quantification and inverse-variance weighted fusion.
+
+        Args:
+            seq: Temporal sequence tensor (batch, seq_len, temporal_dim)
+            static: Synergy features tensor (batch, static_dim)
+            lengths: Actual sequence lengths for packing
+
+        Returns:
+            Tuple of:
+            - logits_temporal: Predictions from Temporal branch (batch, n_classes)
+            - logits_synergy: Predictions from Synergy branch (batch, n_classes)
+            - t_embed: Temporal embedding (batch, lstm_hidden_dim)
+            - s_embed: Synergy embedding (batch, 64)
+        """
+        t_embed = self.temporal(seq, lengths)
+        s_embed = self.synergy(static)
+
+        # Branch-specific predictions
+        logits_temporal = self.temporal_head(t_embed)
+        logits_synergy = self.synergy_head(s_embed)
+
+        return logits_temporal, logits_synergy, t_embed, s_embed
+
+    @staticmethod
+    def uncertainty_weighted_fusion(
+        probs_temporal: torch.Tensor,
+        probs_synergy: torch.Tensor,
+        eps: float = 1e-8,
+    ) -> torch.Tensor:
+        """
+        Uncertainty-weighted fusion of branch predictions.
+
+        Uses inverse variance weighting to combine predictions from Temporal and Synergy branches.
+        - Compute confidence as inverse of predictive variance
+        - Weight each branch by its normalized confidence
+
+        Args:
+            probs_temporal: (batch, n_samples, n_classes) probability samples from temporal branch
+            probs_synergy: (batch, n_samples, n_classes) probability samples from synergy branch
+            eps: Small value to avoid division by zero
+
+        Returns:
+            Fused probability distribution (batch, n_classes)
+        """
+        var_temporal = probs_temporal.var(dim=1).mean(dim=1, keepdim=True)
+        var_synergy = probs_synergy.var(dim=1).mean(dim=1, keepdim=True)
+
+        conf_temporal = 1.0 / (var_temporal + eps)
+        conf_synergy = 1.0 / (var_synergy + eps)
+
+        # Normalize weights
+        total_conf = conf_temporal + conf_synergy
+        w_temporal = conf_temporal / total_conf
+        w_synergy = conf_synergy / total_conf
+
+        mean_prob_temporal = probs_temporal.mean(dim=1)
+        mean_prob_synergy = probs_synergy.mean(dim=1)
+
+        fused_prob = w_temporal * mean_prob_temporal + w_synergy * mean_prob_synergy
+
+        return fused_prob, w_temporal.squeeze(), w_synergy.squeeze()

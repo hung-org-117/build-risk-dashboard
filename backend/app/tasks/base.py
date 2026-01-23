@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 import redis
 from celery import Task
@@ -93,9 +94,249 @@ class TaskState:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
-# =============================================================================
-# Backoff Helper
-# =============================================================================
+# Heartbeat for Long-Running Tasks
+class Heartbeat:
+    """
+    Periodic status updater for long-running tasks.
+
+    Publishes heartbeat updates at regular intervals to indicate task is still
+    running. Useful for monitoring and debugging stuck/slow tasks.
+
+    Usage:
+        def my_callback(elapsed_seconds: float) -> None:
+            logger.info(f"Task still running ({elapsed_seconds:.1f}s)")
+
+        with Heartbeat(callback=my_callback, interval_seconds=30):
+            do_long_running_work()
+    """
+
+    def __init__(
+        self,
+        callback: Callable[[float], None],
+        interval_seconds: float = 30.0,
+    ) -> None:
+        """
+        Initialize heartbeat.
+
+        Args:
+            callback: Function called each interval with elapsed time in seconds
+            interval_seconds: Time between heartbeats (default 30s)
+        """
+        self._callback = callback
+        self._interval = interval_seconds
+        self._timer: threading.Timer | None = None
+        self._start_time: float | None = None
+        self._stopped = threading.Event()
+
+    def _tick(self) -> None:
+        """Internal tick - call callback and schedule next tick."""
+        if self._stopped.is_set():
+            return
+
+        import time
+
+        elapsed = time.time() - (self._start_time or time.time())
+        try:
+            self._callback(elapsed)
+        except Exception as e:
+            logger.warning(f"Heartbeat callback error: {e}")
+
+        # Schedule next tick
+        if not self._stopped.is_set():
+            self._timer = threading.Timer(self._interval, self._tick)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def start(self) -> None:
+        """Start heartbeat timer."""
+        import time
+
+        self._start_time = time.time()
+        self._stopped.clear()
+        self._timer = threading.Timer(self._interval, self._tick)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def stop(self) -> None:
+        """Stop heartbeat timer."""
+        self._stopped.set()
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+
+    def __enter__(self) -> "Heartbeat":
+        """Context manager entry - start heartbeat."""
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit - stop heartbeat."""
+        self.stop()
+
+
+# Distributed Lock for Concurrency Control
+class DistributedLock:
+    """
+    Redis-based distributed lock for critical sections.
+
+    Prevents concurrent execution of protected code across multiple workers.
+    Uses Redis SET NX with TTL to prevent deadlocks.
+
+    Supports two modes:
+    - **Non-blocking** (default): Retry a few times then fail fast
+    - **Blocking**: Wait up to blocking_timeout for lock to become available
+
+    Usage:
+        lock = DistributedLock(redis_client, "export:scenario_123")
+        with lock:
+            generate_export_files()
+
+        lock = DistributedLock(
+            redis_client, "clone:repo_123",
+            ttl_seconds=700,
+            blocking=True,
+            blocking_timeout=60,
+        )
+        with lock:
+            clone_repository()
+
+    Args:
+        redis_client: Redis connection instance
+        key: Lock key (should be unique per resource)
+        ttl_seconds: Lock expiration time (default: 300s / 5 minutes)
+        blocking: If True, use blocking mode (wait for lock). Default: False
+        blocking_timeout: Max seconds to wait in blocking mode (default: 30)
+        retry_times: Number of acquire retries in non-blocking mode (default: 3)
+        retry_delay: Delay between retries in seconds (default: 1)
+    """
+
+    def __init__(
+        self,
+        redis_client,
+        key: str,
+        ttl_seconds: int = 300,
+        blocking: bool = False,
+        blocking_timeout: int = 30,
+        retry_times: int = 3,
+        retry_delay: float = 1.0,
+    ):
+        self._redis = redis_client
+        self._key = f"lock:{key}"
+        self._ttl = ttl_seconds
+        self._blocking = blocking
+        self._blocking_timeout = blocking_timeout
+        self._retry_times = retry_times
+        self._retry_delay = retry_delay
+        self._lock_value: str | None = None
+        self._native_lock = None  # For blocking mode
+
+    def acquire(self) -> bool:
+        """
+        Attempt to acquire the lock.
+
+        In blocking mode: Use redis-py's native Lock with blocking.
+        In non-blocking mode: Retry a few times then return False.
+
+        Returns True if lock was acquired, False otherwise.
+        """
+        import time
+        import uuid
+
+        self._lock_value = str(uuid.uuid4())
+
+        if self._blocking:
+            # Blocking mode: Use redis-py's native lock mechanism
+            self._native_lock = self._redis.lock(
+                self._key,
+                timeout=self._ttl,
+                blocking_timeout=self._blocking_timeout,
+            )
+            acquired = self._native_lock.acquire(blocking=True)
+            if acquired:
+                logger.debug(f"Lock acquired (blocking): {self._key}")
+            else:
+                logger.warning(
+                    f"Failed to acquire lock (timeout={self._blocking_timeout}s): "
+                    f"{self._key}"
+                )
+            return acquired
+
+        # Non-blocking mode: Manual SET NX with retries
+        for attempt in range(self._retry_times):
+            acquired = self._redis.set(
+                self._key,
+                self._lock_value,
+                nx=True,
+                ex=self._ttl,
+            )
+
+            if acquired:
+                logger.debug(f"Lock acquired: {self._key}")
+                return True
+
+            if attempt < self._retry_times - 1:
+                time.sleep(self._retry_delay)
+
+        logger.warning(
+            f"Failed to acquire lock after {self._retry_times} attempts: {self._key}"
+        )
+        return False
+
+    def release(self) -> bool:
+        """
+        Release the lock if we own it.
+
+        In blocking mode: Use redis-py's native Lock release.
+        In non-blocking mode: Use Lua script for atomic check-and-delete.
+        """
+        # Blocking mode: delegate to native lock
+        if self._blocking and self._native_lock:
+            try:
+                self._native_lock.release()
+                logger.debug(f"Lock released (blocking): {self._key}")
+                return True
+            except Exception as e:
+                logger.warning(f"Failed to release lock {self._key}: {e}")
+                return False
+
+        # Non-blocking mode: Lua script atomic release
+        if not self._lock_value:
+            return False
+
+        lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+
+        try:
+            result = self._redis.eval(lua_script, 1, self._key, self._lock_value)
+            if result:
+                logger.debug(f"Lock released: {self._key}")
+                return True
+            else:
+                logger.warning(f"Lock not owned or expired: {self._key}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to release lock {self._key}: {e}")
+            return False
+
+    def __enter__(self) -> "DistributedLock":
+        """Context manager entry - acquire lock or raise."""
+        if not self.acquire():
+            raise RuntimeError(f"Failed to acquire distributed lock: {self._key}")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit - always release lock."""
+        self.release()
+
+    @property
+    def is_locked(self) -> bool:
+        """Check if lock is currently held (by anyone)."""
+        return self._redis.exists(self._key) == 1
 
 
 def compute_backoff(
@@ -121,11 +362,6 @@ def compute_backoff(
     if jitter:
         delay = int(delay * (0.7 + 0.6 * random.random()))  # 0.7x..1.3x
     return max(1, delay)
-
-
-# =============================================================================
-# PipelineTask - Base Task
-# =============================================================================
 
 
 class PipelineTask(Task):
@@ -292,103 +528,24 @@ class SafeTask(PipelineTask):
         self, kwargs: dict
     ) -> Optional[Callable[[str, str], None]]:
         """
-        Return failure handler for orchestrator-level entities.
+        Return failure handler for entity-level failures.
 
-        This base implementation handles parent-level entities only:
-        - repo_config_id → ModelRepoConfig (Model Pipeline orchestrators)
-        - scenario_id → TrainingScenario (Training Pipeline orchestrators)
+        Base implementation (no default handlers):
+        - Subclasses override to provide specific entity failure handling
+        - ScanTask, ExportTask, ModelExportTask provide their own implementations
+        - IngestionTask/ProcessingTask subclasses handle entity-specific failures
 
-        Specialized subclasses override this to handle more granular entities:
-        - IngestionTask subclasses: handle build-level ingestion failures
-        - ProcessingTask subclasses: handle build-level extraction failures
-        - ScanTask: handles scan record failures
-        - ExportTask: handles export failures
+        Returns None if no matching entity ID found.
 
-        Returns a callable(status: str, error_message: str) -> None
-        that updates the relevant entity to FAILED status.
+        Subclass Examples:
+        - ModelIngestionTask: handles model_import_build_id, repo_config_id
+        - ScenarioIngestionTask: handles ingestion_build_id, scenario_id
+        - ModelProcessingTask: handles model_build_id, repo_config_id
+        - ScenarioProcessingTask: handles enrichment_build_id, scenario_id
         """
-        # Check for ModelRepoConfig (Model Pipeline orchestrators)
-        repo_config_id = kwargs.get("repo_config_id")
-        if repo_config_id:
-            return self._create_model_repo_config_failure_handler(repo_config_id)
-
-        # Check for TrainingScenario (Training Pipeline orchestrators)
-        # Skip if commit_sha present (likely a scan task handled by ScanTask)
-        scenario_id = kwargs.get("scenario_id")
-        if scenario_id and not kwargs.get("commit_sha"):
-            return self._create_training_scenario_failure_handler(scenario_id)
-
+        # Default: no orchestrator handling
+        # Each subclass is responsible for implementing its own
         return None
-
-    def _create_model_repo_config_failure_handler(
-        self, repo_config_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for ModelRepoConfig (Model Pipeline orchestrators)."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.model_repo_config import ModelImportStatus
-                from app.repositories.model_repo_config import ModelRepoConfigRepository
-                from app.tasks.shared.events import publish_model_repo_updated
-
-                db = get_database()
-                repo = ModelRepoConfigRepository(db)
-                repo.update_one(
-                    repo_config_id,
-                    {
-                        "status": ModelImportStatus.FAILED.value,
-                        "error_message": error_message[:500],
-                    },
-                )
-                publish_model_repo_updated(
-                    repo_config_id,
-                    ModelImportStatus.FAILED.value,
-                    message=error_message,
-                )
-                logger.info(
-                    f"Marked ModelRepoConfig {repo_config_id[:8]} as FAILED: {error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark ModelRepoConfig {repo_config_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
-
-    def _create_training_scenario_failure_handler(
-        self, scenario_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingScenario (Training Pipeline orchestrators)."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.training_scenario import ScenarioStatus
-                from app.repositories.training_scenario import (
-                    TrainingScenarioRepository,
-                )
-                from app.tasks.shared.events import publish_scenario_updated
-
-                db = get_database()
-                repo = TrainingScenarioRepository(db)
-                repo.update_one(
-                    scenario_id,
-                    {
-                        "status": ScenarioStatus.FAILED.value,
-                        "error_message": error_message[:500],
-                    },
-                )
-                scenario = repo.find_by_id(scenario_id)
-                if scenario:
-                    publish_scenario_updated(scenario, error=error_message)
-                logger.info(
-                    f"Marked TrainingScenario {scenario_id[:8]} as FAILED: {error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark TrainingScenario {scenario_id[:8]} as FAILED: {e}"
-                )
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Handle task failure by calling entity failure handler if defined."""
@@ -430,46 +587,23 @@ class SafeTask(PipelineTask):
         log_prefix = f"[{task_name}][{job_id[:8] if len(job_id) >= 8 else job_id}]"
 
         # Load or create state
-        if load_state_fn:
-            state = load_state_fn(job_id)
-        else:
-            state = TaskState()
+        state = load_state_fn(job_id) if load_state_fn else TaskState()
 
         try:
             result = work(state)
-            # Success - optionally save final state
             if save_state_fn:
                 save_state_fn(state)
             return result
 
         except SoftTimeLimitExceeded as e:
-            # Timeout - check if retries available
-            if (
-                self.max_retries == 0
-                or getattr(self.request, "retries", 0) >= self.max_retries
-            ):
-                logger.error(f"{log_prefix} Soft time limit exceeded, no retries left")
-                if mark_failed_fn:
-                    try:
-                        mark_failed_fn(e)
-                    except Exception as mark_exc:
-                        logger.warning(
-                            f"{log_prefix} Failed to mark failed: {mark_exc}"
-                        )
-                if cleanup_fn:
-                    self._safe_cleanup(cleanup_fn, state, log_prefix)
-                # Return failed result instead of raising to allow cleanup to complete
-                return {"status": "failed", "error": "Soft time limit exceeded"}
-
-            # Retry available - checkpoint, cleanup, retry
-            logger.warning(
-                f"{log_prefix} Soft time limit exceeded, phase={state.phase}"
+            return self._handle_timeout(
+                e, state, log_prefix, save_state_fn, mark_failed_fn, cleanup_fn
             )
-            if save_state_fn:
-                save_state_fn(state)
-            if cleanup_fn:
-                self._safe_cleanup(cleanup_fn, state, log_prefix)
-            raise self.retry(countdown=self.soft_retry_delay, exc=e)
+
+        except TransientError as e:
+            return self._handle_transient(
+                e, state, log_prefix, save_state_fn, mark_failed_fn, cleanup_fn
+            )
 
         except TransientError as e:
             # Transient - use unified retryable error handler
@@ -569,13 +703,17 @@ class SafeTask(PipelineTask):
                 )
 
     def _safe_cleanup(
-        self, cleanup_fn: Callable[[TaskState], None], state: TaskState, log_prefix: str
+        self,
+        cleanup_fn: Callable[[TaskState], None] | None,
+        state: TaskState,
+        log_prefix: str,
     ) -> None:
         """Execute cleanup safely, catching any exceptions."""
-        try:
-            cleanup_fn(state)
-        except Exception as cleanup_exc:
-            logger.warning(f"{log_prefix} Cleanup failed: {cleanup_exc}")
+        if cleanup_fn:
+            try:
+                cleanup_fn(state)
+            except Exception as cleanup_exc:
+                logger.warning(f"{log_prefix} Cleanup failed: {cleanup_exc}")
 
     def _mark_and_cleanup(
         self,
@@ -711,9 +849,12 @@ class ScanTask(SafeTask):
 
         def update_scan_failed(status: str, error_message: str) -> None:
             try:
+                from bson import ObjectId
+
                 from app.database.mongo import get_database
 
                 db = get_database()
+                scenario_obj_id = ObjectId(scenario_id)
 
                 # Mark scan as failed in the appropriate repository
                 if tool_type == "trivy":
@@ -723,9 +864,9 @@ class ScanTask(SafeTask):
 
                     scan_repo = TrivyCommitScanRepository(db)
                     scan = scan_repo.find_by_scenario_and_commit(
-                        scenario_id, commit_sha
+                        scenario_obj_id, commit_sha
                     )
-                    if scan:
+                    if scan and scan.id:
                         scan_repo.mark_failed(scan.id, error_message)
                         logger.info(
                             f"Marked Trivy scan {scan.id} as FAILED: {error_message[:100]}"
@@ -737,9 +878,9 @@ class ScanTask(SafeTask):
 
                     scan_repo = SonarCommitScanRepository(db)
                     scan = scan_repo.find_by_scenario_and_commit(
-                        scenario_id, commit_sha
+                        scenario_obj_id, commit_sha
                     )
-                    if scan:
+                    if scan and scan.id:
                         scan_repo.mark_failed(scan.id, error_message)
                         logger.info(
                             f"Marked SonarQube scan {scan.id} as FAILED: {error_message[:100]}"
@@ -867,150 +1008,11 @@ class IngestionTask(SafeTask):
             return 0
 
 
-class ModelIngestionTask(IngestionTask):
-    """
-    Task for Model Pipeline ingestion operations.
-
-    Provides failure handlers for ModelRepoConfig and ModelImportBuild entities.
-    """
-
-    abstract = True
-
-    def get_pipeline_type(self) -> str:
-        return "model"
-
-    def get_build_repository(self, db: Database):
-        from app.repositories.model_import_build import ModelImportBuildRepository
-
-        return ModelImportBuildRepository(db)
-
-    def get_entity_failure_handler(
-        self, kwargs: dict
-    ) -> Optional[Callable[[str, str], None]]:
-        """
-        Override to provide Model Pipeline specific failure handling.
-
-        Priority order (most specific first):
-        1. model_import_build_id -> Mark specific build as FAILED
-        2. repo_config_id -> Mark ModelRepoConfig as FAILED
-        """
-        # Check for specific build ID first
-        build_id = kwargs.get("model_import_build_id")
-        if build_id:
-            return self._create_model_import_build_handler(build_id)
-
-        # Fall back to repo config level
-        repo_config_id = kwargs.get("repo_config_id") or kwargs.get("pipeline_id")
-        pipeline_type = kwargs.get("pipeline_type", "")
-        if repo_config_id and pipeline_type == "model":
-            return self._create_model_repo_config_failure_handler(repo_config_id)
-
-        return super().get_entity_failure_handler(kwargs)
-
-    def _create_model_import_build_handler(
-        self, build_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for ModelImportBuild."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.entities.model_import_build import ModelImportBuildStatus
-                from app.repositories.model_import_build import (
-                    ModelImportBuildRepository,
-                )
-
-                repo = ModelImportBuildRepository(self.db)
-                repo.update_one(
-                    build_id,
-                    {
-                        "status": ModelImportBuildStatus.FAILED.value,
-                        "ingestion_error": error_message[:500],
-                    },
-                )
-                logger.info(
-                    f"Marked ModelImportBuild {build_id[:8]} as FAILED: "
-                    f"{error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark ModelImportBuild {build_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
-
-
-class ScenarioIngestionTask(IngestionTask):
-    """
-    Task for Training Scenario ingestion operations.
-
-    Provides failure handlers for TrainingScenario and TrainingIngestionBuild entities.
-    """
-
-    abstract = True
-
-    def get_pipeline_type(self) -> str:
-        return "dataset"
-
-    def get_build_repository(self, db: Database):
-        from app.repositories.training_ingestion_build import (
-            TrainingIngestionBuildRepository,
-        )
-
-        return TrainingIngestionBuildRepository(db)
-
-    def get_entity_failure_handler(
-        self, kwargs: dict
-    ) -> Optional[Callable[[str, str], None]]:
-        """
-        Override to provide Training Scenario specific failure handling.
-
-        Priority order (most specific first):
-        1. ingestion_build_id -> Mark specific build as FAILED
-        2. scenario_id -> Mark TrainingScenario as FAILED
-        """
-        # Check for specific build ID first
-        build_id = kwargs.get("ingestion_build_id")
-        if build_id:
-            return self._create_ingestion_build_failure_handler(build_id)
-
-        # Fall back to scenario level
-        scenario_id = kwargs.get("scenario_id") or kwargs.get("pipeline_id")
-        pipeline_type = kwargs.get("pipeline_type", "")
-        if scenario_id and pipeline_type == "dataset":
-            return self._create_training_scenario_failure_handler(scenario_id)
-
-        return super().get_entity_failure_handler(kwargs)
-
-    def _create_ingestion_build_failure_handler(
-        self, build_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingIngestionBuild."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.entities.training_ingestion_build import IngestionStatus
-                from app.repositories.training_ingestion_build import (
-                    TrainingIngestionBuildRepository,
-                )
-
-                repo = TrainingIngestionBuildRepository(self.db)
-                repo.update_one(
-                    build_id,
-                    {
-                        "status": IngestionStatus.FAILED.value,
-                        "ingestion_error": error_message[:500],
-                    },
-                )
-                logger.info(
-                    f"Marked TrainingIngestionBuild {build_id[:8]} as FAILED: "
-                    f"{error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark TrainingIngestionBuild {build_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
+# Specialized Ingestion Task Classes
+# These classes have been moved to their respective modules for better organization.
+# Import from:
+# - from app.tasks.model.ingestion.base import ModelIngestionTask
+# - from app.tasks.training.ingestion.base import ScenarioIngestionTask
 
 
 # =============================================================================
@@ -1026,176 +1028,11 @@ class ProcessingTask(SafeTask):
     abstract = True
 
 
-class ModelProcessingTask(ProcessingTask):
-    """
-    Model Pipeline Processing Task.
-
-    Handles failures for individual ModelTrainingBuilds.
-    """
-
-    abstract = True
-
-    def get_entity_failure_handler(
-        self, kwargs: dict
-    ) -> Optional[Callable[[str, str], None]]:
-        """Override to handle model_build_id."""
-        model_build_id = kwargs.get("model_build_id")
-        if model_build_id:
-            return self._create_model_build_failure_handler(model_build_id)
-
-        return super().get_entity_failure_handler(kwargs)
-
-    def _create_model_build_failure_handler(
-        self, model_build_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for ModelTrainingBuild."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.enums import ExtractionStatus
-                from app.repositories.model_training_build import (
-                    ModelTrainingBuildRepository,
-                )
-
-                db = get_database()
-                model_build_repo = ModelTrainingBuildRepository(db)
-
-                # Mark build as FAILED
-                model_build_repo.update_one(
-                    model_build_id,
-                    {
-                        "extraction_status": ExtractionStatus.FAILED.value,
-                        "extraction_error": error_message[:500],
-                    },
-                )
-
-                logger.info(
-                    f"Marked ModelTrainingBuild {model_build_id[:8]} as FAILED: {error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark ModelTrainingBuild {model_build_id[:8]} as FAILED: {e}"
-                )
-
-        return update_failed
-
-
-class ScenarioProcessingTask(ProcessingTask):
-    """
-    Training Scenario Processing Task.
-
-    Handles failures for individual TrainingEnrichmentBuilds.
-    """
-
-    abstract = True
-
-    def get_entity_failure_handler(
-        self, kwargs: dict
-    ) -> Optional[Callable[[str, str], None]]:
-        """Override to handle enrichment_build_id."""
-        enrichment_build_id = kwargs.get("enrichment_build_id")
-        if enrichment_build_id:
-            return self._create_enrichment_build_failure_handler(enrichment_build_id)
-
-        return super().get_entity_failure_handler(kwargs)
-
-    def _create_enrichment_build_failure_handler(
-        self, enrichment_build_id: str
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for TrainingEnrichmentBuild."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from app.database.mongo import get_database
-                from app.entities.enums import ExtractionStatus
-                from app.repositories.training_enrichment_build import (
-                    TrainingEnrichmentBuildRepository,
-                )
-
-                db = get_database()
-                repo = TrainingEnrichmentBuildRepository(db)
-                repo.update_extraction_status(
-                    enrichment_build_id,
-                    ExtractionStatus.FAILED,
-                    error_message=error_message[:500],
-                )
-                logger.info(
-                    f"Marked TrainingEnrichmentBuild {enrichment_build_id[:8]} as FAILED: "
-                    f"{error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark TrainingEnrichmentBuild {enrichment_build_id[:8]} "
-                    f"as FAILED: {e}"
-                )
-
-        return update_failed
-
-
-class ModelPredictionTask(ProcessingTask):
-    """
-    Model Prediction Task.
-
-    Handles failures for a BATCH of ModelTrainingBuilds.
-    """
-
-    abstract = True
-
-    def get_entity_failure_handler(
-        self, kwargs: dict
-    ) -> Optional[Callable[[str, str], None]]:
-        """Override to handle list of model_build_ids."""
-        model_build_ids = kwargs.get("model_build_ids")
-        # Check if it's a list and not empty
-        if model_build_ids and isinstance(model_build_ids, list):
-            return self._create_batch_prediction_failure_handler(model_build_ids)
-
-        return super().get_entity_failure_handler(kwargs)
-
-    def _create_batch_prediction_failure_handler(
-        self, model_build_ids: List[str]
-    ) -> Callable[[str, str], None]:
-        """Create failure handler for a batch of ModelTrainingBuilds."""
-
-        def update_failed(status: str, error_message: str) -> None:
-            try:
-                from bson import ObjectId
-
-                from app.database.mongo import get_database
-                from app.entities.enums import ExtractionStatus
-                from app.repositories.model_training_build import (
-                    ModelTrainingBuildRepository,
-                )
-
-                db = get_database()
-                model_build_repo = ModelTrainingBuildRepository(db)
-
-                # Bulk update for efficiency
-                build_oids = [
-                    ObjectId(bid) for bid in model_build_ids if ObjectId.is_valid(bid)
-                ]
-
-                if build_oids:
-                    model_build_repo.collection.update_many(
-                        {"_id": {"$in": build_oids}},
-                        {
-                            "$set": {
-                                "prediction_status": ExtractionStatus.FAILED.value,
-                                "prediction_error": error_message[:500],
-                            }
-                        },
-                    )
-
-                logger.info(
-                    f"Marked {len(build_oids)} builds as PREDICTION FAILED in batch: {error_message[:100]}"
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to mark batch prediction failed for {len(model_build_ids)} builds: {e}"
-                )
-
-        return update_failed
+# Specialized Processing Task Classes
+# These classes have been moved to their respective modules for better organization.
+# Import from:
+# - from app.tasks.model.processing.base import ModelProcessingTask, ModelPredictionTask
+# - from app.tasks.training.processing.base import ScenarioProcessingTask
 
 
 # Export Tasks

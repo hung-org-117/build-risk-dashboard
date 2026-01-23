@@ -26,49 +26,6 @@ class AsyncRedisClient:
         return cls._client
 
 
-class RedisLock:
-    """
-    Redis-based distributed lock for preventing concurrent operations.
-
-    Usage:
-        with RedisLock("clone:repo_id", timeout=600):
-            # critical section
-    """
-
-    def __init__(
-        self,
-        key: str,
-        timeout: int = 600,
-        blocking_timeout: int = 30,
-        redis_client: redis.Redis | None = None,
-    ):
-        self.key = f"lock:{key}"
-        self.timeout = timeout
-        self.blocking_timeout = blocking_timeout
-        self._lock = None
-        self._client = redis_client
-
-    def __enter__(self):
-        redis_client = self._client or redis.from_url(settings.REDIS_URL)
-        self._lock = redis_client.lock(
-            self.key,
-            timeout=self.timeout,
-            blocking_timeout=self.blocking_timeout,
-        )
-        acquired = self._lock.acquire(blocking=True)
-        if not acquired:
-            raise TimeoutError(f"Could not acquire lock: {self.key}")
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._lock:
-            try:
-                self._lock.release()
-            except Exception:
-                pass  # Lock may have expired
-        return False
-
-
 def get_redis() -> redis.Redis:
     """Get sync Redis client."""
     return RedisClient.get_client()

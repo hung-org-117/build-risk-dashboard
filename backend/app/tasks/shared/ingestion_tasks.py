@@ -28,7 +28,6 @@ import redis
 from app.celery_app import celery_app
 from app.ci_providers import CIProvider, get_ci_provider, get_provider_config
 from app.config import settings
-from app.core.redis import RedisLock
 from app.paths import (
     get_build_logs_path,
     get_repo_path,
@@ -38,6 +37,7 @@ from app.repositories.base_import_build import get_progressive_updater
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.tasks.base import (
+    DistributedLock,
     PipelineTask,
     SafeTask,
     TaskState,
@@ -111,9 +111,7 @@ def clone_repo(
                         pipeline_id=pipeline_id,
                         raw_repo_id=raw_repo_id,
                     )
-                    updater.update_resource_batch(
-                        "git_history", ResourceStatus.IN_PROGRESS
-                    )
+                    updater.update_resource_batch("git_history", ResourceStatus.IN_PROGRESS)
                 except Exception as e:
                     logger.warning(f"{log_ctx} Failed to update IN_PROGRESS: {e}")
 
@@ -122,17 +120,16 @@ def clone_repo(
         # Phase: CLONING → Execute git commands
         if state.phase == "CLONING":
             try:
-                with RedisLock(
+                with DistributedLock(
+                    self.redis,
                     f"clone:{github_repo_id}",
-                    timeout=700,
+                    ttl_seconds=700,
+                    blocking=True,
                     blocking_timeout=60,
-                    redis_client=self.redis,
                 ):
                     _execute_git_clone_or_fetch(repo_path, full_name, log_ctx)
             except subprocess.CalledProcessError as e:
-                error_msg = (
-                    f"Git command failed: {e.stderr.decode() if e.stderr else str(e)}"
-                )
+                error_msg = f"Git command failed: {e.stderr.decode() if e.stderr else str(e)}"
                 raise TransientError(error_msg) from e
             except subprocess.TimeoutExpired as e:
                 raise TransientError(f"Git command timed out: {e}") from e
@@ -154,12 +151,8 @@ def clone_repo(
                         pipeline_id=pipeline_id,
                         raw_repo_id=raw_repo_id,
                     )
-                    updated = updater.update_resource_batch(
-                        "git_history", ResourceStatus.COMPLETED
-                    )
-                    logger.info(
-                        f"{log_ctx} Marked {updated} builds git_history=COMPLETED"
-                    )
+                    updated = updater.update_resource_batch("git_history", ResourceStatus.COMPLETED)
+                    logger.info(f"{log_ctx} Marked {updated} builds git_history=COMPLETED")
                 except Exception as e:
                     logger.warning(f"{log_ctx} Progressive save failed: {e}")
 
@@ -186,9 +179,7 @@ def clone_repo(
                     pipeline_id=pipeline_id,
                     raw_repo_id=raw_repo_id,
                 )
-                updater.update_resource_batch(
-                    "git_history", ResourceStatus.FAILED, error_msg
-                )
+                updater.update_resource_batch("git_history", ResourceStatus.FAILED, error_msg)
             except Exception as e:
                 logger.warning(f"{log_ctx} Failed to mark FAILED: {e}")
 
@@ -201,9 +192,7 @@ def clone_repo(
                     )
 
                     repo = ModelImportBuildRepository(self.db)
-                    failed_count = repo.mark_all_ingesting_failed(
-                        pipeline_id, error_msg
-                    )
+                    failed_count = repo.mark_all_ingesting_failed(pipeline_id, error_msg)
                     logger.info(f"{log_ctx} Marked {failed_count} builds as FAILED")
                 else:
                     from app.repositories.training_ingestion_build import (
@@ -211,9 +200,7 @@ def clone_repo(
                     )
 
                     repo = TrainingIngestionBuildRepository(self.db)
-                    failed_count = repo.mark_all_ingesting_failed(
-                        pipeline_id, error_msg
-                    )
+                    failed_count = repo.mark_all_ingesting_failed(pipeline_id, error_msg)
                     logger.info(f"{log_ctx} Marked {failed_count} builds as FAILED")
             except Exception as e:
                 logger.warning(f"{log_ctx} Failed to mark builds as FAILED: {e}")
@@ -422,9 +409,7 @@ def create_worktree_chunk(
                     state.meta["processed_commits"].append(sha)
                     continue
 
-                build_run = build_run_repo.find_by_commit_or_effective_sha(
-                    raw_repo_id, sha
-                )
+                build_run = build_run_repo.find_by_commit_or_effective_sha(raw_repo_id, sha)
 
                 try:
                     res = _process_worktree_commit(
@@ -599,9 +584,7 @@ def _publish_worktree_update(
     # Determine status
     is_final_chunk = chunk_index == total_chunks - 1
     has_failures = result.get("worktrees_failed", 0) > 0
-    has_successes = (
-        result.get("worktrees_created", 0) + result.get("worktrees_skipped", 0) > 0
-    )
+    has_successes = result.get("worktrees_created", 0) + result.get("worktrees_skipped", 0) > 0
 
     if is_final_chunk:
         if has_failures and not has_successes:
@@ -625,13 +608,9 @@ def _publish_worktree_update(
         failed_commits = result.get("failed_commits") or []
 
         if created_commits:
-            completed_build_ids = repo.get_build_ids_by_commits(
-                pipeline_id, created_commits
-            )
+            completed_build_ids = repo.get_build_ids_by_commits(pipeline_id, created_commits)
         if failed_commits:
-            failed_build_ids = repo.get_build_ids_by_commits(
-                pipeline_id, failed_commits
-            )
+            failed_build_ids = repo.get_build_ids_by_commits(pipeline_id, failed_commits)
 
     elif pipeline_type == "dataset" and db is not None:
         from app.repositories.training_ingestion_build import (
@@ -643,20 +622,15 @@ def _publish_worktree_update(
         failed_commits = result.get("failed_commits") or []
 
         if created_commits:
-            completed_build_ids = repo.get_build_ids_by_commits(
-                pipeline_id, created_commits
-            )
+            completed_build_ids = repo.get_build_ids_by_commits(pipeline_id, created_commits)
         if failed_commits:
-            failed_build_ids = repo.get_build_ids_by_commits(
-                pipeline_id, failed_commits
-            )
+            failed_build_ids = repo.get_build_ids_by_commits(pipeline_id, failed_commits)
 
     publish_ingestion_progress(
         repo_id=pipeline_id,
         resource="git_worktree",
         status=ws_status,
-        builds_affected=result.get("worktrees_created", 0)
-        + result.get("worktrees_skipped", 0),
+        builds_affected=result.get("worktrees_created", 0) + result.get("worktrees_skipped", 0),
         chunk_index=chunk_index,
         total_chunks=total_chunks,
         pipeline_type=pipeline_type,
@@ -684,11 +658,12 @@ def _process_worktree_commit(
     result = {"created": 0, "skipped": 0, "failed": 0, "replayed": 0}
 
     try:
-        with RedisLock(
+        with DistributedLock(
+            redis_client,
             f"worktree:{github_repo_id}:{sha[:12]}",
-            timeout=120,
+            ttl_seconds=120,
+            blocking=True,
             blocking_timeout=60,
-            redis_client=redis_client,
         ):
             worktree_path = worktrees_dir / sha[:12]
             if worktree_path.exists():
@@ -709,9 +684,7 @@ def _process_worktree_commit(
                         if synthetic_sha:
                             if synthetic_sha != sha:
                                 if build_run:
-                                    build_run_repo.update_effective_sha(
-                                        build_run.id, synthetic_sha
-                                    )
+                                    build_run_repo.update_effective_sha(build_run.id, synthetic_sha)
                                 result["replayed"] = 1
                             commit_sha_to_use = synthetic_sha
                         else:
@@ -804,17 +777,13 @@ def aggregate_logs_results(
             chunks_with_errors.append(
                 {"chunk_index": "?", "error": f"{type(r).__name__}: {str(r)}"}
             )
-            logger.warning(
-                f"{log_ctx} Chunk failed with exception: {type(r).__name__}: {r}"
-            )
+            logger.warning(f"{log_ctx} Chunk failed with exception: {type(r).__name__}: {r}")
             continue
         if not isinstance(r, dict):
             continue
         chunk_idx = r.get("chunk_index", "?")
         if r.get("error"):
-            chunks_with_errors.append(
-                {"chunk_index": chunk_idx, "error": r.get("error")}
-            )
+            chunks_with_errors.append({"chunk_index": chunk_idx, "error": r.get("error")})
             logger.warning(f"{log_ctx} Chunk {chunk_idx} had error: {r.get('error')}")
         else:
             successful_chunks.append(r)
@@ -829,12 +798,8 @@ def aggregate_logs_results(
     total_downloaded = sum(
         r.get("logs_downloaded", 0) for r in chunk_results if isinstance(r, dict)
     )
-    total_expired = sum(
-        r.get("logs_expired", 0) for r in chunk_results if isinstance(r, dict)
-    )
-    total_skipped = sum(
-        r.get("logs_skipped", 0) for r in chunk_results if isinstance(r, dict)
-    )
+    total_expired = sum(r.get("logs_expired", 0) for r in chunk_results if isinstance(r, dict))
+    total_skipped = sum(r.get("logs_skipped", 0) for r in chunk_results if isinstance(r, dict))
 
     # Determine overall status
     if chunks_with_errors:
@@ -1184,12 +1149,8 @@ def download_logs_chunk(
 
         # Phase: DONE → Progressive save and publish WebSocket
         if state.phase == "DONE":
-            _save_logs_progress(
-                self.db, pipeline_id, pipeline_type, raw_repo_id, result, log_ctx
-            )
-            _publish_logs_update(
-                pipeline_id, pipeline_type, chunk_index, total_chunks, result
-            )
+            _save_logs_progress(self.db, pipeline_id, pipeline_type, raw_repo_id, result, log_ctx)
+            _publish_logs_update(pipeline_id, pipeline_type, chunk_index, total_chunks, result)
 
         return result
 
@@ -1211,9 +1172,7 @@ def download_logs_chunk(
             all_failed.extend(unprocessed)
             result["failed_log_ids"] = all_failed
 
-            _save_logs_progress(
-                self.db, pipeline_id, pipeline_type, raw_repo_id, result, log_ctx
-            )
+            _save_logs_progress(self.db, pipeline_id, pipeline_type, raw_repo_id, result, log_ctx)
 
             # Mark builds with failed logs as FAILED (build-level)
             # Note: expired logs are MISSING_RESOURCE, not FAILED
@@ -1311,9 +1270,7 @@ def _save_logs_progress(
         )
 
         # Mark downloaded/skipped as COMPLETED
-        successful = result.get("downloaded_log_ids", []) + result.get(
-            "skipped_log_ids", []
-        )
+        successful = result.get("downloaded_log_ids", []) + result.get("skipped_log_ids", [])
         if successful:
             updated = updater.update_resource_by_ci_run_ids(
                 "build_logs", successful, ResourceStatus.COMPLETED
@@ -1346,9 +1303,7 @@ def _publish_logs_update(
         return
 
     # Determine overall status for this chunk
-    completed_ids = result.get("downloaded_log_ids", []) + result.get(
-        "skipped_log_ids", []
-    )
+    completed_ids = result.get("downloaded_log_ids", []) + result.get("skipped_log_ids", [])
     failed_ids = result.get("failed_log_ids", []) + result.get("expired_log_ids", [])
 
     has_failures = len(failed_ids) > 0

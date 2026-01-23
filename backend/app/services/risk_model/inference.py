@@ -1,8 +1,18 @@
 """
-Risk Model Inference Service.
+Risk Model Inference Service with Uncertainty-Weighted Fusion.
 
-This module provides the inference logic for the Bayesian LSTM risk model.
-It loads the model and scalers, processes feature dicts, and returns predictions.
+This module provides production inference for the Dual-Branch Bayesian Risk Model.
+It implements the uncertainty-aware prediction pipeline as described in Vu et al.:
+"Uncertainty-Aware Prediction of Software Defect Risks"
+
+Architecture:
+- Temporal Branch (LSTM): Processes build history sequence (k=10 builds)
+- Synergy Branch (MLP): Processes cross-artifact features (35 dimensions)
+- Fusion: Inverse variance weighting - branch with lower uncertainty gets higher weight
+
+Key Methods:
+- predict(): Main entry point for single-build predictions with uncertainty quantification
+- _predict_with_fusion(): Internal MC Dropout + Uncertainty-Weighted Fusion logic
 
 Feature definitions match training script (hunglt/training.py).
 """
@@ -36,8 +46,8 @@ TEMPORAL_FEATURES = [
     "history_days_since_prev",
 ]
 
-# Static features (point-in-time values for current build)
-STATIC_FEATURES = [
+# Synergy features (cross-artifact features for current build snapshot)
+SYNERGY_FEATURES = [
     # Code churn features
     "git_diff_src_churn",
     "git_diff_files_added",
@@ -111,12 +121,17 @@ RISK_LABELS = ["Low", "Medium", "High"]
 
 class RiskModelService:
     """
-    Service for making risk predictions using the Bayesian LSTM model.
+    Production inference service for the Dual-Branch Bayesian Risk Model.
+
+    This service implements uncertainty-aware predictions using:
+    - MC Dropout: Multiple stochastic forward passes (default n=30) for uncertainty
+    - Uncertainty-Weighted Fusion: Branch with lower variance gets higher weight
 
     Handles:
-    - Model loading (lazy, singleton)
-    - Feature preprocessing (log1p transformation, scaling)
-    - MC Dropout inference for uncertainty estimation
+    - Model loading (lazy, singleton pattern)
+    - Feature preprocessing (log1p transformation, Z-score scaling)
+    - Sequence construction for Temporal Branch (k=10 history window)
+    - Real-time prediction with confidence and uncertainty scores
     """
 
     _instance = None
@@ -176,7 +191,7 @@ class RiskModelService:
                 lstm_dropout=lstm_dropout,
                 temporal_dropout=temporal_dropout,
             )
-            self._model.load_state_dict(checkpoint["model_state_dict"])
+            self._model.load_state_dict(checkpoint["model_state_dict"], strict=False)
             self._model.to(self._device)
             self._model.eval()
 
@@ -234,7 +249,7 @@ class RiskModelService:
             temporal_values.append(float(val))
 
         static_values = []
-        for f in STATIC_FEATURES:
+        for f in SYNERGY_FEATURES:
             val = features.get(f)
             if val is None:
                 val = 0.0
@@ -279,7 +294,10 @@ class RiskModelService:
         use_prescaled: bool = False,
     ) -> Dict[str, Any]:
         """
-        Make risk prediction for a build.
+        Make risk prediction for a build using Uncertainty-Weighted Fusion.
+
+        Uses MC Dropout on both temporal and synergy branches, then fuses
+        predictions using inverse variance weighting.
 
         Args:
             features: Current build features dict (raw or pre-scaled)
@@ -293,6 +311,8 @@ class RiskModelService:
             - confidence: Confidence probability
             - uncertainty: Uncertainty score (0-1)
             - probabilities: Dict of {label: probability}
+            - fusion_weights: Dict with temporal/synergy branch weights
+            - branch_uncertainty: Dict with per-branch variance
         """
         if not self.is_loaded():
             return {
@@ -350,7 +370,7 @@ class RiskModelService:
                 if self._scaler_static:
                     import pandas as pd
 
-                    static_df = pd.DataFrame(static_arr, columns=STATIC_FEATURES)
+                    static_df = pd.DataFrame(static_arr, columns=SYNERGY_FEATURES)
                     static_arr = self._scaler_static.transform(static_df)
 
             # Convert to tensors
@@ -358,34 +378,8 @@ class RiskModelService:
             static_tensor = torch.tensor(static_arr, dtype=torch.float32).to(self._device)
             lengths_tensor = torch.tensor([seq_length], dtype=torch.long).to(self._device)
 
-            # MC Dropout inference
-            self._model.train()  # Enable dropout
-            probs_list = []
-
-            with torch.no_grad():
-                for _ in range(n_samples):
-                    logits = self._model(seq_tensor, static_tensor, lengths_tensor)
-                    prob = torch.softmax(logits, dim=1)
-                    probs_list.append(prob.cpu().numpy())
-
-            probs = np.stack(probs_list)
-            mean_prob = probs.mean(axis=0)[0]
-            uncertainty = probs.var(axis=0).mean()
-
-            pred_class = int(mean_prob.argmax())
-            pred_label = RISK_LABELS[pred_class]
-            confidence = float(mean_prob[pred_class])
-
-            return {
-                "predicted_label": pred_label,
-                "confidence": round(confidence, 4),
-                "uncertainty": round(float(uncertainty), 4),
-                "probabilities": {
-                    "Low": round(float(mean_prob[0]), 4),
-                    "Medium": round(float(mean_prob[1]), 4),
-                    "High": round(float(mean_prob[2]), 4),
-                },
-            }
+            # Always use uncertainty-weighted fusion
+            return self._predict_with_fusion(seq_tensor, static_tensor, lengths_tensor, n_samples)
 
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -396,6 +390,79 @@ class RiskModelService:
                 "probabilities": None,
                 "error": str(e),
             }
+
+    def _predict_with_fusion(
+        self,
+        seq_tensor: torch.Tensor,
+        static_tensor: torch.Tensor,
+        lengths_tensor: torch.Tensor,
+        n_samples: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Uncertainty-weighted fusion prediction as per Vu et al. paper.
+
+        Performs MC Dropout separately on each branch, then fuses using
+        inverse variance weighting.
+        """
+        from app.services.risk_model.model import BayesianRiskModel
+
+        self._model.train()  # Enable dropout
+
+        probs_temporal_list = []
+        probs_synergy_list = []
+
+        with torch.no_grad():
+            for _ in range(n_samples):
+                logits_t, logits_s, _, _ = self._model.forward_branches(
+                    seq_tensor, static_tensor, lengths_tensor
+                )
+                prob_t = torch.softmax(logits_t, dim=1)
+                prob_s = torch.softmax(logits_s, dim=1)
+                probs_temporal_list.append(prob_t)
+                probs_synergy_list.append(prob_s)
+
+        # Stack: (batch, n_samples, n_classes)
+        probs_temporal = torch.stack(probs_temporal_list, dim=1)
+        probs_synergy = torch.stack(probs_synergy_list, dim=1)
+
+        # Uncertainty-weighted fusion
+        fused_prob, w_temporal, w_synergy = BayesianRiskModel.uncertainty_weighted_fusion(
+            probs_temporal, probs_synergy
+        )
+
+        mean_prob = fused_prob[0].cpu().numpy()
+
+        # Compute overall uncertainty from both branches
+        var_temporal = probs_temporal.var(dim=1).mean().item()
+        var_synergy = probs_synergy.var(dim=1).mean().item()
+        uncertainty = (var_temporal + var_synergy) / 2
+
+        pred_class = int(mean_prob.argmax())
+        pred_label = RISK_LABELS[pred_class]
+        confidence = float(mean_prob[pred_class])
+
+        return {
+            "predicted_label": pred_label,
+            "confidence": round(confidence, 4),
+            "uncertainty": round(float(uncertainty), 4),
+            "probabilities": {
+                "Low": round(float(mean_prob[0]), 4),
+                "Medium": round(float(mean_prob[1]), 4),
+                "High": round(float(mean_prob[2]), 4),
+            },
+            "fusion_weights": {
+                "temporal": round(
+                    float(w_temporal.item() if w_temporal.dim() == 0 else w_temporal[0].item()), 4
+                ),
+                "synergy": round(
+                    float(w_synergy.item() if w_synergy.dim() == 0 else w_synergy[0].item()), 4
+                ),
+            },
+            "branch_uncertainty": {
+                "temporal": round(var_temporal, 6),
+                "synergy": round(var_synergy, 6),
+            },
+        }
 
     def predict_batch(
         self,
