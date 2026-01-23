@@ -17,8 +17,10 @@ interface ActionProgressBannerProps {
             partial: number;
             pending: number;
             total: number;
+            failed?: number;
             with_prediction?: number;
             pending_prediction?: number;
+            prediction_failed?: number;
         };
 
     } | null;
@@ -106,32 +108,100 @@ export function ActionProgressBanner({
         iconColor = "text-green-500";
         isSpinning = false;
 
+        // Extraction progress
+        const extractionFailures = progress?.training_builds.failed || 0;
+        const extractionSuccess = (progress?.training_builds.completed || 0) + (progress?.training_builds.partial || 0);
+        const extractionDone = extractionSuccess + extractionFailures;
+        const extractionTotal = progress?.training_builds.total || 0;
+        const extractionPercent = extractionTotal > 0 ? Math.round((extractionSuccess / extractionTotal) * 100) : 0;
+        const extractionFailPercent = extractionTotal > 0 ? Math.round((extractionFailures / extractionTotal) * 100) : 0;
+        const isExtracting = currentPhase === "extraction" || extractionDone < extractionTotal;
+
+        // Prediction progress
+        const predictionFailures = progress?.training_builds.prediction_failed || 0;
+        const predictionSuccess = progress?.training_builds.with_prediction || 0;
+        const predictionDone = predictionSuccess + predictionFailures;
+        const predictionTotal = extractionDone; // Targets total extracted (success + failed) as they pass through pipeline
+
+        // Wait, prediction can only run on successfully extracted builds?
+        // Actually pipeline might skip failed extractions. 
+        // Let's use extractionSuccess as the base for prediction total if we want to be strict,
+        // but typically the pipeline moves sequentially.
+        // If extraction failed, it won't be predicted. So predictionTotal should be extractionSuccess.
+        const effectivePredictionTotal = extractionSuccess;
+
+        const predictionPercent = effectivePredictionTotal > 0 ? Math.round((predictionSuccess / effectivePredictionTotal) * 100) : 0;
+        const predictionFailPercent = effectivePredictionTotal > 0 ? Math.round((predictionFailures / effectivePredictionTotal) * 100) : 0;
+
+        const isPredicting = currentPhase === "prediction" || (effectivePredictionTotal > 0 && predictionDone < effectivePredictionTotal);
+
         Content = (
-            <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">Progress</span>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-green-500" />
+            <div className="space-y-3">
+                {/* Feature Extraction Progress */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">Feature Extraction</span>
+                            {isExtracting && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                            {!isExtracting && extractionDone >= extractionTotal && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                            {extractionSuccess} ok, {extractionFailures} failed / {extractionTotal} total
+                        </span>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                        {processingDone}/{processingTotal} builds
-                    </span>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary/50 flex">
+                        <div
+                            className="h-full bg-blue-500 transition-all duration-500 ease-in-out"
+                            style={{ width: `${extractionPercent}%` }}
+                        />
+                        <div
+                            className="h-full bg-red-500 transition-all duration-500 ease-in-out"
+                            style={{ width: `${extractionFailPercent}%` }}
+                        />
+                    </div>
                 </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
-                    <div
-                        className="h-full bg-emerald-500 transition-all duration-500 ease-in-out"
-                        style={{ width: `${processingPercent}%` }}
-                    />
+
+                {/* Risk Prediction Progress */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">Risk Prediction</span>
+                            {isPredicting && <Loader2 className="h-3 w-3 animate-spin text-emerald-500" />}
+                            {!isPredicting && predictionDone >= effectivePredictionTotal && effectivePredictionTotal > 0 && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                            {predictionSuccess} ok, {predictionFailures} failed / {effectivePredictionTotal} eligible
+                        </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary/50 flex">
+                        <div
+                            className="h-full bg-emerald-500 transition-all duration-500 ease-in-out"
+                            style={{ width: `${predictionPercent}%` }}
+                        />
+                        <div
+                            className="h-full bg-red-500 transition-all duration-500 ease-in-out"
+                            style={{ width: `${predictionFailPercent}%` }}
+                        />
+                    </div>
                 </div>
-                {/* Real-time sub-status text */}
-                <p className="text-xs text-muted-foreground italic">
-                    {currentPhase === "prediction"
-                        ? "Running risk predictions..."
-                        : currentPhase === "extraction"
-                            ? `Extracting features...`
-                            : "Processing pipeline running..."}
-                    {currentBuildProgress?.buildNumber && ` (Build #${currentBuildProgress.buildNumber})`}
-                </p>
+
+                {/* Real-time detail text */}
+                {(currentBuildProgress?.buildNumber || currentPhase) && (
+                    <p className="text-xs text-muted-foreground italic border-t border-green-200/50 dark:border-green-800/50 pt-2 mt-2">
+                        {currentPhase === "prediction" && "Running risk predictions"}
+                        {currentPhase === "extraction" && "Extracting features"}
+                        {!currentPhase && "Processing pipeline running"}
+
+                        {currentBuildProgress?.buildNumber && (
+                            <span className="ml-1">
+                                for Build #{currentBuildProgress.buildNumber}
+                                {currentBuildProgress.featureCount !== undefined &&
+                                    ` (${currentBuildProgress.featureCount} features)`}
+                            </span>
+                        )}
+                        ...
+                    </p>
+                )}
             </div>
         );
 
@@ -145,19 +215,13 @@ export function ActionProgressBanner({
         Content = (
             <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">Progress</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                        {ingestionDone}/{ingestionTotal} builds
+                    <span className="text-sm text-muted-foreground">
+                        Preparing {ingestionTotal} builds for processing...
                     </span>
                 </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
-                    <div
-                        className="h-full bg-blue-500 transition-all duration-500 ease-in-out"
-                        style={{ width: `${ingestionPercent}%` }}
-                    />
-                </div>
+                <p className="text-xs text-muted-foreground italic">
+                    This step involves cloning code and downloading logs. It may take a while.
+                </p>
             </div>
         );
 
