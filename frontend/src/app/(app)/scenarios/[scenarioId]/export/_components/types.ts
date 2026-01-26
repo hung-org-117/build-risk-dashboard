@@ -5,7 +5,7 @@
 export interface ExportConfig {
     name: string;
     // Preprocessing
-    missing_values_strategy: "drop_row" | "fill_mean" | "fill_median" | "fill_zero";
+    missing_values_strategy: "fill_mean" | "fill_median" | "fill_zero";
     normalization: "none" | "z_score" | "min_max" | "robust";
     // Splitting
     strategy: string;
@@ -52,7 +52,7 @@ export interface GroupByOption {
 
 export const DEFAULT_CONFIG: ExportConfig = {
     name: "",
-    missing_values_strategy: "drop_row",
+    missing_values_strategy: "fill_zero",
     normalization: "z_score",
     strategy: "stratified_within_group",
     group_by: "repo_language",
@@ -90,17 +90,16 @@ export const GROUP_BY = {
 } as const;
 
 export const MISSING_VALUES_OPTIONS = [
-    { value: "drop_row", label: "Drop Row" },
-    { value: "fill_mean", label: "Fill with Mean" },
-    { value: "fill_median", label: "Fill with Median" },
-    { value: "fill_zero", label: "Fill with Zero" },
+    { value: "fill_zero", label: "Fill with Zero", description: "Replace NULL with 0 (for COUNT, BINARY, RATIO features)" },
+    { value: "fill_mean", label: "Fill with Mean", description: "Replace NULL with column average (for CONTINUOUS features)" },
+    { value: "fill_median", label: "Fill with Median", description: "Replace NULL with column median (for CONTINUOUS features)" },
 ] as const;
 
 export const NORMALIZATION_OPTIONS = [
-    { value: "none", label: "None" },
-    { value: "z_score", label: "Z-Score (StandardScaler)" },
-    { value: "min_max", label: "Min-Max (0-1)" },
-    { value: "robust", label: "Robust (IQR)" },
+    { value: "none", label: "None", description: "Keep original values" },
+    { value: "z_score", label: "Z-Score (StandardScaler)", description: "Scale to mean=0, std=1" },
+    { value: "min_max", label: "Min-Max (0-1)", description: "Scale to range [0, 1]" },
+    { value: "robust", label: "Robust (IQR)", description: "Scale using interquartile range (outlier resistant)" },
 ] as const;
 
 export const STRATEGY_OPTIONS: StrategyOption[] = [

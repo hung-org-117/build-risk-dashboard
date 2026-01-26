@@ -89,7 +89,7 @@ class MetricsExporter:
         self,
         component_key: str,
         selected_metrics: List[str],
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Any]:
         """
         Collect metrics from SonarQube for a component.
 
@@ -98,12 +98,72 @@ class MetricsExporter:
             selected_metrics: List of metric keys to fetch. Metric keys can have 'sonar_' prefix which will be stripped.
 
         Returns:
-            Dict mapping metric key to value
+            Dict mapping metric key to value (properly typed based on MetricDefinition)
         """
         # Strip 'sonar_' prefix if present (user selection may have it)
         metrics_to_fetch = [
-            m.replace("sonar_", "") if m.startswith("sonar_") else m for m in selected_metrics
+            m.replace("sonar_", "") if m.startswith("sonar_") else m
+            for m in selected_metrics
         ]
 
         logger.debug(f"Fetching {len(metrics_to_fetch)} metrics for {component_key}")
-        return self._fetch_measures(component_key, metrics_to_fetch)
+        raw_metrics = self._fetch_measures(component_key, metrics_to_fetch)
+
+        # Convert string values to proper types based on MetricDefinition
+        return self._convert_metrics_types(raw_metrics)
+
+    def _convert_metrics_types(self, raw_metrics: Dict[str, str]) -> Dict[str, Any]:
+        """
+        Convert string metric values to proper types using SONARQUBE_METRICS definitions.
+
+        SonarQube API returns all values as strings. This method converts them
+        to the expected data type (INTEGER -> int, FLOAT -> float, BOOLEAN -> bool,
+        JSON -> parsed dict/list).
+        """
+        import json
+
+        from app.integrations.base import MetricDataType
+
+        try:
+            from app.integrations.tools.sonarqube.metrics import SONARQUBE_METRICS
+
+            # Build lookup: metric_key -> MetricDefinition
+            metric_defs = {m.key: m for m in SONARQUBE_METRICS}
+        except ImportError:
+            logger.warning("Could not import SONARQUBE_METRICS, returning raw strings")
+            return raw_metrics
+
+        converted: Dict[str, Any] = {}
+        for key, value in raw_metrics.items():
+            if value is None:
+                converted[key] = None
+                continue
+
+            metric_def = metric_defs.get(key)
+            if not metric_def:
+                # Unknown metric, keep as string
+                converted[key] = value
+                continue
+
+            try:
+                if metric_def.data_type == MetricDataType.INTEGER:
+                    # Handle floats like "3.0" -> 3
+                    converted[key] = int(float(value))
+                elif metric_def.data_type == MetricDataType.FLOAT:
+                    converted[key] = float(value)
+                elif metric_def.data_type == MetricDataType.BOOLEAN:
+                    converted[key] = value.lower() in ("true", "1", "yes")
+                elif metric_def.data_type == MetricDataType.JSON:
+                    # Parse JSON string to Python object
+                    converted[key] = json.loads(value)
+                else:
+                    # STRING, DATETIME - keep as is
+                    converted[key] = value
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse JSON metric {key}={value}: {e}")
+                converted[key] = value
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Failed to convert metric {key}={value}: {e}")
+                converted[key] = value
+
+        return converted

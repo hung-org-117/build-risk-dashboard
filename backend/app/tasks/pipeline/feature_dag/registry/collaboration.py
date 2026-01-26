@@ -7,6 +7,8 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureDataType,
     FeatureDefinition,
     FeatureResource,
+    MissingValueStrategy,
+    PreprocessingType,
 )
 
 COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
@@ -20,6 +22,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="collaboration",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         nullable=True,
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     "history_fail_streak": FeatureDefinition(
         name="history_fail_streak",
@@ -29,6 +33,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="collaboration",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "history_fail_rate_10": FeatureDefinition(
         name="history_fail_rate_10",
@@ -39,6 +45,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="collaboration",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     "history_avg_churn_5": FeatureDefinition(
         name="history_avg_churn_5",
@@ -48,6 +56,9 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.FLOAT,
         extractor_node="collaboration",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
     # === Git Entropy/Ratio (from change_entropy_features) ===
     "git_change_entropy": FeatureDefinition(
@@ -59,6 +70,9 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="collaboration",
         required_resources=[FeatureResource.GIT_HISTORY],
         valid_range=(0.0, None),
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.ZERO,
+        normalize=True,
     ),
     "git_files_modified_ratio": FeatureDefinition(
         name="git_files_modified_ratio",
@@ -69,6 +83,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="collaboration",
         required_resources=[FeatureResource.GIT_HISTORY],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     # === Git Churn vs Avg (from git_churn_vs_avg) ===
     "git_churn_vs_avg": FeatureDefinition(
@@ -82,6 +98,9 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.GIT_HISTORY,
             FeatureResource.RAW_BUILD_RUNS,
         ],
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.ZERO,
+        normalize=True,
     ),
     # === Author Experience (from author_experience_features) ===
     "author_is_new": FeatureDefinition(
@@ -92,6 +111,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.BOOLEAN,
         extractor_node="collaboration",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     "author_ownership": FeatureDefinition(
         name="author_ownership",
@@ -102,6 +123,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="collaboration",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     "author_days_since_commit": FeatureDefinition(
         name="author_days_since_commit",
@@ -113,5 +136,8 @@ COLLABORATION_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         unit="days",
         nullable=True,
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
 }

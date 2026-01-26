@@ -7,7 +7,9 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureDataType,
     FeatureDefinition,
     FeatureResource,
+    MissingValueStrategy,
     OutputFormat,
+    PreprocessingType,
 )
 
 CODE_FEATURES: Dict[str, FeatureDefinition] = {
@@ -24,6 +26,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.RAW_BUILD_RUNS,
         ],
         output_format=OutputFormat.HASH_SEPARATED,
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "git_built_commits_count": FeatureDefinition(
         name="git_built_commits_count",
@@ -37,6 +41,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.RAW_BUILD_RUNS,
         ],
         valid_range=(0, None),
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_prev_commit_sha": FeatureDefinition(
         name="git_prev_commit_sha",
@@ -50,6 +56,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.RAW_BUILD_RUNS,
         ],
         nullable=True,
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "history_prev_build_id": FeatureDefinition(
         name="history_prev_build_id",
@@ -63,6 +71,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.RAW_BUILD_RUNS,
         ],
         nullable=True,
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "git_prev_commit_status": FeatureDefinition(
         name="git_prev_commit_status",
@@ -81,6 +91,9 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             "no_previous_build",
             "commit_not_found",
         ],
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     # === Git Diff Stats ===
     "git_diff_src_churn": FeatureDefinition(
@@ -92,6 +105,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
         valid_range=(0, None),
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_test_churn": FeatureDefinition(
         name="git_diff_test_churn",
@@ -102,6 +117,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
         valid_range=(0, None),
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_files_added": FeatureDefinition(
         name="git_diff_files_added",
@@ -111,6 +128,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_files_deleted": FeatureDefinition(
         name="git_diff_files_deleted",
@@ -120,6 +139,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_files_modified": FeatureDefinition(
         name="git_diff_files_modified",
@@ -129,6 +150,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_tests_added": FeatureDefinition(
         name="git_diff_tests_added",
@@ -138,6 +161,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_tests_deleted": FeatureDefinition(
         name="git_diff_tests_deleted",
@@ -147,6 +172,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_src_files": FeatureDefinition(
         name="git_diff_src_files",
@@ -156,6 +183,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_doc_files": FeatureDefinition(
         name="git_diff_doc_files",
@@ -165,6 +194,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_diff_other_files": FeatureDefinition(
         name="git_diff_other_files",
@@ -174,6 +205,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "git_file_commit_density": FeatureDefinition(
         name="git_file_commit_density",
@@ -183,6 +216,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     # === Team Metrics ===
     "team_size": FeatureDefinition(
@@ -197,6 +232,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.RAW_BUILD_RUNS,
         ],
         valid_range=(1, None),
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "team_is_core_member": FeatureDefinition(
         name="team_is_core_member",
@@ -209,6 +246,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
             FeatureResource.GIT_HISTORY,
             FeatureResource.RAW_BUILD_RUNS,
         ],
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     "team_distinct_authors": FeatureDefinition(
         name="team_distinct_authors",
@@ -218,6 +257,8 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "team_total_revisions": FeatureDefinition(
         name="team_total_revisions",
@@ -227,5 +268,7 @@ CODE_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="code",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
 }

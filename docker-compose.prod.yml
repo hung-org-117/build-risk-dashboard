@@ -137,8 +137,8 @@ services:
       - "4954:4954"  # Expose for local development
     environment:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      TRIVY_SKIP_DB_UPDATE: "true"
-      TRIVY_SKIP_JAVA_DB_UPDATE: "true"
+      TRIVY_SKIP_DB_UPDATE: "false"
+      TRIVY_SKIP_JAVA_DB_UPDATE: "false"
     volumes:
       - trivy_cache:/root/.cache/trivy
     healthcheck:
@@ -161,6 +161,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: prod-backend
+    user: "${APP_UID}:${APP_GID}"
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
     ports:
       - "8000:8000"
@@ -178,13 +179,13 @@ services:
       ENV: "prod"
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
       # SonarQube
-      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_HOST_URL: ${SONAR_HOST_URL:-http://sonarqube:9000}
       SONAR_TOKEN: ${SONAR_TOKEN:-}
       SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
       SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
       # Trivy
       TRIVY_ENABLED: "true"
-      TRIVY_SERVER_URL: http://trivy:4954
+      TRIVY_SERVER_URL: ${TRIVY_SERVER_URL:-http://trivy:4954}
       # GitHub
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
@@ -195,12 +196,6 @@ services:
       GITHUB_TOKENS: ${GITHUB_TOKENS:-}
       GITHUB_ORGANIZATION: ${GITHUB_ORGANIZATION}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/api/auth/github/callback}
-      # Email (Gmail API)
-      GMAIL_ENABLED: ${GMAIL_ENABLED:-false}
-      GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:-}
-      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
-      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
-      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
     volumes:
       - repo_data:/app/repo-data
       - shared_data:/app/data
@@ -224,6 +219,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: prod-celery-worker
+    user: "${APP_UID}:${APP_GID}"
     command: >
       uv run celery -A app.celery_app worker 
       --loglevel=info 
@@ -239,13 +235,13 @@ services:
       HOME: /tmp
       ENV: "prod"
       # SonarQube
-      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_HOST_URL: ${SONAR_HOST_URL:-http://sonarqube:9000}
       SONAR_TOKEN: ${SONAR_TOKEN:-}
       SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
       SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
       # Trivy
       TRIVY_ENABLED: "true"
-      TRIVY_SERVER_URL: http://trivy:4954
+      TRIVY_SERVER_URL: ${TRIVY_SERVER_URL:-http://trivy:4954}
       # GitHub
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
@@ -275,6 +271,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: prod-celery-beat
+    user: "${APP_UID}:${APP_GID}"
     command: uv run celery -A app.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
     environment:
       MONGODB_URI: mongodb://mongo:27017

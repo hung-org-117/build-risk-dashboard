@@ -7,7 +7,9 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureDataType,
     FeatureDefinition,
     FeatureResource,
+    MissingValueStrategy,
     OutputFormat,
+    PreprocessingType,
 )
 
 CI_FEATURES: Dict[str, FeatureDefinition] = {
@@ -20,6 +22,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "devops_lines_changed": FeatureDefinition(
         name="devops_lines_changed",
@@ -29,6 +33,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "devops_tools_detected": FeatureDefinition(
         name="devops_tools_detected",
@@ -39,6 +45,9 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.GIT_HISTORY],
         output_format=OutputFormat.COMMA_SEPARATED,
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     # === Build Logs ===
     "log_test_frameworks": FeatureDefinition(
@@ -50,6 +59,9 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
         output_format=OutputFormat.COMMA_SEPARATED,
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     "log_tests_run": FeatureDefinition(
         name="log_tests_run",
@@ -59,6 +71,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "log_tests_failed": FeatureDefinition(
         name="log_tests_failed",
@@ -68,6 +82,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "log_tests_skipped": FeatureDefinition(
         name="log_tests_skipped",
@@ -77,6 +93,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "log_tests_passed": FeatureDefinition(
         name="log_tests_passed",
@@ -86,6 +104,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "log_tests_fail_rate": FeatureDefinition(
         name="log_tests_fail_rate",
@@ -96,6 +116,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     "log_test_duration_sec": FeatureDefinition(
         name="log_test_duration_sec",
@@ -106,6 +128,9 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
         unit="seconds",
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
     "log_jobs_count": FeatureDefinition(
         name="log_jobs_count",
@@ -115,6 +140,8 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "log_job_ids": FeatureDefinition(
         name="log_job_ids",
@@ -124,5 +151,7 @@ CI_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="ci",
         required_resources=[FeatureResource.BUILD_LOGS],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
 }

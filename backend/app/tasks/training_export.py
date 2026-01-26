@@ -232,12 +232,16 @@ def generate_export_dataset(
                 split_repo.delete_by_export(export_id)
 
                 # Create base output directory
-                export_output_dir = paths.get_training_dataset_dir(scenario_id) / export_id
+                export_output_dir = (
+                    paths.get_training_dataset_dir(scenario_id) / export_id
+                )
                 export_output_dir.mkdir(parents=True, exist_ok=True)
 
                 # Determine export formats from output config
                 output_config = export.output_config
-                export_formats = [output_config.format] if output_config else ["parquet"]
+                export_formats = (
+                    [output_config.format] if output_config else ["parquet"]
+                )
 
                 start_time = datetime.utcnow()
                 total_train = 0
@@ -253,9 +257,13 @@ def generate_export_dataset(
 
                 if is_cv:
                     # ====== CV MODE: Generate multiple folds ======
-                    logger.info(f"{corr_prefix} Using CV strategy, generating multiple folds")
+                    logger.info(
+                        f"{corr_prefix} Using CV strategy, generating multiple folds"
+                    )
 
-                    for fold in splitting_service.apply_cv(df, splitting_config, label_column):
+                    for fold in splitting_service.apply_cv(
+                        df, splitting_config, label_column
+                    ):
                         fold_count += 1
                         fold_id = fold.fold_id
 
@@ -297,7 +305,9 @@ def generate_export_dataset(
                                     split_df.to_csv(file_path, index=False)
 
                                 file_size = file_path.stat().st_size
-                                class_dist = split_df[label_column].value_counts().to_dict()
+                                class_dist = (
+                                    split_df[label_column].value_counts().to_dict()
+                                )
 
                                 # Filter metadata for group_distribution
                                 group_dist = {
@@ -313,20 +323,28 @@ def generate_export_dataset(
                                     fold_id=fold_id,
                                     record_count=len(split_df),
                                     feature_count=len(split_df.columns),
-                                    class_distribution={str(k): v for k, v in class_dist.items()},
+                                    class_distribution={
+                                        str(k): v for k, v in class_dist.items()
+                                    },
                                     group_distribution=group_dist,
-                                    file_path=str(file_path.relative_to(paths.DATA_DIR)),
+                                    file_path=str(
+                                        file_path.relative_to(paths.DATA_DIR)
+                                    ),
                                     file_size_bytes=file_size,
                                     file_format=fmt,
                                     feature_names=list(split_df.columns),
                                     generation_duration_seconds=0,
                                 )
 
-                        logger.info(f"{corr_prefix} Generated fold {fold_count}: {fold_id}")
+                        logger.info(
+                            f"{corr_prefix} Generated fold {fold_count}: {fold_id}"
+                        )
 
                 else:
                     # ====== SINGLE-SPLIT MODE ======
-                    result = splitting_service.apply_split(df, splitting_config, label_column)
+                    result = splitting_service.apply_split(
+                        df, splitting_config, label_column
+                    )
 
                     for split_type, indices in [
                         ("train", result.train_indices),
@@ -368,7 +386,9 @@ def generate_export_dataset(
                                 fold_id=None,
                                 record_count=len(split_df),
                                 feature_count=len(split_df.columns),
-                                class_distribution={str(k): v for k, v in class_dist.items()},
+                                class_distribution={
+                                    str(k): v for k, v in class_dist.items()
+                                },
                                 group_distribution={},
                                 file_path=str(file_path.relative_to(paths.DATA_DIR)),
                                 file_size_bytes=file_size,
@@ -444,7 +464,9 @@ def generate_export_dataset(
 # ============================================================================
 
 
-def _ensure_dataset_materialized(scenario_id: str, db, correlation_id: str = "") -> pd.DataFrame:
+def _ensure_dataset_materialized(
+    scenario_id: str, db, correlation_id: str = ""
+) -> pd.DataFrame:
     """
     Ensure 'master_dataset.parquet' exists for the scenario.
     If not, materialize it by streaming data from MongoDB.
@@ -558,7 +580,11 @@ def _process_and_write_batch(
         return
 
     # Bulk fetch FeatureVectors
-    fv_ids = [doc.get("feature_vector_id") for doc in batch_docs if doc.get("feature_vector_id")]
+    fv_ids = [
+        doc.get("feature_vector_id")
+        for doc in batch_docs
+        if doc.get("feature_vector_id")
+    ]
     fvs = fv_repo.find_by_ids(list(map(str, fv_ids)))
     fv_map = {str(fv.id): fv for fv in fvs}
 
@@ -591,6 +617,7 @@ def _process_and_write_batch(
         return
 
     df = pd.DataFrame(data)
+
     table = pa.Table.from_pandas(df)
 
     # Initialize writer if first batch

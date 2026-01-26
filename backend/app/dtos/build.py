@@ -264,6 +264,7 @@ class UnifiedBuildSummary(BaseModel):
 
     class Config:
         populate_by_name = True
+        protected_namespaces = ()
 
 
 class UnifiedBuildListResponse(BaseModel):

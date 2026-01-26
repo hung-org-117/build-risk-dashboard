@@ -7,6 +7,8 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureDataType,
     FeatureDefinition,
     FeatureResource,
+    MissingValueStrategy,
+    PreprocessingType,
 )
 
 TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
@@ -20,6 +22,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 100.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Bounded 0-100, can be used as-is or /100
     ),
     "number_of_builds_before": FeatureDefinition(
         name="number_of_builds_before",
@@ -29,6 +33,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     # === Build History (from build_history_features) ===
     "history_prev_result": FeatureDefinition(
@@ -41,6 +47,9 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         nullable=True,
         valid_values=["passed", "failed", "cancelled", "errored", "unknown"],
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     "history_same_committer": FeatureDefinition(
         name="history_same_committer",
@@ -50,6 +59,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.BOOLEAN,
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     "history_days_since_prev": FeatureDefinition(
         name="history_days_since_prev",
@@ -61,6 +72,9 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         unit="days",
         nullable=True,
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
     # === Project Fail History (from project_fail_history_features) ===
     "history_project_fail_rate": FeatureDefinition(
@@ -72,6 +86,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     "history_project_fail_recent": FeatureDefinition(
         name="history_project_fail_recent",
@@ -82,6 +98,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     # === Author Fail History (from author_fail_history_features) ===
     "author_fail_rate": FeatureDefinition(
@@ -93,6 +111,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     "author_fail_rate_recent": FeatureDefinition(
         name="author_fail_rate_recent",
@@ -103,6 +123,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     # === Author Experience (from author_experience) ===
     "author_experience": FeatureDefinition(
@@ -113,5 +135,8 @@ TEMPORAL_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.FLOAT,
         extractor_node="temporal",
         required_resources=[FeatureResource.RAW_BUILD_RUNS, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
 }

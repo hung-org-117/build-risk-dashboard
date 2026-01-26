@@ -68,6 +68,9 @@ class AdminDashboardExtras(BaseModel):
     monitoring: MonitoringSummary
     total_users: int = 0
 
+    class Config:
+        protected_namespaces = ()
+
 
 class DashboardSummaryResponse(BaseModel):
     metrics: DashboardMetrics

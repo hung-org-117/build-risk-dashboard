@@ -102,8 +102,13 @@ export default function ScenarioAnalysisPage() {
     // 2. Fetch Initial Quality Report (Once or on Refresh)
     const fetchQualityReport = useCallback(async () => {
         if (!scenarioId) return;
-        // Only set global loading if we don't have report yet (initial load)
-        if (!qualityReport) setLoading(true);
+        // Set loading only on initial load (use functional update to avoid stale closure)
+        setLoading((prev) => prev);
+        setQualityReport((current) => {
+            // If we already have data, don't show loading spinner
+            if (!current) setLoading(true);
+            return current;
+        });
         try {
             const qualityData = await trainingScenariosApi.getAnalysis(scenarioId);
             setQualityReport(qualityData);
@@ -113,7 +118,7 @@ export default function ScenarioAnalysisPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [scenarioId, qualityReport]);
+    }, [scenarioId]); // Removed qualityReport to prevent callback reference change loop
 
     useEffect(() => {
         if (scenarioId && activeTab === "features") {
@@ -171,7 +176,6 @@ export default function ScenarioAnalysisPage() {
     }, [fetchDistributions, scenarioId, activeTab]);
 
     // 3. Fetch Integration Tab Data (Scan Stats)
-    // Note: Depends on qualityReport existence but NOT its value to avoid loops set by setQualityReport
     const fetchIntegrationData = useCallback(async () => {
         if (!scenarioId) return;
         setLoading(true);
@@ -184,11 +188,14 @@ export default function ScenarioAnalysisPage() {
             setTrivyStats(trivyData);
             setSonarStats(sonarData);
 
-            // Fetch quality report if missing (needed for distributions), independent of main flow
-            if (!qualityReport) {
-                const qualityData = await trainingScenariosApi.getAnalysis(scenarioId);
-                setQualityReport(qualityData);
-            }
+            // Fetch quality report if missing - use functional update to check without dependency
+            setQualityReport((current) => {
+                if (!current) {
+                    // Fetch in background without blocking
+                    trainingScenariosApi.getAnalysis(scenarioId).then(setQualityReport).catch(console.error);
+                }
+                return current;
+            });
 
         } catch (err) {
             console.error("Failed to fetch integration tab data:", err);
@@ -196,8 +203,7 @@ export default function ScenarioAnalysisPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [scenarioId, qualityReport]); // Depends on qualityReport to know if it's missing, but logic prevents loop? 
-    // Wait, if qualityReport is null -> fetch -> setQualityReport -> fetchIntegrationData changes -> Effect runs -> qualityReport is NOT null -> no fetch -> no set. Loop broken. Correct.
+    }, [scenarioId]); // Removed qualityReport to prevent callback reference change loop
 
     // Integration Effect
     useEffect(() => {

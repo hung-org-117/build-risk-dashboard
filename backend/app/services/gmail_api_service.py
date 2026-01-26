@@ -56,10 +56,23 @@ def _get_gmail_service():
     creds = _CACHED_CREDS
 
     # If no cached creds, try loading from Environment Variables
-    if not creds and settings.GMAIL_TOKEN_JSON:
+    if not creds:
+        if not settings.GMAIL_ENABLED:
+            return None
+
         try:
-            token_info = json.loads(settings.GMAIL_TOKEN_JSON)
-            creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+            if (
+                settings.GMAIL_CLIENT_ID
+                and settings.GMAIL_CLIENT_SECRET
+                and settings.GMAIL_REFRESH_TOKEN
+            ):
+                token_info = {
+                    "client_id": settings.GMAIL_CLIENT_ID,
+                    "client_secret": settings.GMAIL_CLIENT_SECRET,
+                    "refresh_token": settings.GMAIL_REFRESH_TOKEN,
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+                creds = Credentials.from_authorized_user_info(token_info, SCOPES)
         except Exception as e:
             logger.warning(f"Failed to load Gmail token from environment: {e}")
 
@@ -77,7 +90,7 @@ def _get_gmail_service():
         _CACHED_CREDS = creds
     else:
         # If we failed to get/refresh valid creds, check config status for warning
-        has_token_config = settings.GMAIL_TOKEN_JSON is not None
+        has_token_config = settings.GMAIL_REFRESH_TOKEN
         if has_token_config:
             logger.warning(
                 "Gmail API token is present but invalid/expired and could not be refreshed."
@@ -157,11 +170,11 @@ def setup_gmail_api():
         print("Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
         return False
 
-    client_id = settings.GOOGLE_CLIENT_ID
-    client_secret = settings.GOOGLE_CLIENT_SECRET
+    client_id = settings.GMAIL_CLIENT_ID
+    client_secret = settings.GMAIL_CLIENT_SECRET
 
     if not client_id or not client_secret:
-        print("Error: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
+        print("Error: GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must be set")
         print("in your environment variables to run this setup.")
         return False
 
@@ -188,8 +201,8 @@ def setup_gmail_api():
         print()
         print("✓ Gmail API authorized successfully!")
         print("-" * 50)
-        print("IMPORTANT: Copy the JSON content below")
-        print("and set it as GMAIL_TOKEN_JSON environment variable:")
+        print("IMPORTANT: Copy the 'refresh_token' from the JSON below")
+        print("and set it as GMAIL_REFRESH_TOKEN environment variable:")
         print("-" * 50)
         print(creds.to_json())
         print("-" * 50)

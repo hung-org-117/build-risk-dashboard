@@ -133,11 +133,11 @@ docker compose -f docker-compose.prod.yml logs -f
     ```bash
     # Create Webhook (để báo kết quả về backend)
     # Sử dụng 'backend' làm hostname vì SonarQube và Backend cùng Docker network
-    curl -u "admin:YOUR_NEW_PASSWORD" -X POST \
+    curl -u "admin:admin" -X POST \
       "http://localhost:9000/api/webhooks/create" \
       -d "name=Build Risk Webhook" \
-      -d "url=http://backend:8000/api/integrations/webhooks/sonarqube/pipeline" \
-      -d "secret=YOUR_SONAR_WEBHOOK_SECRET"
+      -d "url=http://10.128.0.3:8000/api/integrations/webhooks/sonarqube/pipeline" \
+      -d "secret=change-me-to-secure-secret"
     ```
 
 4.  **Restart Backend**:

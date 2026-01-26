@@ -488,6 +488,7 @@ def validate_source_builds_chunk(
         source_build_repo = SourceBuildRepository(db)
         raw_build_run_repo = RawBuildRunRepository(db)
         raw_repo_repo = RawRepositoryRepository(db)
+        source_repo_stats_repo = SourceRepoStatsRepository(db)
 
         # Lookup effective_repo_id
         effective_repo_id = raw_repo_id
@@ -675,6 +676,7 @@ def validate_source_builds_chunk(
                         commit_message=build_data.commit_message,
                         commit_author=build_data.commit_author,
                         branch=build_data.branch,
+                        run_created_at=build_data.created_at,
                         run_started_at=build_data.started_at,
                         run_completed_at=build_data.completed_at,
                         duration_seconds=build_data.duration_seconds,
@@ -767,6 +769,31 @@ def validate_source_builds_chunk(
         increment_validation_stat(
             self.redis, source_id, "builds_filtered", builds_filtered
         )
+
+        # Update per-repo stats in MongoDB (atomic increment for chunked processing)
+        try:
+            source_repo_stats_repo.collection.update_one(
+                {
+                    "source_id": ObjectId(source_id),
+                    "raw_repo_id": (
+                        ObjectId(effective_repo_id) if effective_repo_id else None
+                    ),
+                    "full_name": repo_name,
+                },
+                {
+                    "$inc": {
+                        "builds_found": builds_found,
+                        "builds_not_found": builds_not_found,
+                        "builds_filtered": builds_filtered,
+                        "builds_total": builds_found
+                        + builds_not_found
+                        + builds_filtered,
+                    }
+                },
+                upsert=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to update repo stats for {repo_name}: {e}")
 
         return {
             "repo_name": repo_name,

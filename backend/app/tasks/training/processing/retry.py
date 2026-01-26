@@ -204,7 +204,8 @@ def retry_failed_scenario_scans(
     # Split into batches
     batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
     batches = [
-        scans_to_retry[i : i + batch_size] for i in range(0, len(scans_to_retry), batch_size)
+        scans_to_retry[i : i + batch_size]
+        for i in range(0, len(scans_to_retry), batch_size)
     ]
 
     logger.info(
@@ -214,7 +215,7 @@ def retry_failed_scenario_scans(
 
     # Chain batches
     batch_tasks = [
-        process_retry_scan_batch.s(
+        process_retry_scan_batch.si(
             scenario_id=scenario_id,
             tool_type=tool_type,
             scans_batch=batch,
@@ -354,7 +355,9 @@ def process_retry_scan_batch(
             # Check current status - skip if already COMPLETED in DB
             current_scan = sonar_repo.find_by_id(str(scan_id))
             if current_scan and current_scan.status == SonarScanStatus.COMPLETED.value:
-                logger.debug(f"{corr_prefix} Skip {scan_info['commit_sha'][:8]} - completed in DB")
+                logger.debug(
+                    f"{corr_prefix} Skip {scan_info['commit_sha'][:8]} - completed in DB"
+                )
                 skipped_completed += 1
                 continue
 
@@ -372,7 +375,9 @@ def process_retry_scan_batch(
 
             # Generate component key
             repo_name_safe = scan_info["repo_full_name"].replace("/", "_")
-            component_key = f"{repo_name_safe}_{scenario_id[:8]}_{scan_info['commit_sha'][:12]}"
+            component_key = (
+                f"{repo_name_safe}_{scenario_id[:8]}_{scan_info['commit_sha'][:12]}"
+            )
 
             # Check if project already exists on SonarQube server
             if sonar_tool._project_exists(component_key):

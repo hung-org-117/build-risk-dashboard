@@ -12,7 +12,7 @@ Key design principles:
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,8 +36,8 @@ class PreprocessingConfig(BaseModel):
         extra = "allow"
 
     missing_values_strategy: str = Field(
-        default="drop_row",
-        description="Strategy: drop_row | fill_mean | fill_median | fill_zero",
+        default="fill_zero",
+        description="Strategy: fill_zero | fill_mean | fill_median",
     )
     normalization: str = Field(
         default="z_score",

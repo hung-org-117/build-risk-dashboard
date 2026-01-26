@@ -7,7 +7,9 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureDataType,
     FeatureDefinition,
     FeatureResource,
+    MissingValueStrategy,
     OutputFormat,
+    PreprocessingType,
 )
 
 BUILD_FEATURES: Dict[str, FeatureDefinition] = {
@@ -20,6 +22,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "build_number": FeatureDefinition(
         name="build_number",
@@ -29,6 +33,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "build_trigger_sha": FeatureDefinition(
         name="build_trigger_sha",
@@ -38,6 +44,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "build_status": FeatureDefinition(
         name="build_status",
@@ -48,6 +56,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_values=["passed", "failed", "cancelled", "errored", "unknown"],
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     "build_status_num": FeatureDefinition(
         name="build_status_num",
@@ -58,6 +69,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_values=[-1, 0, 1],
+        preprocessing_type=PreprocessingType.IDENTIFIER,  # Label column, skip preprocessing
+        normalize=False,
     ),
     "build_duration_sec": FeatureDefinition(
         name="build_duration_sec",
@@ -68,6 +81,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         unit="seconds",
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
     "build_started_at": FeatureDefinition(
         name="build_started_at",
@@ -77,6 +93,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.DATETIME,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "build_ci_provider": FeatureDefinition(
         name="build_ci_provider",
@@ -87,6 +105,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_values=["github_actions", "travis_ci", "circleci"],
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     "build_day_of_week": FeatureDefinition(
         name="build_day_of_week",
@@ -105,6 +126,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
             "Saturday",
             "Sunday",
         ],
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     "build_hour": FeatureDefinition(
         name="build_hour",
@@ -115,6 +139,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(0, 23),
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=False,  # Bounded, used for grouping
     ),
     "build_hour_sin": FeatureDefinition(
         name="build_hour_sin",
@@ -125,6 +151,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(-1.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [-1, 1]
     ),
     "build_hour_cos": FeatureDefinition(
         name="build_hour_cos",
@@ -135,6 +163,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(-1.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [-1, 1]
     ),
     "build_hour_risk": FeatureDefinition(
         name="build_hour_risk",
@@ -145,6 +175,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         valid_range=(0.0, 1.0),
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded [0, 1]
     ),
     # === Repository Metadata ===
     "repo_full_name": FeatureDefinition(
@@ -155,6 +187,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.REPO],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "repo_language": FeatureDefinition(
         name="repo_language",
@@ -164,6 +198,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.REPO],
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     "repo_languages_all": FeatureDefinition(
         name="repo_languages_all",
@@ -174,6 +211,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.REPO],
         output_format=OutputFormat.COMMA_SEPARATED,
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     # === PR Info ===
     "pr_is_triggered": FeatureDefinition(
@@ -184,6 +224,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.BOOLEAN,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     "pr_number": FeatureDefinition(
         name="pr_number",
@@ -194,6 +236,9 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
         nullable=True,
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        missing_fill=MissingValueStrategy.NULL,
+        normalize=False,
     ),
     "pr_created_at": FeatureDefinition(
         name="pr_created_at",
@@ -204,6 +249,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="build",
         required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
         nullable=True,
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "pr_has_bug_label": FeatureDefinition(
         name="pr_has_bug_label",
@@ -213,6 +260,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.BOOLEAN,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     # === Git Info (from build.py extractor) ===
     "git_trigger_sha": FeatureDefinition(
@@ -223,6 +272,8 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
     "git_branch": FeatureDefinition(
         name="git_branch",
@@ -232,5 +283,7 @@ BUILD_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.STRING,
         extractor_node="build",
         required_resources=[FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,
     ),
 }

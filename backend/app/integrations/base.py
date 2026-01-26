@@ -3,9 +3,11 @@ Base classes for integration tools.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+from app.shared.preprocessing_types import MissingValueStrategy, PreprocessingType
 
 
 class ToolType(str, Enum):
@@ -52,6 +54,11 @@ class MetricDefinition:
     nullable: bool = False
     example_value: Optional[str] = None
     unit: Optional[str] = None
+
+    # Preprocessing metadata (defaults based on common patterns)
+    preprocessing_type: PreprocessingType = PreprocessingType.COUNT
+    missing_fill: MissingValueStrategy = MissingValueStrategy.ZERO
+    normalize: bool = True
 
 
 class IntegrationTool(ABC):

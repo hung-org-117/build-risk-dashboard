@@ -273,7 +273,10 @@ class SonarQubeTool(IntegrationTool):
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Scan failed: {e.stderr}")
-            raise
+            # Wrap in PermanentError so SafeTask marks as FAILED (not retry)
+            from app.tasks.base import PermanentError
+
+            raise PermanentError(f"SonarQube scan failed: {e.stderr}") from e
         finally:
             # Cleanup temp config file
             if temp_config_file and temp_config_file.exists():

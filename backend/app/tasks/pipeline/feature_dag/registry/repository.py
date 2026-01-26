@@ -7,6 +7,8 @@ from app.tasks.pipeline.feature_dag._types import (
     FeatureDataType,
     FeatureDefinition,
     FeatureResource,
+    MissingValueStrategy,
+    PreprocessingType,
 )
 
 REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
@@ -19,6 +21,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "pr_commit_comments": FeatureDefinition(
         name="pr_commit_comments",
@@ -28,6 +32,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "pr_review_comments": FeatureDefinition(
         name="pr_review_comments",
@@ -37,6 +43,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API, FeatureResource.BUILD_RUN],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "pr_description_words": FeatureDefinition(
         name="pr_description_words",
@@ -47,6 +55,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GITHUB_API],
         nullable=True,
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     # === Repository Stats ===
     "repo_age_days": FeatureDefinition(
@@ -58,6 +68,9 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_HISTORY],
         unit="days",
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.MEDIAN,
+        normalize=True,
     ),
     "repo_total_commits": FeatureDefinition(
         name="repo_total_commits",
@@ -67,6 +80,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         data_type=FeatureDataType.INTEGER,
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_HISTORY],
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "repo_sloc": FeatureDefinition(
         name="repo_sloc",
@@ -77,6 +92,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
+        preprocessing_type=PreprocessingType.COUNT,
+        normalize=True,
     ),
     "repo_test_lines_per_kloc": FeatureDefinition(
         name="repo_test_lines_per_kloc",
@@ -87,6 +104,9 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.ZERO,
+        normalize=True,
     ),
     "repo_test_cases_per_kloc": FeatureDefinition(
         name="repo_test_cases_per_kloc",
@@ -97,6 +117,9 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.ZERO,
+        normalize=True,
     ),
     "repo_asserts_per_kloc": FeatureDefinition(
         name="repo_asserts_per_kloc",
@@ -107,5 +130,8 @@ REPOSITORY_FEATURES: Dict[str, FeatureDefinition] = {
         extractor_node="repository",
         required_resources=[FeatureResource.GIT_WORKTREE],
         nullable=True,
+        preprocessing_type=PreprocessingType.CONTINUOUS,
+        missing_fill=MissingValueStrategy.ZERO,
+        normalize=True,
     ),
 }

@@ -37,9 +37,11 @@ class Settings(BaseSettings):
     # RBAC / Organization Access
     GITHUB_ORGANIZATION: str
 
-    # Google API credentials (Gmail notifications)
-    GOOGLE_CLIENT_ID: Optional[str] = None
-    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    # Gmail API credentials (Gmail notifications)
+    GMAIL_ENABLED: bool = False
+    GMAIL_CLIENT_ID: Optional[str] = None
+    GMAIL_CLIENT_SECRET: Optional[str] = None
+    GMAIL_REFRESH_TOKEN: Optional[str] = None
 
     # CircleCI
     CIRCLECI_TOKEN: Optional[str] = None
@@ -131,16 +133,25 @@ class Settings(BaseSettings):
     TRIVY_SERVER_URL: Optional[str] = None  # For client/server mode
 
     # Gmail API (OAuth2) Notifications
-    GMAIL_TOKEN_JSON: Optional[str] = None  # Paste gmail token JSON content
+
 
     def model_post_init(self, __context):
         """Post-initialization to check for Gmail API capability."""
         super().model_post_init(__context)
 
-        if self.GMAIL_TOKEN_JSON:
-            print("✓ Gmail API configured (GMAIL_TOKEN_JSON found).")
+        if self.GMAIL_ENABLED:
+            if (
+                self.GMAIL_CLIENT_ID
+                and self.GMAIL_CLIENT_SECRET
+                and self.GMAIL_REFRESH_TOKEN
+            ):
+                print("✓ Gmail API configured and enabled.")
+            else:
+                print(
+                    "! Gmail API enabled but missing credentials (CLIENT_ID/SECRET/REFRESH_TOKEN)."
+                )
         else:
-            print("! Gmail API not configured (GMAIL_TOKEN_JSON missing).")
+            print("- Gmail API disabled (GMAIL_ENABLED=False).")
 
     model_config = SettingsConfigDict(
         env_file=".env",

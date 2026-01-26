@@ -213,6 +213,100 @@ class RedisTokenPool:
         token_hash, raw_token = result[0], result[1]
         return token_hash, raw_token
 
+    def get_best_available_token(
+        self, current_token_hash: str, current_remaining: int
+    ) -> tuple[str, str] | None:
+        """
+        Get the best available token if it has more remaining quota than current.
+
+        This enables greedy token selection - always use the token with most quota.
+
+        Args:
+            current_token_hash: Hash of the current token
+            current_remaining: Remaining quota of current token
+
+        Returns:
+            Tuple of (token_hash, raw_token) if a better token exists, None otherwise
+        """
+        from app.services.github.exceptions import GithubAllRateLimitError
+
+        # Lua script to find best token with more remaining than current
+        best_token_lua = """
+        local pool_key = KEYS[1]
+        local cooldown_prefix = KEYS[2]
+        local raw_key = KEYS[3]
+        local current_hash = ARGV[1]
+        local current_remaining = tonumber(ARGV[2])
+        local now_ts = tonumber(ARGV[3])
+
+        -- Get all tokens sorted by priority (highest first)
+        local tokens = redis.call('ZREVRANGE', pool_key, 0, -1, 'WITHSCORES')
+
+        for i = 1, #tokens, 2 do
+            local token_hash = tokens[i]
+            local score = tonumber(tokens[i + 1])
+
+            -- Skip if this is the current token
+            if token_hash == current_hash then
+                -- Continue to next
+            elseif score > current_remaining then
+                -- Check if token is on cooldown
+                local cooldown_key = cooldown_prefix .. ':' .. token_hash
+                local cooldown = redis.call('GET', cooldown_key)
+
+                if cooldown then
+                    local cooldown_ts = tonumber(cooldown)
+                    if cooldown_ts > now_ts then
+                        -- Token is on cooldown, skip
+                    else
+                        -- Cooldown expired, clear it
+                        redis.call('DEL', cooldown_key)
+                        cooldown = nil
+                    end
+                end
+
+                if not cooldown then
+                    -- Found a better token
+                    local raw_token = redis.call('HGET', raw_key, token_hash)
+                    if raw_token then
+                        return {token_hash, raw_token, tostring(score)}
+                    end
+                end
+            end
+        end
+
+        return nil
+        """
+
+        now_ts = _now_ts()
+
+        result = self._redis.eval(
+            best_token_lua,
+            3,  # Number of KEYS
+            KEY_POOL,
+            KEY_COOLDOWN,
+            KEY_RAW,
+            current_token_hash,
+            str(current_remaining),
+            str(now_ts),
+        )
+
+        if result is None:
+            return None
+
+        # Handle bytes from Redis
+        if isinstance(result[0], bytes):
+            result = [r.decode() if isinstance(r, bytes) else r for r in result]
+
+        token_hash, raw_token = result[0], result[1]
+        better_remaining = int(result[2]) if len(result) > 2 else 0
+
+        logger.debug(
+            f"Found better token: {token_hash[:8]}... with {better_remaining} "
+            f"remaining (current has {current_remaining})"
+        )
+        return token_hash, raw_token
+
     def update_rate_limit(
         self,
         token_hash: str,

@@ -10,6 +10,8 @@ from app.integrations.base import (
     MetricCategory,
     MetricDataType,
     MetricDefinition,
+    MissingValueStrategy,
+    PreprocessingType,
 )
 
 SONARQUBE_METRICS: List[MetricDefinition] = [
@@ -23,14 +25,17 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.RELIABILITY,
         data_type=MetricDataType.INTEGER,
         example_value="5",
+        # Default: COUNT, ZERO, normalize=True
     ),
     MetricDefinition(
         key="reliability_issues",
         display_name="Reliability Issues",
-        description="Total number of reliability issues",
+        description="Reliability issues breakdown by severity (JSON with INFO, LOW, MEDIUM, HIGH, BLOCKER, total)",
         category=MetricCategory.RELIABILITY,
-        data_type=MetricDataType.INTEGER,
-        example_value="8",
+        data_type=MetricDataType.JSON,
+        example_value='{"INFO":0,"LOW":36,"MEDIUM":14,"HIGH":0,"BLOCKER":0,"total":50}',
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # JSON blob, not for ML
     ),
     MetricDefinition(
         key="reliability_rating",
@@ -39,6 +44,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.RELIABILITY,
         data_type=MetricDataType.STRING,
         example_value="A",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="reliability_remediation_effort",
@@ -56,6 +64,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.RELIABILITY,
         data_type=MetricDataType.STRING,
         example_value="B",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="software_quality_reliability_issues",
@@ -88,10 +99,12 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
     MetricDefinition(
         key="security_issues",
         display_name="Security Issues",
-        description="Total number of security issues",
+        description="Security issues breakdown by severity (JSON with INFO, LOW, MEDIUM, HIGH, BLOCKER, total)",
         category=MetricCategory.SECURITY,
-        data_type=MetricDataType.INTEGER,
-        example_value="4",
+        data_type=MetricDataType.JSON,
+        example_value='{"INFO":0,"LOW":0,"MEDIUM":0,"HIGH":0,"BLOCKER":0,"total":0}',
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # JSON blob, not for ML
     ),
     MetricDefinition(
         key="security_rating",
@@ -100,6 +113,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SECURITY,
         data_type=MetricDataType.STRING,
         example_value="A",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="security_hotspots",
@@ -125,6 +141,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SECURITY,
         data_type=MetricDataType.STRING,
         example_value="B",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="security_hotspots_to_review_status",
@@ -134,6 +153,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.FLOAT,
         example_value="75.0",
         unit="percent",
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Already bounded 0-100
     ),
     MetricDefinition(
         key="software_quality_security_rating",
@@ -142,6 +163,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SECURITY,
         data_type=MetricDataType.STRING,
         example_value="A",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="software_quality_security_issues",
@@ -188,6 +212,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.FLOAT,
         example_value="2.5",
         unit="percent",
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Bounded ratio
     ),
     MetricDefinition(
         key="sqale_rating",
@@ -196,14 +222,19 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.MAINTAINABILITY,
         data_type=MetricDataType.STRING,
         example_value="A",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="maintainability_issues",
         display_name="Maintainability Issues",
-        description="Total number of maintainability issues",
+        description="Maintainability issues breakdown by severity (JSON with INFO, LOW, MEDIUM, HIGH, BLOCKER, total)",
         category=MetricCategory.MAINTAINABILITY,
-        data_type=MetricDataType.INTEGER,
-        example_value="25",
+        data_type=MetricDataType.JSON,
+        example_value='{"INFO":0,"LOW":169,"MEDIUM":51,"HIGH":44,"BLOCKER":0,"total":264}',
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # JSON blob, not for ML
     ),
     MetricDefinition(
         key="development_cost",
@@ -212,6 +243,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.MAINTAINABILITY,
         data_type=MetricDataType.STRING,
         example_value="50000",
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # Not a feature for ML
     ),
     MetricDefinition(
         key="effort_to_reach_maintainability_rating_a",
@@ -230,6 +263,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.FLOAT,
         example_value="1.8",
         unit="percent",
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,
     ),
     MetricDefinition(
         key="software_quality_maintainability_remediation_effort",
@@ -247,6 +282,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.MAINTAINABILITY,
         data_type=MetricDataType.STRING,
         example_value="B",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="effort_to_reach_software_quality_maintainability_rating_a",
@@ -276,6 +314,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.FLOAT,
         example_value="3.2",
         unit="percent",
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,  # Bounded ratio
     ),
     MetricDefinition(
         key="duplicated_lines",
@@ -378,6 +418,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SIZE,
         data_type=MetricDataType.STRING,
         example_value="py=15000;js=10000",
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # Not a feature for ML
     ),
     MetricDefinition(
         key="comment_lines_density",
@@ -387,6 +429,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.FLOAT,
         example_value="18.5",
         unit="percent",
+        preprocessing_type=PreprocessingType.RATIO,
+        normalize=False,
     ),
     MetricDefinition(
         key="comment_lines",
@@ -406,6 +450,9 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.CODE_QUALITY,
         data_type=MetricDataType.STRING,
         example_value="OK",
+        preprocessing_type=PreprocessingType.CATEGORICAL,
+        missing_fill=MissingValueStrategy.UNKNOWN,
+        normalize=False,
     ),
     MetricDefinition(
         key="quality_gate_details",
@@ -414,6 +461,8 @@ SONARQUBE_METRICS: List[MetricDefinition] = [
         category=MetricCategory.CODE_QUALITY,
         data_type=MetricDataType.STRING,
         example_value='{"level":"OK","conditions":[...]}',
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # JSON blob, not for ML
     ),
     # -------------------------------------------------------------------------
     # Issue Severity Metrics

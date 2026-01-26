@@ -30,6 +30,9 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
         <Card>
             <CardHeader>
                 <CardTitle className="text-lg">1. Preprocessing</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                    Applied globally to all numeric features only. String/Identifier columns are skipped.
+                </p>
             </CardHeader>
             <CardContent>
                 <div className="space-y-4">
@@ -47,11 +50,17 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
                             <SelectContent>
                                 {MISSING_VALUES_OPTIONS.map(opt => (
                                     <SelectItem key={opt.value} value={opt.value}>
-                                        {opt.label}
+                                        <div className="flex flex-col">
+                                            <span>{opt.label}</span>
+                                            <span className="text-xs text-muted-foreground">{opt.description}</span>
+                                        </div>
                                     </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
+                        <p className="text-xs text-muted-foreground">
+                            {MISSING_VALUES_OPTIONS.find(o => o.value === config.missing_values_strategy)?.description}
+                        </p>
                     </div>
                     <div className="space-y-2">
                         <Label>Normalization</Label>
@@ -67,11 +76,17 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
                             <SelectContent>
                                 {NORMALIZATION_OPTIONS.map(opt => (
                                     <SelectItem key={opt.value} value={opt.value}>
-                                        {opt.label}
+                                        <div className="flex flex-col">
+                                            <span>{opt.label}</span>
+                                            <span className="text-xs text-muted-foreground">{opt.description}</span>
+                                        </div>
                                     </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
+                        <p className="text-xs text-muted-foreground">
+                            {NORMALIZATION_OPTIONS.find(o => o.value === config.normalization)?.description}
+                        </p>
                     </div>
                 </div>
             </CardContent>

@@ -203,6 +203,63 @@ class GitHubClient:
             # No tokens available
             return False
 
+    def _maybe_rotate_to_better_token(self) -> bool:
+        """
+        Greedy token selection: rotate to a better token if one exists.
+
+        Called before each request to ensure we always use the token
+        with the highest remaining quota. This distributes load evenly
+        across all available tokens.
+
+        Returns:
+            True if rotated to a better token, False if current is best
+        """
+        if not self._redis_pool or not self._current_token_key:
+            return False
+
+        # Get current token's remaining quota from Redis
+        try:
+            stats = self._redis_pool._redis.hgetall(
+                f"github_tokens:stats:{self._current_token_key}"
+            )
+            if stats:
+                remaining_bytes = stats.get(b"rate_limit_remaining") or stats.get(
+                    "rate_limit_remaining"
+                )
+                if remaining_bytes:
+                    current_remaining = int(
+                        remaining_bytes.decode()
+                        if isinstance(remaining_bytes, bytes)
+                        else remaining_bytes
+                    )
+                else:
+                    # No rate limit info yet, assume full quota
+                    current_remaining = 5000
+            else:
+                current_remaining = 5000
+        except Exception as e:
+            logger.debug(f"Could not get current token remaining: {e}")
+            return False
+
+        # Check if there's a better token
+        try:
+            result = self._redis_pool.get_best_available_token(
+                self._current_token_key, current_remaining
+            )
+            if result:
+                token_hash, raw_token = result
+                self._current_token_key = token_hash
+                self._token = raw_token
+                logger.debug(
+                    f"Greedy rotation: switched to token {token_hash[:8]}... "
+                    f"(current had {current_remaining} remaining)"
+                )
+                return True
+        except Exception as e:
+            logger.debug(f"Greedy rotation check failed: {e}")
+
+        return False
+
     def _retry_on_rate_limit(
         self, request_func: Callable[[], httpx.Response], max_retries: int = MAX_RETRIES
     ) -> httpx.Response:
@@ -321,6 +378,9 @@ class GitHubClient:
 
         get_rate_limiter().wait()
 
+        # Greedy token selection: always use the token with highest remaining quota
+        self._maybe_rotate_to_better_token()
+
         def _do_request():
             return self._rest.request(method, path, headers=self._headers(), **kwargs)
 
@@ -364,6 +424,9 @@ class GitHubClient:
 
         # Rate limit before making request
         get_rate_limiter().wait()
+
+        # Greedy token selection: always use the token with highest remaining quota
+        self._maybe_rotate_to_better_token()
 
         # Build headers with conditional request
         headers = self._headers()

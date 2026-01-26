@@ -10,6 +10,7 @@ from app.integrations.base import (
     MetricCategory,
     MetricDataType,
     MetricDefinition,
+    PreprocessingType,
 )
 
 TRIVY_METRICS: List[MetricDefinition] = [
@@ -20,6 +21,7 @@ TRIVY_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SECURITY,
         data_type=MetricDataType.INTEGER,
         example_value="2",
+        # Default: COUNT, ZERO, normalize=True
     ),
     MetricDefinition(
         key="vuln_high",
@@ -96,16 +98,7 @@ TRIVY_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.INTEGER,
         example_value="15",
     ),
-    # Secrets Metrics (disabled - secret scanner is slow)
-    # MetricDefinition(
-    #     key="secrets_count",
-    #     display_name="Secrets Found",
-    #     description="Number of exposed secrets detected (API keys, passwords, tokens)",
-    #     category=MetricCategory.SECURITY,
-    #     data_type=MetricDataType.INTEGER,
-    #     example_value="0",
-    # ),
-    # Scan Metadata
+    # Scan Metadata - Not useful for ML prediction, just scan info
     MetricDefinition(
         key="scan_duration_ms",
         display_name="Scan Duration",
@@ -114,6 +107,8 @@ TRIVY_METRICS: List[MetricDefinition] = [
         data_type=MetricDataType.INTEGER,
         example_value="2340",
         unit="ms",
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # Metadata, not a feature
     ),
     MetricDefinition(
         key="packages_scanned",
@@ -122,6 +117,8 @@ TRIVY_METRICS: List[MetricDefinition] = [
         category=MetricCategory.METADATA,
         data_type=MetricDataType.INTEGER,
         example_value="156",
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # Metadata, not a feature
     ),
     MetricDefinition(
         key="files_scanned",
@@ -130,6 +127,8 @@ TRIVY_METRICS: List[MetricDefinition] = [
         category=MetricCategory.METADATA,
         data_type=MetricDataType.INTEGER,
         example_value="42",
+        preprocessing_type=PreprocessingType.IDENTIFIER,
+        normalize=False,  # Metadata, not a feature
     ),
     MetricDefinition(
         key="has_critical",
@@ -138,6 +137,8 @@ TRIVY_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SECURITY,
         data_type=MetricDataType.BOOLEAN,
         example_value="true",
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
     MetricDefinition(
         key="has_high",
@@ -146,5 +147,7 @@ TRIVY_METRICS: List[MetricDefinition] = [
         category=MetricCategory.SECURITY,
         data_type=MetricDataType.BOOLEAN,
         example_value="true",
+        preprocessing_type=PreprocessingType.BINARY,
+        normalize=False,
     ),
 ]

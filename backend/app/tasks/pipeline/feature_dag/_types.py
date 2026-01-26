@@ -7,6 +7,7 @@ This file exists to break circular imports between _feature_definitions.py and r
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from app.shared.preprocessing_types import MissingValueStrategy, PreprocessingType
 from app.tasks.pipeline.feature_dag._metadata import (
     FeatureCategory,
     FeatureDataType,
@@ -33,6 +34,11 @@ class FeatureDefinition:
     valid_values: Optional[List[str]] = None
     example_value: Optional[str] = None
 
+    # Preprocessing metadata
+    preprocessing_type: PreprocessingType = PreprocessingType.CONTINUOUS
+    missing_fill: MissingValueStrategy = MissingValueStrategy.ZERO
+    normalize: bool = True
+
 
 # Re-export for convenience
 __all__ = [
@@ -41,4 +47,6 @@ __all__ = [
     "FeatureDataType",
     "FeatureResource",
     "OutputFormat",
+    "PreprocessingType",
+    "MissingValueStrategy",
 ]
