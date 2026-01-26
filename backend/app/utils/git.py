@@ -344,9 +344,9 @@ def ensure_worktree(github_repo_id: int, commit_sha: str, full_name: str) -> Opt
                 return None
 
         # Ensure commit exists (handles fork commits via replay if needed)
-        from app.services.github.github_client import GitHubClient
+        from app.services.github.github_client import get_public_github_client
 
-        github_client = GitHubClient()
+        github_client = get_public_github_client()
         effective_sha = ensure_commit_exists(repo_path, commit_sha, full_name, github_client)
 
         if not effective_sha:
