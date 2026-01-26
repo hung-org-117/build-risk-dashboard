@@ -601,11 +601,6 @@ class SafeTask(PipelineTask):
             )
 
         except TransientError as e:
-            return self._handle_transient(
-                e, state, log_prefix, save_state_fn, mark_failed_fn, cleanup_fn
-            )
-
-        except TransientError as e:
             # Transient - use unified retryable error handler
             self._handle_retryable_error(
                 exc=e,

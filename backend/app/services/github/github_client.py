@@ -933,11 +933,26 @@ def get_user_github_client(db: Database, user_id: str) -> GitHubClient:
 
 
 def get_app_github_client() -> GitHubClient:
+    """
+    Get a GitHub client using GitHub App installation token.
+
+    Includes redis_pool for fallback to public tokens when App token is rate limited.
+    """
+    from app.services.github.redis_token_pool import get_redis_token_pool
+
     if not github_app_configured():
         raise GithubConfigurationError("GitHub App is not configured")
 
     token = get_installation_token()
-    return GitHubClient(token=token)
+
+    # Include redis_pool for fallback to public tokens when App token hits rate limit
+    try:
+        redis_pool = get_redis_token_pool()
+    except Exception as e:
+        logger.warning(f"Could not get redis token pool for fallback: {e}")
+        redis_pool = None
+
+    return GitHubClient(token=token, redis_pool=redis_pool)
 
 
 def get_public_github_client() -> GitHubClient:
