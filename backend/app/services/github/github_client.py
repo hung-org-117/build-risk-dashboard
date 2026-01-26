@@ -499,6 +499,8 @@ class GitHubClient:
         url = path
         query = params or {}
         while url:
+            # Greedy rotation before each page
+            self._maybe_rotate_to_better_token()
 
             def _do_request():
                 return self._rest.get(url, headers=self._headers(), params=query)

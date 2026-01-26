@@ -228,7 +228,6 @@ class RedisTokenPool:
         Returns:
             Tuple of (token_hash, raw_token) if a better token exists, None otherwise
         """
-        from app.services.github.exceptions import GithubAllRateLimitError
 
         # Lua script to find best token with more remaining than current
         best_token_lua = """
