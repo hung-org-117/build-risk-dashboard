@@ -322,6 +322,12 @@ class RedisTokenPool:
             limit: Total rate limit
             reset_at: When rate limit resets (can be None if header missing)
         """
+        # Debug logging
+        logger.info(
+            f"[TokenPool] Updating rate limit for {token_hash[:8]}...: "
+            f"remaining={remaining}, limit={limit}"
+        )
+
         # Update priority in sorted set (remaining quota)
         self._redis.zadd(KEY_POOL, {token_hash: remaining})
 

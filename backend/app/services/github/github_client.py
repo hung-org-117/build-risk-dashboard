@@ -82,6 +82,11 @@ class GitHubClient:
             limit = response.headers.get("X-RateLimit-Limit")
             reset = response.headers.get("X-RateLimit-Reset")
 
+            logger.debug(
+                f"[RateLimit Headers] token={self._current_token_key[:8]}... "
+                f"remaining={remaining}, limit={limit}, reset={reset}"
+            )
+
             if remaining is not None:
                 try:
                     from datetime import datetime, timezone
