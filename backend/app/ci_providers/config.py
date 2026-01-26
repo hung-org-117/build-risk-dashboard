@@ -44,14 +44,10 @@ def get_provider_config(
 
     # Provider-specific configuration with ENV fallback
     if provider_type == CIProvider.GITHUB_ACTIONS:
-        # GitHub uses token pool, get first available token
-        if not token:
-            token = settings.GITHUB_TOKENS[0] if settings.GITHUB_TOKENS else None
-        base_url = settings.GITHUB_API_URL
         return ProviderConfig(
             provider=provider_type,
-            token=token,
-            base_url=base_url,
+            token=None,
+            base_url=settings.GITHUB_API_URL,
         )
 
     elif provider_type == CIProvider.CIRCLECI:
