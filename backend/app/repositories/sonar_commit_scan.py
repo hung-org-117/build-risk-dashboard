@@ -115,10 +115,6 @@ class SonarCommitScanRepository(BaseRepository[SonarCommitScan]):
         )
         return result.deleted_count
 
-    # ========================================================================
-    # Scenario-based methods (Training Scenario flow)
-    # ========================================================================
-
     def list_by_scenario(
         self,
         scenario_id: ObjectId,

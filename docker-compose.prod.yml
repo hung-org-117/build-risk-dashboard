@@ -178,13 +178,13 @@ services:
       DEBUG: "False"
       ENV: "prod"
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+      HOME: /tmp
       # SonarQube
       SONAR_HOST_URL: ${SONAR_HOST_URL:-http://sonarqube:9000}
       SONAR_TOKEN: ${SONAR_TOKEN:-}
       SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
       SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
       # Trivy
-      TRIVY_ENABLED: "true"
       TRIVY_SERVER_URL: ${TRIVY_SERVER_URL:-http://trivy:4954}
       # GitHub
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
@@ -240,7 +240,6 @@ services:
       SONAR_DEFAULT_PROJECT_KEY: ${SONAR_DEFAULT_PROJECT_KEY:-build-risk}
       SONAR_WEBHOOK_SECRET: ${SONAR_WEBHOOK_SECRET:-}
       # Trivy
-      TRIVY_ENABLED: "true"
       TRIVY_SERVER_URL: ${TRIVY_SERVER_URL:-http://trivy:4954}
       # GitHub
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}

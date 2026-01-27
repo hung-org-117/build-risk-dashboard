@@ -45,7 +45,9 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
                             }
                         >
                             <SelectTrigger>
-                                <SelectValue />
+                                {MISSING_VALUES_OPTIONS.find(
+                                    (opt) => opt.value === config.missing_values_strategy
+                                )?.label}
                             </SelectTrigger>
                             <SelectContent>
                                 {MISSING_VALUES_OPTIONS.map(opt => (
@@ -58,9 +60,6 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
                                 ))}
                             </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
-                            {MISSING_VALUES_OPTIONS.find(o => o.value === config.missing_values_strategy)?.description}
-                        </p>
                     </div>
                     <div className="space-y-2">
                         <Label>Normalization</Label>
@@ -71,7 +70,9 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
                             }
                         >
                             <SelectTrigger>
-                                <SelectValue />
+                                {NORMALIZATION_OPTIONS.find(
+                                    (opt) => opt.value === config.normalization
+                                )?.label}
                             </SelectTrigger>
                             <SelectContent>
                                 {NORMALIZATION_OPTIONS.map(opt => (
@@ -84,9 +85,6 @@ export function PreprocessingSection({ config, updateConfig }: PreprocessingSect
                                 ))}
                             </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
-                            {NORMALIZATION_OPTIONS.find(o => o.value === config.normalization)?.description}
-                        </p>
                     </div>
                 </div>
             </CardContent>

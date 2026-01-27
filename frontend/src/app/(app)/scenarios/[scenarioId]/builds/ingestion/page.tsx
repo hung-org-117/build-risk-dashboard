@@ -173,7 +173,7 @@ function IngestionBuildRow({ build }: { build: TrainingIngestionBuildRecord }) {
     );
 }
 
-// Removed statusColors in favor of IngestionStatusBadge
+
 
 export default function IngestionBuildsPage() {
     const params = useParams<{ scenarioId: string }>();
@@ -317,8 +317,7 @@ export default function IngestionBuildsPage() {
 
     // Determine available actions
     const canStartProcessing = scenario?.status === "ingested";
-    // const canRetry = failedCount > 0 && ["ingested", "processing", "processed"].includes(scenario?.status || ""); // Original logic
-    const canRetry = failedCount > 0; // Simplified as per new instruction
+    const canRetry = failedCount > 0;
 
     return (
         <div className="space-y-4">

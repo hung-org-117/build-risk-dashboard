@@ -4,13 +4,13 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database.mongo import Database, get_db
+from app.dtos.training_export import ExportCreateDTO
 from app.dtos.training_scenario import (
     TrainingScenarioCreateDTO,
     TrainingScenarioListResponse,
     TrainingScenarioResponse,
     TrainingScenarioUpdateDTO,
 )
-from app.dtos.training_export import ExportCreateDTO
 from app.entities.training_scenario import ScenarioStatus
 from app.entities.user import User
 from app.middleware.auth import get_current_user
@@ -21,11 +21,6 @@ from app.services.training_processing_service import TrainingProcessingService
 from app.services.training_scenario_service import TrainingScenarioService
 
 router = APIRouter()
-
-
-# ============================================================================
-# Preview Builds (Wizard Step 1)
-# ============================================================================
 
 
 @router.get("/preview-builds")
@@ -167,11 +162,6 @@ def get_filter_options(
         ],
         "languages": normalized_languages,
     }
-
-
-# ============================================================================
-# Splitting Groups Discovery (Wizard Step 3 - for LOO/LTO)
-# ============================================================================
 
 
 @router.get("/splitting-groups")
@@ -431,11 +421,6 @@ def get_quality_report(
     return result
 
 
-# ============================================================================
-# Pipeline Actions
-# ============================================================================
-
-
 @router.post("/{scenario_id}/ingest")
 def start_ingestion(
     scenario_id: str,
@@ -470,11 +455,6 @@ def generate_dataset(
         scenario_id,
         str(current_user["_id"]),
     )
-
-
-# ============================================================================
-# Build Listing
-# ============================================================================
 
 
 @router.get("/{scenario_id}/ingestion-builds")
@@ -587,11 +567,6 @@ def get_data_availability(
     )
 
 
-# ============================================================================
-# Retry Actions
-# ============================================================================
-
-
 @router.post("/{scenario_id}/retry-ingestion")
 def retry_ingestion(
     scenario_id: str,
@@ -614,11 +589,6 @@ def reprocess_failed_feature_extraction(
     return service.reprocess_failed_feature_extraction(
         scenario_id, str(current_user["_id"])
     )
-
-
-# ============================================================================
-# Commit Scans
-# ============================================================================
 
 
 @router.get("/{scenario_id}/commit-scans")

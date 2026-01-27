@@ -218,7 +218,6 @@ class TrivyTool(IntegrationTool):
                 f"Running Trivy scan (server mode) on {target_path} "
                 f"with scanners: {scan_types}"
             )
-            # logger.debug(f"Command: {' '.join(cmd)}")
 
             # Use extensive timeout for subprocess to allow Trivy to handle its own timeout
             process_timeout = self._timeout + 300  # 5 minutes buffer

@@ -143,7 +143,6 @@ class FillMissingStrategy(MissingValuesStrategy):
                 # Simple fillna for the column (fill_value should be numeric for this flow)
                 df[col] = df[col].fillna(self.fill_value)
 
-            # logger.info(f"Filled {len(columns)} columns with value {self.fill_value}")
         return df
 
 

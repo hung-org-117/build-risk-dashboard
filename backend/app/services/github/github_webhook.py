@@ -237,7 +237,7 @@ def handle_github_event(
     db: Database, event: str, payload: Dict[str, object]
 ) -> Dict[str, object]:
     if event in {"installation", "installation_repositories"}:
-        # return _handle_installation_event(db, event, payload)
+
         return {"status": "ignored", "reason": "installation_management_removed"}
 
     elif event == "workflow_run":

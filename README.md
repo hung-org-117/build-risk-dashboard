@@ -166,7 +166,6 @@ This starts:
 
 **Trivy Configuration** (in backend `.env`):
 ```env
-TRIVY_ENABLED=true
 TRIVY_SEVERITY=CRITICAL,HIGH,MEDIUM
 TRIVY_TIMEOUT=300
 TRIVY_SKIP_DIRS=node_modules,vendor,.git
@@ -346,7 +345,6 @@ npm run build
 | `GITHUB_WEBHOOK_SECRET` | Yes | Webhook signature secret |
 | `SECRET_KEY` | Yes | JWT signing secret |
 | `SONAR_TOKEN` | No | SonarQube API token |
-| `TRIVY_ENABLED` | No | Enable Trivy scanning (default: false) |
 | `TRIVY_SKIP_DB_UPDATE` | No | Skip Trivy vuln DB update (default: false) |
 | `TRIVY_SKIP_JAVA_DB_UPDATE` | No | Skip Trivy Java DB update (default: false) |
 

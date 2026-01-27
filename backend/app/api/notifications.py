@@ -38,11 +38,6 @@ def _to_response(notification: Notification) -> NotificationResponse:
     )
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
-
-
 @router.get("/", response_model=NotificationListResponse)
 def list_notifications(
     skip: int = Query(0, ge=0),
@@ -106,7 +101,9 @@ def mark_all_as_read(
     return MarkReadResponse(success=True, marked_count=count)
 
 
-@router.post("/", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED
+)
 def create_notification(
     request: CreateNotificationRequest,
     db: Database = Depends(get_db),

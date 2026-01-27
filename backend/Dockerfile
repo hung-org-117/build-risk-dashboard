@@ -24,6 +24,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy application code
 COPY . .
+RUN chown -R 1000:1000 /app
 
 # Install project
 RUN uv sync --frozen --no-dev
