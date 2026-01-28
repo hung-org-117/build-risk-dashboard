@@ -10,6 +10,7 @@ from app.dtos.admin_user import (
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserUpdateRequest,
+    GithubIdentity,
 )
 from app.repositories.oauth_identity import OAuthIdentityRepository
 from app.repositories.user import UserRepository
@@ -23,8 +24,16 @@ class AdminUserService:
         self.user_repo = UserRepository(db)
         self.oauth_identity_repo = OAuthIdentityRepository(db)
 
-    def _to_response(self, user) -> AdminUserResponse:
+    def _to_response(self, user, github_identity=None) -> AdminUserResponse:
         """Convert User entity to AdminUserResponse."""
+        github = None
+        if github_identity:
+            github = GithubIdentity(
+                login=github_identity.account_login,
+                account_avatar_url=getattr(github_identity, "account_avatar_url", None),
+                connected_at=getattr(github_identity, "connected_at", None),
+            )
+
         return AdminUserResponse(
             _id=str(user.id),
             email=user.email,
@@ -33,6 +42,7 @@ class AdminUserService:
             created_at=user.created_at,
             is_banned=getattr(user, "is_banned", False),
             banned_at=getattr(user, "banned_at", None),
+            github=github,
         )
 
     def list_users(
@@ -43,8 +53,15 @@ class AdminUserService:
         users = self.user_repo.list_all(search=search, skip=skip, limit=page_size)
         total = self.user_repo.count_all(search=search)
 
+        # Batch fetch GitHub identities
+        user_ids = [u.id for u in users]
+        identities = self.oauth_identity_repo.find_by_user_ids(
+            user_ids, provider="github"
+        )
+        identity_map = {str(i.user_id): i for i in identities}
+
         return AdminUserListResponse(
-            items=[self._to_response(u) for u in users],
+            items=[self._to_response(u, identity_map.get(str(u.id))) for u in users],
             total=total,
             page=page,
             page_size=page_size,
@@ -58,9 +75,15 @@ class AdminUserService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found",
             )
-        return self._to_response(user)
 
-    def update_user(self, user_id: str, payload: AdminUserUpdateRequest) -> AdminUserResponse:
+        identity = self.oauth_identity_repo.find_by_user_id_and_provider(
+            user.id, provider="github"
+        )
+        return self._to_response(user, identity)
+
+    def update_user(
+        self, user_id: str, payload: AdminUserUpdateRequest
+    ) -> AdminUserResponse:
         """Update user profile."""
         updates = payload.model_dump(exclude_unset=True)
         if not updates:

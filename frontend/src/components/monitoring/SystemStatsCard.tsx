@@ -110,7 +110,6 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
             <Card>
                 <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Cpu className="h-4 w-4" />
                         Celery Workers
                     </CardTitle>
                 </CardHeader>
@@ -153,7 +152,6 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
             <Card>
                 <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Zap className="h-4 w-4" />
                         Redis
                     </CardTitle>
                 </CardHeader>
@@ -188,7 +186,6 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
             <Card>
                 <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Database className="h-4 w-4" />
                         MongoDB
                     </CardTitle>
                 </CardHeader>
@@ -226,7 +223,6 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
             <Card>
                 <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Shield className="h-4 w-4" />
                         Trivy
                     </CardTitle>
                 </CardHeader>
@@ -267,7 +263,6 @@ export function SystemStatsCard({ stats, isLoading }: SystemStatsCardProps) {
             <Card>
                 <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
-                        <Bug className="h-4 w-4" />
                         SonarQube
                     </CardTitle>
                 </CardHeader>

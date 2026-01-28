@@ -14,6 +14,7 @@ from bson import ObjectId
 
 from app.celery_app import celery_app
 from app.entities.training_ingestion_build import IngestionStatus
+from app.paths import get_worktree_path
 from app.repositories.raw_build_run import RawBuildRunRepository
 from app.repositories.raw_repository import RawRepositoryRepository
 from app.repositories.training_ingestion_build import TrainingIngestionBuildRepository
@@ -85,8 +86,12 @@ def dispatch_scenario_scans(
             status_filter=IngestionStatus.INGESTED,
         )
 
-        raw_build_run_ids = [b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id]
-        raw_build_runs = raw_build_run_repo.find_by_ids([str(rid) for rid in raw_build_run_ids])
+        raw_build_run_ids = [
+            b.raw_build_run_id for b in ingested_builds if b.raw_build_run_id
+        ]
+        raw_build_runs = raw_build_run_repo.find_by_ids(
+            [str(rid) for rid in raw_build_run_ids]
+        )
         build_run_map = {str(r.id): r for r in raw_build_runs}
 
         for build in ingested_builds:
@@ -114,6 +119,17 @@ def dispatch_scenario_scans(
                 "repo_full_name": raw_repo.full_name,
             }
 
+            # Check if worktree exists (otherwise dispatch will skip it)
+            worktree_path = get_worktree_path(
+                raw_repo.github_repo_id, raw_run.commit_sha
+            )
+            if not worktree_path.exists():
+                logger.warning(
+                    f"{corr_prefix} Skipping scan for {raw_run.commit_sha[:8]} - "
+                    f"worktree not found at {worktree_path}"
+                )
+                del commits_to_scan[commit_key]
+
         if not commits_to_scan:
             logger.info(f"{corr_prefix} No commits to scan")
             updated_scenario = scenario_repo.find_one_and_update(
@@ -140,7 +156,8 @@ def dispatch_scenario_scans(
         commits_list = list(commits_to_scan.values())
         batch_size = getattr(settings, "SCAN_COMMITS_PER_BATCH", 20)
         batches = [
-            commits_list[i : i + batch_size] for i in range(0, len(commits_list), batch_size)
+            commits_list[i : i + batch_size]
+            for i in range(0, len(commits_list), batch_size)
         ]
 
         logger.info(

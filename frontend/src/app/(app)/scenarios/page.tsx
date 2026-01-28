@@ -285,12 +285,10 @@ export default function ScenariosPage() {
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="scenarios" className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4" />
                         Training Scenarios
                         <Badge variant="secondary" className="ml-1">{total}</Badge>
                     </TabsTrigger>
                     <TabsTrigger value="sources" className="flex items-center gap-2">
-                        <Database className="w-4 h-4" />
                         Build Sources
                     </TabsTrigger>
                 </TabsList>

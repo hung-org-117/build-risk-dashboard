@@ -97,7 +97,7 @@ This will start:
    ```bash
    cd backend
    uv run celery -A app.celery_app worker --loglevel=info
-   uv run celery -A app.celery_app worker --loglevel=info --pool=threads --concurrency=20
+   uv run celery -A app.celery_app worker --loglevel=info --pool=threads --concurrency=4
    ```
 
    **Celery Queues:**

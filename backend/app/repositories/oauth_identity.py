@@ -20,10 +20,23 @@ class OAuthIdentityRepository(BaseRepository[OAuthIdentity]):
     def find_by_provider_and_external_id(
         self, provider: str, external_user_id: str
     ) -> Optional[OAuthIdentity]:
-        return self.find_one({"provider": provider, "external_user_id": external_user_id})
+        return self.find_one(
+            {"provider": provider, "external_user_id": external_user_id}
+        )
 
-    def find_by_user_id_and_provider(self, user_id, provider: str) -> Optional[OAuthIdentity]:
+    def find_by_user_id_and_provider(
+        self, user_id, provider: str
+    ) -> Optional[OAuthIdentity]:
         return self.find_one({"user_id": user_id, "provider": provider})
+
+    def find_by_user_ids(
+        self, user_ids: list, provider: str = "github"
+    ) -> list[OAuthIdentity]:
+        """Find identities for multiple users."""
+        from bson import ObjectId
+
+        uids = [uid if isinstance(uid, ObjectId) else ObjectId(uid) for uid in user_ids]
+        return self.find_many({"user_id": {"$in": uids}, "provider": provider})
 
     def delete_by_user_id(self, user_id) -> int:
         """Delete all OAuth identities for a user."""
@@ -81,7 +94,9 @@ class OAuthIdentityRepository(BaseRepository[OAuthIdentity]):
     ) -> Tuple[User, OAuthIdentity]:
         """Upsert a GitHub identity and associated user"""
         provider = "github"
-        existing_identity = self.find_by_provider_and_external_id(provider, github_user_id)
+        existing_identity = self.find_by_provider_and_external_id(
+            provider, github_user_id
+        )
 
         now = datetime.now(timezone.utc)
 

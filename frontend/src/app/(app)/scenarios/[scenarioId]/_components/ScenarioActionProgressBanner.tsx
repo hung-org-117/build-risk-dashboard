@@ -150,7 +150,7 @@ export function ScenarioActionProgressBanner({
                                         )}
                                     </div>
                                     <span className="text-xs text-muted-foreground">
-                                        {scansDone}/{scansTotal} commits
+                                        {scansDone}/{scansTotal} scans
                                         {scansFailed > 0 && (
                                             <span className="text-red-500 ml-1">({scansFailed} failed)</span>
                                         )}

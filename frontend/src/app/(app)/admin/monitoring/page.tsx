@@ -8,7 +8,6 @@ import {
 
 } from "@/components/monitoring";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Activity } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -198,7 +197,6 @@ export default function MonitoringPage() {
             {/* Header */}
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-3">
-                    <Activity className="h-6 w-6 md:h-8 md:w-8" />
                     <div>
                         <h1 className="text-xl md:text-2xl font-bold">System Monitoring</h1>
                         <p className="text-muted-foreground text-xs md:text-sm">
@@ -212,7 +210,6 @@ export default function MonitoringPage() {
                         title={isConnected ? "WebSocket connected" : "WebSocket disconnected"}
                     />
                     <Button variant="outline" size="sm" onClick={handleRefreshAll}>
-                        <RefreshCw className="h-4 w-4 mr-2" />
                         <span className="hidden md:inline">Refresh All</span>
                         <span className="md:hidden">Refresh</span>
                     </Button>

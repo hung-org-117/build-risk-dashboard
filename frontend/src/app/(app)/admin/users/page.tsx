@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Users, Trash2, Shield, User, RefreshCw, Mail, Search, AlertCircle } from 'lucide-react'
+import { Trash2, Shield, User, RefreshCw, Mail, Search, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -35,7 +35,7 @@ export default function AdminUsersPage() {
     const [banUserId, setBanUserId] = useState<string | null>(null)
     const [banUserData, setBanUserData] = useState<UserAccount | null>(null)
     const [isBanning, setIsBanning] = useState(false)
-    
+
     // Admin ban warning state
     const [showAdminWarning, setShowAdminWarning] = useState(false)
 
@@ -96,8 +96,8 @@ export default function AdminUsersPage() {
             toast({ title: 'Success', description: 'User banned successfully' })
         } catch (err: any) {
             console.error('Failed to ban user:', err)
-            const errorMessage = err?.response?.status === 403 
-                ? 'Cannot ban admin users' 
+            const errorMessage = err?.response?.status === 403
+                ? 'Cannot ban admin users'
                 : 'Failed to ban user'
             toast({
                 title: 'Error',
@@ -128,25 +128,31 @@ export default function AdminUsersPage() {
         {
             key: 'user',
             header: 'User',
-            render: (user) => (
-                <div className="flex items-center gap-2">
-                    {user.github?.avatar_url ? (
-                        <img
-                            src={user.github.avatar_url}
-                            alt={user.name || user.email}
-                            className="h-8 w-8 rounded-full"
-                        />
-                    ) : (
-                        <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                            <User className="h-4 w-4 text-muted-foreground" />
+            render: (user) => {
+                const initials = user.name
+                    ? user.name.split(' ').filter(Boolean).map((p) => p[0]?.toUpperCase()).slice(0, 2).join('')
+                    : user.email?.[0]?.toUpperCase() || '?'
+
+                return (
+                    <div className="flex items-center gap-2">
+                        <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-xs font-semibold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                            {user.github?.avatar_url ? (
+                                <img
+                                    src={user.github.avatar_url}
+                                    alt={user.name || user.email}
+                                    className="h-full w-full object-cover"
+                                />
+                            ) : (
+                                <span>{initials}</span>
+                            )}
                         </div>
-                    )}
-                    <span>{user.name || user.github?.login || '-'}</span>
-                    {user.id === currentUserId && (
-                        <Badge variant="outline" className="text-xs">You</Badge>
-                    )}
-                </div>
-            ),
+                        <span>{user.name || user.github?.login || '-'}</span>
+                        {user.id === currentUserId && (
+                            <Badge variant="outline" className="text-xs">You</Badge>
+                        )}
+                    </div>
+                )
+            },
         },
         {
             key: 'email',
@@ -204,8 +210,7 @@ export default function AdminUsersPage() {
         <div className="flex flex-col gap-6">
             {/* Header */}
             <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <Users className="h-6 w-6 text-muted-foreground" />
+                <div>
                     <div>
                         <h1 className="text-2xl font-bold">User Management</h1>
                         <p className="text-sm text-muted-foreground">

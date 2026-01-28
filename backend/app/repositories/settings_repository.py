@@ -52,10 +52,11 @@ class SettingsRepository(BaseRepository[ApplicationSettings]):
                     "webhook_secret_encrypted"
                 ] = settings.sonarqube.webhook_secret_encrypted
 
-            return self.update_one(
-                self.SETTINGS_ID,
-                dump,
+            self.collection.update_one(
+                {"_id": self.SETTINGS_ID},
+                {"$set": dump},
             )
+            return self.get_settings()
         else:
             # Insert new
             doc = settings.model_dump(by_alias=True, exclude_none=True)
