@@ -19,6 +19,7 @@ class PredictionResult:
     risk_score: float  # 0.0 - 1.0 (confidence)
     uncertainty: float  # Bayesian uncertainty
     model_version: str
+    probabilities: Optional[Dict[str, float]] = None  # {Low: x, Medium: y, High: z}
     error: Optional[str] = None
 
 
@@ -108,6 +109,7 @@ class PredictionService:
                 risk_score=result.get("confidence", 0.0),
                 uncertainty=result.get("uncertainty", 0.0),
                 model_version="bayesian-lstm-v1.0",
+                probabilities=result.get("probabilities"),
             )
 
         except Exception as e:

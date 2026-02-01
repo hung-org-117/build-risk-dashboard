@@ -420,33 +420,92 @@ export default function BuildDetailPage() {
                                 </p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                                <div className="rounded-lg border p-4">
-                                    <p className="text-xs text-muted-foreground">Risk Level</p>
-                                    <p className="font-medium mt-1">{build.predicted_label}</p>
+                            <div className="space-y-6">
+                                {/* Main Metrics Grid */}
+                                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                                    <div className="rounded-lg border p-4">
+                                        <p className="text-xs text-muted-foreground">Risk Level</p>
+                                        <p className="font-medium mt-1">{build.predicted_label}</p>
+                                    </div>
+                                    <div className="rounded-lg border p-4">
+                                        <p className="text-xs text-muted-foreground">Confidence</p>
+                                        <p className="font-medium mt-1">
+                                            {build.prediction_confidence
+                                                ? `${(build.prediction_confidence * 100).toFixed(1)}%`
+                                                : "—"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-lg border p-4">
+                                        <p className="text-xs text-muted-foreground">Uncertainty</p>
+                                        <p className="font-medium mt-1">
+                                            {build.prediction_uncertainty
+                                                ? build.prediction_uncertainty.toFixed(4)
+                                                : "—"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-lg border p-4">
+                                        <p className="text-xs text-muted-foreground">Predicted At</p>
+                                        <p className="font-medium mt-1 text-sm">
+                                            {formatDateTime(build.predicted_at)}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="rounded-lg border p-4">
-                                    <p className="text-xs text-muted-foreground">Confidence</p>
-                                    <p className="font-medium mt-1">
-                                        {build.prediction_confidence
-                                            ? `${(build.prediction_confidence * 100).toFixed(1)}%`
-                                            : "—"}
-                                    </p>
-                                </div>
-                                <div className="rounded-lg border p-4">
-                                    <p className="text-xs text-muted-foreground">Uncertainty</p>
-                                    <p className="font-medium mt-1">
-                                        {build.prediction_uncertainty
-                                            ? build.prediction_uncertainty.toFixed(3)
-                                            : "—"}
-                                    </p>
-                                </div>
-                                <div className="rounded-lg border p-4">
-                                    <p className="text-xs text-muted-foreground">Predicted At</p>
-                                    <p className="font-medium mt-1 text-sm">
-                                        {formatDateTime(build.predicted_at)}
-                                    </p>
-                                </div>
+
+                                {/* Probability Breakdown */}
+                                {build.prediction_probabilities && (
+                                    <div className="rounded-lg border p-4">
+                                        <p className="text-sm font-medium mb-4">Risk Probability Distribution</p>
+                                        <div className="space-y-3">
+                                            {/* Low Risk */}
+                                            <div className="flex items-center gap-3">
+                                                <span className="w-16 text-sm text-muted-foreground">Low</span>
+                                                <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-green-500 rounded-full transition-all duration-300"
+                                                        style={{ width: `${(build.prediction_probabilities.Low * 100)}%` }}
+                                                    />
+                                                </div>
+                                                <span className={`w-16 text-sm font-mono text-right ${build.predicted_label?.toUpperCase() === 'LOW' ? 'font-bold text-green-600' : ''}`}>
+                                                    {(build.prediction_probabilities.Low * 100).toFixed(1)}%
+                                                </span>
+                                            </div>
+                                            {/* Medium Risk */}
+                                            <div className="flex items-center gap-3">
+                                                <span className="w-16 text-sm text-muted-foreground">Medium</span>
+                                                <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                                                        style={{ width: `${(build.prediction_probabilities.Medium * 100)}%` }}
+                                                    />
+                                                </div>
+                                                <span className={`w-16 text-sm font-mono text-right ${build.predicted_label?.toUpperCase() === 'MEDIUM' ? 'font-bold text-amber-600' : ''}`}>
+                                                    {(build.prediction_probabilities.Medium * 100).toFixed(1)}%
+                                                </span>
+                                            </div>
+                                            {/* High Risk */}
+                                            <div className="flex items-center gap-3">
+                                                <span className="w-16 text-sm text-muted-foreground">High</span>
+                                                <div className="flex-1 h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-red-500 rounded-full transition-all duration-300"
+                                                        style={{ width: `${(build.prediction_probabilities.High * 100)}%` }}
+                                                    />
+                                                </div>
+                                                <span className={`w-16 text-sm font-mono text-right ${build.predicted_label?.toUpperCase() === 'HIGH' ? 'font-bold text-red-600' : ''}`}>
+                                                    {(build.prediction_probabilities.High * 100).toFixed(1)}%
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Low confidence warning */}
+                                        {build.prediction_confidence && build.prediction_confidence < 0.5 && (
+                                            <div className="mt-4 flex items-center gap-2 text-amber-600 dark:text-amber-400 text-sm">
+                                                <AlertTriangle className="h-4 w-4" />
+                                                <span>Low confidence prediction — model is uncertain about this build</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </CardContent>

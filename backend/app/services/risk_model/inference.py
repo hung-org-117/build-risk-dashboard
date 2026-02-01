@@ -156,7 +156,9 @@ class RiskModelService:
             self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
             # Load model checkpoint
-            checkpoint = torch.load(model_path, map_location=self._device, weights_only=False)
+            checkpoint = torch.load(
+                model_path, map_location=self._device, weights_only=False
+            )
 
             # Get hyperparameters from checkpoint or use defaults
             lstm_hidden_dim = checkpoint.get("lstm_hidden_dim", LSTM_HIDDEN_DIM)
@@ -306,7 +308,9 @@ class RiskModelService:
         try:
             # Extract features (with log1p if not prescaled)
             apply_log1p = not use_prescaled
-            temporal_values, static_values = self._extract_features(features, apply_log1p)
+            temporal_values, static_values = self._extract_features(
+                features, apply_log1p
+            )
 
             # Build sequence from history
             if temporal_history:
@@ -355,8 +359,12 @@ class RiskModelService:
 
             # Convert to tensors
             seq_tensor = torch.tensor(seq, dtype=torch.float32).to(self._device)
-            static_tensor = torch.tensor(static_arr, dtype=torch.float32).to(self._device)
-            lengths_tensor = torch.tensor([seq_length], dtype=torch.long).to(self._device)
+            static_tensor = torch.tensor(static_arr, dtype=torch.float32).to(
+                self._device
+            )
+            lengths_tensor = torch.tensor([seq_length], dtype=torch.long).to(
+                self._device
+            )
 
             # MC Dropout inference
             self._model.train()  # Enable dropout
@@ -370,16 +378,23 @@ class RiskModelService:
 
             probs = np.stack(probs_list)
             mean_prob = probs.mean(axis=0)[0]
-            uncertainty = probs.var(axis=0).mean()
+            # Epistemic uncertainty: variance across MC samples
+            epistemic_uncertainty = float(probs.var(axis=0).mean())
 
             pred_class = int(mean_prob.argmax())
             pred_label = RISK_LABELS[pred_class]
-            confidence = float(mean_prob[pred_class])
+
+            # Confidence score: inverse of uncertainty (per paper definition)
+            # Lower uncertainty → Higher confidence
+            epsilon = 1e-6
+            raw_confidence = 1.0 / (epistemic_uncertainty + epsilon)
+            # Normalize to 0-1 range using sigmoid-like scaling
+            confidence = 1.0 / (1.0 + np.exp(-0.1 * (raw_confidence - 50)))
 
             return {
                 "predicted_label": pred_label,
                 "confidence": round(confidence, 4),
-                "uncertainty": round(float(uncertainty), 4),
+                "uncertainty": round(epistemic_uncertainty, 4),
                 "probabilities": {
                     "Low": round(float(mean_prob[0]), 4),
                     "Medium": round(float(mean_prob[1]), 4),

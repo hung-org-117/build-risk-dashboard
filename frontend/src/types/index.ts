@@ -85,6 +85,7 @@ export interface BuildDetail extends Build {
   predicted_label?: string;
   prediction_confidence?: number;
   prediction_uncertainty?: number;
+  prediction_probabilities?: { Low: number; Medium: number; High: number };
   predicted_at?: string;
   prediction_status?: string;
   prediction_error?: string;
@@ -336,6 +337,7 @@ export interface TrainingBuild {
   predicted_label?: string;
   prediction_confidence?: number;
   prediction_uncertainty?: number;
+  prediction_probabilities?: { Low: number; Medium: number; High: number };
   predicted_at?: string;
   prediction_status?: string;
   prediction_error?: string;
@@ -380,6 +382,7 @@ export interface UnifiedBuild {
   predicted_label?: string;
   prediction_confidence?: number;
   prediction_uncertainty?: number;
+  prediction_probabilities?: { Low: number; Medium: number; High: number };
 }
 
 export interface UnifiedBuildListResponse {

@@ -584,6 +584,7 @@ def predict_risk_batch(
                     "predicted_label": prediction.risk_level,
                     "prediction_confidence": prediction.risk_score,
                     "prediction_uncertainty": prediction.uncertainty,
+                    "prediction_probabilities": prediction.probabilities,
                     "prediction_model_version": prediction.model_version,
                     "predicted_at": datetime.utcnow(),
                 }

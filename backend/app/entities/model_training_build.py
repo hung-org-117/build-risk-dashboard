@@ -110,7 +110,11 @@ class ModelTrainingBuild(BaseEntity):
     )
     prediction_uncertainty: Optional[float] = Field(
         None,
-        description="Bayesian uncertainty score",
+        description="Bayesian uncertainty score (epistemic uncertainty)",
+    )
+    prediction_probabilities: Optional[dict] = Field(
+        None,
+        description="Probability distribution for each risk class: {Low: float, Medium: float, High: float}",
     )
     prediction_model_version: Optional[str] = Field(
         None,
